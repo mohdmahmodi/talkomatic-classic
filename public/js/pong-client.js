@@ -40,12 +40,40 @@ class Pong {
 
     this.onKeyDown = this.onKeyDown.bind(this);
     this.onKeyUp = this.onKeyUp.bind(this);
+    this.onPointer = this.onPointer.bind(this);class Pong {
+  constructor(socket, userId, username) {
+    this.socket = socket;
+    this.userId = userId;
+    this.username = username;
+
+    this.isOpen = false;
+    this.meta = null;
+    this.snapshots = [];
+    this.clockOffset = 0;
+    this.offsetSamples = [];
+
+    this.sim = { active: false, x: 640, y: 360, vx: 0, vy: 0 };
+    this.trail = [];
+    this.hitFlash = { left: 0, right: 0 };
+    this.lastLocalBounceAt = 0;
+
+    this.myTarget = 0.5;
+    this.lastSentAt = 0;
+    this.lastSentVal = -1;
+    this.keys = { up: false, down: false };
+    this.stageRect = null;
+    this.frame = null;
+    this.lastFrameAt = 0;
+
+    this.buildUI();
+    this.bindSocket();
+
+    this.onKeyDown = this.onKeyDown.bind(this);
+    this.onKeyUp = this.onKeyUp.bind(this);
     this.onPointer = this.onPointer.bind(this);
     this.onResize = this.onResize.bind(this);
     this.renderLoop = this.renderLoop.bind(this);
   }
-
-  // ── UI ────────────────────────────────────────────────────────────────────
 
   buildUI() {
     const root = document.createElement("div");
@@ -107,8 +135,6 @@ class Pong {
     });
   }
 
-  // ── Open / close ──────────────────────────────────────────────────────────
-
   open() {
     if (this.isOpen) return;
     this.isOpen = true;
@@ -143,8 +169,6 @@ class Pong {
     this.stage.removeEventListener("pointerdown", this.onPointer);
     cancelAnimationFrame(this.frame);
   }
-
-  // ── Input ─────────────────────────────────────────────────────────────────
 
   amPlayer() {
     return this.meta && (this.meta.you === "left" || this.meta.you === "right");
@@ -212,8 +236,6 @@ class Pong {
     return this.snapshots[this.snapshots.length - 1] || null;
   }
 
-  // Opponent paddles render interpolated ~110 ms in the past (smooth under
-  // jitter); your own renders at your local target instantly.
   paddleAt(side) {
     const meta = this.meta;
     const half = meta ? meta.paddle.h / 2 : 50;
@@ -237,10 +259,6 @@ class Pong {
     return a[key] + (b[key] - a[key]) * k;
   }
 
-  // ── Local ball simulation ─────────────────────────────────────────────────
-
-  // Where the server says the ball is RIGHT NOW (its last report advanced by
-  // its own velocity for the time since the report).
   serverBallNow() {
     const s = this.latest();
     if (!s || !s.v) return null;
@@ -264,8 +282,7 @@ class Pong {
     if (!target) return;
 
     const still = target.vx === 0 && target.vy === 0;
-    const far =
-      Math.hypot(this.sim.x - target.x, this.sim.y - target.y) > 90;
+    const far = Math.hypot(this.sim.x - target.x, this.sim.y - target.y) > 90;
     if (!this.sim.active || far || still) {
       this.sim.active = true;
       this.sim.x = target.x;
@@ -275,8 +292,6 @@ class Pong {
       if (far) this.trail.length = 0;
       if (still) return;
     } else {
-      // Adopt server velocity unless we JUST bounced locally and the server
-      // has not caught up yet (avoids flip-flapping at the paddle face).
       const flipped =
         Math.sign(target.vx) !== Math.sign(this.sim.vx) ||
         Math.sign(target.vy) !== Math.sign(this.sim.vy);
@@ -284,9 +299,6 @@ class Pong {
         this.sim.vx = target.vx;
         this.sim.vy = target.vy;
       }
-      // Gentle pull toward the server's position, but only while snapshots
-      // are fresh - on a network hiccup the ball flies on pure physics
-      // instead of being dragged back to a stale point.
       if (this.serverNow() - s.t < 250) {
         const pull = Math.min(1, dt * 5);
         this.sim.x += (target.x - this.sim.x) * pull;
@@ -315,11 +327,9 @@ class Pong {
     if (this.trail.length > 9) this.trail.shift();
   }
 
-  // Same swept test as the server, but against the paddle positions as
-  // RENDERED, so the ball always bounces exactly where the player sees the
-  // paddle - it can never appear to pass through it.
   collideLocal(side, prevX, prevY, now) {
     const m = this.meta;
+    if (!m) return;
     const R = m.ballR;
     const face =
       side === "left"
@@ -335,7 +345,15 @@ class Pong {
     const span = this.sim.x - prevX;
     const t = span === 0 ? 0 : (face - prevX) / span;
     const hitY = prevY + (this.sim.y - prevY) * t;
-    const padY = this.paddleAt(side);
+
+    let padY;
+    if (this.meta.you === side) {
+      padY = this.paddleAt(side);
+    } else {
+      const s = this.latest();
+      padY = side === "left" ? s.l : s.r;
+    }
+
     const half = m.paddle.h / 2 + R;
     if (Math.abs(hitY - padY) > half) return;
 
@@ -351,12 +369,10 @@ class Pong {
     this.hitFlash[side] = 1;
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────
-
   renderLoop() {
     if (!this.isOpen) return;
     const now = performance.now();
-    const dt = Math.min(0.05, (now - this.lastFrameAt) / 1000);
+    const dt = Math.min(0.016, (now - this.lastFrameAt) / 1000);
     this.lastFrameAt = now;
 
     if (this.keys.up || this.keys.down) {
@@ -385,7 +401,6 @@ class Pong {
     ctx.fillStyle = "#000000";
     ctx.fillRect(0, 0, W, H);
 
-    // Field: dashed center line + center circle
     ctx.strokeStyle = "#3a3a3a";
     ctx.lineWidth = Math.max(1, 2 * sx);
     ctx.setLineDash([10 * sy, 14 * sy]);
@@ -398,7 +413,6 @@ class Pong {
     ctx.arc(W / 2, H / 2, 90 * sx, 0, Math.PI * 2);
     ctx.stroke();
 
-    // Big on-field scores + player names, classic pong style
     if (s) {
       ctx.textAlign = "center";
       ctx.font = "bold " + Math.round(110 * sy) + "px talkoSS, Arial, sans-serif";
@@ -425,7 +439,6 @@ class Pong {
 
     if (!meta || !s) return;
 
-    // Paddles (own = predicted at cursor), with a brief flash on ball hits
     const pw = meta.paddle.w * sx;
     const ph = meta.paddle.h * sy;
     const margin = meta.paddle.margin * sx;
@@ -450,7 +463,6 @@ class Pong {
     ctx.fillRect(W - margin - pw, rightY * sy - ph / 2, pw, ph);
     ctx.restore();
 
-    // Ball + fading trail, from the local simulation
     if (s.st === "playing") {
       const R = meta.ballR * sx;
       for (let i = 0; i < this.trail.length; i++) {
@@ -469,7 +481,6 @@ class Pong {
       ctx.fill();
     }
 
-    // Round countdown, drawn on the field
     if (s.st === "countdown" && s.cd) {
       const n = Math.max(1, Math.ceil((s.cd - this.serverNow()) / 1000));
       ctx.fillStyle = "#ff9800";
@@ -481,8 +492,6 @@ class Pong {
     }
     ctx.textAlign = "left";
   }
-
-  // ── Status overlays & top bar ─────────────────────────────────────────────
 
   chipHTML(info, side) {
     if (!info) return "Waiting...";
