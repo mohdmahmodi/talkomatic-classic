@@ -340,7 +340,7 @@ class Pong {
   renderLoop() {
     if (!this.isOpen) return;
     const now = performance.now();
-    const dt = Math.min(0.016, (now - this.lastFrameAt) / 1000);
+    const dt = Math.min(0.05, (now - this.lastFrameAt) / 1000);
     this.lastFrameAt = now;
 
     if (this.keys.up || this.keys.down) {
