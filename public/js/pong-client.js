@@ -16,37 +16,6 @@ class Pong {
     this.username = username;
 
     this.isOpen = false;
-    this.meta = null; // last "pong meta"
-    this.snapshots = []; // ring of "pong state", oldest first
-    this.clockOffset = 0;
-    this.offsetSamples = [];
-
-    // Local ball simulation
-    this.sim = { active: false, x: 640, y: 360, vx: 0, vy: 0 };
-    this.trail = [];
-    this.hitFlash = { left: 0, right: 0 };
-    this.lastLocalBounceAt = 0;
-
-    this.myTarget = 0.5; // 0..1, local paddle intent
-    this.lastSentAt = 0;
-    this.lastSentVal = -1;
-    this.keys = { up: false, down: false };
-    this.stageRect = null;
-    this.frame = null;
-    this.lastFrameAt = 0;
-
-    this.buildUI();
-    this.bindSocket();
-
-    this.onKeyDown = this.onKeyDown.bind(this);
-    this.onKeyUp = this.onKeyUp.bind(this);
-    this.onPointer = this.onPointer.bind(this);class Pong {
-  constructor(socket, userId, username) {
-    this.socket = socket;
-    this.userId = userId;
-    this.username = username;
-
-    this.isOpen = false;
     this.meta = null;
     this.snapshots = [];
     this.clockOffset = 0;
@@ -292,13 +261,6 @@ class Pong {
       if (far) this.trail.length = 0;
       if (still) return;
     } else {
-      const flipped =
-        Math.sign(target.vx) !== Math.sign(this.sim.vx) ||
-        Math.sign(target.vy) !== Math.sign(this.sim.vy);
-      if (!flipped || now - this.lastLocalBounceAt > 150) {
-        this.sim.vx = target.vx;
-        this.sim.vy = target.vy;
-      }
       if (this.serverNow() - s.t < 250) {
         const pull = Math.min(1, dt * 5);
         this.sim.x += (target.x - this.sim.x) * pull;
@@ -307,24 +269,30 @@ class Pong {
     }
 
     const R = this.meta.ballR;
-    const prevX = this.sim.x;
-    const prevY = this.sim.y;
-    this.sim.x += this.sim.vx * dt;
-    this.sim.y += this.sim.vy * dt;
+    const maxStep = 0.004;
+    let remaining = dt;
+    while (remaining > 0) {
+      const step = Math.min(remaining, maxStep);
+      const prevX = this.sim.x;
+      const prevY = this.sim.y;
+      this.sim.x += this.sim.vx * step;
+      this.sim.y += this.sim.vy * step;
 
-    if (this.sim.y - R < 0) {
-      this.sim.y = R;
-      this.sim.vy = Math.abs(this.sim.vy);
-    } else if (this.sim.y + R > 720) {
-      this.sim.y = 720 - R;
-      this.sim.vy = -Math.abs(this.sim.vy);
+      if (this.sim.y - R < 0) {
+        this.sim.y = R;
+        this.sim.vy = Math.abs(this.sim.vy);
+      } else if (this.sim.y + R > 720) {
+        this.sim.y = 720 - R;
+        this.sim.vy = -Math.abs(this.sim.vy);
+      }
+
+      this.collideLocal("left", prevX, prevY, now);
+      this.collideLocal("right", prevX, prevY, now);
+      remaining -= step;
     }
 
-    this.collideLocal("left", prevX, prevY, now);
-    this.collideLocal("right", prevX, prevY, now);
-
     this.trail.push({ x: this.sim.x, y: this.sim.y });
-    if (this.trail.length > 9) this.trail.shift();
+    if (this.trail.length > 6) this.trail.shift();
   }
 
   collideLocal(side, prevX, prevY, now) {
@@ -354,7 +322,7 @@ class Pong {
       padY = side === "left" ? s.l : s.r;
     }
 
-    const half = m.paddle.h / 2 + R;
+    const half = m.paddle.h / 2 + R + 4;
     if (Math.abs(hitY - padY) > half) return;
 
     const rel = Math.max(-1, Math.min(1, (hitY - padY) / half));
