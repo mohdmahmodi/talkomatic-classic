@@ -33,5 +33,8 @@
     "socketio": "^1.0.0",
     "uuid": "^10.0.0",
     "xss-clean": "^0.1.4"
+  },
+  "overrides": {
+    "socket.io-parser": "4.2.1"
   }
 }
