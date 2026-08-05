@@ -280,22 +280,13 @@ app.use((req, res, next) => {
 const SESSION_SECRET = process.env.SESSION_SECRET;
 
 if (!SESSION_SECRET) {
-  console.warn(
-    "\n" +
-      "════════════════════════════════════════════════════════════\n" +
-      "  WARNING: SESSION_SECRET is not set in .env\n" +
-      "  A temporary secret will be generated for this process.\n" +
-      "  Every restart will sign out ALL users and invalidate all\n" +
-      "  validated room access codes.\n" +
-      "\n" +
-      "  Fix: add to .env →  SESSION_SECRET=<long random string>\n" +
-      "  Generate one:       openssl rand -hex 32\n" +
-      "════════════════════════════════════════════════════════════\n",
+  throw new Error(
+    "SESSION_SECRET is not set. Add SESSION_SECRET=<long random string> to .env (generate one with: openssl rand -hex 32)",
   );
 }
 
 const sessionMiddleware = session({
-  secret: SESSION_SECRET || crypto.randomBytes(32).toString("hex"),
+  secret: SESSION_SECRET,
   resave: false,
   saveUninitialized: true,
   proxy: true,
