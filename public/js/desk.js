@@ -584,6 +584,123 @@
     return a;
   }
 
+  // ── Pictures ──────────────────────────────────────────────────────────────
+  // A link to a picture shows the picture. Only in staff chat, where everybody
+  // posting has a key: an appeal thread still shows the banned user's links as
+  // links, because loading whatever they name would fetch it from the reader's
+  // own connection.
+  //
+  // SVG is deliberately not on the list: it is a document, not a picture, and
+  // it stays a link you have to choose to open. Nor is plain http, which the
+  // page's own CSP (img-src https:) would refuse anyway - better a working
+  // link than a broken frame.
+  const IMG_EXT = /\.(?:png|jpe?g|jfif|gif|apng|webp|avif|bmp)$/i;
+  const MAX_SHOTS = 4; // per message
+
+  function imageUrl(u) {
+    let url;
+    try {
+      url = new URL(u);
+    } catch (_) {
+      return null;
+    }
+    if (url.protocol !== "https:") return null;
+    // The extension is read off the path, so an address that carries its size
+    // in a query string ("...red-apple.jpg?s=612x612&w=0") still counts.
+    if (!IMG_EXT.test(url.pathname)) return null;
+    return url.href;
+  }
+
+  // Every picture named in a message, and whatever text is left once they are
+  // taken out - a message that is nothing but a link to a picture should show
+  // the picture rather than the address of it.
+  function imagesIn(text) {
+    const src = String(text || "");
+    const re = /https?:\/\/[^\s<>]+/g;
+    const found = [];
+    const seen = new Set();
+    let m;
+    while ((m = re.exec(src)) && found.length < MAX_SHOTS) {
+      const raw = trimUrl(m[0]);
+      const url = imageUrl(raw);
+      if (!url || seen.has(url)) continue;
+      seen.add(url);
+      found.push({ raw, url });
+    }
+    let rest = src;
+    for (const f of found) rest = rest.split(f.raw).join(" ");
+    return { urls: found.map((f) => f.url), rest: rest.trim() };
+  }
+
+  function imageBlock(urls) {
+    const wrap = el("div", "dk-shots");
+    for (const url of urls) {
+      const b = el("button", "dk-shot");
+      b.type = "button";
+      b.title = "Open " + url;
+      const img = document.createElement("img");
+      img.loading = "lazy";
+      img.decoding = "async";
+      img.referrerPolicy = "no-referrer";
+      img.alt = "";
+      // An address that no longer serves a picture leaves nothing behind: the
+      // link is still in the message above, which is all a grey box was ever
+      // going to tell you.
+      img.addEventListener("error", () => b.remove());
+      img.src = url;
+      b.appendChild(img);
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openShot(url);
+      });
+      wrap.appendChild(b);
+    }
+    return wrap;
+  }
+
+  // ── One picture, full size ────────────────────────────────────────────────
+  const shotOpen = () => !!(els.shot && els.shot.style.display !== "none");
+
+  function closeShot() {
+    if (els.shot) {
+      els.shot.style.display = "none";
+      els.shot.textContent = "";
+    }
+  }
+
+  function openShot(url) {
+    if (!els.panel) return;
+    // Rebuilt if the panel it belonged to has been torn down since.
+    if (!els.shot || els.shot.parentNode !== els.panel) {
+      els.shot = el("div", "dk-lb");
+      els.shot.addEventListener("click", (e) => {
+        if (e.target === els.shot) closeShot();
+      });
+      els.panel.appendChild(els.shot);
+    }
+    els.shot.textContent = "";
+
+    const bar = el("div", "dk-lb-h");
+    const open = el("a", "dk-lb-open", "Open the original");
+    open.href = url;
+    open.target = "_blank";
+    open.rel = "noopener noreferrer nofollow";
+    bar.appendChild(open);
+    const x = btn("dk-lb-x", null, "fa-xmark", "Close");
+    x.addEventListener("click", closeShot);
+    bar.appendChild(x);
+    els.shot.appendChild(bar);
+
+    const img = document.createElement("img");
+    img.className = "dk-lb-img";
+    img.decoding = "async";
+    img.referrerPolicy = "no-referrer";
+    img.alt = "";
+    img.src = url;
+    els.shot.appendChild(img);
+    els.shot.style.display = "";
+  }
+
   function inlineInto(parent, text) {
     if (!text) return;
     // A fresh regex per call: this recurses into emphasis, and a shared
@@ -1390,7 +1507,11 @@
     panel.appendChild(els.toast);
 
     document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape" && panelOpen && !pageMode) setOpen(false);
+      if (e.key !== "Escape") return;
+      // A picture sits on top of everything, so it takes the key first rather
+      // than closing the whole Desk out from under itself.
+      if (shotOpen()) return closeShot();
+      if (panelOpen && !pageMode) setOpen(false);
     });
     window.addEventListener("focus", () => {
       if (viewingNow(viewKey())) markRead(viewKey());
@@ -2605,12 +2726,16 @@
         el("span", "dk-tomb", "Message removed by " + (m.deletedBy || "?")),
       );
     } else {
-      body.appendChild(textEl(m.text));
+      const shots = imagesIn(m.text);
+      // "here is the proof <link>" keeps the sentence and shows the picture
+      // under it. A message that is only the link shows only the picture.
+      if (!shots.urls.length || shots.rest) body.appendChild(textEl(m.text));
       if (m.editedAt) {
         const e = el("span", "dk-edited", "(edited)");
         e.title = "Edited " + new Date(m.editedAt).toLocaleString();
         body.appendChild(e);
       }
+      if (shots.urls.length) body.appendChild(imageBlock(shots.urls));
     }
     // A dev can always read what a message used to say.
     if (me && me.role === "dev" && m.history && m.history.length) {
@@ -3898,6 +4023,7 @@
       p: [
         "Links are clickable. **bold**, *italic*, ~~strike~~ and `code` all work, three backticks on their own line open a code block, and lines starting with - become a list.",
         "Emotes are the same ones the rooms have, written the same way: a colon, the code, a colon. Type a colon and two letters and the list narrows as you go, or press the face next to the send button to browse them.",
+        "A link to a picture shows the picture, and clicking it opens it full size. Only here, and only https links ending in a real image: an SVG, or anything a banned user writes in an appeal, stays a link you choose to open.",
         "Shift+Enter starts a new line without sending. Hover a message to reply to it; the quote above your reply links back to the original.",
         "Scrolled up reading something? New messages stop pulling you down and a bar appears saying how many came in. Click it to jump back to the latest.",
       ],
@@ -5249,6 +5375,30 @@
   width:38px;height:38px;display:flex;align-items:center;justify-content:center;
   cursor:pointer;font-size:14px;padding:0;}
 .dk-send:hover{background: #ffad33;}
+
+/* ── Pictures in a message ──
+   A thumbnail that keeps its own shape, capped so a tall screenshot cannot
+   take the whole channel. Clicking one opens it full size. */
+.dk-shots{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;}
+.dk-shot{background: #141414;border:1px solid #2a2a2a;border-radius:6px;padding:0;
+  cursor:zoom-in;overflow:hidden;line-height:0;max-width:100%;}
+.dk-shot:hover{border-color: #ff9800;}
+.dk-shot img{display:block;max-width:min(100%,380px);max-height:240px;width:auto;height:auto;
+  object-fit:contain;}
+/* Full size, over the panel. Same shape as the record card: click the backdrop,
+   the X, or Escape to close. */
+.dk-lb{position:absolute;inset:0;z-index:11;background:rgba(0,0,0,.82);display:flex;
+  align-items:center;justify-content:center;padding:54px 14px 14px;}
+/* Pinned to the corner rather than stacked above the picture, so the way out
+   is in the same place whatever shape the picture is. */
+.dk-lb-h{position:absolute;top:11px;right:13px;display:flex;align-items:center;gap:12px;}
+.dk-lb-open{color: #ff9800;font-size:12px;text-decoration:underline;}
+.dk-lb-x{background: #1b1b1b;border:1px solid #616161;color: #fff;border-radius:5px;
+  width:32px;height:32px;display:flex;align-items:center;justify-content:center;
+  cursor:pointer;font-size:15px;padding:0;}
+.dk-lb-x:hover{border-color: #ff9800;color: #ff9800;}
+.dk-lb-img{max-width:100%;max-height:100%;min-height:0;object-fit:contain;
+  border:1px solid #333;background: #000;}
 
 /* ── Emotes ──
    The same codes the rooms use. Sized in em so an emote sits on the line it
