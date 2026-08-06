@@ -76,6 +76,16 @@ class Talkoboard {
     this.size = 3;
     this.eraser = false;
     this.panMode = false; // hand tool: drag to move the board (great on touch)
+    // Everything is one of these. The booleans above are kept because plenty of
+    // the drawing code reads them, but `tool` is what decides.
+    this.tool = "pen";
+    // Shapes are ordinary strokes: a rectangle is a stroke whose points trace a
+    // rectangle. Nothing else in the board - undo, erase-by-person, saving the
+    // image, replaying it on someone else's screen - has to know about them.
+    this.SHAPES = ["line", "arrow", "rect", "ellipse", "triangle"];
+    this.shapeStart = null; // world point a shape drag began at
+    this.preview = null; // the shape under the pointer, drawn last, sent to nobody
+    this.fillShapes = false; // draw shapes filled rather than as outlines
 
     // ── Gradient brush (null = solid color) ─────────────────────────
     this.gradient = null; // array of hex stops when a gradient is selected
@@ -247,36 +257,63 @@ class Talkoboard {
     const toolbar = document.createElement("div");
     toolbar.className = "tb-toolbar";
 
-    // ── Group: pan / pen / eraser ───────────────────────────────────
+    // ── Group: the tools ────────────────────────────────────────────
+    // One row, one job each, in the order you reach for them: move, draw,
+    // rub out, then the shapes, then the bucket.
     const drawGroup = document.createElement("div");
     drawGroup.className = "tb-group";
+    this.toolBtns = {};
+
+    const tool = (name, icon, title) => {
+      const b = this.makeBtn(
+        "tb-tool-btn tb-icon-btn" + (name === "pen" ? " active" : ""),
+        '<i class="fas ' + icon + '"></i>',
+        title,
+      );
+      b.addEventListener("click", () => this.setTool(name));
+      this.toolBtns[name] = b;
+      drawGroup.appendChild(b);
+      return b;
+    };
 
     // Hand tool sits left of the pen so you can drag to move the board with
     // one finger - much easier than two-finger panning on mobile.
-    this.panBtn = this.makeBtn(
-      "tb-tool-btn tb-icon-btn",
-      '<i class="fas fa-hand"></i>',
-      "Move (drag to pan)",
-    );
-    this.panBtn.addEventListener("click", () => this.setTool("pan"));
+    this.panBtn = tool("pan", "fa-hand", "Move (drag to pan)");
+    this.penBtn = tool("pen", "fa-pen", "Pen");
+    this.eraserBtn = tool("eraser", "fa-eraser", "Eraser");
 
-    this.penBtn = this.makeBtn(
-      "tb-tool-btn tb-icon-btn active",
-      '<i class="fas fa-pen"></i>',
-      "Pen",
-    );
-    this.penBtn.addEventListener("click", () => this.setTool("pen"));
+    const shapeGroup = document.createElement("div");
+    shapeGroup.className = "tb-group";
+    const shape = (name, icon, title) => {
+      const b = this.makeBtn(
+        "tb-tool-btn tb-icon-btn",
+        '<i class="fas ' + icon + '"></i>',
+        title,
+      );
+      b.addEventListener("click", () => this.setTool(name));
+      this.toolBtns[name] = b;
+      shapeGroup.appendChild(b);
+      return b;
+    };
+    shape("line", "fa-slash", "Line - hold Shift to snap the angle");
+    shape("arrow", "fa-arrow-right-long", "Arrow");
+    shape("rect", "fa-square", "Rectangle - hold Shift for a square");
+    shape("ellipse", "fa-circle", "Ellipse - hold Shift for a circle");
+    shape("triangle", "fa-play", "Triangle");
+    this.toolBtns.triangle.querySelector("i").style.transform = "rotate(-90deg)";
+    shape("bucket", "fa-fill-drip", "Fill a closed area with the current color");
 
-    this.eraserBtn = this.makeBtn(
-      "tb-tool-btn tb-icon-btn",
-      '<i class="fas fa-eraser"></i>',
-      "Eraser",
+    // Outline or solid. Only means anything to a shape with an inside, so it
+    // greys out for the line and the arrow.
+    this.fillBtn = this.makeBtn(
+      "tb-tool-btn tb-icon-btn disabled",
+      '<i class="fas fa-square-full"></i>',
+      "Draw shapes filled in",
     );
-    this.eraserBtn.addEventListener("click", () => this.setTool("eraser"));
-
-    drawGroup.appendChild(this.panBtn);
-    drawGroup.appendChild(this.penBtn);
-    drawGroup.appendChild(this.eraserBtn);
+    this.fillBtn.addEventListener("click", () =>
+      this.setFillShapes(!this.fillShapes),
+    );
+    shapeGroup.appendChild(this.fillBtn);
 
     // Staff only: point at a drawing and deal with the person who made it,
     // rather than clearing the whole board because one thing has to go.
@@ -287,7 +324,7 @@ class Talkoboard {
         "Mod tools - tap a drawing to see who made it",
       );
       this.inspectBtn.addEventListener("click", () => this.setTool("inspect"));
-      drawGroup.appendChild(this.inspectBtn);
+      this.toolBtns.inspect = this.inspectBtn;
     }
 
     // ── Group: color ────────────────────────────────────────────────
@@ -356,10 +393,18 @@ class Talkoboard {
     historyGroup.appendChild(this.undoBtn);
     historyGroup.appendChild(this.redoBtn);
 
+    // Staff tools sit on their own at the end of the row, so they read as a
+    // different kind of thing from the pens.
+    const modGroup = document.createElement("div");
+    modGroup.className = "tb-group tb-mod-group";
+    if (this.inspectBtn) modGroup.appendChild(this.inspectBtn);
+
     toolbar.appendChild(drawGroup);
+    toolbar.appendChild(shapeGroup);
     toolbar.appendChild(colorGroup);
     toolbar.appendChild(sizeWrap);
     toolbar.appendChild(historyGroup);
+    if (this.inspectBtn) toolbar.appendChild(modGroup);
 
     // ── Header right: save + zoom + close ───────────────────────────
     const headerRight = document.createElement("div");
@@ -939,6 +984,12 @@ class Talkoboard {
   // The partial stroke was already broadcast, so tell everyone to end then
   // remove it, and clear our own canvas so no stray mark is left behind.
   _abortCurrentStroke() {
+    // A half-drawn shape has never left this screen, so it just goes.
+    if (this.shapeStart || this.preview) {
+      this.shapeStart = null;
+      this.preview = null;
+      this.scheduleRedraw();
+    }
     if (!this.drawing && !this.currentStroke) return;
     const s = this.currentStroke;
     this.drawing = false;
@@ -961,18 +1012,30 @@ class Talkoboard {
   // ═══════════════════════════════════════════════════════════════════════════
 
   setTool(name) {
+    this.tool = name;
     this.panMode = name === "pan";
     this.eraser = name === "eraser";
     this.inspectActive = name === "inspect";
-    this.penBtn.classList.toggle("active", name === "pen");
-    this.eraserBtn.classList.toggle("active", name === "eraser");
-    if (this.panBtn) this.panBtn.classList.toggle("active", name === "pan");
-    if (this.inspectBtn)
-      this.inspectBtn.classList.toggle("active", name === "inspect");
+    this.shapeStart = null;
+    this.preview = null;
+    for (const [tool, btn] of Object.entries(this.toolBtns || {}))
+      if (btn) btn.classList.toggle("active", tool === name);
     if (this.inspectActive)
       this.showHint("Mod tools: tap a drawing to see who made it");
-    if (!this.inspectActive) this.closeModCard();
+    else this.closeModCard();
+    if (name === "bucket") this.showHint("Tap inside a closed shape to fill it");
+    // The fill switch only means anything to a shape that has an inside.
+    if (this.fillBtn)
+      this.fillBtn.classList.toggle(
+        "disabled",
+        !["rect", "ellipse", "triangle"].includes(name),
+      );
     this.updateCursor();
+  }
+
+  setFillShapes(on) {
+    this.fillShapes = !!on;
+    if (this.fillBtn) this.fillBtn.classList.toggle("active", this.fillShapes);
   }
 
   // Back-compat: a few callers just want to return to the pen.
@@ -986,7 +1049,8 @@ class Talkoboard {
     this.gradient = null; // a solid color clears any selected gradient
     this.colorSwatch.style.background = color;
     if (this.colorInput) this.colorInput.value = this.normalizeHex(color);
-    // Choosing a color switches you back to the pen
+    // Picking a color puts you back on the pen only if the tool you are on
+    // has no use for one. A rectangle does.
     if (this.eraser || this.panMode || this.inspectActive) this.setTool("pen");
     this.updateSizeDot();
     this.updateCursor();
@@ -1001,6 +1065,8 @@ class Talkoboard {
     this.gradient = stops.slice();
     this.colorSwatch.style.background =
       "linear-gradient(135deg, " + stops.join(", ") + ")";
+    // Picking a color puts you back on the pen only if the tool you are on
+    // has no use for one. A rectangle does.
     if (this.eraser || this.panMode || this.inspectActive) this.setTool("pen");
     this.updateSizeDot();
     this.updateGradientSelection();
@@ -1180,6 +1246,299 @@ class Talkoboard {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // SHAPES
+  // A shape is an ordinary stroke whose points happen to trace something. That
+  // is the whole trick: undo, erase-everything-they-drew, saving the image and
+  // replaying on somebody else's screen all work already, and the server never
+  // had to learn what a rectangle is.
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  isShapeTool(name) {
+    return this.SHAPES.includes(name || this.tool);
+  }
+
+  // Shift squares a rectangle, circles an ellipse, and snaps a line to 45s.
+  constrainPoint(a, b, kind, shift) {
+    if (!shift) return b;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    if (kind === "line" || kind === "arrow") {
+      const ang = Math.atan2(dy, dx);
+      const step = Math.PI / 4;
+      const snapped = Math.round(ang / step) * step;
+      const len = Math.hypot(dx, dy);
+      return { x: a.x + Math.cos(snapped) * len, y: a.y + Math.sin(snapped) * len };
+    }
+    const side = Math.max(Math.abs(dx), Math.abs(dy));
+    return {
+      x: a.x + Math.sign(dx || 1) * side,
+      y: a.y + Math.sign(dy || 1) * side,
+    };
+  }
+
+  // The points that make the shape, in world coordinates.
+  shapePoints(kind, a, b) {
+    const pts = [];
+    if (kind === "line") return [a, b];
+    if (kind === "arrow") {
+      // Shaft, then back up each side of the head: one unbroken polyline, so
+      // it renders and erases like anything else drawn by hand.
+      const ang = Math.atan2(b.y - a.y, b.x - a.x);
+      const head = Math.max(9, Math.hypot(b.x - a.x, b.y - a.y) * 0.18);
+      const spread = Math.PI / 7;
+      const wing = (dir) => ({
+        x: b.x - Math.cos(ang + dir * spread) * head,
+        y: b.y - Math.sin(ang + dir * spread) * head,
+      });
+      return [a, b, wing(1), b, wing(-1)];
+    }
+    const x0 = Math.min(a.x, b.x);
+    const y0 = Math.min(a.y, b.y);
+    const x1 = Math.max(a.x, b.x);
+    const y1 = Math.max(a.y, b.y);
+    if (kind === "rect")
+      return [
+        { x: x0, y: y0 },
+        { x: x1, y: y0 },
+        { x: x1, y: y1 },
+        { x: x0, y: y1 },
+        { x: x0, y: y0 },
+      ];
+    if (kind === "triangle")
+      return [
+        { x: (x0 + x1) / 2, y: y0 },
+        { x: x1, y: y1 },
+        { x: x0, y: y1 },
+        { x: (x0 + x1) / 2, y: y0 },
+      ];
+    // Ellipse: enough segments that it stays smooth when zoomed in, few enough
+    // that it is a small stroke on the wire.
+    const cx = (x0 + x1) / 2;
+    const cy = (y0 + y1) / 2;
+    const rx = (x1 - x0) / 2;
+    const ry = (y1 - y0) / 2;
+    const steps = 48;
+    for (let i = 0; i <= steps; i++) {
+      const t = (i / steps) * Math.PI * 2;
+      pts.push({ x: cx + Math.cos(t) * rx, y: cy + Math.sin(t) * ry });
+    }
+    return pts;
+  }
+
+  // A finished shape goes straight out whole, through the same event redo uses.
+  commitShape(kind, a, b, shift) {
+    const end = this.constrainPoint(a, b, kind, shift);
+    if (Math.hypot(end.x - a.x, end.y - a.y) < 2) return; // a tap, not a drag
+    const closed = kind === "rect" || kind === "ellipse" || kind === "triangle";
+    const stroke = {
+      id: this.nextStrokeId(),
+      owner: this.userId,
+      points: this.shapePoints(kind, a, end),
+      color: this.color,
+      size: this.size,
+      eraser: false,
+      gradient: this.gradient ? this.gradient.slice() : null,
+      fill: closed && this.fillShapes,
+    };
+    this.addOwnStroke(stroke);
+  }
+
+  // Puts a finished stroke of ours on the board and tells everyone. Shapes and
+  // bucket fills both arrive complete rather than point by point.
+  addOwnStroke(stroke) {
+    this.strokes.push(stroke);
+    this.undoStack.push(stroke.id);
+    this.redoStack = [];
+    this.updateUndoRedoButtons();
+    this.socket.emit("board stroke add", {
+      stroke: {
+        id: stroke.id,
+        points: stroke.points,
+        color: stroke.color,
+        size: stroke.size,
+        eraser: stroke.eraser,
+        gradient: stroke.gradient || null,
+        fill: !!stroke.fill,
+        rings: stroke.rings || null,
+      },
+    });
+    this.scheduleRedraw();
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PAINT BUCKET
+  // Flood fills what is on screen, then traces the edge of what it filled and
+  // stores THAT as an ordinary filled shape. The picture everyone ends up with
+  // is a polygon, not a picture of a fill - so it survives a reload, undoes,
+  // zooms in cleanly and erases with the person who poured it. Holes are kept
+  // as extra rings, so filling a box that has something in it does not swallow
+  // what was inside.
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  bucketFill(screenPt) {
+    const dpr = this.dpr;
+    const W = this.canvas.width;
+    const H = this.canvas.height;
+    if (!W || !H) return;
+    const sx = Math.round(screenPt.x * dpr);
+    const sy = Math.round(screenPt.y * dpr);
+    if (sx < 0 || sy < 0 || sx >= W || sy >= H) return;
+
+    // Paint against what is actually on the board, not what was on it at the
+    // last animation frame: a shape drawn a moment ago may still be queued,
+    // and filling around a wall that has not been painted yet leaks.
+    this.redraw();
+
+    let img;
+    try {
+      img = this.ctx.getImageData(0, 0, W, H);
+    } catch (_) {
+      return this.showHint("Cannot read the board to fill it");
+    }
+    const px = img.data;
+    const at = (x, y) => (y * W + x) * 4;
+    const seed = at(sx, sy);
+    const sr = px[seed];
+    const sg = px[seed + 1];
+    const sb = px[seed + 2];
+    const TOL = 32 * 32 * 3; // squared distance, forgiving of anti-aliased edges
+
+    const mask = new Uint8Array(W * H);
+    const stack = [sx, sy];
+    let touchedEdge = false;
+    let filled = 0;
+    while (stack.length) {
+      const y = stack.pop();
+      const x = stack.pop();
+      if (x < 0 || y < 0 || x >= W || y >= H) continue;
+      const i = y * W + x;
+      if (mask[i]) continue;
+      const o = i * 4;
+      const dr = px[o] - sr;
+      const dg = px[o + 1] - sg;
+      const db = px[o + 2] - sb;
+      if (dr * dr + dg * dg + db * db > TOL) continue;
+      mask[i] = 1;
+      filled++;
+      if (x === 0 || y === 0 || x === W - 1 || y === H - 1) touchedEdge = true;
+      stack.push(x + 1, y, x - 1, y, x, y + 1, x, y - 1);
+    }
+
+    if (!filled) return;
+    // Reaching the edge of the screen means the area is not closed, and the
+    // fill would be a rectangle of paint over the whole view.
+    if (touchedEdge)
+      return this.showHint("That area is not closed - the paint would run out");
+
+    const rings = this.traceMask(mask, W, H);
+    if (!rings.length) return this.showHint("Nothing to fill there");
+
+    // Screen pixels back into board coordinates, so the shape means the same
+    // thing at any zoom and on anybody else's screen.
+    const toWorld = (p) => ({
+      x: (p.x / dpr - this.panX) / this.zoom,
+      y: (p.y / dpr - this.panY) / this.zoom,
+    });
+    let out = rings
+      .map((r) => this.simplifyRing(r, 1.2).map(toWorld))
+      .filter((r) => r.length >= 3);
+    if (!out.length) return this.showHint("Nothing to fill there");
+    // Biggest first: the outline is the outer ring, the rest are the holes.
+    out.sort((a, b) => b.length - a.length);
+    let total = out.reduce((n, r) => n + r.length, 0);
+    if (total > 1400) {
+      out = out.map((r) => this.simplifyRing(r, 3 / this.zoom));
+      total = out.reduce((n, r) => n + r.length, 0);
+    }
+
+    this.addOwnStroke({
+      id: this.nextStrokeId(),
+      owner: this.userId,
+      points: out[0],
+      rings: out,
+      color: this.color,
+      size: 1,
+      eraser: false,
+      gradient: null,
+      fill: true,
+    });
+  }
+
+  // Every boundary between a filled pixel and an unfilled one, walked into
+  // closed loops. Directed consistently (filled on the left), so each corner
+  // has one way out and the loops close by themselves.
+  traceMask(mask, W, H) {
+    const edges = new Map(); // "x,y" -> [x2, y2]
+    const key = (x, y) => x + "," + y;
+    const add = (x1, y1, x2, y2) => edges.set(key(x1, y1), [x2, y2]);
+    const on = (x, y) => x >= 0 && y >= 0 && x < W && y < H && mask[y * W + x];
+
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        if (!mask[y * W + x]) continue;
+        if (!on(x, y - 1)) add(x, y, x + 1, y); // top edge, left to right
+        if (!on(x + 1, y)) add(x + 1, y, x + 1, y + 1); // right, down
+        if (!on(x, y + 1)) add(x + 1, y + 1, x, y + 1); // bottom, right to left
+        if (!on(x - 1, y)) add(x, y + 1, x, y); // left, up
+      }
+    }
+
+    const rings = [];
+    while (edges.size) {
+      const startKey = edges.keys().next().value;
+      const ring = [];
+      let k = startKey;
+      while (true) {
+        const next = edges.get(k);
+        if (!next) break;
+        edges.delete(k);
+        const [x, y] = k.split(",");
+        ring.push({ x: +x, y: +y });
+        k = key(next[0], next[1]);
+        if (k === startKey) break;
+        if (ring.length > 200000) break; // never spin on a malformed mask
+      }
+      if (ring.length >= 4) rings.push(ring);
+    }
+    return rings;
+  }
+
+  // Staircase pixel edges into something worth storing: drop the points that
+  // sit on a straight run, then Douglas-Peucker the rest.
+  simplifyRing(ring, eps) {
+    if (ring.length < 4) return ring;
+    const straight = [ring[0]];
+    for (let i = 1; i < ring.length - 1; i++) {
+      const a = straight[straight.length - 1];
+      const b = ring[i];
+      const c = ring[i + 1];
+      const cross = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+      if (cross !== 0) straight.push(b);
+    }
+    straight.push(ring[ring.length - 1]);
+    return this.douglasPeucker(straight, eps);
+  }
+
+  douglasPeucker(pts, eps) {
+    if (pts.length < 3) return pts;
+    let worst = 0;
+    let idx = 0;
+    const a = pts[0];
+    const b = pts[pts.length - 1];
+    for (let i = 1; i < pts.length - 1; i++) {
+      const d = this.distToSegmentSq(pts[i], a, b);
+      if (d > worst) {
+        worst = d;
+        idx = i;
+      }
+    }
+    if (worst <= eps * eps) return [a, b];
+    const left = this.douglasPeucker(pts.slice(0, idx + 1), eps);
+    const right = this.douglasPeucker(pts.slice(idx), eps);
+    return left.slice(0, -1).concat(right);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
   // MOD TOOLS: one person's drawings, or their pen
   // ═══════════════════════════════════════════════════════════════════════════
 
@@ -1191,6 +1550,16 @@ class Talkoboard {
   isBarred() {
     if (this.barredUntil && this.barredUntil <= Date.now()) this.barredUntil = 0;
     return !!this.barredUntil;
+  }
+
+  // Same question, but it says so on the way past - every drawing tool asks it
+  // before doing anything.
+  isBarredForDrawing() {
+    if (!this.isBarred()) return false;
+    this.showHint(
+      "You are off the board for another " + this.barredMinutes() + " minutes",
+    );
+    return true;
   }
 
   closeModCard() {
@@ -1526,6 +1895,10 @@ class Talkoboard {
       this.canvas.style.cursor = "help";
       return;
     }
+    if (this.tool === "bucket") {
+      this.canvas.style.cursor = "cell";
+      return;
+    }
     this.canvas.style.cursor =
       this._spaceDown || this.panMode ? "grab" : "crosshair";
   }
@@ -1748,6 +2121,24 @@ class Talkoboard {
       this.renderStrokeSmooth(ctx, this.currentStroke);
     }
 
+    // The shape under the pointer, last and local only.
+    if (this.preview) {
+      this.renderStrokeSmooth(ctx, {
+        points: this.shapePoints(
+          this.preview.kind,
+          this.preview.a,
+          this.preview.b,
+        ),
+        color: this.color,
+        size: this.size,
+        eraser: false,
+        gradient: this.gradient,
+        fill:
+          this.fillShapes &&
+          ["rect", "ellipse", "triangle"].includes(this.preview.kind),
+      });
+    }
+
     ctx.restore();
   }
 
@@ -1759,6 +2150,13 @@ class Talkoboard {
   renderStrokeSmooth(ctx, stroke) {
     const pts = stroke.points;
     if (!pts || pts.length === 0) return;
+
+    // A filled shape is a path, not a line: its rings go down together so a
+    // hole in the middle stays a hole.
+    if (stroke.fill && !stroke.eraser) {
+      this.renderFilled(ctx, stroke);
+      return;
+    }
 
     if (!stroke.eraser && stroke.gradient && stroke.gradient.length >= 2) {
       this.renderStrokeGradient(ctx, stroke);
@@ -1868,6 +2266,36 @@ class Talkoboard {
     ctx.stroke();
   }
 
+  // A filled shape: every ring into one path, filled even-odd so the holes
+  // stay holes, then the same outline the shape would have had on its own.
+  renderFilled(ctx, stroke) {
+    const rings =
+      Array.isArray(stroke.rings) && stroke.rings.length
+        ? stroke.rings
+        : [stroke.points];
+    const path = new Path2D();
+    for (const ring of rings) {
+      if (!ring || ring.length < 3) continue;
+      path.moveTo(ring[0].x, ring[0].y);
+      for (let i = 1; i < ring.length; i++) path.lineTo(ring[i].x, ring[i].y);
+      path.closePath();
+    }
+    ctx.save();
+    ctx.globalCompositeOperation = "source-over";
+    ctx.fillStyle = stroke.color;
+    ctx.fill(path, "evenodd");
+    // A bucket fill has no outline of its own (size 1 is the marker); a drawn
+    // shape keeps the edge it was drawn with.
+    if (stroke.size > 1) {
+      ctx.lineWidth = stroke.size;
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
+      ctx.strokeStyle = stroke.color;
+      ctx.stroke(path);
+    }
+    ctx.restore();
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   // STROKE RENDERING - INCREMENTAL (used during live drawing, no full redraw)
   // Draws only from fromIndex onward, connecting to existing canvas content.
@@ -1971,10 +2399,19 @@ class Talkoboard {
 
     // Barred: the server would refuse this anyway, and drawing it locally
     // would leave a line on this screen that exists nowhere else.
-    if (this.isBarred()) {
-      this.showHint(
-        "You are off the board for another " + this.barredMinutes() + " minutes",
-      );
+    if (this.isBarredForDrawing()) return;
+
+    // The bucket is a tap, not a drag.
+    if (this.tool === "bucket") {
+      const rect = this.canvas.getBoundingClientRect();
+      this.bucketFill({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+      return;
+    }
+
+    // A shape is a drag from here to wherever they let go.
+    if (this.isShapeTool()) {
+      this.shapeStart = this.getCanvasPoint(e);
+      this.preview = null;
       return;
     }
 
@@ -2027,6 +2464,20 @@ class Talkoboard {
       return;
     }
 
+    // A shape follows the pointer without going anywhere near the network:
+    // nobody else sees it until it is finished.
+    if (this.shapeStart) {
+      const end = this.constrainPoint(
+        this.shapeStart,
+        this.getCanvasPoint(e),
+        this.tool,
+        e.shiftKey,
+      );
+      this.preview = { kind: this.tool, a: this.shapeStart, b: end };
+      this.scheduleRedraw();
+      return;
+    }
+
     if (!this.drawing) return;
     e.preventDefault();
 
@@ -2062,6 +2513,15 @@ class Talkoboard {
       this.isPanning = false;
       this.panStart = null;
       this.updateCursor();
+      return;
+    }
+
+    if (this.shapeStart) {
+      const start = this.shapeStart;
+      this.shapeStart = null;
+      this.preview = null;
+      this.commitShape(this.tool, start, this.getCanvasPoint(e), e.shiftKey);
+      this.scheduleRedraw();
       return;
     }
 
@@ -2506,8 +2966,11 @@ class Talkoboard {
     // ── Staff: answer to "who drew this" ────────────────────────────
     this.socket.on("board stroke author", (data) => {
       if (!data) return;
+      // No owner on record: an old drawing from before the board kept track,
+      // or somebody the viewer is not allowed to see. Say what can be done
+      // about it rather than describing the gap.
       if (data.unknown || !data.userId)
-        return this.showHint("Whoever drew that is no longer traceable");
+        return this.showHint("Nothing on record for that one");
       // Remember the name, so anything that happens to them afterwards can be
       // reported by name rather than as "someone".
       if (data.username) this.notePeerName(data.userId, data.username);

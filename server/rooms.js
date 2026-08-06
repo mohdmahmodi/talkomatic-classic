@@ -237,6 +237,28 @@ function finalizeBoardUserStroke(roomId, userId) {
 
 // Validate a gradient-brush spec from the client: 2-8 hex color stops, else
 // null (a plain solid-color stroke). Trusts nothing about it but the shape.
+// A filled shape carries its outline as `points` and, when the fill has holes
+// in it (a bucket fill around something), the rest of its rings here. Same
+// shape as points, capped the same way, so one fill can never be bigger than
+// one stroke's worth of data.
+function sanitizeRings(rings, budget) {
+  if (!Array.isArray(rings)) return null;
+  const out = [];
+  let left = budget;
+  for (const ring of rings) {
+    if (!Array.isArray(ring) || ring.length < 3) continue;
+    const pts = [];
+    for (const p of ring) {
+      if (typeof p?.x !== "number" || typeof p?.y !== "number") continue;
+      pts.push({ x: p.x, y: p.y });
+      if (--left <= 0) break;
+    }
+    if (pts.length >= 3) out.push(pts);
+    if (out.length >= 24 || left <= 0) break;
+  }
+  return out.length ? out : null;
+}
+
 function sanitizeGradient(g) {
   if (!Array.isArray(g)) return null;
   const out = [];
@@ -3564,6 +3586,13 @@ function registerSocketHandlers(opts) {
           size: Math.min(Math.max(Number(s.size) || 3, 1), 50),
           eraser: !!s.eraser,
           gradient: s.eraser ? null : sanitizeGradient(s.gradient),
+          // Shapes and bucket fills arrive whole through this event rather than
+          // point by point, so this is the only place the two extra fields a
+          // filled shape needs have to be accepted.
+          fill: !!s.fill,
+          rings: s.fill
+            ? sanitizeRings(s.rings, MAX_POINTS_PER_STROKE - points.length)
+            : null,
         };
 
         const bs = getBoardState(socket.roomId);

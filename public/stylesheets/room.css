@@ -1053,38 +1053,46 @@ html {
   inset: 0;
   width: 100%;
   height: 100%;
-  background: #ffffff;
+  background: var(--tk-bg);
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
-/* ── Header / Toolbar ──────────────────────────────────────────────────────── */
+/* ── Banner ────────────────────────────────────────────────────────────────────
+   One bar: who you are looking at on the left, the tools in the middle, the
+   view controls and the way out on the right. Flat dark tiles and orange on
+   what is selected, the same as the lobby and the mod dashboard. */
 
 .tb-header {
   display: flex;
   align-items: center;
-  padding: 9px 16px;
-  background: #ffffff;
-  border-bottom: 1px solid #e9e9ee;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  padding: 8px 14px;
+  background: var(--tk-tile);
+  border-bottom: 1px solid var(--tk-border);
   gap: 12px;
   flex-shrink: 0;
-  min-height: 50px;
-  flex-wrap: wrap;
+  /* No min-height: the tallest control decides, so the bar is exactly as deep
+     as the buttons in it rather than carrying empty space above and below. */
+  /* One row, always. A banner that reflows into two lines as tools are added
+     pushes the board down and reads like a mistake; the tools scroll sideways
+     instead, and the brand and the way out stay pinned either end. */
+  flex-wrap: nowrap;
   z-index: 2;
 }
 
-/* Brand (icon + name) at the far left. */
 .tb-brand {
   display: flex;
   align-items: center;
   gap: 9px;
-  color: #1b1b22;
-  font-weight: 800;
+  color: var(--tk-text);
+  font-weight: bold;
   font-size: 16px;
   letter-spacing: 0.2px;
   flex-shrink: 0;
+  padding-right: 14px;
+  border-right: 1px solid var(--tk-border);
+  align-self: stretch;
 }
 .tb-brand i {
   color: var(--tk-accent);
@@ -1095,61 +1103,81 @@ html {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex: 1;
-  flex-wrap: wrap;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  /* No scrollbar under the tools: it is a strip you drag, and a bar there
+     makes the banner taller than the buttons in it. */
+  scrollbar-width: none;
+}
+.tb-toolbar::-webkit-scrollbar {
+  display: none;
+}
+.tb-toolbar > * {
+  flex-shrink: 0;
 }
 
 /* Segmented tool groups */
 .tb-group {
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: 2px;
   padding: 3px;
-  background: #f4f4f7;
-  border: 1px solid #e7e7ed;
-  border-radius: 11px;
+  background: #000000;
+  border: 1px solid var(--tk-border);
+  border-radius: 6px;
 }
 
 /* Tool buttons */
 .tb-tool-btn {
   background: transparent;
   border: 1px solid transparent;
-  color: #44444d;
+  color: #c3c3c3;
   padding: 6px 12px;
-  border-radius: 8px;
+  border-radius: 4px;
   cursor: pointer;
+  font-family: inherit;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: bold;
   transition:
-    background 0.13s ease,
-    color 0.13s ease,
-    box-shadow 0.13s ease;
+    background 0.12s ease,
+    color 0.12s ease;
   white-space: nowrap;
   line-height: 1.3;
 }
 .tb-tool-btn:hover {
-  background: #ffffff;
-  color: #1b1b22;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  background: #2a2a2a;
+  color: var(--tk-text);
 }
 .tb-tool-btn.active {
   background: var(--tk-accent);
-  color: var(--tk-text);
+  color: #000000;
   border-color: var(--tk-accent);
-  box-shadow: 0 1px 4px color-mix(in srgb, var(--tk-accent) 45%, transparent);
 }
 .tb-tool-btn.disabled {
-  opacity: 0.3;
+  opacity: 0.35;
   pointer-events: none;
 }
 .tb-icon-btn {
-  width: 36px;
-  height: 34px;
+  width: 34px;
+  height: 32px;
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 15px;
+  font-size: 14px;
+}
+
+/* Staff tools are a different kind of thing from the pens, and say so. */
+.tb-mod-group {
+  border-color: rgba(255, 152, 0, 0.5);
+}
+.tb-mod-btn {
+  color: var(--tk-accent);
+}
+.tb-mod-btn.active {
+  color: #000000;
 }
 
 /* Color button (opens the color panel) */
@@ -1157,29 +1185,26 @@ html {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: #ffffff;
-  border: 1px solid #e0e0e6;
-  border-radius: 8px;
-  padding: 5px 8px 5px 6px;
+  background: #000000;
+  border: 1px solid var(--tk-border);
+  border-radius: 6px;
+  padding: 4px 7px 4px 5px;
   cursor: pointer;
   height: 34px;
 }
-.tb-color-btn:hover {
-  border-color: #c8c8d0;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-}
+.tb-color-btn:hover,
 .tb-color-btn.active {
   border-color: var(--tk-accent);
 }
 .tb-color-current {
   width: 22px;
   height: 22px;
-  border-radius: 6px;
+  border-radius: 4px;
   display: block;
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
 }
 .tb-color-caret {
-  color: #9a9aa2;
+  color: #8d8d8d;
   font-size: 11px;
 }
 
@@ -1193,9 +1218,8 @@ html {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #1b1b22;
+  background: var(--tk-text);
   flex-shrink: 0;
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15);
 }
 .tb-size-wrap input[type="range"] {
   width: 90px;
@@ -1203,14 +1227,14 @@ html {
   cursor: pointer;
 }
 .tb-size-label {
-  color: #6b6b73;
+  color: #8d8d8d;
   font-size: 12px;
   min-width: 18px;
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
 
-/* Header right: zoom + close */
+/* Header right: save + zoom + close */
 .tb-header-right {
   display: flex;
   align-items: center;
@@ -1218,10 +1242,10 @@ html {
   margin-left: auto;
 }
 .tb-zoom-wrap {
-  gap: 3px;
+  gap: 2px;
 }
 .tb-zoom-label {
-  color: #6b6b73;
+  color: #8d8d8d;
   font-size: 12px;
   min-width: 42px;
   text-align: center;
@@ -1230,31 +1254,34 @@ html {
 
 /* Close button */
 .tb-close {
-  background: #ffffff;
-  border: 1px solid #e0e0e6;
-  color: #6b6b73;
+  background: #000000;
+  border: 1px solid var(--tk-border);
+  color: #c3c3c3;
   font-size: 16px;
   line-height: 1;
   cursor: pointer;
-  width: 36px;
+  width: 34px;
   height: 34px;
-  border-radius: 8px;
+  border-radius: 6px;
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   transition:
-    background 0.15s,
-    border-color 0.15s,
-    color 0.15s;
+    background 0.13s,
+    border-color 0.13s,
+    color 0.13s;
 }
 .tb-close:hover {
-  background: #e5484d;
-  border-color: #e5484d;
+  background: #ff5468;
+  border-color: #ff5468;
   color: var(--tk-text);
 }
 
-/* ── Canvas Area ───────────────────────────────────────────────────────────── */
+/* ── Canvas Area ─────────────────────────────────────────────────────────────
+   The sheet stays white. It is the one part of the board that is paper rather
+   than interface, and everything drawn on it since the board existed was drawn
+   against white. */
 
 .tb-canvas-wrap {
   flex: 1;
@@ -1307,9 +1334,8 @@ html {
   border-radius: 4px;
   white-space: nowrap;
   pointer-events: none;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-weight: 500;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  font-weight: bold;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
 }
 
 /* ── Color Panel (docked top-left of the board) ────────────────────────────── */
@@ -1323,7 +1349,7 @@ html {
   background: var(--tk-bg);
   border: 1px solid var(--tk-border);
   border-radius: 8px;
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55);
   padding: 12px;
   z-index: 30;
   display: none;
@@ -1332,15 +1358,15 @@ html {
   display: block;
 }
 .tb-pop-title {
-  color: #888888;
+  color: #8d8d8d;
   font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
+  font-weight: bold;
   letter-spacing: 0.6px;
-  margin: 0 0 6px;
+  text-transform: uppercase;
+  margin-bottom: 8px;
 }
 .tb-pop-title:not(:first-child) {
-  margin-top: 12px;
+  margin-top: 14px;
 }
 .tb-swatch-grid {
   display: grid;
@@ -1356,136 +1382,130 @@ html {
   width: 26px;
   height: 26px;
   border-radius: 5px;
-  border: none;
+  border: 1px solid var(--tk-border);
   cursor: pointer;
   padding: 0;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
-  transition: transform 0.08s ease;
+  display: block;
 }
 .tb-swatch:hover {
-  transform: scale(1.12);
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.5),
-    0 0 0 2px var(--tk-accent);
+  border-color: var(--tk-accent);
+  transform: translateY(-1px);
 }
 .tb-swatch.active {
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.5),
-    0 0 0 2px var(--tk-accent);
+  border-color: var(--tk-accent);
+  box-shadow: 0 0 0 2px rgba(255, 152, 0, 0.35);
 }
-/* Gradient brushes are wider so the colors read clearly */
 .tb-gradient-row {
-  gap: 7px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 .tb-gradient-swatch {
-  width: 46px;
-  border-radius: 6px;
+  width: 34px;
 }
 .tb-custom-row {
   display: flex;
   gap: 8px;
-  margin-top: 10px;
+  align-items: center;
 }
 .tb-custom-pick {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: #000000;
-  border: 1px solid var(--tk-border);
+  position: relative;
+  width: 34px;
+  height: 30px;
   border-radius: 6px;
-  padding: 6px 8px;
-  cursor: pointer;
-  color: #e6e6e6;
-  font-size: 12px;
-  font-weight: 600;
-}
-.tb-custom-pick:hover {
-  background: var(--tk-tile);
-  border-color: var(--tk-accent);
-}
-.tb-custom-pick input[type="color"] {
-  width: 24px;
-  height: 24px;
-  border: none;
-  background: none;
-  padding: 0;
-  cursor: pointer;
-}
-.tb-eyedropper {
-  width: 40px;
-  background: #000000;
   border: 1px solid var(--tk-border);
-  border-radius: 6px;
+  background: #000000;
   cursor: pointer;
-  font-size: 15px;
-  color: #e6e6e6;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  color: #c3c3c3;
+  overflow: hidden;
+}
+.tb-custom-pick:hover {
+  border-color: var(--tk-accent);
+  color: var(--tk-text);
+}
+.tb-custom-pick input[type="color"] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+  border: none;
+  padding: 0;
+}
+.tb-eyedropper {
+  flex: 1;
+  height: 30px;
+  border-radius: 6px;
+  border: 1px solid var(--tk-border);
+  background: #000000;
+  color: #c3c3c3;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: bold;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
 }
 .tb-eyedropper:hover {
-  background: var(--tk-tile);
   border-color: var(--tk-accent);
+  color: var(--tk-text);
 }
 .tb-pop-empty {
-  color: #777777;
-  font-size: 11px;
-  font-style: italic;
-  padding: 2px 0;
+  color: #8d8d8d;
+  font-size: 11.5px;
+}
+.tb-users-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 .tb-user-swatch {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  background: #000000;
+  gap: 6px;
+  background: var(--tk-tile);
   border: 1px solid var(--tk-border);
-  border-radius: 14px;
-  padding: 3px 8px 3px 4px;
+  border-radius: 6px;
+  padding: 3px 7px 3px 4px;
   cursor: pointer;
-  color: #dddddd;
-  font-size: 11px;
-  max-width: 100%;
+  font-family: inherit;
 }
 .tb-user-swatch:hover {
-  background: var(--tk-tile);
   border-color: var(--tk-accent);
 }
 .tb-user-swatch .tb-swatch {
   width: 16px;
   height: 16px;
-  border-radius: 50%;
+  border-radius: 4px;
 }
 .tb-user-name {
+  color: #c3c3c3;
+  font-size: 11.5px;
+  max-width: 92px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 92px;
 }
 
 /* ── Mod tools ────────────────────────────────────────────────────────────────
-   Staff only. The tool button wears the accent so it reads as a different kind
-   of thing from the pen and the eraser, and the card that opens on a tap is
-   about ONE person: what they drew, and whether they keep their pen. */
-
-.tb-mod-btn {
-  color: var(--tk-accent);
-}
-.tb-mod-btn.active {
-  color: #000;
-}
+   Staff only. A card about ONE person: what they drew, and whether they keep
+   their pen. Same tiles and same orange as everything else. */
 
 .tb-modcard {
   position: absolute;
   z-index: 45;
-  width: 246px;
-  background: #16161a;
+  width: 250px;
+  background: var(--tk-bg);
   border: 1px solid var(--tk-accent);
   border-radius: 8px;
-  padding: 9px;
+  padding: 10px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 7px;
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.6);
 }
 
@@ -1493,6 +1513,8 @@ html {
   display: flex;
   align-items: flex-start;
   gap: 8px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--tk-border);
 }
 .tb-modcard-who {
   display: flex;
@@ -1501,8 +1523,8 @@ html {
   flex: 1;
 }
 .tb-modcard-n {
-  font-size: 13px;
-  font-weight: 700;
+  font-size: 13.5px;
+  font-weight: bold;
   color: var(--tk-text);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1532,8 +1554,8 @@ html {
   gap: 2px 8px;
   align-items: center;
   text-align: left;
-  background: #1f1f24;
-  border: 1px solid #33333a;
+  background: var(--tk-tile);
+  border: 1px solid var(--tk-border);
   border-radius: 6px;
   color: var(--tk-text);
   font-family: inherit;
@@ -1547,7 +1569,7 @@ html {
   color: #8d8d8d;
 }
 .tb-modcard-bt {
-  font-weight: 600;
+  font-weight: bold;
 }
 .tb-modcard-bn {
   font-size: 10.5px;
@@ -1557,10 +1579,9 @@ html {
 .tb-modcard-b:hover {
   border-color: var(--tk-accent);
 }
-.tb-modcard-b.danger:hover {
-  border-color: #ff5468;
-}
+.tb-modcard-b.danger:hover,
 .tb-modcard-b.danger:hover i {
+  border-color: #ff5468;
   color: #ff5468;
 }
 /* Armed: one more press does it. */
@@ -1581,29 +1602,30 @@ html {
   top: 14px;
   left: 50%;
   transform: translateX(-50%) translateY(-8px);
-  background: rgba(0, 0, 0, 0.92);
+  background: var(--tk-bg);
   color: var(--tk-text);
   border: 1px solid var(--tk-accent);
   padding: 7px 14px;
   border-radius: 6px;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: bold;
   pointer-events: none;
   opacity: 0;
   transition:
     opacity 0.2s ease,
     transform 0.2s ease;
   z-index: 40;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
 .tb-hint.show {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
 }
 
-/* ── Chat (closable panel, bottom-right) ──────────────────────────────────────
-   A small launcher bubble keeps the board fully visible; clicking it opens a
-   compact, solid panel with a send button. Closing it hides the panel again. An
-   unread dot appears on the bubble while it is closed. */
+/* ── Chat ─────────────────────────────────────────────────────────────────────
+   A bubble in the corner until you want it, then a panel that reads like the
+   Desk: who said it in their own color, what they said underneath, and a box
+   at the bottom. Closing it puts the whole board back on screen. */
 
 .tb-chat {
   position: absolute;
@@ -1619,38 +1641,38 @@ html {
 /* Launcher bubble */
 .tb-chat-fab {
   position: relative;
-  width: 52px;
-  height: 52px;
-  border-radius: 50%;
-  border: none;
-  background: var(--tk-accent);
-  color: var(--tk-text);
-  font-size: 20px;
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  border: 1px solid var(--tk-accent);
+  background: var(--tk-tile);
+  color: var(--tk-accent);
+  font-size: 19px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
   transition:
-    transform 0.12s ease,
-    box-shadow 0.12s ease;
+    background 0.12s ease,
+    color 0.12s ease;
 }
 .tb-chat-fab:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+  background: var(--tk-accent);
+  color: #000000;
 }
 .tb-chat.open .tb-chat-fab {
   display: none;
 }
 .tb-chat-badge {
   position: absolute;
-  top: 6px;
-  right: 6px;
-  width: 11px;
-  height: 11px;
+  top: 5px;
+  right: 5px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
-  background: #e5484d;
-  border: 2px solid #ffffff;
+  background: #ff5468;
+  border: 2px solid var(--tk-tile);
   display: none;
 }
 .tb-chat-fab.has-unread .tb-chat-badge {
@@ -1663,10 +1685,10 @@ html {
   width: 320px;
   max-width: calc(100vw - 32px);
   height: min(58vh, 440px);
-  background: #ffffff;
-  border: 1px solid #e6e6ec;
-  border-radius: 14px;
-  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.22);
+  background: var(--tk-bg);
+  border: 1px solid var(--tk-border);
+  border-radius: 8px;
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.6);
   overflow: hidden;
   flex-direction: column;
 }
@@ -1689,17 +1711,18 @@ html {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 10px 10px 14px;
-  border-bottom: 1px solid #eeeef2;
+  padding: 9px 9px 9px 13px;
+  background: var(--tk-tile);
+  border-bottom: 1px solid var(--tk-border);
   flex-shrink: 0;
 }
 .tb-chat-title {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-weight: 800;
-  font-size: 14px;
-  color: #1b1b22;
+  font-weight: bold;
+  font-size: 13.5px;
+  color: var(--tk-text);
 }
 .tb-chat-title i {
   color: var(--tk-accent);
@@ -1707,11 +1730,11 @@ html {
 .tb-chat-close-btn {
   background: transparent;
   border: none;
-  color: #8a8a92;
-  font-size: 16px;
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
+  color: #8d8d8d;
+  font-size: 15px;
+  width: 28px;
+  height: 28px;
+  border-radius: 5px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -1721,8 +1744,8 @@ html {
     color 0.12s ease;
 }
 .tb-chat-close-btn:hover {
-  background: #f1f1f4;
-  color: #1b1b22;
+  background: #2a2a2a;
+  color: var(--tk-text);
 }
 
 .tb-chat-log {
@@ -1733,7 +1756,9 @@ html {
   padding: 10px 12px;
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: #3d3d3d transparent;
 }
 .tb-chat-log > :first-child {
   margin-top: auto;
@@ -1742,85 +1767,81 @@ html {
   width: 7px;
 }
 .tb-chat-log::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.18);
+  background: #3d3d3d;
   border-radius: 4px;
 }
 
 .tb-chat-msg {
-  font-size: 14px;
-  line-height: 1.4;
-  color: #25252c;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+  line-height: 1.45;
   word-break: break-word;
-  animation: tb-chat-rise 0.18s ease-out;
-}
-@keyframes tb-chat-rise {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
 }
 .tb-chat-name {
-  font-weight: 800;
-  margin-right: 5px;
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 0.2px;
 }
 .tb-chat-self .tb-chat-name {
-  color: #c25e00;
+  color: var(--tk-accent);
 }
 .tb-chat-text {
-  color: #25252c;
+  color: #dedede;
+}
+.tb-chat-system {
+  align-self: center;
+  text-align: center;
 }
 .tb-chat-system .tb-chat-text {
-  color: #b3261e;
+  color: #8d8d8d;
+  font-size: 11.5px;
   font-style: italic;
 }
 
 .tb-chat-input-row {
   display: flex;
-  align-items: center;
   gap: 8px;
-  padding: 10px;
-  border-top: 1px solid #eeeef2;
+  padding: 9px 10px;
+  border-top: 1px solid var(--tk-border);
+  background: var(--tk-tile);
   flex-shrink: 0;
 }
 .tb-chat-input {
   flex: 1;
   min-width: 0;
-  border: 1px solid #e2e2e8;
-  border-radius: 9px;
-  padding: 9px 12px;
-  font-size: 14px;
-  outline: none;
-  background: #f7f7f9;
-  color: #1b1b22;
+  background: #000000;
+  border: 1px solid var(--tk-border);
+  border-radius: 6px;
+  color: var(--tk-text);
   font-family: inherit;
+  font-size: 13px;
+  padding: 8px 10px;
+  outline: none;
 }
 .tb-chat-input:focus {
   border-color: var(--tk-accent);
-  background: #ffffff;
 }
 .tb-chat-input::placeholder {
-  color: #9a9aa2;
+  color: #6f6f6f;
 }
 .tb-chat-send {
-  flex-shrink: 0;
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
-  border: none;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  border: 1px solid var(--tk-accent);
   background: var(--tk-accent);
-  color: var(--tk-text);
-  font-size: 15px;
+  color: #000000;
+  font-size: 14px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   transition:
     background 0.12s ease,
-    transform 0.1s ease;
+    transform 0.08s ease;
 }
 .tb-chat-send:hover {
   background: #ffa726;
