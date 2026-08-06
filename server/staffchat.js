@@ -41,6 +41,16 @@ const PING_COOLDOWN_MS = 60 * 1000; // per staff member per room
 const PING_ESCALATE_MS = 3 * 60 * 1000; // unclaimed for this long -> waiting
 const RECEIPT_WINDOW_MS = 30 * 60 * 1000;
 
+// What may be put on a message as a reaction. The fixed set is the one the
+// client offers first; a room emote code (":like_this:") is the other allowed
+// shape. Kept in step with REACTIONS in public/js/desk.js - the client only
+// ever sends from its own list, and this is what stops anything else landing.
+const REACTIONS = [
+  "👍", "👎", "✅", "❌", "👀", "🔥", "❤️", "😂", "🎉", "🤔", "⚠️", "🚨",
+];
+const EMOTE_CODE_RE = /^:[A-Za-z0-9_.-]{1,40}:$/;
+const REACTION_CAP = 12; // distinct reactions on one message
+
 // ── State ───────────────────────────────────────────────────────────────────
 let desk = {
   seq: 0,
@@ -432,6 +442,18 @@ function outbound(msg, socket) {
   // Edit and delete history is a dev-only view; a mod sees the tombstone.
   if (!socket.isDev) delete copy.history;
   copy.mention = mentions(msg, socket);
+  // Reactions are stored as identity keys and sent as a count, the names
+  // behind it, and whether this reader is one of them. The client never has to
+  // work out who it is looking at.
+  if (Array.isArray(msg.reactions) && msg.reactions.length) {
+    const mine = idKeyOf(who(socket));
+    copy.reactions = msg.reactions.map((r) => ({
+      e: r.e,
+      n: r.by.length,
+      me: r.by.includes(mine),
+      who: r.by.map((k) => k.slice(k.indexOf(":") + 1)),
+    }));
+  }
   return copy;
 }
 
@@ -1308,6 +1330,43 @@ function register(socket, safe) {
       ref.msg.text = "";
       ref.msg.deletedAt = Date.now();
       ref.msg.deletedBy = w.label;
+      scheduleSave();
+      broadcast(ref.key, ref.msg, true);
+    }),
+  );
+
+  // ── Reactions ─────────────────────────────────────────────────────────
+  // One tap, one opinion: tapping the same thing again takes it back. Held
+  // against the staff identity rather than the socket, so somebody with the
+  // Desk open in three tabs still counts once.
+  //
+  // Two shapes are allowed and nothing else: one of the fixed set above, or a
+  // room emote code written ":like_this:". The server cannot know which emote
+  // codes exist - that list is fetched by the browser - so it checks the shape
+  // and lets an unknown code render as the text it is.
+  socket.on(
+    "desk react",
+    safe(async (data) => {
+      if (!isStaff(socket)) return;
+      const ref = byId.get(String(data?.id || ""));
+      if (!ref || ref.msg.deletedAt) return;
+      if (!canRead(socket, ref.key)) return;
+      const e = String(data?.emoji || "");
+      if (!REACTIONS.includes(e) && !EMOTE_CODE_RE.test(e)) return;
+      const mine = idKeyOf(who(socket));
+      const list = (ref.msg.reactions = ref.msg.reactions || []);
+      let r = list.find((x) => x.e === e);
+      if (!r) {
+        // A message is a message, not a scoreboard.
+        if (list.length >= REACTION_CAP) return;
+        list.push((r = { e, by: [] }));
+      }
+      const at = r.by.indexOf(mine);
+      if (at === -1) r.by.push(mine);
+      else r.by.splice(at, 1);
+      // The last person taking theirs back takes the whole thing away.
+      if (!r.by.length) list.splice(list.indexOf(r), 1);
+      if (!list.length) delete ref.msg.reactions;
       scheduleSave();
       broadcast(ref.key, ref.msg, true);
     }),

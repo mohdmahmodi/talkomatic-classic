@@ -1508,9 +1508,10 @@
 
     document.addEventListener("keydown", (e) => {
       if (e.key !== "Escape") return;
-      // A picture sits on top of everything, so it takes the key first rather
-      // than closing the whole Desk out from under itself.
+      // Whatever is on top takes the key first, rather than closing the whole
+      // Desk out from under itself.
       if (shotOpen()) return closeShot();
+      if (reactPickerOpen()) return closeReactPicker();
       if (panelOpen && !pageMode) setOpen(false);
     });
     window.addEventListener("focus", () => {
@@ -2091,6 +2092,8 @@
   function renderMessages(keepScroll) {
     const list = els.list;
     if (!list) return;
+    // The message it was anchored to is about to be replaced.
+    closeReactPicker();
     const c = cacheFor(viewKey());
     const prevHeight = list.scrollHeight;
     const prevTop = list.scrollTop;
@@ -2760,15 +2763,26 @@
     }
     r.appendChild(body);
 
-    // On touch layouts the tool row stays hidden until the message is tapped,
-    // so a dev scrolling the floor is not looking at a column of bins.
+    if (!m.deletedAt && m.reactions && m.reactions.length)
+      r.appendChild(reactionBar(m));
+
+    // Clicking the message answers it. The reply button is still there, but
+    // aiming at a 20px icon to say "this one" was the slow way round.
+    // On touch this also brings up the tool row, which stays hidden until a
+    // message is tapped so a dev scrolling the floor is not looking at a
+    // column of bins.
     r.addEventListener("click", (e) => {
-      if (e.target.closest("button, textarea, a, input")) return;
-      r.classList.toggle("tools");
+      if (e.target.closest("button, textarea, a, input, .dk-editbox")) return;
+      // Highlighting a line to copy it ends in a click, and that is not
+      // somebody asking to reply to it.
+      const sel = window.getSelection && window.getSelection();
+      if (sel && String(sel).trim()) return;
+      r.classList.add("tools");
+      if (!m.deletedAt) startReply(m);
     });
 
-    // Every message can be replied to; your own can be edited for five
-    // minutes and deleted; a dev can delete anything.
+    // Every message can be reacted to and replied to; your own can be edited
+    // for five minutes and deleted; a dev can delete anything.
     const own =
       me &&
       m.author &&
@@ -2776,8 +2790,17 @@
       m.author.role === me.role;
     if (!m.deletedAt) {
       const tools = el("div", "dk-mtools");
+      const xb = btn("dk-tool", null, "fa-face-smile", "React");
+      xb.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openReactPicker(r, m);
+      });
+      tools.appendChild(xb);
       const rb = btn("dk-tool", null, "fa-reply", "Reply");
-      rb.addEventListener("click", () => startReply(m));
+      rb.addEventListener("click", (e) => {
+        e.stopPropagation();
+        startReply(m);
+      });
       tools.appendChild(rb);
       if (own && Date.now() - m.ts < 5 * 60 * 1000) {
         const eb = btn("dk-tool", null, "fa-pen", "Edit");
@@ -2797,6 +2820,125 @@
       r.appendChild(tools);
     }
     return r;
+  }
+
+  // ── Reactions ─────────────────────────────────────────────────────────────
+  // The quick set, in the order they are offered. It must match REACTIONS in
+  // server/staffchat.js, which is what refuses anything else. Beyond these,
+  // any room emote can be used, written as its ":code:".
+  const REACTIONS = [
+    "👍", "👎", "✅", "❌", "👀", "🔥", "❤️", "😂", "🎉", "🤔", "⚠️", "🚨",
+  ];
+  const REACTION_CODE = /^:([A-Za-z0-9_.-]{1,40}):$/;
+
+  // A reaction is drawn as whatever it is: a room emote, or the character.
+  function reactionFace(e) {
+    const m = REACTION_CODE.exec(e);
+    if (m && emotes[m[1]]) return emoteImg(m[1], "rx");
+    return el("span", "dk-rx-e", e);
+  }
+
+  function react(m, e) {
+    socket.emit("desk react", { id: m.id, emoji: e });
+    closeReactPicker();
+  }
+
+  function reactionBar(m) {
+    const bar = el("div", "dk-rx");
+    for (const r of m.reactions) {
+      const b = el("button", "dk-rx-c" + (r.me ? " mine" : ""));
+      b.type = "button";
+      b.appendChild(reactionFace(r.e));
+      b.appendChild(el("span", "dk-rx-n", String(r.n)));
+      // Who is behind a number matters on a small team - agreeing with
+      // something is a position, and it should be attributable.
+      b.title =
+        (r.who || []).join(", ") + (r.me ? " - press again to take yours back" : "");
+      b.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        react(m, r.e);
+      });
+      bar.appendChild(b);
+    }
+    const add = btn("dk-rx-add", null, "fa-plus", "Add a reaction");
+    add.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      openReactPicker(add, m);
+    });
+    bar.appendChild(add);
+    return bar;
+  }
+
+  function closeReactPicker() {
+    if (els.react) {
+      els.react.remove();
+      els.react = null;
+    }
+  }
+
+  const reactPickerOpen = () => !!els.react;
+
+  // Anchored to whatever was pressed, and drawn on the panel rather than
+  // inside the message, so the last message in a channel does not open a
+  // picker that the scroll box cuts in half.
+  function openReactPicker(anchor, m) {
+    closeReactPicker();
+    if (!els.panel) return;
+
+    const pop = el("div", "dk-rxp");
+    els.react = pop;
+    const quick = el("div", "dk-rxp-q");
+    for (const e of REACTIONS) {
+      const b = el("button", "dk-rxp-b");
+      b.type = "button";
+      b.title = e;
+      b.appendChild(reactionFace(e));
+      b.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        react(m, e);
+      });
+      quick.appendChild(b);
+    }
+    pop.appendChild(quick);
+
+    // The room emotes underneath, the same list and the same search the
+    // composer's picker uses.
+    const search = el("input", "dk-emsearch");
+    search.type = "text";
+    search.placeholder = "Search emotes";
+    search.setAttribute("aria-label", "Search emotes to react with");
+    const grid = el("div", "dk-emgrid");
+    const pick = (c) => react(m, ":" + c + ":");
+    search.addEventListener("input", () =>
+      paintEmoteGrid(grid, search.value, pick),
+    );
+    pop.appendChild(search);
+    pop.appendChild(grid);
+    paintEmoteGrid(grid, "", pick);
+    // Nothing inside the picker counts as a click on the message underneath.
+    pop.addEventListener("click", (ev) => ev.stopPropagation());
+    els.panel.appendChild(pop);
+
+    const pr = els.panel.getBoundingClientRect();
+    const ar = anchor.getBoundingClientRect();
+    let left = ar.left - pr.left;
+    let top = ar.bottom - pr.top + 6;
+    if (left + pop.offsetWidth > pr.width - 8)
+      left = pr.width - pop.offsetWidth - 8;
+    if (left < 8) left = 8;
+    // No room below: open upwards instead of hanging off the bottom.
+    if (top + pop.offsetHeight > pr.height - 8)
+      top = ar.top - pr.top - pop.offsetHeight - 6;
+    if (top < 8) top = 8;
+    pop.style.left = Math.round(left) + "px";
+    pop.style.top = Math.round(top) + "px";
+    search.focus();
+
+    // The next click anywhere else puts it away.
+    setTimeout(
+      () => document.addEventListener("click", closeReactPicker, { once: true }),
+      0,
+    );
   }
 
   // Arm the composer to answer a specific message. The bar above the box says
@@ -4024,7 +4166,8 @@
         "Links are clickable. **bold**, *italic*, ~~strike~~ and `code` all work, three backticks on their own line open a code block, and lines starting with - become a list.",
         "Emotes are the same ones the rooms have, written the same way: a colon, the code, a colon. Type a colon and two letters and the list narrows as you go, or press the face next to the send button to browse them.",
         "A link to a picture shows the picture, and clicking it opens it full size. Only here, and only https links ending in a real image: an SVG, or anything a banned user writes in an appeal, stays a link you choose to open.",
-        "Shift+Enter starts a new line without sending. Hover a message to reply to it; the quote above your reply links back to the original.",
+        "Shift+Enter starts a new line without sending. Clicking a message replies to it, and the quote above your reply links back to the original. Selecting text to copy it does not count as a click.",
+        "The face on a message puts a reaction on it - one of the quick set, or any emote. Pressing your own reaction again takes it back, and hovering a count says who is behind it.",
         "Scrolled up reading something? New messages stop pulling you down and a bar appears saying how many came in. Click it to jump back to the latest.",
       ],
     },
@@ -4775,7 +4918,9 @@
     applyToken(box, at, to, ":" + code + ": ");
   }
 
-  function paintEmoteGrid(grid, q) {
+  // `pick` is what an emote is for here: writing it into the composer by
+  // default, or putting it on a message when the reaction picker borrows this.
+  function paintEmoteGrid(grid, q, pick) {
     grid.textContent = "";
     const want = String(q || "").toLowerCase();
     const codes = Object.keys(emotes)
@@ -4800,6 +4945,7 @@
       b.title = ":" + c + ":";
       b.appendChild(emoteImg(c));
       b.addEventListener("click", () => {
+        if (pick) return pick(c);
         insertEmote(c);
         toggleEmotePicker(false);
       });
@@ -5376,6 +5522,34 @@
   cursor:pointer;font-size:14px;padding:0;}
 .dk-send:hover{background: #ffad33;}
 
+/* ── Reactions ──
+   Under the message, small enough to sit there all day. Yours is the one with
+   the orange on it. */
+.dk-rx{display:flex;flex-wrap:wrap;gap:4px;margin-top:5px;}
+.dk-rx-c{display:inline-flex;align-items:center;gap:5px;background: #141414;border:1px solid #2a2a2a;
+  border-radius:11px;padding:2px 8px;cursor:pointer;font-family:inherit;font-size:12px;
+  color: #c3c3c3;line-height:1.6;}
+.dk-rx-c:hover{border-color: #8d8d8d;color: #fff;}
+.dk-rx-c.mine{background:rgba(255,152,0,.14);border-color: #ff9800;color: #fff;}
+.dk-rx-e{font-size:13px;line-height:1;}
+.dk-rx-n{font-variant-numeric:tabular-nums;font-size:11px;}
+.dk-emote.rx{height:15px;max-width:20px;vertical-align:middle;}
+/* Dashed, because it is an invitation rather than a count - and only while the
+   pointer is on that message, the same way the tool row behaves. The counts
+   themselves always stay: they are what somebody said. */
+.dk-rx-add{display:none;background:none;border:1px dashed #616161;border-radius:11px;
+  color: #8d8d8d;cursor:pointer;font-size:10px;padding:3px 8px;align-items:center;}
+.dk-msg:hover .dk-rx-add{display:inline-flex;}
+.dk-rx-add:hover{border-color: #ff9800;color: #ff9800;}
+.dk-rxp{position:absolute;z-index:12;background: #202020;border:1px solid #616161;border-radius:6px;
+  padding:8px;width:min(310px,calc(100% - 16px));display:flex;flex-direction:column;gap:7px;
+  box-shadow:0 12px 30px rgba(0,0,0,.6);}
+.dk-rxp-q{display:flex;flex-wrap:wrap;gap:3px;}
+.dk-rxp-b{background:none;border:1px solid transparent;border-radius:5px;cursor:pointer;
+  font-size:17px;line-height:1;padding:4px 5px;color: #fff;font-family:inherit;}
+.dk-rxp-b:hover{background: #2a2a2a;border-color: #ff9800;}
+.dk-rxp .dk-emgrid{max-height:148px;}
+
 /* ── Pictures in a message ──
    A thumbnail that keeps its own shape, capped so a tall screenshot cannot
    take the whole channel. Clicking one opens it full size. */
@@ -5579,6 +5753,9 @@ button.dk-chan:focus-visible,button.dk-thread:focus-visible,.dk-minib:focus-visi
   .dk-msg .dk-mtools{display:none;position:static;margin-top:4px;width:max-content;}
   .dk-msg:hover .dk-mtools{display:none;}
   .dk-msg.tools .dk-mtools{display:flex;}
+  /* No pointer to hover with: the tap that opens the tool row shows this too. */
+  .dk-msg:hover .dk-rx-add{display:none;}
+  .dk-msg.tools .dk-rx-add{display:inline-flex;}
   /* 16px inputs, or iOS zooms the whole page every time the composer opens. */
   .dk-input,.dk-editbox{font-size:16px;}
   /* Two across on a phone. The card's own container query says the same, so
