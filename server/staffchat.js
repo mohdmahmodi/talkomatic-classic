@@ -249,15 +249,19 @@ function parseStats(m) {
     const x = re.exec(body);
     return x ? Number(x[1]) || 0 : 0;
   };
-  const visitors = num(/(\d+)\s+(?:person|people)\s+stopped by/);
-  const rooms = num(/(\d+)\s+rooms?\s+opened/);
+  // Both wordings: this only ever runs on posts written before the numbers
+  // were carried separately, and some of those use the older phrasing.
+  const visitors = num(
+    /(\d+)\s+(?:person|people)\s+(?:stopped by|used Talkomatic)/,
+  );
+  const rooms = num(/(\d+)\s+rooms?\s+(?:opened|created)/);
   if (!visitors && !rooms) return null;
   return {
     when,
     visitors,
     rooms,
     peak: num(/(\d+)\s+online at once/),
-    actions: num(/(\d+)\s+staff actions?/),
+    actions: num(/(\d+)\s+(?:staff|moderator) actions?/),
     reports: num(/(\d+)\s+reports?/),
     pings: num(/(\d+)\s+calls?\s+for backup/),
     strokes: 0,
@@ -684,13 +688,15 @@ function postDailyStats(d) {
     day: "numeric",
     month: "long",
   });
+  // Each number says what it counts on its own, so the sentence reads the same
+  // way the Desk's tiles do and nobody has to guess which total is which.
   const bits = [
-    plural(visitors, "person", "people") + " stopped by",
-    plural(d.rooms, "room") + " opened",
+    plural(visitors, "person", "people") + " used Talkomatic",
+    plural(d.rooms, "room") + " created",
   ];
   if (d.peak) bits.push(d.peak + " online at once at the busiest");
-  if (d.actions) bits.push(plural(d.actions, "staff action"));
-  if (d.reports) bits.push(plural(d.reports, "report"));
+  if (d.actions) bits.push(plural(d.actions, "moderator action"));
+  if (d.reports) bits.push(plural(d.reports, "report") + " filed");
   if (d.pings) bits.push(plural(d.pings, "call") + " for backup");
   const msg = pushMessage("stats", {
     ts: Date.now(),

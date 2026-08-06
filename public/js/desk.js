@@ -470,6 +470,73 @@
       parent.appendChild(document.createTextNode(text.slice(last)));
   }
 
+  // ── Emotes ────────────────────────────────────────────────────────────────
+  // The same set the rooms use, from the same file, written the same way: a
+  // code between colons. Fetched once, the first time a staff member opens the
+  // Desk, so a page belonging to anybody else never asks for it.
+  const EMOTE_BASE =
+    "https://raw.githubusercontent.com/ZackiBoiz/Multiplayer-Piano-Optimizations/refs/heads/main/emotes";
+  const EMOTE_EXT = /^(?:png|gif|webp|jpe?g|avif|heif|tiff|bmp|svg)$/i;
+  let emotes = {}; // code -> url
+  let emotesAsked = false;
+
+  // meta.jsonc is JSON with comments in it, and a comment of "*" is how the
+  // file marks an emote that is not meant to be offered. Both are read the
+  // same way the room client reads them, so the two never disagree about
+  // which codes exist.
+  function parseEmoteMeta(src) {
+    const out = {};
+    const body = String(src).replace(/\/\*[\s\S]*?\*\//g, "");
+    for (const raw of body.split("\n")) {
+      const cut = raw.indexOf("//");
+      if (
+        cut !== -1 &&
+        raw
+          .slice(cut + 2)
+          .split(";")
+          .some((t) => t.trim() === "*")
+      )
+        continue;
+      const line = cut === -1 ? raw : raw.slice(0, cut);
+      const m = /"([A-Za-z0-9_.-]+)"\s*:\s*"([A-Za-z0-9]+)"/.exec(line);
+      if (m && EMOTE_EXT.test(m[2]))
+        out[m[1]] = EMOTE_BASE + "/assets/" + m[1] + "." + m[2];
+    }
+    return out;
+  }
+
+  async function loadEmotes() {
+    if (emotesAsked) return;
+    emotesAsked = true;
+    try {
+      const resp = await fetch(EMOTE_BASE + "/meta.jsonc?_=" + Date.now(), {
+        referrerPolicy: "no-referrer",
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      const next = parseEmoteMeta(await resp.text());
+      // Only a non-empty answer counts: a blank one would turn every emote in
+      // the channel back into the text it was typed as.
+      if (!Object.keys(next).length) return;
+      emotes = next;
+      if (panelOpen && mode === "chat") renderMessages(true);
+    } catch (_) {
+      // A GitHub blip is not worth saying anything about. The codes stay as
+      // typed, and the next page load asks again.
+    }
+  }
+
+  function emoteImg(code, cls) {
+    const img = document.createElement("img");
+    img.className = "dk-emote" + (cls ? " " + cls : "");
+    img.src = emotes[code];
+    img.alt = ":" + code + ":";
+    img.title = ":" + code + ":";
+    img.decoding = "async";
+    img.referrerPolicy = "no-referrer";
+    return img;
+  }
+
   // ── Markdown, the small useful half of it ─────────────────────────────────
   // `code`, **bold**, __bold__, ~~strike~~, *italic*, _italic_, links, bullet
   // lists and ``` blocks. Deliberately not a markdown engine: no HTML is ever
@@ -482,7 +549,12 @@
     "|~~([\\s\\S]+?)~~" + // 5 strike
     "|\\*([^*\\n]+?)\\*" + // 6 italic
     "|_([^_\\n]+?)_" + // 7 italic
-    "|(https?:\\/\\/[^\\s<>]+)"; // 8 link
+    "|(https?:\\/\\/[^\\s<>]+)" + // 8 link
+    // 9 emote. Here rather than in a pass of its own so it competes with the
+    // emphasis rules on position: ":kappa_pride: :some_thing:" starts with a
+    // colon, so it is claimed as two emotes instead of one stray italic run
+    // between the two underscores.
+    "|:([A-Za-z0-9_.-]{1,40}):"; // 9 emote
 
   // Trailing punctuation is nearly always the sentence, not the address.
   function trimUrl(u) {
@@ -549,6 +621,10 @@
         parent.appendChild(linkEl(url));
         last = at + url.length;
         re.lastIndex = last;
+      } else if (m[9] != null) {
+        // A code nobody has an image for is just something somebody typed.
+        if (emotes[m[9]]) parent.appendChild(emoteImg(m[9]));
+        else parent.appendChild(document.createTextNode(m[0]));
       }
     }
     if (last < text.length) namesInto(parent, text.slice(last));
@@ -922,7 +998,13 @@
     socket.on("staff mod history", (h) => {
       if (!h || !recordFor || !recordFor.loading) return;
       if ((h.label || "") !== recordFor.label) return;
-      recordFor = Object.assign({}, h, { loading: false, role: recordFor.role });
+      // The reply says what they have done, not what they hold, so the rank we
+      // already knew has to survive it.
+      recordFor = Object.assign({}, h, {
+        loading: false,
+        role: recordFor.role,
+        level: h.modLevel != null ? h.modLevel : recordFor.level,
+      });
       showRecord();
     });
 
@@ -1045,6 +1127,9 @@
     }
     mounted = true;
     injectCss();
+    // Only ever from here: mount runs once the server has confirmed a staff
+    // key, so nobody else's page fetches the emote list.
+    loadEmotes();
     if (pageMode) {
       // Its own window: the Desk IS the page. The sign-in gate goes away the
       // moment the server has confirmed a staff key.
@@ -1699,6 +1784,8 @@
     if (ch && ch.readonly) {
       els.replyBar = null;
       els.palette = null;
+      els.emotes = null;
+      els.emoteBtn = null;
       els.composer = null;
       els.sizeTa = null;
       main.appendChild(
@@ -1721,6 +1808,12 @@
     els.palette.style.display = "none";
     main.appendChild(els.palette);
 
+    // The picker sits between the list above the box and the box itself, so
+    // whichever one is up, the box never moves under your hands.
+    els.emotes = el("div", "dk-empanel");
+    els.emotes.style.display = "none";
+    main.appendChild(els.emotes);
+
     const comp = el("div", "dk-comp");
     const ta = el("textarea", "dk-input");
     ta.rows = 1;
@@ -1731,6 +1824,13 @@
         : "Reply in thread";
     ta.setAttribute("aria-label", ta.placeholder);
     const count = el("span", "dk-count");
+    const emoteBtn = btn(
+      "dk-emobtn",
+      null,
+      "fa-face-smile",
+      "Emotes - or type a colon and the first letters of one",
+    );
+    emoteBtn.addEventListener("click", () => toggleEmotePicker());
     const send = btn("dk-send", null, "fa-paper-plane", "Send");
     // One line tall until the text needs more, then it grows to a cap. The
     // reset to "auto" first is what lets it shrink again on delete.
@@ -1794,6 +1894,11 @@
         e.preventDefault();
         doSend();
       }
+      if (e.key === "Escape" && emotePickerOpen()) {
+        e.stopPropagation();
+        toggleEmotePicker(false);
+        return;
+      }
       if (e.key === "Escape" && replyTo) {
         e.stopPropagation();
         clearReply();
@@ -1828,9 +1933,11 @@
     send.addEventListener("click", doSend);
     comp.appendChild(ta);
     comp.appendChild(count);
+    comp.appendChild(emoteBtn);
     comp.appendChild(send);
     main.appendChild(comp);
     els.composer = ta;
+    els.emoteBtn = emoteBtn;
 
     renderMessages();
   }
@@ -2331,42 +2438,66 @@
     t.title = new Date(m.ts).toLocaleString();
     head.appendChild(t);
     r.appendChild(head);
+    // The card is posted the moment the day rolls over, so it lands under
+    // today's divider while the date on it is the day it is about. Saying so
+    // costs one line and stops the double-take.
+    r.appendChild(
+      el("div", "dk-st-sub", "That whole day, midnight to midnight."),
+    );
 
     const grid = el("div", "dk-st-g");
-    const tile = (n, label, fa, cls) => {
+    const tile = (n, label, hint, fa, cls) => {
       const c = el("div", "dk-st-c" + (cls ? " " + cls : ""));
       const top = el("div", "dk-st-n");
       top.appendChild(icon(fa));
       top.appendChild(el("span", null, String(n)));
       c.appendChild(top);
       c.appendChild(el("div", "dk-st-l", label));
+      c.appendChild(el("div", "dk-st-s", hint));
       grid.appendChild(c);
     };
+    // Every number says what it counts, in full. "93 people stopped by" and
+    // "45 on at the busiest" sat next to each other reading like two counts of
+    // the same thing, and "staff actions" did not say whose or what.
     // "1 calls for backup" reads like a bug in the counting, so the labels
-    // agree with their numbers.
+    // agree with their numbers too.
     const p = (n, one, many) => (n === 1 ? one : many);
     tile(
       s.visitors || 0,
-      p(s.visitors, "person stopped by", "people stopped by"),
+      p(s.visitors, "person used Talkomatic", "people used Talkomatic"),
+      "counted once each, however many times they came back",
       "fa-users",
       "lead",
     );
-    tile(s.peak || 0, "on at the busiest", "fa-signal");
-    tile(s.rooms || 0, p(s.rooms, "room opened", "rooms opened"), "fa-door-open");
+    tile(
+      s.peak || 0,
+      "online at the same time",
+      "the most at any one moment, not a total",
+      "fa-signal",
+    );
+    tile(
+      s.rooms || 0,
+      p(s.rooms, "room created", "rooms created"),
+      "new rooms opened that day",
+      "fa-door-open",
+    );
     tile(
       s.actions || 0,
-      p(s.actions, "staff action", "staff actions"),
+      p(s.actions, "moderator action", "moderator actions"),
+      "kicks, bans, warnings and the rest, across the team",
       "fa-gavel",
     );
     tile(
       s.reports || 0,
-      p(s.reports, "report", "reports"),
+      p(s.reports, "report filed", "reports filed"),
+      "sent in by people in rooms",
       "fa-flag",
       s.reports ? "warn" : "",
     );
     tile(
       s.pings || 0,
       p(s.pings, "call for backup", "calls for backup"),
+      "staff asking the team for a hand",
       "fa-hand",
       s.pings ? "warn" : "",
     );
@@ -2446,7 +2577,7 @@
       // Face and name both open that person's record.
       const openRec = (e) => {
         e.stopPropagation();
-        openRecord(m.author.label, m.author.role);
+        openRecord(m.author.label, m.author.role, m.author.level);
       };
       const face = faceEl(m.author);
       face.classList.add("clickable");
@@ -2454,7 +2585,7 @@
       face.addEventListener("click", openRec);
       r.appendChild(face);
       const head = el("div", "dk-mhead");
-      const nameBtn = el("button", "dk-mname clickable", m.author.label);
+      const nameBtn = el("button", "dk-mname clickable " + rank, m.author.label);
       nameBtn.type = "button";
       nameBtn.title = "Open " + m.author.label + "'s record";
       nameBtn.addEventListener("click", openRec);
@@ -2797,7 +2928,7 @@
     // two things people actually aim at.
     const open = (e) => {
       e.stopPropagation();
-      openRecord(s.label, s.role);
+      openRecord(s.label, s.role, s.level);
     };
     const face = faceEl(s, "sm");
     face.classList.add("clickable");
@@ -3162,11 +3293,34 @@
   // the dashboard asks, and shows the answer in place. The Desk is on every
   // page, so this is usually the fastest way to check who somebody is before
   // handing them something.
-  let recordFor = null; // { label, role }
+  let recordFor = null; // { label, role, level }
 
-  function openRecord(label, role) {
+  // What level somebody holds, from whoever on the Desk happens to know: the
+  // presence rows, the roster, the message that was clicked. The server's
+  // record reply carries their actions, not their rank, so without this every
+  // record card called everybody a full mod - devs and juniors included.
+  function levelFor(label, fallback) {
+    const want = String(label || "").toLowerCase();
+    if (!want) return fallback;
+    const lists = [presence.staff || [], roster || []];
+    for (const list of lists)
+      for (const s of list)
+        if (String(s.label || "").toLowerCase() === want) {
+          if (s.role === "dev") return 0;
+          if (s.level != null) return s.level;
+        }
+    return fallback;
+  }
+
+  function openRecord(label, role, level) {
     if (!label) return;
-    recordFor = { label, role: role === "dev" ? "dev" : "mod", loading: true };
+    const known = levelFor(label, level);
+    recordFor = {
+      label,
+      role: role === "dev" ? "dev" : "mod",
+      level: known,
+      loading: true,
+    };
     socket.emit("staff get mod history", { label, role: recordFor.role, limit: 12 });
     showRecord();
   }
@@ -3190,7 +3344,7 @@
     );
     const ht = el("div", "dk-rec-ht");
     ht.appendChild(el("span", "dk-rec-n", h.label || "Staff"));
-    const r = h.role === "dev" ? "dev" : (h.modLevel || 2) >= 2 ? "l2" : "l1";
+    const r = rankOf({ role: h.role, level: h.level });
     ht.appendChild(el("span", "dk-chip " + r, rankName(r)));
     head.appendChild(ht);
     const x = btn("dk-hbtn", null, "fa-xmark", "Close");
@@ -3301,7 +3455,7 @@
           f.title = "Open " + (m.by || "their") + "'s record";
           f.addEventListener("click", (e) => {
             e.stopPropagation();
-            openRecord(m.by, m.role === "dev" ? "dev" : "mod");
+            openRecord(m.by, m.role === "dev" ? "dev" : "mod", m.level);
           });
           gutter.appendChild(f);
         } else {
@@ -3322,7 +3476,7 @@
           nm.title = "Open " + (m.by || "their") + "'s record";
           nm.addEventListener("click", (e) => {
             e.stopPropagation();
-            openRecord(m.by, m.role === "dev" ? "dev" : "mod");
+            openRecord(m.by, m.role === "dev" ? "dev" : "mod", m.level);
           });
           who.appendChild(nm);
           const r = m.role === "dev" ? "dev" : (m.level || 2) >= 2 ? "l2" : "l1";
@@ -3743,6 +3897,7 @@
       h: "Writing a message",
       p: [
         "Links are clickable. **bold**, *italic*, ~~strike~~ and `code` all work, three backticks on their own line open a code block, and lines starting with - become a list.",
+        "Emotes are the same ones the rooms have, written the same way: a colon, the code, a colon. Type a colon and two letters and the list narrows as you go, or press the face next to the send button to browse them.",
         "Shift+Enter starts a new line without sending. Hover a message to reply to it; the quote above your reply links back to the original.",
         "Scrolled up reading something? New messages stop pulling you down and a bar appears saying how many came in. Click it to jump back to the latest.",
       ],
@@ -4372,6 +4527,16 @@
     const head = v.slice(0, caret);
     // A slash only ever means a command at the very start of the box.
     if (v.startsWith("/") && !/\s/.test(head)) return showCommands(head, ta);
+    // ":ka" - a colon and at least two letters, the way it works everywhere
+    // else. One letter would put a list up on every "10:3" and "note: ".
+    const em = /(^|[\s(]):([A-Za-z0-9_.-]{2,40})$/.exec(head);
+    if (em)
+      return showEmotes(
+        em[2].toLowerCase(),
+        caret - em[2].length - 1,
+        caret,
+        ta,
+      );
     const m = /(^|[\s(])([#@])([^\s#@]{0,40})$/.exec(head);
     if (!m) return hidePalette();
     const q = m[3].toLowerCase();
@@ -4438,6 +4603,114 @@
       return { node, apply };
     });
     openPalette("chan", rows, 0);
+  }
+
+  // Typing a colon and a couple of letters. Two before it opens, so an
+  // ordinary colon in the middle of a sentence does not put a list up.
+  function showEmotes(q, start, end, ta) {
+    const codes = Object.keys(emotes);
+    if (!codes.length) return hidePalette();
+    const score = (c) => (c.toLowerCase().startsWith(q) ? 0 : 1);
+    const hits = codes
+      .filter((c) => c.toLowerCase().includes(q))
+      .sort(
+        (a, b) =>
+          score(a) - score(b) || a.length - b.length || (a < b ? -1 : 1),
+      )
+      .slice(0, 8);
+    if (!hits.length) return hidePalette();
+    const rows = hits.map((c) => {
+      const node = el("button", "dk-pick");
+      node.type = "button";
+      const face = el("span", "dk-pick-em");
+      face.appendChild(emoteImg(c));
+      node.appendChild(face);
+      const mid = el("span", "dk-pick-mid");
+      mid.appendChild(el("span", "dk-pick-n", ":" + c + ":"));
+      node.appendChild(mid);
+      const apply = () => applyToken(ta, start, end, ":" + c + ": ");
+      node.addEventListener("click", apply);
+      return { node, apply };
+    });
+    openPalette("emote", rows, 0);
+  }
+
+  // ── The emote picker ──────────────────────────────────────────────────────
+  // For when you know the face and not the word. Same list as the palette,
+  // laid out as a grid with a box to narrow it down.
+  const emotePickerOpen = () =>
+    !!(els.emotes && els.emotes.style.display !== "none");
+
+  function insertEmote(code) {
+    const box = els.composer;
+    if (!box) return;
+    const at = box.selectionStart == null ? box.value.length : box.selectionStart;
+    const to = box.selectionEnd == null ? at : box.selectionEnd;
+    applyToken(box, at, to, ":" + code + ": ");
+  }
+
+  function paintEmoteGrid(grid, q) {
+    grid.textContent = "";
+    const want = String(q || "").toLowerCase();
+    const codes = Object.keys(emotes)
+      .filter((c) => !want || c.toLowerCase().includes(want))
+      .sort()
+      .slice(0, 300);
+    if (!codes.length) {
+      grid.appendChild(
+        el(
+          "div",
+          "dk-emnone",
+          Object.keys(emotes).length
+            ? "Nothing matches that."
+            : "The emote list has not loaded.",
+        ),
+      );
+      return;
+    }
+    for (const c of codes) {
+      const b = el("button", "dk-emb");
+      b.type = "button";
+      b.title = ":" + c + ":";
+      b.appendChild(emoteImg(c));
+      b.addEventListener("click", () => {
+        insertEmote(c);
+        toggleEmotePicker(false);
+      });
+      grid.appendChild(b);
+    }
+  }
+
+  function toggleEmotePicker(on) {
+    const host = els.emotes;
+    if (!host) return;
+    const want = on == null ? !emotePickerOpen() : !!on;
+    if (els.emoteBtn) els.emoteBtn.classList.toggle("on", want);
+    if (!want) {
+      host.style.display = "none";
+      host.textContent = "";
+      if (els.composer) els.composer.focus();
+      return;
+    }
+    hidePalette();
+    host.textContent = "";
+    const search = el("input", "dk-emsearch");
+    search.type = "text";
+    search.placeholder = "Search emotes";
+    search.setAttribute("aria-label", "Search emotes");
+    const grid = el("div", "dk-emgrid");
+    search.addEventListener("input", () => paintEmoteGrid(grid, search.value));
+    search.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        toggleEmotePicker(false);
+      }
+    });
+    host.appendChild(search);
+    host.appendChild(grid);
+    paintEmoteGrid(grid, "");
+    host.style.display = "";
+    search.focus();
   }
 
   function showPeople(q, start, end, ta) {
@@ -4659,7 +4932,14 @@
 .dk-quote-t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}
 .dk-quote:hover .dk-quote-t,.dk-quote:hover{color: #fff;}
 .dk-mhead{display:flex;align-items:baseline;gap:7px;flex-wrap:wrap;}
-.dk-mname{font-weight:bold;}
+/* Who is talking, in their rank's colour and a size up from what they said.
+   The name used to come out the same white, the same size and - because the
+   button reset below said font:inherit - not even bold, so a name and a
+   message were one wall of identical text. */
+.dk-mname{font-weight:bold;font-size:14.5px;color: #fff;letter-spacing:.1px;}
+.dk-mname.dev{color: #ff7a88;}
+.dk-mname.l2{color: #7dbcff;}
+.dk-mname.l1{color: #cfa6ff;}
 .dk-chip{font-size:9px;font-weight:bold;letter-spacing:.5px;padding:1px 5px;border-radius:3px;border:1px solid;}
 .dk-chip.dev{color: #ff5468;border-color: #ff5468;}
 .dk-chip.l2{color: #5aa9ff;border-color: #5aa9ff;}
@@ -4667,7 +4947,7 @@
 .dk-chip.ghost{color: #8d8d8d;border-color: #8d8d8d;}
 .dk-alias{font-size:11px;color: #8d8d8d;font-style:italic;}
 .dk-mtime{font-size:10.5px;color: #8d8d8d;margin-left:auto;font-variant-numeric:tabular-nums;white-space:nowrap;}
-.dk-mbody{font-size:13.5px;line-height:1.5;word-break:break-word;white-space:pre-wrap;}
+.dk-mbody{font-size:13.5px;line-height:1.5;word-break:break-word;white-space:pre-wrap;color: #dedede;}
 .dk-edited{font-size:10px;color: #8d8d8d;margin-left:5px;}
 .dk-tomb{color: #8d8d8d;font-style:italic;font-size:12.5px;}
 .dk-hist{background:none;border:none;color: #5aa9ff;font-size:10.5px;cursor:pointer;font-family:inherit;
@@ -4783,11 +5063,21 @@
 
 /* ── The daily summary ── */
 .dk-st{margin-top:10px;background: #1b1b1b;border:1px solid #3a3126;
-  border-radius:6px;padding:11px 13px;display:flex;flex-direction:column;gap:10px;}
+  border-radius:6px;padding:11px 13px;display:flex;flex-direction:column;gap:10px;
+  /* The card measures itself, not the window: the panel can be dragged down to
+     560px with both rails open, and the grid below has to answer to that. */
+  container-type:inline-size;}
 .dk-st-h{display:flex;align-items:center;gap:8px;}
 .dk-st-h .fas{color: #ff9800;font-size:12px;}
 .dk-st-day{font-size:13.5px;font-weight:bold;color: #ff9800;letter-spacing:.2px;flex:1;min-width:0;}
-.dk-st-g{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:7px;}
+/* Six numbers, three across, two down. auto-fit put five on one line and left
+   the sixth on a row of its own, which read like an afterthought. Three is
+   fixed rather than fitted, so the shape is the same every day. */
+.dk-st-g{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;}
+/* Below this a third tile is thinner than the words in it, so it drops to two
+   and then to one rather than shredding every label. A phone lands here. */
+@container (max-width:380px){.dk-st-g{grid-template-columns:repeat(2,minmax(0,1fr));}}
+@container (max-width:250px){.dk-st-g{grid-template-columns:minmax(0,1fr);}}
 .dk-st-c{background: #141414;border:1px solid #2a2a2a;border-radius:5px;padding:8px 10px;min-width:0;}
 .dk-st-c.lead{border-color:rgba(255,152,0,.35);}
 .dk-st-n{display:flex;align-items:center;gap:6px;font-size:17px;font-weight:bold;color: #fff;
@@ -4796,7 +5086,9 @@
 .dk-st-c.lead .dk-st-n{color: #ff9800;}
 .dk-st-c.lead .dk-st-n .fas{color: #ff9800;}
 .dk-st-c.warn .dk-st-n{color: #ffb454;}
-.dk-st-l{font-size:10.5px;color: #8d8d8d;margin-top:2px;line-height:1.3;}
+.dk-st-l{font-size:11px;color: #c3c3c3;margin-top:3px;line-height:1.3;}
+.dk-st-s{font-size:10px;color: #8d8d8d;margin-top:2px;line-height:1.35;}
+.dk-st-sub{font-size:11px;color: #8d8d8d;margin-top:-2px;}
 
 /* ── One appeal, as a conversation ──
    Theirs on the left, staff on the right. Same thread the banned user is
@@ -4838,8 +5130,11 @@
 .dk-ap-sys{align-self:center;text-align:center;font-size:11.5px;color: #8d8d8d;background: #1b1b1b;
   border:1px solid #2a2a2a;padding:5px 10px;margin:10px auto 0;max-width:100%;width:fit-content;}
 .dk-av.clickable,.dk-mname.clickable,.dk-staff-name.clickable{cursor:pointer;}
+/* font-family only, not the font shorthand: the shorthand also reset the size
+   and the weight, which is what flattened the name into the message. */
 .dk-mname.clickable,.dk-staff-name.clickable{background:none;border:none;padding:0;
-  font:inherit;color:inherit;text-align:left;}
+  font-family:inherit;text-align:left;}
+.dk-staff-name.clickable{font:inherit;color:inherit;}
 .dk-mname.clickable:hover,.dk-staff-name.clickable:hover{color: #ff9800;text-decoration:underline;}
 .dk-av.clickable:hover{outline:2px solid #ff9800;outline-offset:1px;}
 
@@ -4954,6 +5249,30 @@
   width:38px;height:38px;display:flex;align-items:center;justify-content:center;
   cursor:pointer;font-size:14px;padding:0;}
 .dk-send:hover{background: #ffad33;}
+
+/* ── Emotes ──
+   The same codes the rooms use. Sized in em so an emote sits on the line it
+   was typed into rather than pushing it open. */
+.dk-emote{height:1.55em;width:auto;max-width:130px;vertical-align:-0.42em;object-fit:contain;}
+.dk-emobtn{flex:none;background:none;border:1px solid #3a3a3a;color: #c3c3c3;border-radius:5px;
+  width:38px;height:38px;display:flex;align-items:center;justify-content:center;
+  cursor:pointer;font-size:15px;padding:0;}
+.dk-emobtn:hover{border-color: #ff9800;color: #fff;}
+.dk-emobtn.on{border-color: #ff9800;color: #ff9800;}
+.dk-pick-em{width:26px;height:26px;flex:none;display:flex;align-items:center;justify-content:center;}
+.dk-pick-em .dk-emote{height:24px;max-width:26px;vertical-align:middle;}
+.dk-empanel{flex:none;background: #1b1b1b;border-top:1px solid #333;padding:8px 12px;
+  display:flex;flex-direction:column;gap:7px;max-height:236px;}
+.dk-emsearch{flex:none;background: #000;color: #fff;border:1px solid #3a3a3a;border-radius:5px;
+  padding:7px 10px;font-family:inherit;font-size:12.5px;outline:none;}
+.dk-emsearch::placeholder{color: #6f6f6f;}
+.dk-emsearch:focus{border-color: #ff9800;}
+.dk-emgrid{overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(40px,1fr));gap:4px;}
+.dk-emb{background:none;border:1px solid transparent;border-radius:5px;padding:2px;height:40px;
+  display:flex;align-items:center;justify-content:center;cursor:pointer;}
+.dk-emb:hover{background: #2a2a2a;border-color: #ff9800;}
+.dk-emb .dk-emote{height:28px;max-width:34px;vertical-align:middle;}
+.dk-emnone{grid-column:1/-1;color: #8d8d8d;font-size:12px;padding:8px 2px;}
 .dk-side{background: #1b1b1b;border-left:1px solid #333;overflow-y:auto;padding:10px;}
 .dk-side-h{font-size:10.5px;font-weight:bold;letter-spacing:.6px;text-transform:uppercase;color: #8d8d8d;
   padding:10px 4px 6px;}
@@ -5112,6 +5431,9 @@ button.dk-chan:focus-visible,button.dk-thread:focus-visible,.dk-minib:focus-visi
   .dk-msg.tools .dk-mtools{display:flex;}
   /* 16px inputs, or iOS zooms the whole page every time the composer opens. */
   .dk-input,.dk-editbox{font-size:16px;}
+  /* Two across on a phone. The card's own container query says the same, so
+     this is only here for a browser that does not do container queries. */
+  .dk-st-g{grid-template-columns:repeat(2,minmax(0,1fr));}
 }
 @media (prefers-reduced-motion:reduce){
   .dk-pill.nudge,.dk-pill.urgent,.dk-ping-badge,.dk-msg.flash,.dk-sys.flash,.dk-ping.flash{animation:none !important;}
@@ -5135,6 +5457,12 @@ button.dk-chan:focus-visible,button.dk-thread:focus-visible,.dk-minib:focus-visi
         auth: {
           devKey: localStorage.getItem("talkomatic_devKey") || undefined,
           modKey: localStorage.getItem("talkomatic_modKey") || undefined,
+          // The same device id the lobby and the rooms send. The key watch
+          // counts people by it, so a Desk tab that left it out used to look
+          // like a second person holding the same key.
+          deviceId:
+            (window.TalkomaticIdentity && window.TalkomaticIdentity.deviceId) ||
+            undefined,
           app: "desk",
         },
       }),

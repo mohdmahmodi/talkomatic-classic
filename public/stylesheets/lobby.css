@@ -523,6 +523,62 @@ html {
   margin-bottom: 10px;
 }
 
+/* How many people fit in the room. Replaced the layout radios, which moved
+   into the room itself as a button. */
+#lobbyForm .size-slider {
+  width: 90%;
+  margin-bottom: 15px;
+}
+
+#lobbyForm #roomSizeValue {
+  color: var(--tk-accent);
+  font-weight: bold;
+}
+
+#lobbyForm .size-slider input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  margin: 4px 0;
+  background: var(--tk-dim, #3a3a3a);
+  border: 1px solid var(--room-name-input-border-color);
+  cursor: pointer;
+}
+
+#lobbyForm .size-slider input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  background: var(--tk-accent);
+  border: 1px solid #000;
+  cursor: pointer;
+}
+
+#lobbyForm .size-slider input[type="range"]::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 0;
+  background: var(--tk-accent);
+  border: 1px solid #000;
+  cursor: pointer;
+}
+
+#lobbyForm .size-slider input[type="range"]:focus {
+  outline: none;
+  border-color: var(--tk-accent);
+}
+
+/* The numbers under the track, so the range is readable without dragging. */
+#lobbyForm .size-scale {
+  display: flex;
+  justify-content: space-between;
+  color: var(--lobby-form-color);
+  font-size: 11px;
+  opacity: 0.7;
+}
+
 /* Container for the go chat button */
 .button-container {
   position: absolute;

@@ -192,8 +192,37 @@ async function grantModKey(label, level, grantedBy) {
     grantedAt: Date.now(),
   };
   modKeys.push(entry);
+  carryKeyActivity(entry.label, entry.hash);
   await saveModKeys();
   return { key, hash: entry.hash, label: entry.label, level: entry.level };
+}
+
+// Somebody being given a key again keeps what is known about them. Their audit
+// record follows the label and survives a revoke on its own, but where the key
+// has been used from is stored per HASH, and a re-issued key is a new hash. So
+// a returning moderator arrived with an empty history: nothing on the key
+// activity panel, no last-seen, and a "connected from an address it has never
+// been used from before" alert about the address they have always used. The
+// old record stays where it is; this copies it onto the new key.
+function carryKeyActivity(label, newHash) {
+  if (!label || !newHash || keyActivity[newHash]) return;
+  let from = null;
+  for (let i = formerMods.length - 1; i >= 0; i--) {
+    const f = formerMods[i];
+    if (f.label !== label || !f.hash) continue;
+    if (keyActivity[f.hash]) {
+      from = keyActivity[f.hash];
+      break;
+    }
+  }
+  if (!from) return;
+  const ips = {};
+  for (const ip in from.ips || {}) {
+    const m = from.ips[ip];
+    if (m) ips[ip] = { first: m.first, last: m.last, count: m.count };
+  }
+  keyActivity[newHash] = { label, role: from.role || "mod", ips };
+  saveKeyActivitySoon();
 }
 
 // Removing a moderator writes a former-staff record: who they were, when the

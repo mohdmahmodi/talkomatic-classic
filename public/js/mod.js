@@ -16,6 +16,12 @@
     auth: {
       devKey: localStorage.getItem("talkomatic_devKey") || undefined,
       modKey: localStorage.getItem("talkomatic_modKey") || undefined,
+      // The same device id the lobby and the rooms send. The key watch counts
+      // people by it, so a dashboard tab that left it out used to look like a
+      // second person holding the same key.
+      deviceId:
+        (window.TalkomaticIdentity && window.TalkomaticIdentity.deviceId) ||
+        undefined,
       // The dashboard is a separate read-only board, exempt from the
       // one-active-tab rule so it can stay open beside a room.
       app: "modlog",
@@ -2628,8 +2634,8 @@
     wrap.appendChild(board);
   }
 
-  // A former moderator's card. No actions on it: there is no key left to act
-  // on, and the record is the point.
+  // A former moderator's card. Their record is the point, and a dev can hand
+  // the key back from here.
   function buildFormerCard(f) {
     const card = divc("modcard former");
 
@@ -2693,6 +2699,49 @@
       openModHistory({ label: f.label, rank: f.level === 1 ? "l1" : "l2" }),
     );
     actions.appendChild(histBtn);
+
+    // Handing the key back from here reuses the exact label they had, which is
+    // what their record is filed under. Typing the name again in the grant box
+    // is how a returning moderator ended up with a blank record - one stray
+    // character and none of their work follows them back.
+    if (viewerIsDev()) {
+      const back = document.createElement("button");
+      back.className = "btn sm";
+      back.appendChild(icon("fa-rotate-left"));
+      back.appendChild(document.createTextNode(" Give the key back"));
+      back.title = "Issue a new key under this exact label, record and all";
+      back.addEventListener("click", async () => {
+        if (!window.StaffUI) return;
+        const r = await StaffUI.prompt({
+          title: "Give " + (f.label || "them") + " a key again",
+          icon: '<i class="fas fa-rotate-left"></i>',
+          message:
+            'A new key under the same label, so everything "' +
+            (f.label || "this person") +
+            '" did before still shows up on their record.',
+          fields: [
+            {
+              name: "level",
+              label: "Level",
+              type: "select",
+              value: f.level === 1 ? "1" : "2",
+              options: [
+                { value: "1", label: "Junior mod (L1) - limited" },
+                { value: "2", label: "Full mod (L2) - all powers" },
+              ],
+            },
+          ],
+          confirmText: "Generate key",
+        });
+        if (r)
+          socket.emit("dev grant mod", {
+            label: f.label,
+            level: Number(r.level),
+          });
+      });
+      actions.appendChild(back);
+    }
+
     card.appendChild(actions);
     return card;
   }

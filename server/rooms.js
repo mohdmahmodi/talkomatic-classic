@@ -87,6 +87,11 @@ const REPORT_CATEGORIES = {
   other: "Other",
 };
 
+// The largest room anybody can open from the lobby slider. A dev can still
+// raise a single room past this from inside it ("dev set room size"); this is
+// only the ceiling on what a normal person may ask for at creation.
+const NEW_ROOM_MAX_CAPACITY = 10;
+
 // Effective capacity for a room: a per-room override (set by a dev inside the
 // room) wins over the global default, so raising one room to 50 never changes
 // the 5-person limit in other rooms.
@@ -95,6 +100,18 @@ function roomCapacity(room) {
   return Number.isFinite(n) && n >= 2
     ? Math.floor(n)
     : CONFIG.LIMITS.MAX_ROOM_CAPACITY;
+}
+
+// The capacity a brand new room gets, from whatever was asked for. Clamped,
+// because the client is never the authority on capacity: the slider offers
+// the default up to NEW_ROOM_MAX_CAPACITY and nothing hand-sent gets past it.
+function newRoomCapacity(want) {
+  const n = Math.floor(Number(want));
+  if (!Number.isFinite(n)) return CONFIG.LIMITS.MAX_ROOM_CAPACITY;
+  return Math.max(
+    CONFIG.LIMITS.MAX_ROOM_CAPACITY,
+    Math.min(NEW_ROOM_MAX_CAPACITY, n),
+  );
 }
 
 
@@ -654,7 +671,8 @@ function judgeStaffKey(hash, role, label) {
       kind: "concurrent",
       detail:
         `The ${role} key "${label}" is being held by ${who.length} browsers at once, ` +
-        `all on the same network. Probably one person on two machines - worth knowing, not acted on.`,
+        `sharing a network. Probably one person on two machines in one place - ` +
+        `worth knowing, not acted on.`,
     });
     return;
   }
@@ -3808,13 +3826,17 @@ function registerSocketHandlers(opts) {
             ),
           );
 
+        // No layout here: the lobby stopped asking, because the room itself has
+        // a button that flips it per person. Every new room starts vertical.
         const valErr = validateObject(data, {
           name: { rule: "roomName" },
           type: { rule: "roomType" },
-          layout: { rule: "layout" },
           accessCode: { rule: "accessCode", context: data.type },
         });
         if (valErr) return socket.emit("validation_error", valErr);
+
+        // How many people fit, from the lobby slider.
+        const maxSize = newRoomCapacity(data?.maxSize);
 
         const { username, location } = socket.handshake.session;
         if (
@@ -3963,7 +3985,8 @@ function registerSocketHandlers(opts) {
           id: roomId,
           name: roomName,
           type: data.type,
-          layout: data.layout,
+          layout: "vertical",
+          maxSize,
           users: [],
           accessCode: data.type === "semi-private" ? data.accessCode : null,
           votes: {},
@@ -6145,6 +6168,9 @@ function registerSocketHandlers(opts) {
           level: granted.level,
         });
         socket.emit("dev mod keys", roles.listModKeys());
+        // Somebody handed their key back stops being listed as former staff the
+        // moment it happens, rather than on the next refresh.
+        socket.emit("dev former mods", roles.listFormerMods());
         // A new name has to show up in everyone's team list and "@" list now,
         // not whenever they next open the Desk.
         staffchat.rosterDirty();
@@ -8254,6 +8280,7 @@ module.exports = {
   leaveRoom,
   joinRoom,
   roomCapacity,
+  newRoomCapacity,
   announceAppeal,
   announceAppealMessage,
 };

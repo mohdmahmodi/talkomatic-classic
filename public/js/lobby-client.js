@@ -464,6 +464,10 @@ const MAX_RETRIES = 3;
 const MAX_USERNAME_LENGTH = 15;
 const MAX_LOCATION_LENGTH = 20;
 const MAX_ROOM_NAME_LENGTH = 25;
+// How many people a room can hold, picked on the slider. The server clamps to
+// the same numbers, so a hand-sent value cannot open a 40-seat room.
+const ROOM_SIZE_MIN = 5;
+const ROOM_SIZE_MAX = 10;
 let devLobbyCodes = {};
 let statsModal = null;
 let currentUserIsDev = false;
@@ -1604,12 +1608,15 @@ goChatButton.addEventListener("click", () => {
   const roomType = document.querySelector(
     'input[name="roomType"]:checked',
   )?.value;
-  const roomLayout = document.querySelector(
-    'input[name="roomLayout"]:checked',
-  )?.value;
+  // The slider, clamped here and again on the server.
+  const sizeEl = document.getElementById("roomSizeSlider");
+  const maxSize = Math.max(
+    ROOM_SIZE_MIN,
+    Math.min(ROOM_SIZE_MAX, Number(sizeEl?.value) || ROOM_SIZE_MIN),
+  );
   const accessCode = accessCodeInput.querySelector("input").value;
 
-  if (roomName && roomType && roomLayout) {
+  if (roomName && roomType) {
     if (roomType === "semi-private") {
       if (!accessCode || accessCode.length !== 6 || !/^\d+$/.test(accessCode)) {
         window.showErrorModal(
@@ -1622,10 +1629,12 @@ goChatButton.addEventListener("click", () => {
     // FIX #4: The access code is sent to the server ONLY in this socket
     // event. The server validates it and stores it in the session before
     // confirming, so the redirect URL never needs to carry it.
+    // No layout here any more: every room starts vertical, and the button in
+    // the room's top right switches it for whoever presses it.
     socket.emit("create room", {
       name: roomName,
       type: roomType,
-      layout: roomLayout,
+      maxSize,
       accessCode,
     });
   } else {
@@ -2046,9 +2055,17 @@ function showRoomList() {
 function initLobby() {
   document.querySelector('input[name="roomType"][value="public"]').checked =
     true;
-  document.querySelector(
-    'input[name="roomLayout"][value="horizontal"]',
-  ).checked = true;
+
+  // The room size slider, with the number above it kept in step.
+  const sizeEl = document.getElementById("roomSizeSlider");
+  const sizeOut = document.getElementById("roomSizeValue");
+  if (sizeEl && sizeOut) {
+    const showSize = () => {
+      sizeOut.textContent = sizeEl.value;
+    };
+    sizeEl.addEventListener("input", showSize);
+    showSize();
+  }
 
   statsModal = new StatsModal();
 

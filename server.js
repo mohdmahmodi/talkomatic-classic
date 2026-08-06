@@ -1193,10 +1193,11 @@ app.get(`${API}/rooms/:id`, apiAuth, (req, res) => {
 app.post(`${API}/rooms`, apiAuth, async (req, res) => {
   try {
     const data = req.body;
+    // Layout is not asked for any more - every room starts vertical and the
+    // room's own button switches it - so this matches the socket path.
     const valErr = validateObject(data, {
       name: { rule: "roomName" },
       type: { rule: "roomType" },
-      layout: { rule: "layout" },
       accessCode: { rule: "accessCode", context: data.type },
     });
     if (valErr)
@@ -1264,7 +1265,8 @@ app.post(`${API}/rooms`, apiAuth, async (req, res) => {
       id: roomId,
       name,
       type: data.type,
-      layout: data.layout,
+      layout: "vertical",
+      maxSize: rooms.newRoomCapacity(data.maxSize),
       users: [],
       accessCode: data.type === "semi-private" ? data.accessCode : null,
       votes: {},

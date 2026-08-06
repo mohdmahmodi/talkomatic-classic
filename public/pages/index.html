@@ -8,7 +8,7 @@
     Main Features:
     - Sign-in form to enter a chat room with a name and optional location.
     - Create a chat room with different privacy options (public, semi-private, private).
-    - Choose between horizontal or vertical room layout.
+    - Choose how many people fit in the room (5 to 10).
     - View and join available chat rooms.
     - Real-time server statistics display.
     - External links to information about Talkomatic.
@@ -767,27 +767,30 @@
               pattern="\d{6}"
             />
           </div>
-          <!-- Room layout selection (horizontal or vertical) -->
-          <p class="roomLay">Room Layout</p>
-          <div class="radio-group">
-            <label>
-              <input type="radio" name="roomLayout" value="horizontal" />
-              <img
-                src="images/icons/horizontal.svg"
-                alt="Horizontal Layout Icon"
-                class="radio-icon"
-              />
-              <span>Horizontal</span>
-            </label>
-            <label>
-              <input type="radio" name="roomLayout" value="vertical" />
-              <img
-                src="images/icons/vertical.svg"
-                alt="Vertical Layout Icon"
-                class="radio-icon"
-              />
-              <span>Vertical</span>
-            </label>
+          <!-- How many people fit in the room. The layout is no longer chosen
+               here: there is a button in the room itself that flips it. -->
+          <p class="roomLay">
+            Room Size:
+            <span id="roomSizeValue">5</span> people
+          </p>
+          <div class="size-slider">
+            <input
+              type="range"
+              id="roomSizeSlider"
+              min="5"
+              max="10"
+              step="1"
+              value="5"
+              aria-label="How many people can be in the room"
+            />
+            <div class="size-scale" aria-hidden="true">
+              <span>5</span>
+              <span>6</span>
+              <span>7</span>
+              <span>8</span>
+              <span>9</span>
+              <span>10</span>
+            </div>
           </div>
           <!-- Button to initiate the chat based on the provided inputs -->
           <div class="button-container">
@@ -999,30 +1002,32 @@
           </div>
         </div>
         <div class="modal-section">
-          <h3>Room Layouts</h3>
+          <h3>Room Size and Layout</h3>
           <div class="layout-info">
             <div class="layout-item">
               <img
-                src="images/icons/horizontal.svg"
-                alt="Horizontal Layout Icon"
+                src="images/icons/vertical.svg"
+                alt="Room Size Icon"
                 class="info-icon"
               />
-              <h4>Horizontal Layout</h4>
+              <h4>Room Size</h4>
               <p>
-                Chat windows are arranged in columns side by side. Automatically
-                switches to vertical on smaller screens.
+                The slider sets how many people can be in your room, from 5 up
+                to 10. Once it is full, nobody else can enter.
               </p>
             </div>
             <div class="layout-item">
               <img
-                src="images/icons/vertical.svg"
-                alt="Vertical Layout Icon"
+                src="images/icons/horizontal.svg"
+                alt="Room Layout Icon"
                 class="info-icon"
               />
-              <h4>Vertical Layout</h4>
+              <h4>Layout</h4>
               <p>
-                Chat windows are stacked on top of each other. Best for mobile
-                devices and narrow windows.
+                Rooms start as side-by-side columns. There is a button in the
+                top right of the room to stack them one above the other
+                instead - it only changes your own screen, and phones always
+                stack.
               </p>
             </div>
           </div>

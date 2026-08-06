@@ -4561,8 +4561,11 @@
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
+    <!-- Before mod.js: the socket sends this browser's device id, and without
+         it the key watch cannot tell this tab from a second person's. -->
+    <script src="js/identity.js?v=1.0.2"></script>
     <script src="js/staff-ui.js?v=1.8.1"></script>
-    <script src="js/desk.js?v=1.0.0"></script>
-    <script src="js/mod.js?v=4.10.0"></script>
+    <script src="js/desk.js?v=1.0.1"></script>
+    <script src="js/mod.js?v=4.10.1"></script>
   </body>
 </html>

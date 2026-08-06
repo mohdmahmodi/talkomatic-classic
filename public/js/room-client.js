@@ -30,7 +30,11 @@ let currentUsername = "";
 let currentLocation = "";
 let currentRoomId = "";
 let currentUserId = "";
-let currentRoomLayout = "horizontal";
+// New rooms are made vertical (side-by-side columns), so that is what to
+// assume before the server has said anything. Rooms made before the lobby
+// stopped asking still carry their own layout, and it arrives with the room
+// data below.
+let currentRoomLayout = "vertical";
 // Desktop-only, client-side view override. When set it wins over the room's
 // layout for THIS user's screen only; the server is never told, so nobody
 // else is affected and incoming room updates never clobber it. Null means
