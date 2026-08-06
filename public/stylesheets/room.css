@@ -1463,6 +1463,117 @@ html {
   max-width: 92px;
 }
 
+/* ── Mod tools ────────────────────────────────────────────────────────────────
+   Staff only. The tool button wears the accent so it reads as a different kind
+   of thing from the pen and the eraser, and the card that opens on a tap is
+   about ONE person: what they drew, and whether they keep their pen. */
+
+.tb-mod-btn {
+  color: var(--tk-accent);
+}
+.tb-mod-btn.active {
+  color: #000;
+}
+
+.tb-modcard {
+  position: absolute;
+  z-index: 45;
+  width: 246px;
+  background: #16161a;
+  border: 1px solid var(--tk-accent);
+  border-radius: 8px;
+  padding: 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.6);
+}
+
+.tb-modcard-h {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.tb-modcard-who {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.tb-modcard-n {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--tk-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tb-modcard-s {
+  font-size: 11px;
+  color: #8d8d8d;
+}
+.tb-modcard-x {
+  flex: none;
+  background: none;
+  border: none;
+  color: #8d8d8d;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 2px 4px;
+  line-height: 1;
+}
+.tb-modcard-x:hover {
+  color: var(--tk-text);
+}
+
+.tb-modcard-b {
+  display: grid;
+  grid-template-columns: 16px 1fr;
+  gap: 2px 8px;
+  align-items: center;
+  text-align: left;
+  background: #1f1f24;
+  border: 1px solid #33333a;
+  border-radius: 6px;
+  color: var(--tk-text);
+  font-family: inherit;
+  font-size: 12px;
+  padding: 7px 9px;
+  cursor: pointer;
+}
+.tb-modcard-b i {
+  grid-row: 1 / span 2;
+  font-size: 12px;
+  color: #8d8d8d;
+}
+.tb-modcard-bt {
+  font-weight: 600;
+}
+.tb-modcard-bn {
+  font-size: 10.5px;
+  color: #8d8d8d;
+  line-height: 1.3;
+}
+.tb-modcard-b:hover {
+  border-color: var(--tk-accent);
+}
+.tb-modcard-b.danger:hover {
+  border-color: #ff5468;
+}
+.tb-modcard-b.danger:hover i {
+  color: #ff5468;
+}
+/* Armed: one more press does it. */
+.tb-modcard-b.armed {
+  background: #ff5468;
+  border-color: #ff5468;
+  color: #fff;
+}
+.tb-modcard-b.armed i,
+.tb-modcard-b.armed .tb-modcard-bn {
+  color: rgba(255, 255, 255, 0.85);
+}
+
 /* ── Hint toast ────────────────────────────────────────────────────────────── */
 
 .tb-hint {

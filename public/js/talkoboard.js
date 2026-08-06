@@ -38,6 +38,12 @@ class Talkoboard {
     // button is built - it grants nothing on its own.
     this.isStaff = !!(staff && (staff.isDev || staff.isMod));
     this.inspectActive = false;
+    this._modCard = null; // the open mod-tools card, if any
+    this._modTapAt = null; // where it was opened from
+    // When staff have taken this browser's pen away. The server is the real
+    // gate; this stops a line appearing on their own screen that the server
+    // has already refused and nobody else will ever see.
+    this.barredUntil = 0;
 
     // ── Canvas state ────────────────────────────────────────────────
     this.canvas = null;
@@ -272,13 +278,13 @@ class Talkoboard {
     drawGroup.appendChild(this.penBtn);
     drawGroup.appendChild(this.eraserBtn);
 
-    // Staff only: point at something and find out who put it there, rather
-    // than clearing the whole board because one drawing has to go.
+    // Staff only: point at a drawing and deal with the person who made it,
+    // rather than clearing the whole board because one thing has to go.
     if (this.isStaff) {
       this.inspectBtn = this.makeBtn(
-        "tb-tool-btn tb-icon-btn",
-        '<i class="fas fa-magnifying-glass"></i>',
-        "Who drew this? (staff)",
+        "tb-tool-btn tb-icon-btn tb-mod-btn",
+        '<i class="fas fa-user-shield"></i>',
+        "Mod tools - tap a drawing to see who made it",
       );
       this.inspectBtn.addEventListener("click", () => this.setTool("inspect"));
       drawGroup.appendChild(this.inspectBtn);
@@ -963,7 +969,9 @@ class Talkoboard {
     if (this.panBtn) this.panBtn.classList.toggle("active", name === "pan");
     if (this.inspectBtn)
       this.inspectBtn.classList.toggle("active", name === "inspect");
-    if (this.inspectActive) this.showHint("Tap a stroke to see who drew it");
+    if (this.inspectActive)
+      this.showHint("Mod tools: tap a drawing to see who made it");
+    if (!this.inspectActive) this.closeModCard();
     this.updateCursor();
   }
 
@@ -1171,6 +1179,157 @@ class Talkoboard {
     return dx * dx + dy * dy;
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // MOD TOOLS: one person's drawings, or their pen
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // How long until they get their pen back, rounded the friendly way.
+  barredMinutes() {
+    return Math.max(1, Math.round((this.barredUntil - Date.now()) / 60000));
+  }
+
+  isBarred() {
+    if (this.barredUntil && this.barredUntil <= Date.now()) this.barredUntil = 0;
+    return !!this.barredUntil;
+  }
+
+  closeModCard() {
+    if (this._modCard) {
+      this._modCard.remove();
+      this._modCard = null;
+    }
+  }
+
+  // Opened by tapping a drawing with the mod tool on. Everything on it is
+  // about the ONE person who made that drawing - nobody else's work is
+  // touched by anything here.
+  openModCard(info) {
+    this.closeModCard();
+    if (!this.isStaff) return;
+
+    const name = info.username || this.peerNames.get(info.userId) || "Someone";
+    const card = document.createElement("div");
+    card.className = "tb-modcard";
+    this._modCard = card;
+
+    const head = document.createElement("div");
+    head.className = "tb-modcard-h";
+    const who = document.createElement("div");
+    who.className = "tb-modcard-who";
+    const nm = document.createElement("span");
+    nm.className = "tb-modcard-n";
+    nm.textContent = name; // textContent: a username is never markup
+    who.appendChild(nm);
+    const sub = document.createElement("span");
+    sub.className = "tb-modcard-s";
+    sub.textContent = info.present ? "drew this" : "drew this, and has left";
+    who.appendChild(sub);
+    head.appendChild(who);
+    const x = document.createElement("button");
+    x.type = "button";
+    x.className = "tb-modcard-x";
+    x.title = "Close";
+    x.innerHTML = '<i class="fas fa-xmark"></i>';
+    x.addEventListener("click", () => this.closeModCard());
+    head.appendChild(x);
+    card.appendChild(head);
+
+    const act = (cls, icon, label, note, fn) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "tb-modcard-b " + cls;
+      b.innerHTML =
+        '<i class="fas ' +
+        icon +
+        '"></i><span class="tb-modcard-bt"></span><span class="tb-modcard-bn"></span>';
+      b.querySelector(".tb-modcard-bt").textContent = label;
+      b.querySelector(".tb-modcard-bn").textContent = note;
+      b.addEventListener("click", fn);
+      card.appendChild(b);
+      return b;
+    };
+
+    // Two presses, because both of these are visible to the whole room and
+    // neither can be undone by the person who pressed it.
+    const arm = (b, confirmLabel, fn) => {
+      let armed = false;
+      const text = b.querySelector(".tb-modcard-bt");
+      const was = text.textContent;
+      b.addEventListener("click", () => {
+        if (armed) return fn();
+        armed = true;
+        b.classList.add("armed");
+        text.textContent = confirmLabel;
+        setTimeout(() => {
+          if (!armed || !b.isConnected) return;
+          armed = false;
+          b.classList.remove("armed");
+          text.textContent = was;
+        }, 3000);
+      });
+    };
+
+    const wipe = act(
+      "danger",
+      "fa-eraser",
+      "Erase everything they drew",
+      "Only theirs. Everyone else's stays.",
+      () => {},
+    );
+    arm(wipe, "Erase it all? Press again", () => {
+      this.socket.emit("board wipe user", { userId: info.userId });
+      this.closeModCard();
+    });
+
+    const barred = info.barredUntil && info.barredUntil > Date.now();
+    if (barred) {
+      act(
+        "",
+        "fa-rotate-left",
+        "Let them back in",
+        "They can draw again straight away.",
+        () => {
+          this.socket.emit("board bar user", {
+            userId: info.userId,
+            allow: true,
+          });
+          this.closeModCard();
+        },
+      );
+    } else if (info.present) {
+      const kick = act(
+        "danger",
+        "fa-ban",
+        "Take them off the board",
+        "Ten minutes. They stay in the room.",
+        () => {},
+      );
+      arm(kick, "Take their pen? Press again", () => {
+        this.socket.emit("board bar user", { userId: info.userId });
+        this.closeModCard();
+      });
+    }
+
+    // Inside the board modal, beside whatever was tapped, and never off the
+    // edge of it.
+    this.modal.appendChild(card);
+    const mr = this.modal.getBoundingClientRect();
+    const at = this._modTapAt || {
+      x: mr.left + mr.width / 2,
+      y: mr.top + mr.height / 2,
+    };
+    let left = at.x - mr.left + 12;
+    let top = at.y - mr.top + 12;
+    if (left + card.offsetWidth > mr.width - 10)
+      left = mr.width - card.offsetWidth - 10;
+    if (left < 10) left = 10;
+    if (top + card.offsetHeight > mr.height - 10)
+      top = at.y - mr.top - card.offsetHeight - 12;
+    if (top < 10) top = 10;
+    card.style.left = Math.round(left) + "px";
+    card.style.top = Math.round(top) + "px";
+  }
+
   showHint(text) {
     if (!this.hintEl) return;
     this.hintEl.textContent = text;
@@ -1254,6 +1413,18 @@ class Talkoboard {
 
   open() {
     if (this.isOpen) return;
+    // Already known to be off the board: say so here rather than opening it
+    // for a second and having the server close it again.
+    if (this.isBarred()) {
+      if (window.toastr)
+        toastr.warning(
+          "You are off the board for another " +
+            this.barredMinutes() +
+            " minutes.",
+          "Board",
+        );
+      return;
+    }
     this.isOpen = true;
     this.modal.classList.add("show");
     this.resizeCanvas();
@@ -1307,6 +1478,7 @@ class Talkoboard {
       this._redrawRaf = null;
     }
     this.closeChat();
+    this.closeModCard();
 
     this.toggleColorPanel(false);
     this.deactivateEyedropper();
@@ -1762,18 +1934,21 @@ class Talkoboard {
       return;
     }
 
-    // Staff inspect: ask the server who owns the stroke under the tap. The
-    // tool stays on, so several drawings can be checked in a row.
+    // Mod tools: ask the server who owns the drawing under the tap. The tool
+    // stays on, so several can be checked in a row.
     if (this.inspectActive) {
+      this.closeModCard();
       const hit = this.strokeAt(this.getCanvasPoint(e));
       if (!hit) {
-        this.showHint("Nothing there - tap on a line");
+        this.showHint("Nothing there - tap on a drawing");
         return;
       }
       if (hit.owner === this.userId) {
         this.showHint("That one is yours");
         return;
       }
+      // Where the card opens, so it lands beside what was tapped.
+      this._modTapAt = { x: e.clientX, y: e.clientY };
       this.showHint("Checking...");
       this.socket.emit("board who drew", { id: hit.id });
       return;
@@ -1793,6 +1968,15 @@ class Talkoboard {
     }
 
     if (e.button !== 0) return;
+
+    // Barred: the server would refuse this anyway, and drawing it locally
+    // would leave a line on this screen that exists nowhere else.
+    if (this.isBarred()) {
+      this.showHint(
+        "You are off the board for another " + this.barredMinutes() + " minutes",
+      );
+      return;
+    }
 
     this.drawing = true;
     const pt = this.getCanvasPoint(e);
@@ -2324,11 +2508,69 @@ class Talkoboard {
       if (!data) return;
       if (data.unknown || !data.userId)
         return this.showHint("Whoever drew that is no longer traceable");
-      const name =
-        data.username || this.peerNames.get(data.userId) || "Someone";
-      this.showHint(
-        data.present ? name + " drew that" : name + " drew that, and has left",
-      );
+      // Remember the name, so anything that happens to them afterwards can be
+      // reported by name rather than as "someone".
+      if (data.username) this.notePeerName(data.userId, data.username);
+      // The name is the start of it, not the end: the card that opens is what
+      // lets a mod do something about it.
+      this.openModCard(data);
+    });
+
+    // Everything one person drew, taken off the board by staff.
+    this.socket.on("board user wiped", (data) => {
+      if (!data || !data.userId) return;
+      const before = this.strokes.length;
+      this.strokes = this.strokes.filter((s) => s.owner !== data.userId);
+      this.remoteActiveStrokes.delete(data.userId);
+      if (data.userId === this.userId) {
+        // Undo and redo pointed at drawings that are gone now.
+        this.undoStack = [];
+        this.redoStack = [];
+        this.currentStroke = null;
+        this.drawing = false;
+        this.updateUndoRedoButtons();
+        this.showHint("A moderator erased your drawings");
+      } else if (before !== this.strokes.length) {
+        // Named only if this browser already knows the name; the broadcast
+        // deliberately does not carry it, so wiping a vanished dev's drawings
+        // cannot announce who they were.
+        const name = this.peerNames.get(data.userId);
+        this.showHint(
+          name
+            ? "Erased everything " + name + " drew"
+            : "A moderator erased someone's drawings",
+        );
+      }
+      if (this.isOpen) this.redraw();
+    });
+
+    // Staff took this browser's pen away. Close the board and say so plainly,
+    // with when it wears off.
+    this.socket.on("board barred", (data) => {
+      this.barredUntil = (data && data.until) || Date.now() + 10 * 60 * 1000;
+      // Whatever was half-drawn when the pen was taken goes with it: the
+      // server refused it, so it is on this screen and nowhere else.
+      if (this.currentStroke) {
+        this.strokes = this.strokes.filter((s) => s !== this.currentStroke);
+        this.currentStroke = null;
+      }
+      this.drawing = false;
+      this.lastPoint = null;
+      const msg =
+        "A moderator has taken you off the board for " +
+        this.barredMinutes() +
+        " minutes.";
+      if (this.isOpen) {
+        this.showHint(msg);
+        setTimeout(() => this.close(), 1600);
+      } else if (window.toastr) {
+        toastr.warning(msg, "Board");
+      }
+    });
+
+    this.socket.on("board allowed", () => {
+      this.barredUntil = 0;
+      if (window.toastr) toastr.info("You can draw on the board again.", "Board");
     });
 
     // ── Clear ────────────────────────────────────────────────────────

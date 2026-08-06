@@ -195,6 +195,32 @@ function cleanupBoardState(roomId) {
   puzzle.destroyForRoom(roomId);
 }
 
+// ── Taking somebody's pen away ──────────────────────────────────────────────
+// Short and self-clearing on purpose. The board is a toy in one room, so being
+// kept off it should wear off by itself rather than need a second staff member
+// to undo. Held in memory only: a restart is a fresh start, same as the rest of
+// the board's live state.
+const BOARD_BAR_MS = 10 * 60 * 1000;
+
+// Boards restored from disk carry strokes and nothing else, so the map is made
+// the first time anybody needs it.
+function boardBarMap(bs) {
+  if (!bs.barred) bs.barred = new Map();
+  return bs.barred;
+}
+
+// 0 when they are free to draw, otherwise when they get their pen back.
+function boardBarredUntil(roomId, userId) {
+  const bs = boardState.get(roomId);
+  if (!bs || !bs.barred || !userId) return 0;
+  const until = bs.barred.get(userId) || 0;
+  if (until && until <= Date.now()) {
+    bs.barred.delete(userId);
+    return 0;
+  }
+  return until;
+}
+
 function finalizeBoardUserStroke(roomId, userId) {
   const bs = boardState.get(roomId);
   if (!bs) return;
@@ -3157,6 +3183,13 @@ function registerSocketHandlers(opts) {
       safe(async () => {
         if (!socket.roomId || !socket.handshake.session?.userId) return;
         if (socket.spectating) return; // spectators are read-only
+        // Kept off the board by staff: say so and stop, rather than opening a
+        // board that refuses every line drawn on it.
+        const barred = boardBarredUntil(
+          socket.roomId,
+          socket.handshake.session.userId,
+        );
+        if (barred) return socket.emit("board barred", { until: barred });
         socket.boardOpen = true;
         clearAFKTimers(socket.handshake.session.userId);
 
@@ -3220,7 +3253,114 @@ function registerSocketHandlers(opts) {
           userId: stroke.owner,
           username: user ? user.username : null,
           present: !!user,
+          // So the panel can offer to let somebody back in rather than only
+          // ever offering to remove them again.
+          barredUntil: boardBarredUntil(socket.roomId, stroke.owner) || 0,
         });
+      }),
+    );
+
+    // ── Talkoboard mod tools: one person, not the whole board ───────────
+    // Erasing what one person drew leaves everybody else's work where it is,
+    // and taking their pen away stops it happening again without closing the
+    // board for the room. Any staff level, the same as clearing the board: a
+    // junior mod looking at something that has to go should not have to find a
+    // full mod first.
+    socket.on(
+      "board wipe user",
+      safe(async (data) => {
+        if (!socket.roomId) return;
+        if (!isStaffSocket(socket)) return;
+        const userId = typeof data?.userId === "string" ? data.userId : null;
+        if (!userId) return;
+
+        const room = state.rooms.get(socket.roomId);
+        const target = room?.users?.find((u) => u.id === userId) || null;
+        // A vanished dev is invisible here exactly as they are everywhere else.
+        if (target && !canRecipientSeeDevUser(socket, target)) return;
+
+        const bs = getBoardState(socket.roomId);
+        const before = bs.strokes.length;
+        bs.strokes = bs.strokes.filter((s) => s.owner !== userId);
+        const gone = before - bs.strokes.length;
+        bs.active.delete(userId);
+        saveBoardSoon();
+        // Everybody in the room, not only the people with the board open: a
+        // board opened a second later must not show what was just taken off it.
+        io()
+          .to(socket.roomId)
+          .emit("board user wiped", { userId, n: gone });
+        logStaff(
+          socket,
+          "wipe board drawings",
+          target || `user:${userId}`,
+          room,
+          gone + (gone === 1 ? " stroke" : " strokes"),
+        );
+      }),
+    );
+
+    socket.on(
+      "board bar user",
+      safe(async (data) => {
+        if (!socket.roomId) return;
+        if (!isStaffSocket(socket)) return;
+        const userId = typeof data?.userId === "string" ? data.userId : null;
+        if (!userId) return;
+        if (userId === socket.handshake.session?.userId) return; // not yourself
+
+        const room = state.rooms.get(socket.roomId);
+        const target = room?.users?.find((u) => u.id === userId) || null;
+        if (target && !canRecipientSeeDevUser(socket, target)) return;
+        // Staff do not take each other's pens away. A developer can, because
+        // somebody has to be able to.
+        if (target && (target.isDev || target.isMod) && !socket.isDev)
+          return socket.emit(
+            "error",
+            createErrorResponse(
+              ERROR_CODES.FORBIDDEN,
+              "Only a developer can take another staff member off the board.",
+            ),
+          );
+
+        const bs = getBoardState(socket.roomId);
+        const bar = boardBarMap(bs);
+
+        if (data?.allow) {
+          if (!bar.delete(userId)) return;
+          for (const s of findSocketsByUserId(userId))
+            if (s.roomId === socket.roomId) s.emit("board allowed", {});
+          logStaff(
+            socket,
+            "allow back on board",
+            target || `user:${userId}`,
+            room,
+          );
+          return;
+        }
+
+        const until = Date.now() + BOARD_BAR_MS;
+        bar.set(userId, until);
+        // Their unfinished line goes with them, or it hangs on everyone's
+        // screen until the room empties.
+        if (bs.active.delete(userId))
+          io().to(socket.roomId).emit("board stroke end", { userId });
+        for (const s of findSocketsByUserId(userId)) {
+          if (s.roomId !== socket.roomId) continue;
+          s.boardOpen = false;
+          s.emit("board barred", { until });
+        }
+        // A plain room emit, not emitSubAppEvent: this is about the person
+        // being removed, and routing it through the sender's visibility would
+        // hide it whenever a vanished dev is the one doing it.
+        io().to(socket.roomId).emit("board user status", { userId, open: false });
+        logStaff(
+          socket,
+          "remove from board",
+          target || `user:${userId}`,
+          room,
+          Math.round(BOARD_BAR_MS / 60000) + " minutes",
+        );
       }),
     );
 
@@ -3269,6 +3409,10 @@ function registerSocketHandlers(opts) {
         if (!socket.roomId || !socket.handshake.session?.userId) return;
         if (socket.spectating) return;
         const userId = socket.handshake.session.userId;
+        // The real enforcement: a client that ignores being removed from the
+        // board still cannot put a line on it.
+        const barred = boardBarredUntil(socket.roomId, userId);
+        if (barred) return socket.emit("board barred", { until: barred });
 
         if (
           !data ||
@@ -3396,6 +3540,8 @@ function registerSocketHandlers(opts) {
         if (!socket.roomId || !socket.handshake.session?.userId) return;
         if (socket.spectating) return;
         const userId = socket.handshake.session.userId;
+        // Redo is a way of drawing too.
+        if (boardBarredUntil(socket.roomId, userId)) return;
         const s = data?.stroke;
         if (!s || typeof s !== "object") return;
         if (typeof s.id !== "string" || s.id.length > 64) return;

@@ -402,6 +402,10 @@ const ACTION_GROUPS = [
     actions: [
       "lock room", "unlock room", "slow mode on", "slow mode off",
       "close room", "rename room", "clear board",
+      // Board tools are aimed at a person, but they are cheap and instantly
+      // repeatable - a mod could draw and wipe all afternoon. They count as
+      // work done, and deliberately NOT toward the promotion number.
+      "wipe board drawings", "remove from board", "allow back on board",
       "spotlight on", "spotlight off", "set room size", "party mode",
     ],
   },
