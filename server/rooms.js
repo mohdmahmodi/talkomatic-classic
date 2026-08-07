@@ -195,6 +195,61 @@ function cleanupBoardState(roomId) {
   puzzle.destroyForRoom(roomId);
 }
 
+// ── Keeping one person from burying the board ───────────────────────────────
+// A hand-drawn line costs a person real seconds to make. A shape or a bucket
+// fill costs one click, and arrives as one finished event - which makes it the
+// obvious thing to spam. Two guards, because they answer different halves of
+// it: how FAST somebody can add shapes, and how much of a full board any one
+// person is allowed to be holding.
+const BOARD_ADD_BURST = 10; // finished shapes...
+const BOARD_ADD_WINDOW = 5000; // ...per this many ms, per person
+const boardAddTimes = new Map(); // userId -> [ts]
+
+function allowBoardAdd(userId) {
+  const now = Date.now();
+  // Nobody is tracked for longer than the window, so a busy day does not leave
+  // a map full of people who drew one rectangle and left.
+  if (boardAddTimes.size > 500)
+    for (const [uid, ts] of boardAddTimes)
+      if (!ts.length || now - ts[ts.length - 1] > BOARD_ADD_WINDOW)
+        boardAddTimes.delete(uid);
+  const times = (boardAddTimes.get(userId) || []).filter(
+    (t) => now - t < BOARD_ADD_WINDOW,
+  );
+  if (times.length >= BOARD_ADD_BURST) {
+    boardAddTimes.set(userId, times);
+    return false;
+  }
+  times.push(now);
+  boardAddTimes.set(userId, times);
+  return true;
+}
+
+// The board holds MAX_BOARD_STROKES and then starts dropping the oldest. Left
+// alone, that means somebody spamming shapes slowly deletes everybody else's
+// drawing through the cap - griefing by attrition, with nothing on screen to
+// show for it. So when the board is full, whoever is holding the most of it
+// gives up their oldest stroke first.
+function trimBoard(bs) {
+  let guard = 0;
+  while (bs.strokes.length > MAX_BOARD_STROKES && guard++ < 200) {
+    const counts = new Map();
+    for (const s of bs.strokes)
+      counts.set(s.owner, (counts.get(s.owner) || 0) + 1);
+    let heaviest = null;
+    let most = 0;
+    for (const [owner, n] of counts)
+      if (n > most) {
+        most = n;
+        heaviest = owner;
+      }
+    const idx = bs.strokes.findIndex((s) => s.owner === heaviest);
+    bs.strokes.splice(idx === -1 ? 0 : idx, 1);
+  }
+  if (bs.strokes.length > MAX_BOARD_STROKES)
+    bs.strokes = bs.strokes.slice(-MAX_BOARD_STROKES);
+}
+
 // ── Taking somebody's pen away ──────────────────────────────────────────────
 // Short and self-clearing on purpose. The board is a toy in one room, so being
 // kept off it should wear off by itself rather than need a second staff member
@@ -227,9 +282,7 @@ function finalizeBoardUserStroke(roomId, userId) {
   const active = bs.active.get(userId);
   if (active && active.points && active.points.length > 0) {
     bs.strokes.push(active);
-    if (bs.strokes.length > MAX_BOARD_STROKES) {
-      bs.strokes = bs.strokes.slice(-MAX_BOARD_STROKES);
-    }
+    trimBoard(bs);
     saveBoardSoon();
   }
   bs.active.delete(userId);
@@ -3564,6 +3617,18 @@ function registerSocketHandlers(opts) {
         const userId = socket.handshake.session.userId;
         // Redo is a way of drawing too.
         if (boardBarredUntil(socket.roomId, userId)) return;
+        // Shapes and fills come through here, one click each. Staff are not
+        // exempt: the point is the board, not who is at it.
+        if (!allowBoardAdd(userId))
+          return socket.emit("board too fast", {
+            // Which one was refused, so the drawer's own screen can drop it
+            // rather than showing a shape nobody else has.
+            id:
+              typeof data?.stroke?.id === "string"
+                ? data.stroke.id.slice(0, 64)
+                : null,
+            message: "Too many shapes at once - give it a second",
+          });
         const s = data?.stroke;
         if (!s || typeof s !== "object") return;
         if (typeof s.id !== "string" || s.id.length > 64) return;
@@ -3587,20 +3652,19 @@ function registerSocketHandlers(opts) {
           eraser: !!s.eraser,
           gradient: s.eraser ? null : sanitizeGradient(s.gradient),
           // Shapes and bucket fills arrive whole through this event rather than
-          // point by point, so this is the only place the two extra fields a
-          // filled shape needs have to be accepted.
+          // point by point, so this is the only place the extra fields a shape
+          // needs have to be accepted.
           fill: !!s.fill,
           rings: s.fill
             ? sanitizeRings(s.rings, MAX_POINTS_PER_STROKE - points.length)
             : null,
+          sharp: !!s.sharp,
         };
 
         const bs = getBoardState(socket.roomId);
         if (bs.strokes.some((x) => x.id === stroke.id)) return; // dedupe
         bs.strokes.push(stroke);
-        if (bs.strokes.length > MAX_BOARD_STROKES) {
-          bs.strokes = bs.strokes.slice(-MAX_BOARD_STROKES);
-        }
+        trimBoard(bs);
         saveBoardSoon();
         emitSubAppEvent(socket, "board stroke add", { userId, stroke }, false);
       }),

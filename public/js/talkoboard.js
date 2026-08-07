@@ -57,7 +57,10 @@ class Talkoboard {
     this.zoom = 1;
     this.isPanning = false;
     this.panStart = null;
-    this.MIN_ZOOM = 0.2;
+    // The board has no edges, so people wander off across it and then cannot
+    // get far enough out to see where everything is. 5% is far enough out that
+    // a whole afternoon's drawing fits on one screen.
+    this.MIN_ZOOM = 0.05;
     this.MAX_ZOOM = 5;
     this._redrawRaf = null; // rAF handle so pan/zoom redraw at most once per frame
     this._gesturing = false; // true during a two-finger touch (pan + pinch zoom)
@@ -282,38 +285,34 @@ class Talkoboard {
     this.penBtn = tool("pen", "fa-pen", "Pen");
     this.eraserBtn = tool("eraser", "fa-eraser", "Eraser");
 
+    // Shapes live behind one button rather than six. A row of a dozen little
+    // icons is a wall, and you only ever want one shape at a time: the button
+    // wears the one you picked and opens the rest on a tap, the same way the
+    // color button works.
     const shapeGroup = document.createElement("div");
     shapeGroup.className = "tb-group";
-    const shape = (name, icon, title) => {
-      const b = this.makeBtn(
-        "tb-tool-btn tb-icon-btn",
-        '<i class="fas ' + icon + '"></i>',
-        title,
-      );
-      b.addEventListener("click", () => this.setTool(name));
-      this.toolBtns[name] = b;
-      shapeGroup.appendChild(b);
-      return b;
-    };
-    shape("line", "fa-slash", "Line - hold Shift to snap the angle");
-    shape("arrow", "fa-arrow-right-long", "Arrow");
-    shape("rect", "fa-square", "Rectangle - hold Shift for a square");
-    shape("ellipse", "fa-circle", "Ellipse - hold Shift for a circle");
-    shape("triangle", "fa-play", "Triangle");
-    this.toolBtns.triangle.querySelector("i").style.transform = "rotate(-90deg)";
-    shape("bucket", "fa-fill-drip", "Fill a closed area with the current color");
-
-    // Outline or solid. Only means anything to a shape with an inside, so it
-    // greys out for the line and the arrow.
-    this.fillBtn = this.makeBtn(
-      "tb-tool-btn tb-icon-btn disabled",
-      '<i class="fas fa-square-full"></i>',
-      "Draw shapes filled in",
+    this.shapeBtn = document.createElement("button");
+    this.shapeBtn.type = "button";
+    this.shapeBtn.className = "tb-shape-btn";
+    this.shapeBtn.title = "Shapes";
+    this.shapeIcon = document.createElement("i");
+    this.shapeIcon.className = "fas fa-square";
+    const shapeCaret = document.createElement("span");
+    shapeCaret.className = "tb-color-caret";
+    shapeCaret.innerHTML = '<i class="fas fa-caret-down"></i>';
+    this.shapeBtn.appendChild(this.shapeIcon);
+    this.shapeBtn.appendChild(shapeCaret);
+    this.shapeBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.toggleShapePanel();
+    });
+    shapeGroup.appendChild(this.shapeBtn);
+    this.bucketBtn = tool(
+      "bucket",
+      "fa-fill-drip",
+      "Fill a closed area with the current color",
     );
-    this.fillBtn.addEventListener("click", () =>
-      this.setFillShapes(!this.fillShapes),
-    );
-    shapeGroup.appendChild(this.fillBtn);
+    shapeGroup.appendChild(this.bucketBtn);
 
     // Staff only: point at a drawing and deal with the person who made it,
     // rather than clearing the whole board because one thing has to go.
@@ -492,6 +491,7 @@ class Talkoboard {
 
     // Color panel (docked top-left of the board)
     this.buildColorPanel(canvasWrap);
+    this.buildShapePanel(canvasWrap);
 
     // Transient hint toast
     this.hintEl = document.createElement("div");
@@ -514,6 +514,73 @@ class Talkoboard {
   }
 
   // ── Color panel ──────────────────────────────────────────────────
+  // The shapes, and whether they come out solid. Opens under the shape button.
+  buildShapePanel(parent) {
+    const SHAPES = [
+      ["line", "fa-slash", "Line"],
+      ["arrow", "fa-arrow-right-long", "Arrow"],
+      ["rect", "fa-square", "Rectangle"],
+      ["ellipse", "fa-circle", "Ellipse"],
+      ["triangle", "fa-play", "Triangle"],
+    ];
+    this.shapePanel = document.createElement("div");
+    this.shapePanel.className = "tb-shape-panel";
+    this.shapePanel.addEventListener("click", (e) => e.stopPropagation());
+
+    const title = document.createElement("div");
+    title.className = "tb-pop-title";
+    title.textContent = "Shape";
+    this.shapePanel.appendChild(title);
+
+    const grid = document.createElement("div");
+    grid.className = "tb-shape-grid";
+    this.shapePicks = {};
+    for (const [name, icon, label] of SHAPES) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "tb-shape-pick";
+      b.title = label;
+      b.innerHTML = '<i class="fas ' + icon + '"></i><span></span>';
+      b.querySelector("span").textContent = label;
+      if (name === "triangle")
+        b.querySelector("i").style.transform = "rotate(-90deg)";
+      b.addEventListener("click", () => {
+        this.setTool(name);
+        this.toggleShapePanel(false);
+      });
+      this.shapePicks[name] = b;
+      grid.appendChild(b);
+    }
+    this.shapePanel.appendChild(grid);
+
+    const hint = document.createElement("div");
+    hint.className = "tb-shape-note";
+    hint.textContent = "Hold Shift while dragging for a square, circle or 45°.";
+    this.shapePanel.appendChild(hint);
+
+    // Outline or solid. Only means anything to a shape with an inside.
+    this.fillBtn = document.createElement("button");
+    this.fillBtn.type = "button";
+    this.fillBtn.className = "tb-shape-fill";
+    this.fillBtn.innerHTML =
+      '<i class="fas fa-square-full"></i><span>Fill the shape in</span>';
+    this.fillBtn.addEventListener("click", () =>
+      this.setFillShapes(!this.fillShapes),
+    );
+    this.shapePanel.appendChild(this.fillBtn);
+
+    parent.appendChild(this.shapePanel);
+  }
+
+  toggleShapePanel(force) {
+    if (!this.shapePanel) return;
+    const open =
+      force != null ? force : !this.shapePanel.classList.contains("show");
+    this.shapePanel.classList.toggle("show", open);
+    this.shapeBtn.classList.toggle("open", open);
+    if (open) this.toggleColorPanel(false);
+  }
+
   buildColorPanel(parent) {
     const panel = document.createElement("div");
     panel.className = "tb-color-panel";
@@ -632,6 +699,8 @@ class Talkoboard {
     this.colorPanel.classList.toggle("show", open);
     this.colorBtn.classList.toggle("active", open);
     if (open) {
+      // They dock in the same corner, so only one is ever up.
+      this.toggleShapePanel(false);
       this.renderRecentColors();
       this.renderUserColors();
     }
@@ -896,16 +965,21 @@ class Talkoboard {
     this.canvas.addEventListener("touchend", endGesture, { passive: true });
     this.canvas.addEventListener("touchcancel", endGesture, { passive: true });
 
-    // Close color panel when tapping the board
-    this.canvas.addEventListener("pointerdown", () =>
-      this.toggleColorPanel(false),
-    );
+    // Close the popups when tapping the board
+    this.canvas.addEventListener("pointerdown", () => {
+      this.toggleColorPanel(false);
+      this.toggleShapePanel(false);
+    });
 
     // Escape to close board / panel
     this._escHandler = (e) => {
       if (e.key !== "Escape" || !this.isOpen) return;
       if (this.colorPanel.classList.contains("show")) {
         this.toggleColorPanel(false);
+        return;
+      }
+      if (this.shapePanel && this.shapePanel.classList.contains("show")) {
+        this.toggleShapePanel(false);
         return;
       }
       if (this.chatOpen) {
@@ -1020,6 +1094,20 @@ class Talkoboard {
     this.preview = null;
     for (const [tool, btn] of Object.entries(this.toolBtns || {}))
       if (btn) btn.classList.toggle("active", tool === name);
+    // The shape button wears whichever shape is selected, and lights up only
+    // while one of them is the tool in hand.
+    if (this.shapeBtn) {
+      this.shapeBtn.classList.toggle("active", this.isShapeTool(name));
+      if (this.shapePicks)
+        for (const [shape, b] of Object.entries(this.shapePicks))
+          b.classList.toggle("on", shape === name);
+      if (this.isShapeTool(name) && this.shapePicks[name]) {
+        const icon = this.shapePicks[name].querySelector("i");
+        this.shapeIcon.className = icon.className;
+        this.shapeIcon.style.transform = icon.style.transform;
+        this.shapeBtn.title = "Shape: " + this.shapePicks[name].title;
+      }
+    }
     if (this.inspectActive)
       this.showHint("Mod tools: tap a drawing to see who made it");
     else this.closeModCard();
@@ -1027,7 +1115,7 @@ class Talkoboard {
     // The fill switch only means anything to a shape that has an inside.
     if (this.fillBtn)
       this.fillBtn.classList.toggle(
-        "disabled",
+        "off",
         !["rect", "ellipse", "triangle"].includes(name),
       );
     this.updateCursor();
@@ -1036,6 +1124,10 @@ class Talkoboard {
   setFillShapes(on) {
     this.fillShapes = !!on;
     if (this.fillBtn) this.fillBtn.classList.toggle("active", this.fillShapes);
+    // Turning fill on is a statement about shapes, so put one in your hand if
+    // you are holding a pen.
+    if (this.fillShapes && !["rect", "ellipse", "triangle"].includes(this.tool))
+      this.setTool("rect");
   }
 
   // Back-compat: a few callers just want to return to the pen.
@@ -1214,10 +1306,37 @@ class Talkoboard {
     for (let i = candidates.length - 1; i >= 0; i--) {
       const s = candidates[i];
       if (!s || !s.points || !s.points.length) continue;
+      // A solid shape is hit anywhere in the solid part. Testing only the
+      // outline meant tapping the middle of a filled rectangle - or anywhere
+      // in a bucket fill, which has no outline to speak of - found nothing,
+      // which is what stopped the mod tools working on them.
+      if (s.fill && this.pointInFilled(s, pt)) return s;
       const tol = Math.max((s.size || 3) / 2, 6 / this.zoom);
       if (this.strokeHit(s, pt, tol)) return s;
     }
     return null;
+  }
+
+  // Even-odd, across every ring, so a hole in a fill is not part of it.
+  pointInFilled(stroke, pt) {
+    const rings =
+      Array.isArray(stroke.rings) && stroke.rings.length
+        ? stroke.rings
+        : [stroke.points];
+    let inside = false;
+    for (const ring of rings) {
+      if (!ring || ring.length < 3) continue;
+      for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const a = ring[i];
+        const b = ring[j];
+        if (
+          a.y > pt.y !== b.y > pt.y &&
+          pt.x < ((b.x - a.x) * (pt.y - a.y)) / (b.y - a.y) + a.x
+        )
+          inside = !inside;
+      }
+    }
+    return inside;
   }
 
   strokeHit(stroke, pt, tol) {
@@ -1281,11 +1400,14 @@ class Talkoboard {
     const pts = [];
     if (kind === "line") return [a, b];
     if (kind === "arrow") {
-      // Shaft, then back up each side of the head: one unbroken polyline, so
-      // it renders and erases like anything else drawn by hand.
+      // Shaft, then back down each side of the head: one unbroken polyline, so
+      // it renders and erases like anything else drawn by hand. The head grows
+      // with the pen - a 1px arrow with a 30px head is not an arrow - and never
+      // takes more than a third of the shaft, or a short one is all head.
+      const len = Math.hypot(b.x - a.x, b.y - a.y);
       const ang = Math.atan2(b.y - a.y, b.x - a.x);
-      const head = Math.max(9, Math.hypot(b.x - a.x, b.y - a.y) * 0.18);
-      const spread = Math.PI / 7;
+      const head = Math.min(Math.max(this.size * 4, 12), len * 0.34);
+      const spread = 0.44; // ~25 degrees off the shaft
       const wing = (dir) => ({
         x: b.x - Math.cos(ang + dir * spread) * head,
         y: b.y - Math.sin(ang + dir * spread) * head,
@@ -1339,8 +1461,29 @@ class Talkoboard {
       eraser: false,
       gradient: this.gradient ? this.gradient.slice() : null,
       fill: closed && this.fillShapes,
+      // Corners stay corners. Everything drawn by hand is smoothed through the
+      // midpoints, which is right for a wobbly line and wrong for a rectangle:
+      // it rounds the corners off and turns an arrowhead into a squiggle. An
+      // ellipse is the exception - it IS curves, and smoothing suits it.
+      sharp: kind !== "ellipse",
     };
     this.addOwnStroke(stroke);
+  }
+
+  // Everything about a stroke that the server keeps. One place, so a shape
+  // sent for the first time and the same shape sent again by redo agree.
+  strokePayload(stroke) {
+    return {
+      id: stroke.id,
+      points: stroke.points,
+      color: stroke.color,
+      size: stroke.size,
+      eraser: stroke.eraser,
+      gradient: stroke.gradient || null,
+      fill: !!stroke.fill,
+      rings: stroke.rings || null,
+      sharp: !!stroke.sharp,
+    };
   }
 
   // Puts a finished stroke of ours on the board and tells everyone. Shapes and
@@ -1350,18 +1493,7 @@ class Talkoboard {
     this.undoStack.push(stroke.id);
     this.redoStack = [];
     this.updateUndoRedoButtons();
-    this.socket.emit("board stroke add", {
-      stroke: {
-        id: stroke.id,
-        points: stroke.points,
-        color: stroke.color,
-        size: stroke.size,
-        eraser: stroke.eraser,
-        gradient: stroke.gradient || null,
-        fill: !!stroke.fill,
-        rings: stroke.rings || null,
-      },
-    });
+    this.socket.emit("board stroke add", { stroke: this.strokePayload(stroke) });
     this.scheduleRedraw();
   }
 
@@ -1755,16 +1887,9 @@ class Talkoboard {
     const stroke = this.redoStack.pop();
     this.strokes.push(stroke);
     this.undoStack.push(stroke.id);
-    this.socket.emit("board stroke add", {
-      stroke: {
-        id: stroke.id,
-        points: stroke.points,
-        color: stroke.color,
-        size: stroke.size,
-        eraser: stroke.eraser,
-        gradient: stroke.gradient || null,
-      },
-    });
+    // Through the same payload a shape goes out with, or redoing a rectangle
+    // would put back a rounded-off scribble with no fill.
+    this.socket.emit("board stroke add", { stroke: this.strokePayload(stroke) });
     this.redraw();
     this.updateUndoRedoButtons();
   }
@@ -1934,9 +2059,13 @@ class Talkoboard {
 
   adjustZoom(delta, e) {
     const oldZoom = this.zoom;
+    // A step of the same PROPORTION each time, not the same amount. Adding a
+    // flat 0.15 was fine around 100% and useless below it: one press took you
+    // from 20% to 5%, and near the top it barely moved. Each button press is
+    // now about a third in or out, wherever you already are.
     this.zoom = Math.min(
       this.MAX_ZOOM,
-      Math.max(this.MIN_ZOOM, this.zoom + delta),
+      Math.max(this.MIN_ZOOM, this.zoom * Math.pow(1.32, delta / 0.15)),
     );
 
     if (e) {
@@ -2136,6 +2265,8 @@ class Talkoboard {
         fill:
           this.fillShapes &&
           ["rect", "ellipse", "triangle"].includes(this.preview.kind),
+        // The preview has to be the thing you are about to get, corners and all.
+        sharp: this.preview.kind !== "ellipse",
       });
     }
 
@@ -2155,6 +2286,12 @@ class Talkoboard {
     // hole in the middle stays a hole.
     if (stroke.fill && !stroke.eraser) {
       this.renderFilled(ctx, stroke);
+      return;
+    }
+
+    // A shape's points ARE the shape: draw them, do not interpret them.
+    if (stroke.sharp) {
+      this.renderStrokeSharp(ctx, stroke);
       return;
     }
 
@@ -2264,6 +2401,27 @@ class Talkoboard {
     ctx.moveTo(fs.x, fs.y);
     ctx.lineTo(pts[n - 1].x, pts[n - 1].y);
     ctx.stroke();
+  }
+
+  // Straight from point to point, corners intact. Miter joins, so a rectangle
+  // has square corners rather than the rounded ones a pen leaves.
+  renderStrokeSharp(ctx, stroke) {
+    const pts = stroke.points;
+    ctx.save();
+    ctx.globalCompositeOperation = stroke.eraser
+      ? "destination-out"
+      : "source-over";
+    ctx.lineCap = "round";
+    ctx.lineJoin = "miter";
+    ctx.miterLimit = 6;
+    ctx.lineWidth = stroke.size;
+    ctx.strokeStyle = stroke.color;
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    if (pts.length === 1) ctx.lineTo(pts[0].x + 0.01, pts[0].y);
+    ctx.stroke();
+    ctx.restore();
   }
 
   // A filled shape: every ring into one path, filled even-odd so the holes
@@ -3029,6 +3187,21 @@ class Talkoboard {
       } else if (window.toastr) {
         toastr.warning(msg, "Board");
       }
+    });
+
+    // Too many shapes at once. The one that was refused comes off this screen
+    // too, or the drawer is left looking at something nobody else has.
+    this.socket.on("board too fast", (data) => {
+      const id = data && data.id;
+      if (id) {
+        this.strokes = this.strokes.filter((s) => s.id !== id);
+        this.undoStack = this.undoStack.filter((x) => x !== id);
+        this.updateUndoRedoButtons();
+        this.scheduleRedraw();
+      }
+      this.showHint(
+        (data && data.message) || "Too many shapes at once - give it a second",
+      );
     });
 
     this.socket.on("board allowed", () => {
