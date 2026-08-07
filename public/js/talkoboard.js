@@ -940,6 +940,9 @@ class Talkoboard {
     // Escape to close board / panel
     this._escHandler = (e) => {
       if (e.key !== "Escape" || !this.isOpen) return;
+      // Escape in somebody else's box is theirs to handle - clearing a reply
+      // in the Desk must not shut the board underneath it.
+      if (this.isTypingTarget(e.target) && e.target !== this.chatInput) return;
       if (this.colorPanel.classList.contains("show")) {
         this.toggleColorPanel(false);
         return;
@@ -955,7 +958,7 @@ class Talkoboard {
     // Undo / redo keyboard shortcuts
     this._undoKeyHandler = (e) => {
       if (!this.isOpen) return;
-      if (e.target === this.chatInput) return;
+      if (this.isTypingTarget(e.target)) return;
       if (!(e.ctrlKey || e.metaKey)) return;
       const k = e.key.toLowerCase();
       if (k === "z" && !e.shiftKey) {
@@ -972,7 +975,7 @@ class Talkoboard {
     this._spaceDown = false;
     this._spaceHandler = (e) => {
       if (!this.isOpen) return;
-      if (e.target === this.chatInput) return;
+      if (this.isTypingTarget(e.target)) return;
       if (e.key === " ") {
         e.preventDefault();
         this._spaceDown = e.type === "keydown";
@@ -990,6 +993,21 @@ class Talkoboard {
       }
     };
     window.addEventListener("resize", this._resizeHandler);
+  }
+
+  // Is this keypress going into a box somebody is typing in? The board's
+  // shortcuts live on `document`, so they are heard while the Desk, the room's
+  // own chat, or anything else on the page has the keyboard - and swallowing
+  // the space bar there meant nobody could type a space with the board open.
+  // The board's own chat box is only one of the places that matters.
+  isTypingTarget(t) {
+    return !!(
+      t &&
+      (t.tagName === "INPUT" ||
+        t.tagName === "TEXTAREA" ||
+        t.tagName === "SELECT" ||
+        t.isContentEditable)
+    );
   }
 
   // Midpoint and finger spread for a two-finger touch (pan + pinch zoom).

@@ -3783,9 +3783,10 @@
             by: mine ? m.by || "Staff" : a.name || "Them",
             text: String(m.text || "").slice(0, 90),
           };
-          renderAppeal();
-          const box = els.main && els.main.querySelector(".dk-comp .dk-input");
-          if (box) box.focus();
+          // Just the bar, not the view: rebuilding would take the box away
+          // from you at the moment you asked to write in it.
+          paintAppealReplyBar();
+          if (appealView && appealView.composer) appealView.composer.focus();
         });
       }
       stack.appendChild(b);
@@ -3803,12 +3804,102 @@
     renderAll();
   }
 
+  // What the appeal view is currently built for. Rebuilding it wholesale on
+  // every incoming message is what used to take the keyboard away mid-sentence
+  // - and after your own message too, since the server echoes it straight back.
+  // So the view is only rebuilt when the CONTROLS would change; a new message
+  // repaints the conversation alone and leaves the box you are typing in
+  // exactly where it was, caret and all.
+  let appealView = null; // { sig, body, replyBar, composer }
+
+  function appealSig(a) {
+    return [
+      a.id,
+      a.status,
+      a.locked ? 1 : 0,
+      a.resolution || "",
+      a.loading ? 1 : 0,
+      a.stillBlocked ? 1 : 0,
+    ].join("|");
+  }
+
+  // The conversation, repainted in place. Stays put if you have scrolled up to
+  // read something; follows the newest line if you were already at the bottom.
+  function paintAppealBody(a) {
+    const body = appealView && appealView.body;
+    if (!body || !body.isConnected) return;
+    const atBottom =
+      body.scrollHeight - body.scrollTop - body.clientHeight < 80;
+    body.textContent = "";
+    body.appendChild(appealBanHead(a));
+    appealThread(body, a);
+    if (atBottom)
+      requestAnimationFrame(() => {
+        body.scrollTop = body.scrollHeight;
+      });
+  }
+
+  function paintAppealReplyBar() {
+    const rb = appealView && appealView.replyBar;
+    if (!rb) return;
+    rb.textContent = "";
+    if (!appealReply) {
+      rb.style.display = "none";
+      return;
+    }
+    rb.style.display = "";
+    rb.appendChild(icon("fa-reply"));
+    rb.appendChild(el("span", "dk-rb-w", "Replying to " + appealReply.by));
+    rb.appendChild(el("span", "dk-rb-t", appealReply.text));
+    const x = btn("dk-rb-x", null, "fa-xmark", "Cancel the reply");
+    x.addEventListener("click", () => {
+      appealReply = null;
+      paintAppealReplyBar();
+      if (appealView && appealView.composer) appealView.composer.focus();
+    });
+    rb.appendChild(x);
+  }
+
+  // What they are contesting, so a decision is not made blind.
+  function appealBanHead(a) {
+    const head = el("div", "dk-ap-ban");
+    head.appendChild(icon("fa-ban"));
+    const hb = el("div", "dk-ap-ban-b");
+    hb.appendChild(
+      el(
+        "span",
+        "dk-ap-ban-t",
+        (a.banPermanent ? "Permanent ban" : "Temporary ban") +
+          (a.banBy ? " by " + a.banBy : ""),
+      ),
+    );
+    hb.appendChild(
+      el("span", "dk-ap-ban-r", a.banReason || "No ban reason on file."),
+    );
+    head.appendChild(hb);
+    return head;
+  }
+
   function renderAppeal() {
     const main = els.main;
     if (!main) return;
+    const a = appeal || {};
+
+    // Same appeal, same controls: only the conversation can have changed.
+    if (
+      appealView &&
+      appealView.sig === appealSig(a) &&
+      appealView.body &&
+      main.contains(appealView.body)
+    ) {
+      paintAppealBody(a);
+      paintAppealReplyBar();
+      return;
+    }
+
+    appealView = null;
     main.textContent = "";
     if (els.headSub) els.headSub.textContent = "appeal";
-    const a = appeal || {};
 
     const bar = el("div", "dk-threadbar");
     const back = btn("dk-minib", "Back", "fa-arrow-left");
@@ -3840,24 +3931,7 @@
       return;
     }
 
-    // What they are contesting, so a decision is not made blind.
-    const head = el("div", "dk-ap-ban");
-    head.appendChild(icon("fa-ban"));
-    const hb = el("div", "dk-ap-ban-b");
-    hb.appendChild(
-      el(
-        "span",
-        "dk-ap-ban-t",
-        (a.banPermanent ? "Permanent ban" : "Temporary ban") +
-          (a.banBy ? " by " + a.banBy : ""),
-      ),
-    );
-    hb.appendChild(
-      el("span", "dk-ap-ban-r", a.banReason || "No ban reason on file."),
-    );
-    head.appendChild(hb);
-    body.appendChild(head);
-
+    body.appendChild(appealBanHead(a));
     appealThread(body, a);
     main.appendChild(body);
     // Land on the newest line without animating past the whole history.
@@ -3905,18 +3979,11 @@
       return;
     }
 
-    if (appealReply) {
-      const rb = el("div", "dk-replybar");
-      rb.appendChild(icon("fa-reply"));
-      rb.appendChild(el("span", "dk-rb-w", "Replying to " + appealReply.by));
-      rb.appendChild(el("span", "dk-rb-t", appealReply.text));
-      const x = btn("dk-rb-x", null, "fa-xmark", "Cancel the reply");
-      x.addEventListener("click", () => {
-        appealReply = null;
-        renderAppeal();
-      });
-      main.appendChild(rb);
-    }
+    // Built once and filled as needed, so arming a reply never disturbs the
+    // box underneath it.
+    const replyBar = el("div", "dk-replybar");
+    replyBar.style.display = "none";
+    main.appendChild(replyBar);
 
     const comp = el("div", "dk-comp");
     const ta = el("textarea", "dk-input");
@@ -3938,6 +4005,10 @@
       appealDraft.delete(a.id);
       appealReply = null;
       ta.value = "";
+      paintAppealReplyBar();
+      // You are still in the box. Sending one message should not cost you a
+      // click before you can write the next.
+      ta.focus();
     };
     ta.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
@@ -3950,6 +4021,10 @@
     sendBtn.addEventListener("click", send);
     comp.appendChild(sendBtn);
     main.appendChild(comp);
+
+    // Everything a repaint needs to leave alone.
+    appealView = { sig: appealSig(a), body, replyBar, composer: ta };
+    paintAppealReplyBar();
 
     // The decision, and the way to stop somebody flooding the thread while it
     // is still being made.
