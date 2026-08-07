@@ -18,6 +18,12 @@ modlog.txt
 audit-log.jsonl
 key-activity.json
 
+# The Desk (staff chat) and its review state - staff conversation, never commit
+staff-chat.json
+staff-chat.json.tmp
+flag-reviews.json
+flag-reviews.json.tmp
+
 # Runtime counters
 anniversary.json
 

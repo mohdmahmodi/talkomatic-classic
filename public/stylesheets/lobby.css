@@ -330,10 +330,10 @@ html {
 .external-links a > i,
 .external-links a > svg {
   flex: none;
-  width: 20px;
-  margin-right: 11px;
+  width: 18px;
+  margin-right: 9px;
   text-align: center;
-  font-size: 16px;
+  font-size: 15px;
 }
 
 .external-links a:hover {
