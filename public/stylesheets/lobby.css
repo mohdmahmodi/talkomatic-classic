@@ -286,7 +286,12 @@ html {
 
 .external-links {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  /* minmax(0, 1fr), NOT 1fr. A bare 1fr is minmax(auto, 1fr), and that `auto`
+     floor stops a column shrinking below its widest label's min-content width -
+     so "Documentation" widened column one to 159px, the two columns stopped
+     being equal, and the whole grid pushed past the 320px panel and got
+     clipped. A zero floor lets the tracks actually split the space. */
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   margin-bottom: 10px;
   width: 100%;
@@ -298,17 +303,23 @@ html {
 
   display: flex;
   align-items: center;
+  /* The panel is narrow, so a flex child that refuses to shrink is what pushes
+     a label out of its tile. */
+  min-width: 0;
   background-color: var(--external-links-background-color);
   border: 1px solid transparent;
-  padding: 11px 13px;
+  padding: 10px 11px;
   border-radius: 5px;
   color: var(--external-links-color);
   text-decoration: none;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: bold;
   letter-spacing: 0.2px;
-  line-height: 1.2;
-  white-space: nowrap;
+  line-height: 1.25;
+  /* Wrap rather than clip. A label that runs long takes a second line and the
+     row grows to match; truncating to "Docum…" would be worse than a wrap. */
+  white-space: normal;
+  overflow-wrap: break-word;
   transition:
     background-color 0.15s ease,
     border-color 0.15s ease;
@@ -350,8 +361,6 @@ html {
    makes them post the right thing in the right place instead of guessing. */
 .ideas-card {
   background-color: var(--external-links-background-color);
-  border: 1px solid rgba(255, 152, 0, 0.35);
-  border-radius: 6px;
   padding: 12px 13px;
   margin-bottom: 10px;
 }
