@@ -195,34 +195,108 @@ function cleanupBoardState(roomId) {
   puzzle.destroyForRoom(roomId);
 }
 
+// ── Claimed areas: a patch of board that is yours ───────────────────────────
+// Drag a box and nobody else can draw, fill or erase inside it. Asked for by
+// people who wanted somewhere to work without somebody scribbling over it.
+//
+// One box per person, replaced if they claim again, gone when they leave the
+// room. Not persisted: a claim is about who is here now, and a board reloaded
+// tomorrow with yesterday's fences on it would be a puzzle rather than a help.
+const CLAIM_MIN = 120; // world units per side - smaller is not worth fencing
+const CLAIM_MAX = 1800; // and nobody fences off the whole board
+
+function boardClaims(bs) {
+  if (!Array.isArray(bs.claims)) bs.claims = [];
+  return bs.claims;
+}
+
+function claimsOverlap(a, b) {
+  return (
+    a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
+  );
+}
+
+// The claim covering this point that belongs to somebody ELSE, if any.
+function foreignClaimAt(bs, userId, x, y) {
+  for (const c of boardClaims(bs)) {
+    if (c.owner === userId) continue;
+    if (x >= c.x && x <= c.x + c.w && y >= c.y && y <= c.y + c.h) return c;
+  }
+  return null;
+}
+
+function sendClaims(roomId) {
+  const bs = boardState.get(roomId);
+  if (!io() || !bs) return;
+  io()
+    .to(roomId)
+    .emit("board claims", {
+      claims: boardClaims(bs).map((c) => ({
+        owner: c.owner,
+        name: c.name,
+        x: c.x,
+        y: c.y,
+        w: c.w,
+        h: c.h,
+      })),
+    });
+}
+
+// Called when somebody leaves the room: their fence goes with them.
+function dropBoardClaim(roomId, userId) {
+  const bs = boardState.get(roomId);
+  if (!bs || !Array.isArray(bs.claims)) return;
+  const before = bs.claims.length;
+  bs.claims = bs.claims.filter((c) => c.owner !== userId);
+  if (bs.claims.length !== before) sendClaims(roomId);
+}
+
 // ── Keeping one person from burying the board ───────────────────────────────
 // A hand-drawn line costs a person real seconds to make. A shape or a bucket
 // fill costs one click, and arrives as one finished event - which makes it the
 // obvious thing to spam. Two guards, because they answer different halves of
 // it: how FAST somebody can add shapes, and how much of a full board any one
 // person is allowed to be holding.
-const BOARD_ADD_BURST = 10; // finished shapes...
-const BOARD_ADD_WINDOW = 5000; // ...per this many ms, per person
-const boardAddTimes = new Map(); // userId -> [ts]
+// A sliding window on its own was not enough: it let a shape through the
+// moment the oldest one aged out, so somebody hammering the tool still got a
+// steady drip and could paper over an area given a minute. Going over now buys
+// a flat COOLDOWN with nothing accepted at all, which is what makes it not
+// worth doing.
+const BOARD_ADD_BURST = 8; // finished shapes...
+const BOARD_ADD_WINDOW = 6000; // ...per this many ms, per person
+const BOARD_ADD_COOLDOWN = 15000; // then nothing at all, for this long
+const boardAddTimes = new Map(); // userId -> { times: [ts], until: ts }
 
 function allowBoardAdd(userId) {
   const now = Date.now();
-  // Nobody is tracked for longer than the window, so a busy day does not leave
-  // a map full of people who drew one rectangle and left.
+  // Nobody is tracked for longer than they are being counted, so a busy day
+  // does not leave a map full of people who drew one rectangle and left.
   if (boardAddTimes.size > 500)
-    for (const [uid, ts] of boardAddTimes)
-      if (!ts.length || now - ts[ts.length - 1] > BOARD_ADD_WINDOW)
+    for (const [uid, rec] of boardAddTimes)
+      if (
+        now > (rec.until || 0) &&
+        !(rec.times || []).some((t) => now - t < BOARD_ADD_WINDOW)
+      )
         boardAddTimes.delete(uid);
-  const times = (boardAddTimes.get(userId) || []).filter(
-    (t) => now - t < BOARD_ADD_WINDOW,
-  );
-  if (times.length >= BOARD_ADD_BURST) {
-    boardAddTimes.set(userId, times);
-    return false;
+
+  const rec = boardAddTimes.get(userId) || { times: [], until: 0 };
+  if (now < rec.until) return 0;
+  rec.times = rec.times.filter((t) => now - t < BOARD_ADD_WINDOW);
+  if (rec.times.length >= BOARD_ADD_BURST) {
+    rec.until = now + BOARD_ADD_COOLDOWN;
+    rec.times = [];
+    boardAddTimes.set(userId, rec);
+    return 0;
   }
-  times.push(now);
-  boardAddTimes.set(userId, times);
-  return true;
+  rec.times.push(now);
+  boardAddTimes.set(userId, rec);
+  return 1;
+}
+
+// How long until they may add another, for the message.
+function boardAddWaitMs(userId) {
+  const rec = boardAddTimes.get(userId);
+  return rec ? Math.max(0, (rec.until || 0) - Date.now()) : 0;
 }
 
 // The board holds MAX_BOARD_STROKES and then starts dropping the oldest. Left
@@ -2394,6 +2468,7 @@ async function leaveRoom(socket, userId) {
     clearAFKTimers(userId);
 
     finalizeBoardUserStroke(roomId, userId);
+    dropBoardClaim(roomId, userId);
     pianoDropPresence(roomId, userId, true);
 
     const room = state.rooms.get(roomId);
@@ -3280,6 +3355,7 @@ function registerSocketHandlers(opts) {
         socket.emit("board state", {
           strokes: bs.strokes,
           active: activeObj,
+          claims: boardClaims(bs),
         });
 
         emitSubAppEvent(
@@ -3332,6 +3408,90 @@ function registerSocketHandlers(opts) {
           // ever offering to remove them again.
           barredUntil: boardBarredUntil(socket.roomId, stroke.owner) || 0,
         });
+      }),
+    );
+
+    // ── Talkoboard: claiming a patch of the board ───────────────────────
+    socket.on(
+      "board claim",
+      safe(async (data) => {
+        const userId = socket.handshake.session?.userId;
+        if (!socket.roomId || !userId || socket.spectating) return;
+        if (boardBarredUntil(socket.roomId, userId)) return;
+
+        const num = (v) => (typeof v === "number" && isFinite(v) ? v : null);
+        const x = num(data?.x);
+        const y = num(data?.y);
+        const w = num(data?.w);
+        const h = num(data?.h);
+        if (x === null || y === null || w === null || h === null) return;
+        if (w < CLAIM_MIN || h < CLAIM_MIN)
+          return socket.emit("board claim result", {
+            ok: false,
+            message: "Too small to be worth fencing off",
+          });
+        if (w > CLAIM_MAX || h > CLAIM_MAX)
+          return socket.emit("board claim result", {
+            ok: false,
+            message: "That is more board than one person may take",
+          });
+
+        const bs = getBoardState(socket.roomId);
+        const claims = boardClaims(bs);
+        const want = { x, y, w, h };
+        // Somebody else's fence is somebody else's. Overlapping would make
+        // "only you can draw here" untrue for both of you.
+        for (const c of claims)
+          if (c.owner !== userId && claimsOverlap(c, want))
+            return socket.emit("board claim result", {
+              ok: false,
+              message: "That overlaps " + (c.name || "someone") + "'s area",
+            });
+
+        const room = state.rooms.get(socket.roomId);
+        const me = room?.users?.find((u) => u.id === userId);
+        const next = {
+          owner: userId,
+          name: (me && me.username) || "Someone",
+          x,
+          y,
+          w,
+          h,
+          ts: Date.now(),
+        };
+        // One each: claiming again moves your fence rather than adding one.
+        bs.claims = claims.filter((c) => c.owner !== userId).concat([next]);
+        sendClaims(socket.roomId);
+        socket.emit("board claim result", { ok: true });
+      }),
+    );
+
+    socket.on(
+      "board unclaim",
+      safe(async (data) => {
+        const userId = socket.handshake.session?.userId;
+        if (!socket.roomId || !userId) return;
+        // Your own always; anybody's if you are staff, because a fence left
+        // round something that has to go would stop staff dealing with it.
+        const target =
+          typeof data?.owner === "string" && isStaffSocket(socket)
+            ? data.owner
+            : userId;
+        const bs = boardState.get(socket.roomId);
+        if (!bs || !Array.isArray(bs.claims)) return;
+        const gone = bs.claims.find((c) => c.owner === target);
+        if (!gone) return;
+        bs.claims = bs.claims.filter((c) => c.owner !== target);
+        sendClaims(socket.roomId);
+        if (target !== userId) {
+          const room = state.rooms.get(socket.roomId);
+          logStaff(
+            socket,
+            "release board area",
+            room?.users?.find((u) => u.id === target) || `user:${target}`,
+            room,
+          );
+        }
       }),
     );
 
@@ -3508,6 +3668,19 @@ function registerSocketHandlers(opts) {
         const strokeId =
           typeof data.id === "string" && data.id.length <= 64 ? data.id : null;
 
+        // Somebody else's patch of board: not yours to draw on, or rub out.
+        const bsClaim = getBoardState(socket.roomId);
+        const blocked = foreignClaimAt(
+          bsClaim,
+          userId,
+          data.point.x,
+          data.point.y,
+        );
+        if (blocked)
+          return socket.emit("board blocked", {
+            name: blocked.name || "Someone",
+          });
+
         const stroke = {
           id: strokeId,
           owner: userId,
@@ -3551,6 +3724,9 @@ function registerSocketHandlers(opts) {
         const validPoints = [];
         for (const p of data.points) {
           if (typeof p.x === "number" && typeof p.y === "number") {
+            // A line drawn into somebody else's area stops at the fence
+            // rather than carrying on inside it.
+            if (foreignClaimAt(bs, userId, p.x, p.y)) continue;
             validPoints.push({ x: p.x, y: p.y });
           }
         }
@@ -3619,7 +3795,8 @@ function registerSocketHandlers(opts) {
         if (boardBarredUntil(socket.roomId, userId)) return;
         // Shapes and fills come through here, one click each. Staff are not
         // exempt: the point is the board, not who is at it.
-        if (!allowBoardAdd(userId))
+        if (!allowBoardAdd(userId)) {
+          const wait = Math.ceil(boardAddWaitMs(userId) / 1000);
           return socket.emit("board too fast", {
             // Which one was refused, so the drawer's own screen can drop it
             // rather than showing a shape nobody else has.
@@ -3627,8 +3804,12 @@ function registerSocketHandlers(opts) {
               typeof data?.stroke?.id === "string"
                 ? data.stroke.id.slice(0, 64)
                 : null,
-            message: "Too many shapes at once - give it a second",
+            wait,
+            message:
+              "Too many shapes at once" +
+              (wait ? " - wait " + wait + "s" : ""),
           });
+        }
         const s = data?.stroke;
         if (!s || typeof s !== "object") return;
         if (typeof s.id !== "string" || s.id.length > 64) return;
@@ -3642,6 +3823,18 @@ function registerSocketHandlers(opts) {
           }
         }
         if (points.length === 0) return;
+
+        // A shape or a fill is all or nothing: if any of it lands in somebody
+        // else's area, none of it does.
+        const bsAdd = getBoardState(socket.roomId);
+        for (const p of points) {
+          const c = foreignClaimAt(bsAdd, userId, p.x, p.y);
+          if (c)
+            return socket.emit("board blocked", {
+              id: s.id,
+              name: c.name || "Someone",
+            });
+        }
 
         const stroke = {
           id: s.id,

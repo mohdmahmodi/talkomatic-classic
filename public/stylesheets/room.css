@@ -1159,6 +1159,10 @@ html {
   opacity: 0.35;
   pointer-events: none;
 }
+/* Still pressable, just not doing anything for the tool in hand. */
+.tb-tool-btn.off {
+  opacity: 0.4;
+}
 .tb-icon-btn {
   width: 34px;
   height: 32px;
@@ -1206,128 +1210,6 @@ html {
 .tb-color-caret {
   color: #8d8d8d;
   font-size: 11px;
-}
-
-/* Shapes: one button wearing the shape you picked, the rest behind it. */
-.tb-shape-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  color: #c3c3c3;
-  font-size: 14px;
-  padding: 0 7px;
-  height: 32px;
-  cursor: pointer;
-}
-.tb-shape-btn:hover,
-.tb-shape-btn.open {
-  background: #2a2a2a;
-  color: var(--tk-text);
-}
-.tb-shape-btn.active {
-  background: var(--tk-accent);
-  border-color: var(--tk-accent);
-  color: #000000;
-}
-.tb-shape-btn.active .tb-color-caret {
-  color: rgba(0, 0, 0, 0.55);
-}
-
-.tb-shape-panel {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  width: 214px;
-  max-width: calc(100% - 20px);
-  background: var(--tk-bg);
-  border: 1px solid var(--tk-border);
-  border-radius: 8px;
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55);
-  padding: 12px;
-  z-index: 31;
-  display: none;
-}
-.tb-shape-panel.show {
-  display: block;
-}
-.tb-shape-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 6px;
-}
-.tb-shape-pick {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: var(--tk-tile);
-  border: 1px solid var(--tk-border);
-  border-radius: 6px;
-  color: #c3c3c3;
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: bold;
-  padding: 8px 9px;
-  cursor: pointer;
-  text-align: left;
-}
-.tb-shape-pick i {
-  width: 14px;
-  text-align: center;
-  color: #8d8d8d;
-}
-.tb-shape-pick:hover {
-  border-color: var(--tk-accent);
-  color: var(--tk-text);
-}
-.tb-shape-pick.on {
-  background: var(--tk-accent);
-  border-color: var(--tk-accent);
-  color: #000000;
-}
-.tb-shape-pick.on i {
-  color: #000000;
-}
-.tb-shape-note {
-  color: #8d8d8d;
-  font-size: 10.5px;
-  line-height: 1.4;
-  margin: 9px 0;
-}
-.tb-shape-fill {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  background: var(--tk-tile);
-  border: 1px solid var(--tk-border);
-  border-radius: 6px;
-  color: #c3c3c3;
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: bold;
-  padding: 8px 9px;
-  cursor: pointer;
-}
-.tb-shape-fill i {
-  color: #8d8d8d;
-  font-size: 11px;
-}
-.tb-shape-fill:hover {
-  border-color: var(--tk-accent);
-  color: var(--tk-text);
-}
-.tb-shape-fill.active,
-.tb-shape-fill.active i {
-  background: var(--tk-accent);
-  border-color: var(--tk-accent);
-  color: #000000;
-}
-/* Greyed while the shape in hand has no inside to fill. */
-.tb-shape-fill.off {
-  opacity: 0.45;
 }
 
 /* Size slider */
@@ -1525,43 +1407,22 @@ html {
 .tb-gradient-swatch {
   width: 34px;
 }
+/* Two buttons of equal width, each with room for its label. The picker used to
+   be a 34px box with the word "Custom" inside it, which of course did not fit. */
 .tb-custom-row {
   display: flex;
   gap: 8px;
-  align-items: center;
+  align-items: stretch;
 }
-.tb-custom-pick {
-  position: relative;
-  width: 34px;
-  height: 30px;
-  border-radius: 6px;
-  border: 1px solid var(--tk-border);
-  background: #000000;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: #c3c3c3;
-  overflow: hidden;
-}
-.tb-custom-pick:hover {
-  border-color: var(--tk-accent);
-  color: var(--tk-text);
-}
-.tb-custom-pick input[type="color"] {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  cursor: pointer;
-  border: none;
-  padding: 0;
-}
+.tb-custom-pick,
 .tb-eyedropper {
-  flex: 1;
-  height: 30px;
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  height: 34px;
   border-radius: 6px;
   border: 1px solid var(--tk-border);
-  background: #000000;
+  background: var(--tk-tile);
   color: #c3c3c3;
   cursor: pointer;
   font-family: inherit;
@@ -1570,11 +1431,38 @@ html {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 7px;
+  padding: 0 8px;
+  overflow: hidden;
 }
+.tb-custom-pick i,
+.tb-eyedropper i {
+  font-size: 12px;
+  color: #8d8d8d;
+  flex: none;
+}
+.tb-custom-pick span,
+.tb-eyedropper span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tb-custom-pick:hover,
 .tb-eyedropper:hover {
   border-color: var(--tk-accent);
   color: var(--tk-text);
+}
+.tb-custom-pick:hover i,
+.tb-eyedropper:hover i {
+  color: var(--tk-accent);
+}
+.tb-custom-pick input[type="color"] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+  border: none;
+  padding: 0;
 }
 .tb-pop-empty {
   color: #8d8d8d;

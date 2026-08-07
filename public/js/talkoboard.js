@@ -85,10 +85,16 @@ class Talkoboard {
     // Shapes are ordinary strokes: a rectangle is a stroke whose points trace a
     // rectangle. Nothing else in the board - undo, erase-by-person, saving the
     // image, replaying it on someone else's screen - has to know about them.
-    this.SHAPES = ["line", "arrow", "rect", "ellipse", "triangle"];
+    this.SHAPES = ["line", "rect", "ellipse", "triangle"];
     this.shapeStart = null; // world point a shape drag began at
     this.preview = null; // the shape under the pointer, drawn last, sent to nobody
     this.fillShapes = false; // draw shapes filled rather than as outlines
+
+    // ── Claimed areas ───────────────────────────────────────────────
+    // A box somebody has fenced off. Only its owner can draw inside it. The
+    // server is the rule; this list is what the board draws and what stops
+    // your pen locally so you never see a line the server threw away.
+    this.claims = []; // [{ owner, name, x, y, w, h }]
 
     // ── Gradient brush (null = solid color) ─────────────────────────
     this.gradient = null; // array of hex stops when a gradient is selected
@@ -285,34 +291,59 @@ class Talkoboard {
     this.penBtn = tool("pen", "fa-pen", "Pen");
     this.eraserBtn = tool("eraser", "fa-eraser", "Eraser");
 
-    // Shapes live behind one button rather than six. A row of a dozen little
-    // icons is a wall, and you only ever want one shape at a time: the button
-    // wears the one you picked and opens the rest on a tap, the same way the
-    // color button works.
+    // Shapes, out on the bar where you can see them.
     const shapeGroup = document.createElement("div");
     shapeGroup.className = "tb-group";
-    this.shapeBtn = document.createElement("button");
-    this.shapeBtn.type = "button";
-    this.shapeBtn.className = "tb-shape-btn";
-    this.shapeBtn.title = "Shapes";
-    this.shapeIcon = document.createElement("i");
-    this.shapeIcon.className = "fas fa-square";
-    const shapeCaret = document.createElement("span");
-    shapeCaret.className = "tb-color-caret";
-    shapeCaret.innerHTML = '<i class="fas fa-caret-down"></i>';
-    this.shapeBtn.appendChild(this.shapeIcon);
-    this.shapeBtn.appendChild(shapeCaret);
-    this.shapeBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      this.toggleShapePanel();
-    });
-    shapeGroup.appendChild(this.shapeBtn);
-    this.bucketBtn = tool(
-      "bucket",
-      "fa-fill-drip",
-      "Fill a closed area with the current color",
+    const shape = (name, icon, title) => {
+      const b = this.makeBtn(
+        "tb-tool-btn tb-icon-btn",
+        '<i class="fas ' + icon + '"></i>',
+        title,
+      );
+      b.addEventListener("click", () => this.setTool(name));
+      this.toolBtns[name] = b;
+      shapeGroup.appendChild(b);
+      return b;
+    };
+    shape("line", "fa-slash", "Line - hold Shift to snap the angle");
+    shape("rect", "fa-square", "Rectangle - hold Shift for a square");
+    shape("ellipse", "fa-circle", "Ellipse - hold Shift for a circle");
+    shape("triangle", "fa-play", "Triangle");
+    this.toolBtns.triangle.querySelector("i").style.transform = "rotate(-90deg)";
+    shape("bucket", "fa-fill-drip", "Fill a closed area with the current color");
+
+    // Outline or solid. Greys out while the tool in hand has no inside.
+    this.fillBtn = this.makeBtn(
+      "tb-tool-btn tb-icon-btn off",
+      '<i class="fas fa-square-full"></i>',
+      "Draw shapes filled in",
     );
-    shapeGroup.appendChild(this.bucketBtn);
+    this.fillBtn.addEventListener("click", () =>
+      this.setFillShapes(!this.fillShapes),
+    );
+    shapeGroup.appendChild(this.fillBtn);
+
+    // Your own patch of board: drag a box, and only you can draw in it.
+    const areaGroup = document.createElement("div");
+    areaGroup.className = "tb-group";
+    const areaBtn = this.makeBtn(
+      "tb-tool-btn tb-icon-btn",
+      '<i class="fas fa-vector-square"></i>',
+      "Claim an area - drag a box only you can draw in",
+    );
+    areaBtn.addEventListener("click", () => this.setTool("claim"));
+    this.toolBtns.claim = areaBtn;
+    areaGroup.appendChild(areaBtn);
+    this.releaseBtn = this.makeBtn(
+      "tb-tool-btn tb-icon-btn",
+      '<i class="fas fa-square-xmark"></i>',
+      "Give your area back",
+    );
+    this.releaseBtn.addEventListener("click", () =>
+      this.socket.emit("board unclaim", {}),
+    );
+    this.releaseBtn.style.display = "none";
+    areaGroup.appendChild(this.releaseBtn);
 
     // Staff only: point at a drawing and deal with the person who made it,
     // rather than clearing the whole board because one thing has to go.
@@ -400,6 +431,7 @@ class Talkoboard {
 
     toolbar.appendChild(drawGroup);
     toolbar.appendChild(shapeGroup);
+    toolbar.appendChild(areaGroup);
     toolbar.appendChild(colorGroup);
     toolbar.appendChild(sizeWrap);
     toolbar.appendChild(historyGroup);
@@ -491,7 +523,6 @@ class Talkoboard {
 
     // Color panel (docked top-left of the board)
     this.buildColorPanel(canvasWrap);
-    this.buildShapePanel(canvasWrap);
 
     // Transient hint toast
     this.hintEl = document.createElement("div");
@@ -514,73 +545,6 @@ class Talkoboard {
   }
 
   // ── Color panel ──────────────────────────────────────────────────
-  // The shapes, and whether they come out solid. Opens under the shape button.
-  buildShapePanel(parent) {
-    const SHAPES = [
-      ["line", "fa-slash", "Line"],
-      ["arrow", "fa-arrow-right-long", "Arrow"],
-      ["rect", "fa-square", "Rectangle"],
-      ["ellipse", "fa-circle", "Ellipse"],
-      ["triangle", "fa-play", "Triangle"],
-    ];
-    this.shapePanel = document.createElement("div");
-    this.shapePanel.className = "tb-shape-panel";
-    this.shapePanel.addEventListener("click", (e) => e.stopPropagation());
-
-    const title = document.createElement("div");
-    title.className = "tb-pop-title";
-    title.textContent = "Shape";
-    this.shapePanel.appendChild(title);
-
-    const grid = document.createElement("div");
-    grid.className = "tb-shape-grid";
-    this.shapePicks = {};
-    for (const [name, icon, label] of SHAPES) {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.className = "tb-shape-pick";
-      b.title = label;
-      b.innerHTML = '<i class="fas ' + icon + '"></i><span></span>';
-      b.querySelector("span").textContent = label;
-      if (name === "triangle")
-        b.querySelector("i").style.transform = "rotate(-90deg)";
-      b.addEventListener("click", () => {
-        this.setTool(name);
-        this.toggleShapePanel(false);
-      });
-      this.shapePicks[name] = b;
-      grid.appendChild(b);
-    }
-    this.shapePanel.appendChild(grid);
-
-    const hint = document.createElement("div");
-    hint.className = "tb-shape-note";
-    hint.textContent = "Hold Shift while dragging for a square, circle or 45°.";
-    this.shapePanel.appendChild(hint);
-
-    // Outline or solid. Only means anything to a shape with an inside.
-    this.fillBtn = document.createElement("button");
-    this.fillBtn.type = "button";
-    this.fillBtn.className = "tb-shape-fill";
-    this.fillBtn.innerHTML =
-      '<i class="fas fa-square-full"></i><span>Fill the shape in</span>';
-    this.fillBtn.addEventListener("click", () =>
-      this.setFillShapes(!this.fillShapes),
-    );
-    this.shapePanel.appendChild(this.fillBtn);
-
-    parent.appendChild(this.shapePanel);
-  }
-
-  toggleShapePanel(force) {
-    if (!this.shapePanel) return;
-    const open =
-      force != null ? force : !this.shapePanel.classList.contains("show");
-    this.shapePanel.classList.toggle("show", open);
-    this.shapeBtn.classList.toggle("open", open);
-    if (open) this.toggleColorPanel(false);
-  }
-
   buildColorPanel(parent) {
     const panel = document.createElement("div");
     panel.className = "tb-color-panel";
@@ -596,18 +560,22 @@ class Talkoboard {
       presetGrid.appendChild(this.makeSwatch(c, c));
     }
 
-    // Custom picker + eyedropper
+    // Custom picker + eyedropper. Two buttons of equal width with room for
+    // their words: the picker used to be a 34px box with "Custom" written
+    // inside it, so the word simply did not fit.
     const customRow = document.createElement("div");
     customRow.className = "tb-custom-row";
 
     const customLabel = document.createElement("label");
     customLabel.className = "tb-custom-pick";
-    customLabel.title = "Custom color";
+    customLabel.title = "Pick any color";
     this.colorInput = document.createElement("input");
     this.colorInput.type = "color";
     this.colorInput.value = this.color;
     const customText = document.createElement("span");
     customText.textContent = "Custom";
+    customLabel.appendChild(document.createElement("i")).className =
+      "fas fa-palette";
     customLabel.appendChild(this.colorInput);
     customLabel.appendChild(customText);
     // Live preview while dragging; commit to "recent" only on change
@@ -621,8 +589,9 @@ class Talkoboard {
     this.eyedropperBtn = document.createElement("button");
     this.eyedropperBtn.type = "button";
     this.eyedropperBtn.className = "tb-eyedropper";
-    this.eyedropperBtn.title = "Eyedropper: pick a color from the board";
-    this.eyedropperBtn.innerHTML = '<i class="fas fa-eye-dropper"></i>';
+    this.eyedropperBtn.title = "Take a color off the board";
+    this.eyedropperBtn.innerHTML =
+      '<i class="fas fa-eye-dropper"></i><span>Pick up</span>';
     this.eyedropperBtn.addEventListener("click", () =>
       this.activateEyedropper(),
     );
@@ -699,8 +668,6 @@ class Talkoboard {
     this.colorPanel.classList.toggle("show", open);
     this.colorBtn.classList.toggle("active", open);
     if (open) {
-      // They dock in the same corner, so only one is ever up.
-      this.toggleShapePanel(false);
       this.renderRecentColors();
       this.renderUserColors();
     }
@@ -968,7 +935,6 @@ class Talkoboard {
     // Close the popups when tapping the board
     this.canvas.addEventListener("pointerdown", () => {
       this.toggleColorPanel(false);
-      this.toggleShapePanel(false);
     });
 
     // Escape to close board / panel
@@ -976,10 +942,6 @@ class Talkoboard {
       if (e.key !== "Escape" || !this.isOpen) return;
       if (this.colorPanel.classList.contains("show")) {
         this.toggleColorPanel(false);
-        return;
-      }
-      if (this.shapePanel && this.shapePanel.classList.contains("show")) {
-        this.toggleShapePanel(false);
         return;
       }
       if (this.chatOpen) {
@@ -1094,20 +1056,6 @@ class Talkoboard {
     this.preview = null;
     for (const [tool, btn] of Object.entries(this.toolBtns || {}))
       if (btn) btn.classList.toggle("active", tool === name);
-    // The shape button wears whichever shape is selected, and lights up only
-    // while one of them is the tool in hand.
-    if (this.shapeBtn) {
-      this.shapeBtn.classList.toggle("active", this.isShapeTool(name));
-      if (this.shapePicks)
-        for (const [shape, b] of Object.entries(this.shapePicks))
-          b.classList.toggle("on", shape === name);
-      if (this.isShapeTool(name) && this.shapePicks[name]) {
-        const icon = this.shapePicks[name].querySelector("i");
-        this.shapeIcon.className = icon.className;
-        this.shapeIcon.style.transform = icon.style.transform;
-        this.shapeBtn.title = "Shape: " + this.shapePicks[name].title;
-      }
-    }
     if (this.inspectActive)
       this.showHint("Mod tools: tap a drawing to see who made it");
     else this.closeModCard();
@@ -1376,12 +1324,38 @@ class Talkoboard {
     return this.SHAPES.includes(name || this.tool);
   }
 
+  // Somebody else's fence around this point, if there is one.
+  foreignClaimAt(pt) {
+    if (!pt) return null;
+    for (const c of this.claims) {
+      if (c.owner === this.userId) continue;
+      if (pt.x >= c.x && pt.x <= c.x + c.w && pt.y >= c.y && pt.y <= c.y + c.h)
+        return c;
+    }
+    return null;
+  }
+
+  // Says so on the way past, the same as being barred does.
+  blockedByClaim(pt) {
+    const c = this.foreignClaimAt(pt);
+    if (!c) return false;
+    this.showHint("That is " + (c.name || "someone") + "'s area");
+    return true;
+  }
+
+  setClaims(list) {
+    this.claims = Array.isArray(list) ? list : [];
+    const mine = this.claims.some((c) => c.owner === this.userId);
+    if (this.releaseBtn) this.releaseBtn.style.display = mine ? "" : "none";
+    if (this.isOpen) this.scheduleRedraw();
+  }
+
   // Shift squares a rectangle, circles an ellipse, and snaps a line to 45s.
   constrainPoint(a, b, kind, shift) {
     if (!shift) return b;
     const dx = b.x - a.x;
     const dy = b.y - a.y;
-    if (kind === "line" || kind === "arrow") {
+    if (kind === "line") {
       const ang = Math.atan2(dy, dx);
       const step = Math.PI / 4;
       const snapped = Math.round(ang / step) * step;
@@ -1399,21 +1373,6 @@ class Talkoboard {
   shapePoints(kind, a, b) {
     const pts = [];
     if (kind === "line") return [a, b];
-    if (kind === "arrow") {
-      // Shaft, then back down each side of the head: one unbroken polyline, so
-      // it renders and erases like anything else drawn by hand. The head grows
-      // with the pen - a 1px arrow with a 30px head is not an arrow - and never
-      // takes more than a third of the shaft, or a short one is all head.
-      const len = Math.hypot(b.x - a.x, b.y - a.y);
-      const ang = Math.atan2(b.y - a.y, b.x - a.x);
-      const head = Math.min(Math.max(this.size * 4, 12), len * 0.34);
-      const spread = 0.44; // ~25 degrees off the shaft
-      const wing = (dir) => ({
-        x: b.x - Math.cos(ang + dir * spread) * head,
-        y: b.y - Math.sin(ang + dir * spread) * head,
-      });
-      return [a, b, wing(1), b, wing(-1)];
-    }
     const x0 = Math.min(a.x, b.x);
     const y0 = Math.min(a.y, b.y);
     const x1 = Math.max(a.x, b.x);
@@ -2024,6 +1983,10 @@ class Talkoboard {
       this.canvas.style.cursor = "cell";
       return;
     }
+    if (this.tool === "claim") {
+      this.canvas.style.cursor = "crosshair";
+      return;
+    }
     this.canvas.style.cursor =
       this._spaceDown || this.panMode ? "grab" : "crosshair";
   }
@@ -2250,8 +2213,24 @@ class Talkoboard {
       this.renderStrokeSmooth(ctx, this.currentStroke);
     }
 
+    // Fences last, over the drawing but never on top of it: a dashed edge and
+    // a name tag, no wash of colour that would dull what is inside.
+    for (const c of this.claims) this.renderClaim(ctx, c);
+
     // The shape under the pointer, last and local only.
     if (this.preview) {
+      if (this.preview.claim) {
+        // Fencing, not drawing: show it as the fence it is about to be.
+        this.renderClaim(ctx, {
+          owner: this.userId,
+          x: Math.min(this.preview.a.x, this.preview.b.x),
+          y: Math.min(this.preview.a.y, this.preview.b.y),
+          w: Math.abs(this.preview.b.x - this.preview.a.x),
+          h: Math.abs(this.preview.b.y - this.preview.a.y),
+        });
+        ctx.restore();
+        return;
+      }
       this.renderStrokeSmooth(ctx, {
         points: this.shapePoints(
           this.preview.kind,
@@ -2401,6 +2380,33 @@ class Talkoboard {
     ctx.moveTo(fs.x, fs.y);
     ctx.lineTo(pts[n - 1].x, pts[n - 1].y);
     ctx.stroke();
+  }
+
+  // One claimed area: dashed edge, name tag in the corner, and orange when it
+  // is yours so you can tell at a glance which one you may draw in.
+  renderClaim(ctx, c) {
+    const mine = c.owner === this.userId;
+    const z = this.zoom;
+    ctx.save();
+    ctx.setLineDash([8 / z, 6 / z]);
+    ctx.lineWidth = 1.5 / z;
+    ctx.strokeStyle = mine ? "#ff9800" : "#8d8d8d";
+    ctx.strokeRect(c.x, c.y, c.w, c.h);
+    ctx.setLineDash([]);
+
+    // The tag sits at a fixed size on screen, so it stays readable however far
+    // out you are zoomed.
+    const label = (mine ? "Your area" : (c.name || "Someone") + "'s area");
+    const pad = 4 / z;
+    ctx.font = "bold " + 11 / z + "px sans-serif";
+    const w = ctx.measureText(label).width + pad * 2;
+    const h = 16 / z;
+    ctx.fillStyle = mine ? "#ff9800" : "#5a5a5a";
+    ctx.fillRect(c.x, c.y - h, w, h);
+    ctx.fillStyle = mine ? "#000000" : "#ffffff";
+    ctx.textBaseline = "middle";
+    ctx.fillText(label, c.x + pad, c.y - h / 2);
+    ctx.restore();
   }
 
   // Straight from point to point, corners intact. Miter joins, so a rectangle
@@ -2559,6 +2565,16 @@ class Talkoboard {
     // would leave a line on this screen that exists nowhere else.
     if (this.isBarredForDrawing()) return;
 
+    // Claiming an area is a drag like a rectangle, but it fences rather than
+    // draws, so it is the one tool allowed to start inside nothing.
+    if (this.tool === "claim") {
+      this.shapeStart = this.getCanvasPoint(e);
+      this.preview = null;
+      return;
+    }
+
+    if (this.blockedByClaim(this.getCanvasPoint(e))) return;
+
     // The bucket is a tap, not a drag.
     if (this.tool === "bucket") {
       const rect = this.canvas.getBoundingClientRect();
@@ -2631,10 +2647,19 @@ class Talkoboard {
         this.tool,
         e.shiftKey,
       );
-      this.preview = { kind: this.tool, a: this.shapeStart, b: end };
+      this.preview = {
+        kind: this.tool === "claim" ? "rect" : this.tool,
+        a: this.shapeStart,
+        b: end,
+        claim: this.tool === "claim",
+      };
       this.scheduleRedraw();
       return;
     }
+
+    // Drawing into somebody else's area: the pen stops at the fence rather
+    // than leaving a line here that the server will not keep.
+    if (this.drawing && this.foreignClaimAt(this.getCanvasPoint(e))) return;
 
     if (!this.drawing) return;
     e.preventDefault();
@@ -2676,9 +2701,20 @@ class Talkoboard {
 
     if (this.shapeStart) {
       const start = this.shapeStart;
+      const end = this.getCanvasPoint(e);
       this.shapeStart = null;
       this.preview = null;
-      this.commitShape(this.tool, start, this.getCanvasPoint(e), e.shiftKey);
+      if (this.tool === "claim") {
+        const x = Math.min(start.x, end.x);
+        const y = Math.min(start.y, end.y);
+        const w = Math.abs(end.x - start.x);
+        const h = Math.abs(end.y - start.y);
+        if (w >= 20 && h >= 20)
+          this.socket.emit("board claim", { x, y, w, h });
+        this.scheduleRedraw();
+        return;
+      }
+      this.commitShape(this.tool, start, end, e.shiftKey);
       this.scheduleRedraw();
       return;
     }
@@ -2840,6 +2876,7 @@ class Talkoboard {
     // Replace local state with server truth
     this.strokes = [];
     this.remoteActiveStrokes.clear();
+    this.setClaims(data.claims);
 
     if (data.strokes && Array.isArray(data.strokes)) {
       for (const s of data.strokes) {
@@ -3202,6 +3239,30 @@ class Talkoboard {
       this.showHint(
         (data && data.message) || "Too many shapes at once - give it a second",
       );
+    });
+
+    // ── Claimed areas ────────────────────────────────────────────────
+    this.socket.on("board claims", (d) => this.setClaims(d && d.claims));
+
+    this.socket.on("board claim result", (d) => {
+      if (!d) return;
+      this.showHint(
+        d.ok ? "This area is yours now" : d.message || "Cannot claim that",
+      );
+      if (d.ok) this.setTool("pen");
+    });
+
+    // Something was drawn into somebody else's area. Take it back off this
+    // screen: the server refused it and nobody else has it.
+    this.socket.on("board blocked", (d) => {
+      const id = d && d.id;
+      if (id) {
+        this.strokes = this.strokes.filter((s) => s.id !== id);
+        this.undoStack = this.undoStack.filter((x) => x !== id);
+        this.updateUndoRedoButtons();
+        this.scheduleRedraw();
+      }
+      this.showHint("That is " + ((d && d.name) || "someone") + "'s area");
     });
 
     this.socket.on("board allowed", () => {
