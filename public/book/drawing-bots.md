@@ -357,6 +357,7 @@ Rules worth knowing before you write around them:
 | Finished strokes (`board stroke add`) | 8 per 6 seconds | Then a 15s cooldown. `board too fast` with `id` and `wait` |
 | Points per `board stroke move` | 200 | Extra points dropped |
 | Points per stroke | 5000 | Truncated |
+| Rings per stroke | 256 | Extra rings dropped |
 | Strokes on a board | 2000 | Oldest go, heaviest contributor first |
 | Stroke id | 64 chars | Refused |
 | Brush size | 1 to 50 | Clamped |

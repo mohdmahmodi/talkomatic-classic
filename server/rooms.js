@@ -476,10 +476,21 @@ function finalizeBoardUserStroke(roomId, userId) {
 
 // Validate a gradient-brush spec from the client: 2-8 hex color stops, else
 // null (a plain solid-color stroke). Trusts nothing about it but the shape.
-// A filled shape carries its outline as `points` and, when the fill has holes
-// in it (a bucket fill around something), the rest of its rings here. Same
-// shape as points, capped the same way, so one fill can never be bigger than
-// one stroke's worth of data.
+// A filled shape carries its outline as `points` and the rest of its rings
+// here: holes in a bucket fill, or every separate patch of one colour when
+// something has traced a picture.
+//
+// The POINT budget is what bounds this - bandwidth, memory, and how long the
+// canvas takes to fill it are all counted in points, and that is shared with
+// `points` so one stroke can never be worth more than one stroke of data. The
+// ring count is only how those points are grouped. It was capped at 24 back
+// when rings meant "a fill with a couple of holes in it", and that turned out
+// to be the wall everything hit: a hatched drawing is one shape with hundreds
+// of holes, which could not be expressed at all. 256 rings of three points is
+// still under the point budget, so this costs nothing and lets one stroke
+// carry a whole layer - which means FEWER events, not more.
+const MAX_RINGS_PER_STROKE = 256;
+
 function sanitizeRings(rings, budget) {
   if (!Array.isArray(rings)) return null;
   const out = [];
@@ -492,8 +503,11 @@ function sanitizeRings(rings, budget) {
       pts.push({ x: p.x, y: p.y });
       if (--left <= 0) break;
     }
+    // A ring cut off by the budget is a polygon with a hole blown in its side.
+    // Better to stop than to keep half of one.
+    if (left <= 0 && pts.length < ring.length) break;
     if (pts.length >= 3) out.push(pts);
-    if (out.length >= 24 || left <= 0) break;
+    if (out.length >= MAX_RINGS_PER_STROKE || left <= 0) break;
   }
   return out.length ? out : null;
 }

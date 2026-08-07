@@ -216,7 +216,7 @@ class Talkoboard {
       // accepted at all, so it is not something to retry through.
       limits: {
         maxPointsPerStroke: 5000,
-        maxRingsPerStroke: 24,
+        maxRingsPerStroke: 256,
         addsPerWindow: 8,
         windowMs: 6000,
         cooldownMs: 15000,
