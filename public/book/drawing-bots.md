@@ -10,6 +10,8 @@ Socket.IO events on that same connection.
 
 ## Table of Contents
 
+- [Two kinds of bot](#two-kinds-of-bot)
+- [In the page: userscripts and the console](#in-the-page-userscripts-and-the-console)
 - [The shortest bot that draws](#the-shortest-bot-that-draws)
 - [How the board works](#how-the-board-works)
 - [Freehand: start, move, end](#freehand-start-move-end)
@@ -21,6 +23,96 @@ Socket.IO events on that same connection.
 - [Limits, and what gets you refused](#limits-and-what-gets-you-refused)
 - [Event reference](#event-reference)
 - [A worked example: writing text](#a-worked-example-writing-text)
+
+---
+
+## Two kinds of bot
+
+**Outside the page** - a Node or Python script with a bot token, connecting over
+Socket.IO. It joins a room like anybody else. Everything from
+[the next section](#the-shortest-bot-that-draws) down is about this.
+
+**Inside the page** - a userscript, a bookmarklet, or something typed into the
+console, running in a room you already have open. No token, no second
+connection: it borrows the board you are already looking at. Read on.
+
+---
+
+## In the page: userscripts and the console
+
+Open a room, open the Talkoboard, and the page exposes `window.TalkoboardBots`.
+
+```js
+const tb = window.TalkoboardBots;
+
+tb.draw({
+  points: [{ x: 0, y: 0 }, { x: 200, y: 0 }, { x: 100, y: 160 }, { x: 0, y: 0 }],
+  color: "#e74c3c",
+  size: 5,
+  sharp: true,
+});
+```
+
+That single call puts the stroke on **your** screen and sends it to everyone
+else. Both halves matter: the server does not echo your own strokes back to
+you, so a script that only emits leaves you staring at a blank board wondering
+whether it worked.
+
+| | |
+| --- | --- |
+| `tb.draw(stroke)` | One finished stroke, locally and to the room. Returns its id |
+| `tb.send(strokes, onProgress)` | A batch, **paced under the rate limit**. Returns a promise of the ids |
+| `tb.erase(id)` | Takes one of yours back off, here and everywhere |
+| `tb.view()` | `zoom`, `panX/panY`, size, and `toWorld` / `toScreen` / `centre()` |
+| `tb.claims()` | Areas people have fenced off |
+| `tb.on(event, fn)` | Board events straight through |
+| `tb.limits` | The numbers below, so you do not have to hard-code them |
+| `tb.board`, `tb.socket`, `tb.isOpen` | The real objects, if you need them |
+
+`tb.send()` is the one to reach for. Pacing is what everybody gets wrong by
+hand - the burst is small, and going over it costs fifteen seconds of nothing
+getting through:
+
+```js
+// Draw where the person is actually looking.
+const c = tb.view().centre();
+
+await tb.send(
+  myStrokes.map((s) => ({ ...s, points: s.points.map((p) => ({
+    x: c.x + p.x, y: c.y + p.y,
+  })) })),
+  (done, total) => console.log(done + "/" + total),
+);
+```
+
+### Writing a userscript
+
+Two things will stop you before your code ever runs:
+
+- **Use a `@grant`, not `@grant none`.** The page's Content Security Policy is
+  `script-src 'self' 'nonce-…'`, so a script injected into the page without the
+  nonce is refused and silently never runs. Any grant puts the script in the
+  manager's own sandbox instead, where the policy does not apply. Reach the page
+  through `unsafeWindow`.
+- **`eval` and `new Function` are blocked** by the same policy - there is no
+  `unsafe-eval`. Anything that builds code from strings will throw.
+
+```js
+// ==UserScript==
+// @match        https://classic.talkomatic.co/*
+// @grant        unsafeWindow
+// @run-at       document-idle
+// ==/UserScript==
+
+const tb = unsafeWindow.TalkoboardBots; // undefined until the board is opened
+```
+
+`TalkoboardBots` appears when the board is first opened in a room, so poll for
+it rather than assuming it is there at load.
+
+Nothing here is a privilege. It is the same connection with the same rules: the
+rate limit, claimed areas, bans and moderation apply exactly as they do to a
+person with a mouse, and everything you draw carries your name.
 
 ---
 

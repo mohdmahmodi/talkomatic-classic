@@ -183,6 +183,151 @@ class Talkoboard {
     this.modal = null;
     this.buildModal();
     this.setupSocketListeners();
+    this.registerBotApi();
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // A DOOR FOR USERSCRIPTS AND PAGE BOTS
+  //
+  // Everything here is something a page script could already do through
+  // window.socket, and the server remains the only authority on any of it -
+  // the rate limit, claimed areas, bans and moderation all still apply exactly
+  // as they do to a person with a mouse.
+  //
+  // It exists because there was no way to FIND the board. The instance lives in
+  // a `let` inside room-client.js, a script cannot reach another script's
+  // top-level binding, and the page's CSP forbids eval, so the usual tricks are
+  // closed. Rather than leave people prying at internals, hand over a small
+  // surface and keep it stable.
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  registerBotApi() {
+    window.talkoboardInstance = this;
+    if (window.TalkoboardBots) return; // built once; it reads the live board
+
+    const live = () => window.talkoboardInstance || null;
+    let seq = 0;
+
+    const api = {
+      version: 1,
+
+      // What the server will and will not take. Worth reading before you write
+      // a loop: going over the burst buys a flat cooldown with nothing
+      // accepted at all, so it is not something to retry through.
+      limits: {
+        maxPointsPerStroke: 5000,
+        maxRingsPerStroke: 24,
+        addsPerWindow: 8,
+        windowMs: 6000,
+        cooldownMs: 15000,
+        maxStrokesOnBoard: 2000,
+        sizeRange: [1, 50],
+      },
+
+      get board() {
+        return live();
+      },
+      get socket() {
+        const b = live();
+        return b ? b.socket : null;
+      },
+      get isOpen() {
+        const b = live();
+        return !!(b && b.isOpen);
+      },
+
+      // Where the board is looking, and how to convert between the screen and
+      // the board's own coordinates.
+      view() {
+        const b = live();
+        if (!b) return null;
+        return {
+          zoom: b.zoom,
+          panX: b.panX,
+          panY: b.panY,
+          width: b.displayWidth,
+          height: b.displayHeight,
+          canvas: b.canvas,
+          toWorld: (sx, sy) => b.screenToWorld(sx, sy),
+          toScreen: (wx, wy) => b.worldToScreen(wx, wy),
+          centre: () => b.screenToWorld(b.displayWidth / 2, b.displayHeight / 2),
+        };
+      },
+
+      // Areas people have fenced off. Drawing into one is refused.
+      claims() {
+        const b = live();
+        return b ? b.claims.slice() : [];
+      },
+
+      // One finished stroke: onto your own screen and out to the room. The
+      // server does not echo your own strokes back to you, which is why this
+      // does both - emitting alone leaves you looking at nothing.
+      draw(input) {
+        const b = live();
+        if (!b || !input || !Array.isArray(input.points) || !input.points.length)
+          return null;
+        const stroke = {
+          id: input.id || "bot:" + Date.now().toString(36) + ":" + seq++,
+          owner: b.userId,
+          points: input.points,
+          color: input.color || "#000000",
+          size: input.size == null ? 3 : input.size,
+          eraser: !!input.eraser,
+          gradient: input.gradient || null,
+          fill: !!input.fill,
+          rings: input.rings || null,
+          sharp: !!input.sharp,
+        };
+        b.strokes.push(stroke);
+        if (b.isOpen) b.redraw();
+        b.socket.emit("board stroke add", { stroke: b.strokePayload(stroke) });
+        return stroke.id;
+      },
+
+      // Take one of yours back off, here and everywhere.
+      erase(id) {
+        const b = live();
+        if (!b || !id) return false;
+        b.strokes = b.strokes.filter((s) => s.id !== id);
+        if (b.isOpen) b.redraw();
+        b.socket.emit("board stroke remove", { id });
+        return true;
+      },
+
+      // A batch, paced under the rate limit so none of it is refused. This is
+      // the part everybody gets wrong by hand: the burst is small and going
+      // over it costs fifteen seconds of nothing.
+      send(strokes, onProgress) {
+        const list = Array.isArray(strokes) ? strokes.slice() : [];
+        const ids = [];
+        const PER = 6; // the server allows 8; leave room for the person drawing
+        const GAP = 6500;
+        return new Promise((resolve) => {
+          const step = () => {
+            if (!live()) return resolve(ids);
+            for (const s of list.splice(0, PER)) {
+              const id = api.draw(s);
+              if (id) ids.push(id);
+            }
+            if (onProgress) onProgress(ids.length, ids.length + list.length);
+            if (list.length) setTimeout(step, GAP);
+            else resolve(ids);
+          };
+          step();
+        });
+      },
+
+      // Board events, straight through: "board blocked", "board too fast",
+      // "board barred", "board clear", "board claims", and the rest.
+      on(event, fn) {
+        const b = live();
+        if (b) b.socket.on(event, fn);
+        return api;
+      },
+    };
+
+    window.TalkoboardBots = api;
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
