@@ -29,12 +29,52 @@ function io() {
   return state.io;
 }
 
+// An address can arrive in a free-text field as easily as in `ip`. An IP ban
+// logs the address it blocked as the action's TARGET, and a ban reason can
+// name one in passing. Stripping only the dedicated fields left both of those
+// on screen for every moderator - which is how the whole block list was
+// readable from the activity feed.
+//
+// Deliberately greedy: over-redacting a version number costs nothing, leaking
+// an address costs a user their approximate location.
+const IPV4_RE = /\b\d{1,3}(?:\.\d{1,3}){3}(?:\/\d{1,2})?\b/g;
+// Hex groups and colons. Validated below rather than in the pattern, because
+// the forms that need catching (fully written out, or compressed with "::")
+// are hard to tell apart from a clock time in a regex alone.
+const IPV6_RE = /[0-9a-f]{0,4}(?::[0-9a-f]{0,4}){2,}(?:\/\d{1,3})?/gi;
+const HIDDEN = "[ip hidden]";
+
+function isIpv4(token) {
+  return token
+    .split("/")[0]
+    .split(".")
+    .every((o) => o.length <= 3 && Number(o) <= 255);
+}
+
+// Only the unambiguous shapes. A timestamp like "1:52:08" is three groups with
+// no "::", so it survives; an address is either compressed or has enough
+// groups that nothing else looks like it.
+function isIpv6(token) {
+  const body = token.split("/")[0];
+  return body.includes("::") || body.split(":").length >= 5;
+}
+
+function maskIps(value) {
+  if (typeof value !== "string" || !value) return value;
+  return value
+    .replace(IPV4_RE, (m) => (isIpv4(m) ? HIDDEN : m))
+    .replace(IPV6_RE, (m) => (isIpv6(m) ? HIDDEN : m));
+}
+
 // IP addresses are dev-only. Mods get every field except the raw addresses.
+const MASKED_FIELDS = ["target", "details", "text"];
+
 function redactForMod(entry) {
-  if (entry.ip == null && entry.targetIp == null) return entry;
   const copy = Object.assign({}, entry);
   delete copy.ip;
   delete copy.targetIp;
+  for (const f of MASKED_FIELDS)
+    if (copy[f] != null) copy[f] = maskIps(copy[f]);
   return copy;
 }
 
@@ -220,15 +260,19 @@ function recordNotification({
 
 // Live toast to qualifying staff regardless of whether the dashboard is open,
 // so reports and abuse flags surface even to staff sitting in a room or lobby.
+// The toast carries the same sentence the feed does, so it gets the same mask:
+// a mod-abuse flag lists the actions that tripped it, and an IP block's target
+// is the address itself.
 function notifyStaffToast(text, minLevel) {
   if (!io()) return;
+  const masked = maskIps(text);
   for (const [, s] of io().sockets.sockets) {
     if (s.isDev) {
       s.emit("staff notice", { text });
       continue;
     }
     if (s.isMod && (s.modLevel || 2) >= (minLevel || 2))
-      s.emit("staff notice", { text });
+      s.emit("staff notice", { text: masked });
   }
 }
 
@@ -1372,6 +1416,8 @@ module.exports = {
   recordNotification,
   recordComment,
   recent,
+  redactForMod,
+  maskIps,
   historyFor,
   leaderboard,
   isUsefulAction,

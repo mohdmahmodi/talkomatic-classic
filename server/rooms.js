@@ -1225,7 +1225,7 @@ function buildAppealsList(forDev) {
       reviewedAt: a.reviewedAt || null,
       stillBlocked,
       banBy: ban.by || null,
-      banReason: ban.reason || null,
+      banReason: forDev ? ban.reason || null : audit.maskIps(ban.reason || null),
       banPermanent: !!ban.permanent,
       banExpiry: ban.expiry || 0,
       banAt: ban.ts || null,
@@ -1708,7 +1708,11 @@ function buildBlockList(forDev) {
         (b && typeof b === "object" && b.did) || (isId ? ip.slice(3) : null),
       label: (b && b.label) || (isId && matched[0] && matched[0].name) || null,
       by: (b && b.by) || null,
-      reason: (b && b.reason) || null,
+      // Staff wrote this, and "evading from x.x.x.x" is a natural thing to
+      // write. Masked for mods for the same reason the address itself is.
+      reason: forDev
+        ? (b && b.reason) || null
+        : audit.maskIps((b && b.reason) || null),
       permanent: expiry >= Number.MAX_SAFE_INTEGER,
       expiry: expiry || 0,
       ts: (b && typeof b === "object" && b.ts) || null,
@@ -1733,7 +1737,7 @@ function buildBanHistory(forDev) {
     action: e.action, // "ban" | "unban"
     by: e.by,
     at: e.at,
-    reason: e.reason,
+    reason: forDev ? e.reason : audit.maskIps(e.reason),
     duration: e.duration,
     kind: ipban.isIdKey(e.ip)
       ? "id"
@@ -7043,13 +7047,10 @@ function registerSocketHandlers(opts) {
         socket.emit("staff mod history", {
           ...h,
           canReview: !!socket.isDev,
-          entries: socket.isDev
-            ? h.entries
-            : h.entries.map((e) => {
-              const c = Object.assign({}, e);
-              delete c.ip;
-              return c;
-            }),
+          // Same redaction as the main feed rather than a second copy of the
+          // rule: deleting `ip` here was not enough, because an IP ban records
+          // the address it blocked as the entry's target.
+          entries: socket.isDev ? h.entries : h.entries.map(audit.redactForMod),
         });
       }),
     );

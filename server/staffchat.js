@@ -13,6 +13,10 @@ const path = require("path");
 const fs = require("fs");
 const fsp = require("fs").promises;
 const { DATA_DIR } = require("./datadir");
+// Same masker the notification feed uses, so the Desk cannot become the back
+// door to an address the dashboard hides. audit only reaches back into this
+// file from inside a function, so requiring it here is not a cycle.
+const { maskIps } = require("./audit");
 
 const FILE = path.join(DATA_DIR, "staff-chat.json");
 
@@ -441,6 +445,14 @@ function outbound(msg, socket) {
   const copy = { ...msg };
   // Edit and delete history is a dev-only view; a mod sees the tombstone.
   if (!socket.isDev) delete copy.history;
+  // IP addresses are dev-only, and a queue card carries the same sentence the
+  // notification feed does - an abuse flag lists the actions that tripped it,
+  // and an IP block's target IS the address. Masked on the way out rather than
+  // on the way in, so what is stored stays complete for a developer.
+  if (!socket.isDev) {
+    if (copy.text) copy.text = maskIps(copy.text);
+    if (copy.card) copy.card = maskCard(copy.card);
+  }
   copy.mention = mentions(msg, socket);
   // Reactions are stored as identity keys and sent as a count, the names
   // behind it, and whether this reader is one of them. The client never has to
@@ -568,6 +580,18 @@ function sanitizeCard(qkind, c) {
   };
   for (const k in out) if (out[k] == null) delete out[k];
   if (!out.ids.length) delete out.ids;
+  return out;
+}
+
+// The free-text parts of a card, for a reader who may not see addresses. The
+// id fields are left alone: they are device and user ids, which every staff
+// member already gets on the reports board.
+const CARD_TEXT = ["target", "reason", "quote", "category", "roomName"];
+
+function maskCard(card) {
+  const out = { ...card };
+  for (const f of CARD_TEXT) if (out[f] != null) out[f] = maskIps(out[f]);
+  if (Array.isArray(out.lines)) out.lines = out.lines.map(maskIps);
   return out;
 }
 
@@ -1563,7 +1587,8 @@ function register(socket, safe) {
               title: title || null,
               ts: m.ts,
               author: m.author ? m.author.label : null,
-              text: m.text.slice(0, 200),
+              // Masked before the cut, so a hit never ends on half an address.
+              text: (socket.isDev ? m.text : maskIps(m.text)).slice(0, 200),
             });
         }
       };
