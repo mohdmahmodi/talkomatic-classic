@@ -53,23 +53,31 @@ function load() {
   }
 }
 
+const STATUSES = ["open", "approved", "declined", "implemented"];
+const KINDS = ["idea", "bug"];
+
 // Old records: { status: "open"|"resolved", resolution, reviewedBy, reviewedAt }
-// New records: { status: "open"|"approved"|"declined"|"implemented",
-//                statusBy, statusAt, voters, replies, role, ipKey }
+// New records: { kind, status: "open"|"approved"|"declined"|"implemented",
+//                statusBy, statusAt, voters, replies, role, ipKey, editedAt }
+//
+// Everything already on the board predates the idea/bug split, so it becomes an
+// idea: that is what people were posting when the box only asked for one thing,
+// and silently refiling 300 posts as bugs would be worse than leaving them.
 function migrate(s) {
   if (s.status === "resolved") {
     s.status = s.resolution === "approved" ? "approved" : "declined";
     s.statusBy = s.statusBy || s.reviewedBy || null;
     s.statusAt = s.statusAt || s.reviewedAt || null;
   }
-  if (!["open", "approved", "declined", "implemented"].includes(s.status))
-    s.status = "open";
+  if (!STATUSES.includes(s.status)) s.status = "open";
+  if (!KINDS.includes(s.kind)) s.kind = "idea";
   if (!s.voters || typeof s.voters !== "object") s.voters = {};
   if (!Array.isArray(s.replies)) s.replies = [];
   if (!s.role) s.role = "user";
   if (s.statusBy === undefined) s.statusBy = null;
   if (s.statusAt === undefined) s.statusAt = null;
   if (s.ipKey === undefined) s.ipKey = null;
+  if (s.editedAt === undefined) s.editedAt = null;
 }
 
 function saveSoon() {
@@ -130,7 +138,7 @@ function remainingPosts(deviceId, ip) {
   return Math.max(0, POSTS_PER_DAY - countRecent("post", deviceId, ipKeyFor(ip)));
 }
 
-function post({ deviceId, ip, userId, name, role, text, avatar }) {
+function post({ deviceId, ip, userId, name, role, text, avatar, kind, title }) {
   if (!text) return { ok: false, code: "empty" };
   const ipKey = ipKeyFor(ip);
   if (countRecent("post", deviceId, ipKey) >= POSTS_PER_DAY)
@@ -143,8 +151,11 @@ function post({ deviceId, ip, userId, name, role, text, avatar }) {
     name: name || null,
     role: role || "user",
     avatar: avatar || null,
+    kind: KINDS.includes(kind) ? kind : "idea",
+    title: title || null,
     text,
     at: Date.now(),
+    editedAt: null,
     status: "open",
     statusBy: null,
     statusAt: null,
@@ -214,8 +225,7 @@ function voteCounts(s) {
 }
 
 function setStatus(id, status, byLabel) {
-  if (!["open", "approved", "declined", "implemented"].includes(status))
-    return null;
+  if (!STATUSES.includes(status)) return null;
   const s = get(id);
   if (!s) return null;
   s.status = status;
@@ -225,14 +235,45 @@ function setStatus(id, status, byLabel) {
   return s;
 }
 
-function remove(id, replyId) {
+// Who may change or remove a given post. Ownership is by device id, which is
+// the same thing the vote and rate limits key on - never a client-sent id, so
+// "mine" cannot be claimed by asking. Staff may always remove; only the author
+// may edit, because an edit puts words in somebody's mouth under their name.
+function ownsPost(s, deviceId) {
+  return !!(s && deviceId && s.deviceId === deviceId);
+}
+
+function editPost({ id, replyId, deviceId, text }) {
+  const s = get(id);
+  if (!s) return { ok: false, code: "not_found" };
+  if (!text) return { ok: false, code: "empty" };
+  if (replyId) {
+    const r = s.replies.find((x) => x.id === replyId);
+    if (!r) return { ok: false, code: "not_found" };
+    if (!deviceId || r.deviceId !== deviceId) return { ok: false, code: "denied" };
+    r.text = text;
+    r.editedAt = Date.now();
+  } else {
+    if (!ownsPost(s, deviceId)) return { ok: false, code: "denied" };
+    s.text = text;
+    s.editedAt = Date.now();
+  }
+  saveSoon();
+  return { ok: true };
+}
+
+// `byStaff` skips the ownership check: a mod clearing something abusive is the
+// whole reason the board can be left open to everybody.
+function remove(id, replyId, deviceId, byStaff) {
   const s = get(id);
   if (!s) return false;
   if (replyId) {
-    const before = s.replies.length;
-    s.replies = s.replies.filter((r) => r.id !== replyId);
-    if (s.replies.length === before) return false;
+    const r = s.replies.find((x) => x.id === replyId);
+    if (!r) return false;
+    if (!byStaff && (!deviceId || r.deviceId !== deviceId)) return false;
+    s.replies = s.replies.filter((x) => x.id !== replyId);
   } else {
+    if (!byStaff && !ownsPost(s, deviceId)) return false;
     suggestions = suggestions.filter((x) => x.id !== id);
   }
   saveSoon();
@@ -245,7 +286,11 @@ function get(id) {
 
 // Projection sent to browsers. deviceId / ipKey never leave the server;
 // userId is included for devs only (user tracing, same as the old dashboard).
-function publicList({ deviceId, isDev, limit = 200 } = {}) {
+// The whole board goes to the client in one payload and is filtered, searched
+// and sorted there. At a couple of thousand posts that is a few hundred KB
+// once, against a round trip for every keystroke in the search box - and the
+// board is opened far less often than it is scrolled.
+function publicList({ deviceId, isDev, limit = MAX } = {}) {
   const out = suggestions
     .slice()
     .sort((a, b) => (b.at || 0) - (a.at || 0))
@@ -257,13 +302,17 @@ function publicList({ deviceId, isDev, limit = 200 } = {}) {
         name: s.name,
         role: s.role || "user",
         avatar: s.avatar || null,
+        kind: s.kind || "idea",
+        title: s.title || null,
         text: s.text,
         at: s.at,
+        editedAt: s.editedAt || null,
         status: s.status,
         statusBy: s.statusBy,
         statusAt: s.statusAt,
         up,
         down,
+        score: up - down,
         myVote: (deviceId && s.voters[deviceId]?.v) || 0,
         mine: !!deviceId && s.deviceId === deviceId,
         userId: isDev ? s.userId : undefined,
@@ -275,6 +324,10 @@ function publicList({ deviceId, isDev, limit = 200 } = {}) {
           avatar: r.avatar || null,
           text: r.text,
           at: r.at,
+          editedAt: r.editedAt || null,
+          // Replies carry it too, so the author gets edit and delete on their
+          // own without the client guessing from a name.
+          mine: !!deviceId && r.deviceId === deviceId,
           userId: isDev ? r.userId : undefined,
         })),
       };
@@ -307,8 +360,12 @@ module.exports = {
   reply,
   vote,
   setStatus,
+  editPost,
+  ownsPost,
   remove,
   get,
+  STATUSES,
+  KINDS,
   remainingPosts,
   publicList,
   submit,

@@ -516,3 +516,315 @@
   .sb-dev-controls { margin-left: 0; }
   .sb-status { margin-left: 0; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Finding things on a board of hundreds
+   Search, the type and status filters, and the title line on each card are
+   what turn a wall of posts into something you can actually look through.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.sb-head-btns {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.sb-icon-btn {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--tk-border);
+  border-radius: 6px;
+  background: var(--tk-tile);
+  color: var(--tk-text);
+  font-size: 18px;
+  font-weight: bold;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.sb-icon-btn:hover {
+  background: var(--tk-tile-hover);
+  border-color: var(--primary, var(--tk-accent));
+}
+
+/* ── The "?" panel ── */
+
+.sb-help {
+  flex-shrink: 0;
+  padding: 14px 24px 16px;
+  background: var(--tk-panel, var(--tk-tile));
+  border-bottom: 1px solid var(--tk-border);
+  color: var(--tk-text);
+}
+
+.sb-help h4 {
+  margin: 0 0 8px;
+  color: var(--primary, var(--tk-accent));
+  font-size: 15px;
+}
+
+.sb-help ul {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.sb-help li { margin-bottom: 3px; }
+
+/* ── Search + filters ── */
+
+.sb-controls {
+  flex-shrink: 0;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--tk-border);
+}
+
+.sb-search-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.sb-search {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  background: var(--tk-input-bg, var(--tk-tile));
+  border: 1px solid var(--tk-border);
+  border-radius: 6px;
+  padding: 0 12px;
+}
+
+.sb-search > i {
+  color: var(--tk-text);
+  opacity: 0.55;
+  font-size: 14px;
+  flex: none;
+}
+
+.sb-search-input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--tk-text);
+  font-size: 14px;
+  padding: 10px 10px;
+  font-family: inherit;
+}
+
+.sb-search-input::-webkit-search-cancel-button { cursor: pointer; }
+
+.sb-newpost-btn {
+  flex: none;
+  border: none;
+  border-radius: 6px;
+  background: var(--primary, var(--tk-accent));
+  color: #1a1a1a;
+  font-size: 14px;
+  font-weight: bold;
+  padding: 11px 16px;
+  cursor: pointer;
+  transition: filter 0.15s ease;
+}
+
+.sb-newpost-btn:hover { filter: brightness(1.1); }
+
+.sb-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sb-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.sb-filter-label {
+  color: var(--tk-text);
+  opacity: 0.6;
+  font-size: 11px;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  min-width: 46px;
+}
+
+.sb-chip-btn {
+  border: 1px solid var(--tk-border);
+  border-radius: 999px;
+  background: var(--tk-tile);
+  color: var(--tk-text);
+  font-size: 12px;
+  font-weight: bold;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.sb-chip-btn:hover { background: var(--tk-tile-hover); }
+
+.sb-chip-btn.active {
+  background: var(--primary, var(--tk-accent));
+  border-color: var(--primary, var(--tk-accent));
+  color: #1a1a1a;
+}
+
+/* Active filter chips carry their own colour, so the row reads as the same
+   vocabulary as the tags on the cards below it. */
+.sb-chip-btn.sb-st-open.active { background: #64b5f6; border-color: #64b5f6; }
+.sb-chip-btn.sb-st-approved.active { background: #66bb6a; border-color: #66bb6a; }
+.sb-chip-btn.sb-st-implemented.active { background: #ab47bc; border-color: #ab47bc; color: #fff; }
+.sb-chip-btn.sb-st-declined.active { background: #ef5350; border-color: #ef5350; color: #fff; }
+.sb-chip-btn.sb-chip-bug.active { background: #ef5350; border-color: #ef5350; color: #fff; }
+.sb-chip-btn.sb-chip-idea.active { background: #ffb74d; border-color: #ffb74d; }
+
+.sb-count-line {
+  flex-shrink: 0;
+  padding: 10px 24px 0;
+  color: var(--tk-text);
+  opacity: 0.6;
+  font-size: 12px;
+}
+
+/* ── Composer ── */
+
+.sb-compose-wrap {
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--tk-border);
+  background: var(--tk-panel, var(--tk-tile));
+}
+
+.sb-kind-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.sb-field-label {
+  color: var(--tk-text);
+  opacity: 0.7;
+  font-size: 13px;
+  font-weight: bold;
+}
+
+.sb-kind-btn {
+  border: 1px solid var(--tk-border);
+  border-radius: 6px;
+  background: var(--tk-tile);
+  color: var(--tk-text);
+  font-size: 13px;
+  font-weight: bold;
+  padding: 7px 14px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.sb-kind-btn:hover { background: var(--tk-tile-hover); }
+.sb-kind-btn.sb-kind-idea.active { background: #ffb74d; border-color: #ffb74d; color: #1a1a1a; }
+.sb-kind-btn.sb-kind-bug.active { background: #ef5350; border-color: #ef5350; color: #fff; }
+
+.sb-title-input {
+  margin-bottom: 10px;
+  font-size: 15px;
+  font-weight: bold;
+}
+
+.sb-cancel-btn {
+  border: 1px solid var(--tk-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--tk-text);
+  font-size: 13px;
+  font-weight: bold;
+  padding: 9px 16px;
+  cursor: pointer;
+}
+
+.sb-cancel-btn:hover { background: var(--tk-tile-hover); }
+
+/* ── Card title line ── */
+
+.sb-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 5px;
+}
+
+.sb-card-title {
+  color: var(--tk-text);
+  font-size: 16px;
+  font-weight: bold;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.sb-kind {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: bold;
+  padding: 3px 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.sb-kind.sb-kind-idea { background: #ffb74d; color: #1a1a1a; }
+.sb-kind.sb-kind-bug { background: #ef5350; color: #fff; }
+
+.sb-st-open { background: #64b5f6; color: #1a1a1a; }
+
+/* ── Inline editing, and the author's own controls ── */
+
+.sb-editor { margin: 8px 0; }
+
+.sb-editor-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.sb-own-controls {
+  display: inline-flex;
+  gap: 10px;
+  margin-left: 12px;
+}
+
+.sb-reply-act {
+  margin-left: 8px;
+  font-size: 11px;
+}
+
+@media (max-width: 700px) {
+  .sb-controls { padding: 10px 14px; }
+  .sb-help { padding: 12px 14px; }
+  .sb-count-line { padding: 8px 14px 0; }
+  .sb-search-row { flex-wrap: wrap; }
+  .sb-newpost-btn { width: 100%; }
+  .sb-filter-label { min-width: 100%; }
+  .sb-card-title { font-size: 15px; }
+}
+
+/* On a short screen the header, help panel and composer are all fixed-height
+   and were squeezing the list down to a couple of visible rows. Each optional
+   panel scrolls within a bound, and the list keeps a floor, so the board never
+   collapses into a strip you cannot read. */
+.sb-help { max-height: 38vh; overflow-y: auto; }
+.sb-compose-wrap { max-height: 52vh; overflow-y: auto; }
+.sb-list { min-height: 140px; }

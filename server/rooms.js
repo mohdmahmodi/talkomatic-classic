@@ -103,15 +103,35 @@ function roomCapacity(room) {
     : CONFIG.LIMITS.MAX_ROOM_CAPACITY;
 }
 
-// The capacity a brand new room gets, from whatever was asked for. Clamped,
-// because the client is never the authority on capacity: the slider offers
-// the default up to NEW_ROOM_MAX_CAPACITY and nothing hand-sent gets past it.
-function newRoomCapacity(want) {
+// How big a room somebody may open, by what they hold. Staff run the sessions
+// that need the space - an event, an overflow from a full room, a raid being
+// herded into one place - so the ceiling rises with the level.
+const ROOM_CAPACITY_BY_ROLE = {
+  user: NEW_ROOM_MAX_CAPACITY, // 10
+  jr: 15, // mod level 1
+  mod: 25, // mod level 2
+  dev: 50,
+};
+
+function roomCapacityCeiling(socket) {
+  if (socket?.isDev) return ROOM_CAPACITY_BY_ROLE.dev;
+  if (socket?.isMod)
+    return (socket.modLevel || 2) >= 2
+      ? ROOM_CAPACITY_BY_ROLE.mod
+      : ROOM_CAPACITY_BY_ROLE.jr;
+  return ROOM_CAPACITY_BY_ROLE.user;
+}
+
+// The capacity a brand new room gets, from whatever was asked for. Clamped
+// against the CREATOR's ceiling, because the client is never the authority on
+// capacity: the slider offers what their level allows, and nothing hand-sent
+// past it survives this.
+function newRoomCapacity(want, socket) {
   const n = Math.floor(Number(want));
   if (!Number.isFinite(n)) return CONFIG.LIMITS.MAX_ROOM_CAPACITY;
   return Math.max(
     CONFIG.LIMITS.MAX_ROOM_CAPACITY,
-    Math.min(NEW_ROOM_MAX_CAPACITY, n),
+    Math.min(roomCapacityCeiling(socket), n),
   );
 }
 
@@ -1312,16 +1332,23 @@ function boardPayloadFor(socket) {
       socket.deviceId || null,
       socket.clientIp || null,
     ),
-    canModerate: !!socket.isDev,
+    // Mods triage too, so the queue does not all land on one person. Deleting
+    // and status-setting are both gated on this.
+    canModerate: !!socket.isDev || !!socket.isMod,
+    isDev: !!socket.isDev,
     role: boardRole(socket),
   };
 }
 
 // Only sockets that currently have the board modal open receive live updates.
+// A separate flag from the Talkoboard's `boardOpen`: they share the event name
+// for client compatibility, but that flag also suppresses the AFK sweep, and
+// reading the suggestion board in the lobby should not make somebody immune to
+// it the way drawing in a room does.
 function broadcastBoard() {
   if (!io()) return;
   for (const [, s] of io().sockets.sockets)
-    if (s.boardOpen) s.emit("board data", boardPayloadFor(s));
+    if (s.suggestBoardOpen) s.emit("board data", boardPayloadFor(s));
 }
 
 // Called from the HTTP appeal route after an appeal is filed: drop a staff
@@ -3387,6 +3414,20 @@ function registerSocketHandlers(opts) {
             );
         }
 
+        // A textbox rewrites an address to a placeholder, but a name cannot be
+        // rewritten and still work - the roster and every @mention read it - so
+        // an address in a name is refused instead. Nobody is exempt: a name is
+        // shown to everyone in the room, with no way to mask it per reader the
+        // way chat is.
+        if (ipredact.containsIp(username) || ipredact.containsIp(location))
+          return socket.emit(
+            "error",
+            createErrorResponse(
+              ERROR_CODES.VALIDATION_ERROR,
+              "Names and locations cannot contain an IP address.",
+            ),
+          );
+
         // Reserved staff names only validate for connections carrying a
         // dev or mod key, so trolls cannot impersonate staff.
         if (isReservedName(username) && !socket.isDev && !socket.isMod) {
@@ -4469,8 +4510,9 @@ function registerSocketHandlers(opts) {
         });
         if (valErr) return socket.emit("validation_error", valErr);
 
-        // How many people fit, from the lobby slider.
-        const maxSize = newRoomCapacity(data?.maxSize);
+        // How many people fit, from the lobby slider, capped by the creator's
+        // level rather than by a single number for everybody.
+        const maxSize = newRoomCapacity(data?.maxSize, socket);
 
         const { username, location } = socket.handshake.session;
         if (
@@ -4594,6 +4636,17 @@ function registerSocketHandlers(opts) {
             createErrorResponse(
               ERROR_CODES.VALIDATION_ERROR,
               "Room name contains forbidden words.",
+            ),
+          );
+        // A room name sits in the lobby for everyone, staff or not. Same rule
+        // as a username: refused, because there is nobody to hide it from
+        // selectively.
+        if (ipredact.containsIp(roomName))
+          return socket.emit(
+            "error",
+            createErrorResponse(
+              ERROR_CODES.VALIDATION_ERROR,
+              "Room name cannot contain an IP address.",
             ),
           );
 
@@ -5970,6 +6023,14 @@ function registerSocketHandlers(opts) {
             createErrorResponse(
               ERROR_CODES.VALIDATION_ERROR,
               "Room name contains forbidden words.",
+            ),
+          );
+        if (ipredact.containsIp(roomName))
+          return socket.emit(
+            "error",
+            createErrorResponse(
+              ERROR_CODES.VALIDATION_ERROR,
+              "Room name cannot contain an IP address.",
             ),
           );
         const oldName = room.name;
@@ -7502,7 +7563,7 @@ function registerSocketHandlers(opts) {
     socket.on(
       "board open",
       safe(async () => {
-        socket.boardOpen = true;
+        socket.suggestBoardOpen = true;
         socket.emit("board data", boardPayloadFor(socket));
       }),
     );
@@ -7510,7 +7571,7 @@ function registerSocketHandlers(opts) {
     socket.on(
       "board close",
       safe(async () => {
-        socket.boardOpen = false;
+        socket.suggestBoardOpen = false;
       }),
     );
 
@@ -7530,6 +7591,13 @@ function registerSocketHandlers(opts) {
         ).slice(0, 600);
         text = wordFilter.filterText(text);
         if (text.trim().length < 8) return fail("Please write a little more.");
+        // A one-line title, so a list of 300 can be skimmed instead of read.
+        let title = wordFilter.filterText(
+          sanitizeMessage(typeof data?.title === "string" ? data.title : "")
+            .slice(0, 80),
+        ).trim();
+        if (title.length < 3) return fail("Please add a short title.");
+        const kind = data?.kind === "bug" ? "bug" : "idea";
         const r = suggestions.post({
           deviceId: socket.deviceId,
           ip: socket.clientIp || null,
@@ -7537,18 +7605,20 @@ function registerSocketHandlers(opts) {
           name,
           role: boardRole(socket),
           avatar: socket.handshake.session?.avatar || null,
+          kind,
+          title,
           text,
         });
         if (!r.ok)
           return fail(
             r.code === "limit"
-              ? "You can post 3 suggestions per day. Try again tomorrow."
-              : "Could not post your suggestion.",
+              ? "You can post 3 times per day. Try again tomorrow."
+              : "Could not post that.",
           );
         socket._lastBoardPost = now;
         audit.recordNotification({
           kind: "suggestion",
-          text: `${name} posted on the board: ${text.slice(0, 200)}`,
+          text: `${name} posted a ${kind} on the board: ${title}`,
           by: name,
           minLevel: 2,
         });
@@ -7640,11 +7710,13 @@ function registerSocketHandlers(opts) {
     socket.on(
       "board status",
       safe(async (data) => {
-        if (!requireDev(socket)) return;
+        // Mods as well as devs: triaging 300 posts is not a one-person job,
+        // and every change is logged below like any other staff action.
+        if (!socket.isDev && !socket.isMod) return;
         const s = suggestions.setStatus(
           Number(data?.id),
           String(data?.status || ""),
-          socket.staffLabel || "dev",
+          socket.staffLabel || (socket.isDev ? "dev" : "mod"),
         );
         if (!s)
           return socket.emit(
@@ -7661,20 +7733,65 @@ function registerSocketHandlers(opts) {
       }),
     );
 
+    // Anybody can clear up their OWN post or reply; staff can clear anybody's.
+    // Ownership is decided server-side from the device id, never from a "mine"
+    // flag sent by the client.
     socket.on(
       "board delete",
       safe(async (data) => {
-        if (!requireDev(socket)) return;
         const id = Number(data?.id);
         const replyId = data?.replyId ? Number(data.replyId) : null;
         const s = suggestions.get(id);
-        if (!s || !suggestions.remove(id, replyId)) return;
-        logStaff(
-          socket,
-          replyId ? "delete board reply" : "delete board post",
-          { name: s.name || "?", id: s.userId || "-" },
-          "-",
-        );
+        if (!s) return;
+        const byStaff = !!socket.isDev || !!socket.isMod;
+        if (!suggestions.remove(id, replyId, socket.deviceId || null, byStaff))
+          return socket.emit("board result", {
+            ok: false,
+            action: "delete",
+            error: "You can only delete your own posts.",
+          });
+        // Only a staff removal is a moderation action. Somebody tidying up
+        // after themselves is not work, and logging it would pad the record.
+        if (byStaff && s.deviceId !== socket.deviceId)
+          logStaff(
+            socket,
+            replyId ? "delete board reply" : "delete board post",
+            { name: s.name || "?", id: s.userId || "-" },
+            "-",
+          );
+        socket.emit("board result", { ok: true, action: "delete" });
+        broadcastBoard();
+      }),
+    );
+
+    // Fixing your own typo. Authors only - staff can delete something, but
+    // rewriting it would put words in somebody's mouth under their name.
+    socket.on(
+      "board edit",
+      safe(async (data) => {
+        const fail = (error) =>
+          socket.emit("board result", { ok: false, action: "edit", error });
+        if (!socket.deviceId) return fail("Could not identify this browser.");
+        const replyId = data?.replyId ? Number(data.replyId) : null;
+        let text = sanitizeMessage(
+          typeof data?.text === "string" ? data.text : "",
+        ).slice(0, replyId ? 300 : 600);
+        text = wordFilter.filterText(text);
+        if (text.trim().length < (replyId ? 2 : 8))
+          return fail("Please write a little more.");
+        const r = suggestions.editPost({
+          id: Number(data?.id),
+          replyId,
+          deviceId: socket.deviceId,
+          text,
+        });
+        if (!r.ok)
+          return fail(
+            r.code === "denied"
+              ? "You can only edit your own posts."
+              : "Could not save your edit.",
+          );
+        socket.emit("board result", { ok: true, action: "edit" });
         broadcastBoard();
       }),
     );

@@ -344,6 +344,67 @@ html {
   grid-column: 1 / -1;
 }
 
+/* ── Ideas & Bugs card ──────────────────────────────────────────────────────
+   Deliberately not one of the links above. It is the only thing in this panel
+   we want people to actually go and do, and a one-line explanation is what
+   makes them post the right thing in the right place instead of guessing. */
+.ideas-card {
+  background-color: var(--external-links-background-color);
+  border: 1px solid rgba(255, 152, 0, 0.35);
+  border-radius: 6px;
+  padding: 12px 13px;
+  margin-bottom: 10px;
+}
+
+.ideas-card-head {
+  display: flex;
+  align-items: center;
+  color: var(--external-links-color);
+  font-size: 14px;
+  font-weight: bold;
+  letter-spacing: 0.2px;
+}
+
+.ideas-card-head > i {
+  flex: none;
+  width: 20px;
+  margin-right: 11px;
+  text-align: center;
+  font-size: 16px;
+  color: #ffa726;
+}
+
+.ideas-card-sub {
+  margin: 7px 0 10px;
+  color: var(--external-links-color);
+  opacity: 0.75;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.ideas-card-btn {
+  display: block;
+  padding: 9px 12px;
+  border: none;
+  border-radius: 5px;
+  background-color: #ff9800;
+  color: #1a1a1a;
+  font-size: 13px;
+  font-weight: bold;
+  text-align: center;
+  text-decoration: none;
+  transition: background-color 0.15s ease;
+}
+
+.ideas-card-btn:hover,
+.ideas-card-btn:visited {
+  color: #1a1a1a;
+}
+
+.ideas-card-btn:hover {
+  background-color: #ffa726;
+}
+
 /* Known-as section with a light background */
 .known-as-section {
   background-color: var(

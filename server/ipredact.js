@@ -78,4 +78,11 @@ function redact(value, label) {
     .replace(IPV6_RE, (m) => (isIpv6(m) ? tag : m));
 }
 
-module.exports = { redact, looksLikeIp, DEFAULT_LABEL };
+// For inputs that are rejected rather than rewritten. A username or a room
+// name cannot be shown as a placeholder - the roster and the lobby have to
+// stay readable - so those are refused at the door instead.
+function containsIp(value) {
+  return redact(value) !== value;
+}
+
+module.exports = { redact, containsIp, looksLikeIp, DEFAULT_LABEL };

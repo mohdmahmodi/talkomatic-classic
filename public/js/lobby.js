@@ -174,18 +174,19 @@ async function getCurrentTheme() {
 }
 
 /**
- * Show a Toastr notification inviting the user to join Discord,
- * once every 14 days or until they dismiss it.
+ * One community invite toast (Discord, Reddit). Sticky until dismissed, and
+ * dismissing it remembers that choice for 14 days under its own cookie so the
+ * two are independent.
  */
-function showDiscordInviteNotification() {
-  // If cookie says "true", means user previously dismissed
-  if (getCookie("dismissedDiscordInvite") === "true") {
-    return; // Do not show again
-  }
+function showCommunityInvite({ cookie, title, blurb, cta, color, url }) {
+  if (getCookie(cookie) === "true") return null;
 
-  // Configure Toastr for a sticky notification (until closed)
+  // Sticky until closed. newestOnTop is set explicitly rather than inherited:
+  // assigning to toastr.options replaces the whole object, so anything left
+  // out here falls back to the library default instead of what the page set.
   toastr.options = {
     closeButton: true,
+    newestOnTop: true,
     positionClass: "toast-top-right",
     timeOut: 0,
     extendedTimeOut: 0,
@@ -199,64 +200,75 @@ function showDiscordInviteNotification() {
     hideMethod: "fadeOut",
   };
 
-  const titleText = "Join Our Discord!";
-
-  // Build a small DOM fragment for the toast content
   const container = document.createElement("div");
   container.style.display = "flex";
   container.style.flexDirection = "column";
   container.style.gap = "8px";
 
-  // A short description
   const desc = document.createElement("div");
-  desc.textContent =
-    "For community help, support, bug reports, or just to meet others!";
+  desc.textContent = blurb;
   container.appendChild(desc);
 
-  // A styled button to open Discord
   const button = document.createElement("button");
-  button.textContent = "Join Discord";
-  button.style.backgroundColor = "#5865F2";
+  button.className = "toast-cta";
+  button.textContent = cta;
+  button.style.backgroundColor = color;
   button.style.color = "#FFF";
   button.style.border = "none";
   button.style.padding = "6px 12px";
   button.style.borderRadius = "4px";
   button.style.cursor = "pointer";
   button.style.fontWeight = "bold";
-
   container.appendChild(button);
 
-  // Convert container to HTML for Toastr (listeners do NOT survive this -
-  // they are attached to the LIVE toast below instead)
-  const contentHTML = container.outerHTML;
+  // Listeners do NOT survive the trip through Toastr as HTML, so they are
+  // attached to the LIVE toast below instead.
+  const $toast = toastr.info(container.outerHTML, title);
+  if (!$toast) return null;
 
-  // Show an info toast
-  const $toast = toastr.info(contentHTML, titleText);
+  // ".toast-cta", not "button": find("button") also matched the X, so closing
+  // the toast opened the link as well and it read as un-closable.
+  $toast.find(".toast-cta").on("click", function (e) {
+    e.stopPropagation();
+    window.open(url, "_blank", "noopener");
+  });
 
-  if ($toast) {
-    // Button click → open Discord (bound to the rendered toast, so it works)
-    $toast.find("button").on("click", function (e) {
-      e.stopPropagation();
-      window.open("https://discord.gg/N7tJznESrE", "_blank");
-    });
+  // Clicking the body opens the link too; the X and the CTA are excluded so
+  // they keep their own behaviour.
+  $toast.on("click", function (e) {
+    if ($(e.target).closest(".toast-close-button, .toast-cta").length) return;
+    window.open(url, "_blank", "noopener");
+  });
 
-    // Click anywhere else on the toast (except the X) → also open Discord
-    $toast.on("click", function (e) {
-      if (
-        !$(e.target).hasClass("toast-close-button") &&
-        !$(e.target).is("button")
-      ) {
-        window.open("https://discord.gg/N7tJznESrE", "_blank");
-      }
-    });
-  }
+  $toast.find(".toast-close-button").on("click", function () {
+    setCookie(cookie, "true", 14);
+  });
 
-  // When user clicks the X, set cookie for 14 days
-  if ($toast && $toast.find(".toast-close-button")) {
-    $toast.find(".toast-close-button").on("click", function () {
-      setCookie("dismissedDiscordInvite", "true", 14);
-    });
-  }
+  return $toast;
+}
+
+/**
+ * The two community invites. Discord is shown first so that, with newestOnTop,
+ * Reddit lands above it.
+ */
+function showCommunityInvites() {
+  showCommunityInvite({
+    cookie: "dismissedDiscordInvite",
+    title: "Join Our Discord!",
+    blurb:
+      "For community help, support, bug reports, or just to meet others!",
+    cta: "Join Discord",
+    color: "#5865F2",
+    url: "https://discord.gg/N7tJznESrE",
+  });
+  showCommunityInvite({
+    cookie: "dismissedRedditInvite",
+    title: "Join Our Subreddit!",
+    blurb: "Share ideas, read announcements, and see what others are making.",
+    cta: "Join Reddit",
+    color: "#FF4500",
+    url: "https://www.reddit.com/r/talkomatic/",
+  });
 }
 
 // Run after DOM is fully loaded
@@ -278,9 +290,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     hideMethod: "fadeOut",
   };
 
-  // Show the Discord invite after a brief delay
+  // Show the community invites after a brief delay
   setTimeout(() => {
-    showDiscordInviteNotification();
+    showCommunityInvites();
   }, 2000);
 
   await initDB();

@@ -312,10 +312,12 @@ load();
 // can remove one, and it takes an explicit act.
 const isArchived = (t) => Date.now() - (t.lastTs || t.createdAt) > THREAD_QUIET_MS;
 
-function threadSummary(t) {
+// A thread title is free text somebody typed, and the rail shows it to every
+// staff member, so it gets masked like anything else they could have written.
+function threadSummary(t, forDev) {
   return {
     id: t.id,
-    title: t.title,
+    title: forDev ? t.title : maskIps(t.title),
     createdBy: t.createdBy,
     createdAt: t.createdAt,
     lastTs: t.lastTs,
@@ -442,21 +444,18 @@ function mentions(msg, socket) {
 // Messages go to every eligible STAFF socket whether the Desk is open or not,
 // so the dock badge is always right. Volume is tiny: staff only.
 function outbound(msg, socket) {
-  const copy = { ...msg };
+  // IP addresses are dev-only, so every string heading to a non-dev is masked
+  // in ONE pass over the whole message. Field by field was tried first and was
+  // wrong: a reply carries a SNAPSHOT of the message it answers, so quoting a
+  // masked line put the address straight back on screen. Doing it wholesale
+  // means a field added to a message later is covered the day it is added.
+  const copy = socket.isDev ? { ...msg } : maskDeep(msg);
   // Edit and delete history is a dev-only view; a mod sees the tombstone.
   if (!socket.isDev) delete copy.history;
-  // IP addresses are dev-only, and a queue card carries the same sentence the
-  // notification feed does - an abuse flag lists the actions that tripped it,
-  // and an IP block's target IS the address. Masked on the way out rather than
-  // on the way in, so what is stored stays complete for a developer.
-  if (!socket.isDev) {
-    if (copy.text) copy.text = maskIps(copy.text);
-    if (copy.card) copy.card = maskCard(copy.card);
-  }
   copy.mention = mentions(msg, socket);
   // Reactions are stored as identity keys and sent as a count, the names
   // behind it, and whether this reader is one of them. The client never has to
-  // work out who it is looking at.
+  // work out who it is looking at. Staff labels, so never masked.
   if (Array.isArray(msg.reactions) && msg.reactions.length) {
     const mine = idKeyOf(who(socket));
     copy.reactions = msg.reactions.map((r) => ({
@@ -479,9 +478,13 @@ function broadcast(key, msg, updated) {
 
 function broadcastThreadList() {
   if (!io()) return;
-  const list = desk.threads.map(threadSummary);
+  // Two lists, not one per socket: the titles are the same for everybody at a
+  // given clearance, and the rail is redrawn on every reply.
+  const masked = desk.threads.map((t) => threadSummary(t, false));
+  const full = desk.threads.map((t) => threadSummary(t, true));
   for (const [, s] of io().sockets.sockets)
-    if (s.connected && isStaff(s)) s.emit("desk threads", { threads: list });
+    if (s.connected && isStaff(s))
+      s.emit("desk threads", { threads: s.isDev ? full : masked });
 }
 
 // ── Messages ────────────────────────────────────────────────────────────────
@@ -583,16 +586,31 @@ function sanitizeCard(qkind, c) {
   return out;
 }
 
-// The free-text parts of a card, for a reader who may not see addresses. The
-// id fields are left alone: they are device and user ids, which every staff
-// member already gets on the reports board.
-const CARD_TEXT = ["target", "reason", "quote", "category", "roomName"];
+// Fields that must reach the client byte for byte, because the client matches
+// on them rather than reading them: message and thread ids, the channel key,
+// the device and user ids a card is keyed by. None of them is prose, and none
+// is ever shaped like an address, so skipping them costs no cover.
+//
+// Everything else is masked. The list is written as "what must NOT change"
+// rather than "what to mask" on purpose: get the second kind of list wrong and
+// an address leaks, get this one wrong and a label reads oddly.
+const NEVER_MASK = new Set([
+  "id", "key", "refId", "ids", "itemId", "roomId",
+  "targetUserId", "byUserId", "deviceId",
+]);
 
-function maskCard(card) {
-  const out = { ...card };
-  for (const f of CARD_TEXT) if (out[f] != null) out[f] = maskIps(out[f]);
-  if (Array.isArray(out.lines)) out.lines = out.lines.map(maskIps);
-  return out;
+// Masks every string anywhere in a message, however deeply nested. Numbers,
+// booleans and nulls pass through untouched.
+function maskDeep(value, field) {
+  if (typeof value === "string")
+    return NEVER_MASK.has(field) ? value : maskIps(value);
+  if (Array.isArray(value)) return value.map((v) => maskDeep(v, field));
+  if (value && typeof value === "object") {
+    const out = {};
+    for (const k in value) out[k] = maskDeep(value[k], k);
+    return out;
+  }
+  return value;
 }
 
 // ── Queue cards: handled, and cleaned up ────────────────────────────────────
@@ -1114,7 +1132,7 @@ function register(socket, safe) {
           restricted: !!c.access,
           readonly: !!c.readonly,
         })),
-        threads: desk.threads.map(threadSummary),
+        threads: desk.threads.map((t) => threadSummary(t, socket.isDev)),
         unread: unreadFor(socket),
         presence: buildPresence(socket),
       });
@@ -1130,7 +1148,10 @@ function register(socket, safe) {
       const tgt = targetList(key);
       if (!tgt) return;
       const thread = key.startsWith("t")
-        ? threadSummary(desk.threads.find((t) => t.id === key) || {})
+        ? threadSummary(
+          desk.threads.find((t) => t.id === key) || {},
+          socket.isDev,
+        )
         : null;
 
       // Jumping to a search hit: a window centred on that moment, with room
@@ -1584,7 +1605,7 @@ function register(socket, safe) {
           )
             hits.push({
               key,
-              title: title || null,
+              title: (socket.isDev ? title : maskIps(title)) || null,
               ts: m.ts,
               author: m.author ? m.author.label : null,
               // Masked before the cut, so a hit never ends on half an address.

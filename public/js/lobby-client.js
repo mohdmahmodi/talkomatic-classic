@@ -1731,6 +1731,7 @@ socket.on("signin status", (data) => {
   currentUserModLevel = data.modLevel || 0;
   if (currentUserIsDev || currentUserIsMod) ensureDevPanelButton();
   updateStaffLink();
+  applyRoomSizeCeiling();
   if (data.isSignedIn) {
     currentUsername = data.username;
     currentLocation = data.location;
@@ -2051,6 +2052,45 @@ function showRoomList() {
 // ============================================================================
 // 13. INITIALIZATION
 // ============================================================================
+
+// How far the room size slider goes, by what the signed-in person holds. The
+// server clamps whatever actually arrives (newRoomCapacity), so this is only
+// about not offering a number that would be silently cut back down.
+const ROOM_SIZE_CEILING = { user: 10, jr: 15, mod: 25, dev: 50 };
+
+function roomSizeCeiling() {
+  if (currentUserIsDev) return ROOM_SIZE_CEILING.dev;
+  if (currentUserIsMod)
+    return currentUserModLevel >= 2
+      ? ROOM_SIZE_CEILING.mod
+      : ROOM_SIZE_CEILING.jr;
+  return ROOM_SIZE_CEILING.user;
+}
+
+function applyRoomSizeCeiling() {
+  const sizeEl = document.getElementById("roomSizeSlider");
+  if (!sizeEl) return;
+  const max = roomSizeCeiling();
+  if (Number(sizeEl.max) === max) return;
+  const min = Number(sizeEl.min) || 5;
+  sizeEl.max = String(max);
+  if (Number(sizeEl.value) > max) sizeEl.value = String(max);
+  sizeEl.dispatchEvent(new Event("input")); // keep the number above it in step
+
+  // Redraw the tick labels. Every value fits under the slider at 10 and
+  // nothing like it at 50, so the scale becomes evenly spaced markers.
+  const scale = document.querySelector(".size-scale");
+  if (!scale) return;
+  const marks = [];
+  for (let i = 0; i < 6; i++)
+    marks.push(Math.round(min + ((max - min) * i) / 5));
+  scale.innerHTML = "";
+  for (const m of [...new Set(marks)]) {
+    const span = document.createElement("span");
+    span.textContent = String(m);
+    scale.appendChild(span);
+  }
+}
 
 function initLobby() {
   document.querySelector('input[name="roomType"][value="public"]').checked =
