@@ -35,35 +35,16 @@ function io() {
 // on screen for every moderator - which is how the whole block list was
 // readable from the activity feed.
 //
-// Deliberately greedy: over-redacting a version number costs nothing, leaking
-// an address costs a user their approximate location.
-const IPV4_RE = /\b\d{1,3}(?:\.\d{1,3}){3}(?:\/\d{1,2})?\b/g;
-// Hex groups and colons. Validated below rather than in the pattern, because
-// the forms that need catching (fully written out, or compressed with "::")
-// are hard to tell apart from a clock time in a regex alone.
-const IPV6_RE = /[0-9a-f]{0,4}(?::[0-9a-f]{0,4}){2,}(?:\/\d{1,3})?/gi;
+// The matcher is shared with room chat (server/ipredact.js) so there is one
+// answer to "is this an address"; only the placeholder differs. Deliberately
+// greedy: over-redacting a version number costs nothing, leaking an address
+// costs a user their approximate location.
+const ipredact = require("./ipredact");
+
 const HIDDEN = "[ip hidden]";
 
-function isIpv4(token) {
-  return token
-    .split("/")[0]
-    .split(".")
-    .every((o) => o.length <= 3 && Number(o) <= 255);
-}
-
-// Only the unambiguous shapes. A timestamp like "1:52:08" is three groups with
-// no "::", so it survives; an address is either compressed or has enough
-// groups that nothing else looks like it.
-function isIpv6(token) {
-  const body = token.split("/")[0];
-  return body.includes("::") || body.split(":").length >= 5;
-}
-
 function maskIps(value) {
-  if (typeof value !== "string" || !value) return value;
-  return value
-    .replace(IPV4_RE, (m) => (isIpv4(m) ? HIDDEN : m))
-    .replace(IPV6_RE, (m) => (isIpv6(m) ? HIDDEN : m));
+  return ipredact.redact(value, HIDDEN);
 }
 
 // IP addresses are dev-only. Mods get every field except the raw addresses.

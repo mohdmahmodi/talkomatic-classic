@@ -33,6 +33,7 @@ const {
 } = require("./security");
 const roles = require("./roles");
 const audit = require("./audit");
+const ipredact = require("./ipredact");
 const identity = require("./identity");
 const modwatch = require("./modwatch");
 const keywatch = require("./keywatch");
@@ -1195,7 +1196,10 @@ function buildReportsList(forDev) {
           // What the reported user had typed when this report was filed, so
           // staff can see the offending text even after it is cleared or they
           // leave. Captured at report time; rendered as plain text on the board.
-          targetText: r.targetText || null,
+          // Carries whatever they wrote, so it gets the same mask the room did.
+          targetText: forDev
+            ? r.targetText || null
+            : audit.maskIps(r.targetText || null),
         })),
     };
   });
@@ -1959,9 +1963,15 @@ function filterVotesForSocket(room, recipientSocket) {
 
 function filterCurrentMessagesForSocket(room, recipientSocket) {
   const messages = {};
+  const forDev = !!recipientSocket?.isDev;
+  const own = getRecipientUserId(recipientSocket);
   for (const user of room?.users || []) {
     if (!canRecipientSeeDevUser(recipientSocket, user)) continue;
-    messages[user.id] = state.userMessageBuffers.get(user.id) || "";
+    const text = state.userMessageBuffers.get(user.id) || "";
+    // Same rule as the live update. Their own box comes back exactly as they
+    // left it: rewriting what somebody is still typing helps nobody.
+    messages[user.id] =
+      forDev || user.id === own ? text : ipredact.redact(text);
   }
   return messages;
 }
@@ -2099,6 +2109,14 @@ function emitRoomChatUpdate(socket, payload) {
   const room = state.rooms.get(socket.roomId);
   if (!room) return;
   const senderUser = room.users?.find((u) => u.id === payload.userId);
+  // A textbox is how one user hands another user's address to a whole room, so
+  // an address never leaves the server as it was typed. Devs read it as written,
+  // because somebody has to be able to act on it. The speaker is not a recipient
+  // in this loop, so nothing here rewrites the box they are still typing in.
+  const text = payload.diff?.text;
+  const safe = ipredact.looksLikeIp(text)
+    ? { ...payload, diff: { ...payload.diff, text: ipredact.redact(text) } }
+    : payload;
   for (const [, recipient] of io().sockets.sockets) {
     if (
       !recipient.connected ||
@@ -2107,7 +2125,7 @@ function emitRoomChatUpdate(socket, payload) {
     )
       continue;
     if (!canRecipientSeeDevUser(recipient, senderUser)) continue;
-    recipient.emit("chat update", payload);
+    recipient.emit("chat update", recipient.isDev ? payload : safe);
   }
 }
 
@@ -2543,6 +2561,12 @@ async function processPendingChatUpdates(userId, socket) {
     }
 
     msg = sanitizeMessage(msg);
+    // The buffer stays exactly as typed, addresses and all. It is the copy the
+    // client's own text is diffed against, and the diffs that arrive carry
+    // indexes into THEIR string - shortening an address to a placeholder here
+    // would slide every later index and garble the rest of what they write.
+    // Redaction happens on the way out instead: emitRoomChatUpdate and
+    // filterCurrentMessagesForSocket.
     state.userMessageBuffers.set(userId, msg);
 
     // Typing "@someone" in a room nudges that person. Their name may contain
