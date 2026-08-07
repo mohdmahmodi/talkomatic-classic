@@ -1343,8 +1343,13 @@ class Talkoboard {
   }
 
   // Somebody else's fence around this point, if there is one.
+  //
+  // Staff are never fenced out. An area is meant to stop other users drawing
+  // over your work; it was immediately used the other way round - fence off a
+  // patch, draw something vile inside it, and be untouchable. A fence has no
+  // authority over a moderator, and the server agrees (see claimBlocking).
   foreignClaimAt(pt) {
-    if (!pt) return null;
+    if (!pt || this.isStaff) return null;
     for (const c of this.claims) {
       if (c.owner === this.userId) continue;
       if (pt.x >= c.x && pt.x <= c.x + c.w && pt.y >= c.y && pt.y <= c.y + c.h)
@@ -1359,6 +1364,44 @@ class Talkoboard {
     if (!c) return false;
     this.showHint("That is " + (c.name || "someone") + "'s area");
     return true;
+  }
+
+  // Does the line from a to b touch this box at all? Checking the POINTS was
+  // not enough: draw fast and the samples land far apart, so a stroke stepped
+  // clean over an area - point outside, next point outside, and the straight
+  // line between them scribbled through the middle of it.
+  segmentHitsRect(a, b, r) {
+    let t0 = 0;
+    let t1 = 1;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const p = [-dx, dx, -dy, dy];
+    const q = [a.x - r.x, r.x + r.w - a.x, a.y - r.y, r.y + r.h - a.y];
+    for (let i = 0; i < 4; i++) {
+      if (p[i] === 0) {
+        if (q[i] < 0) return false;
+        continue;
+      }
+      const t = q[i] / p[i];
+      if (p[i] < 0) {
+        if (t > t1) return false;
+        if (t > t0) t0 = t;
+      } else {
+        if (t < t0) return false;
+        if (t < t1) t1 = t;
+      }
+    }
+    return true;
+  }
+
+  // The area this line runs into, if any.
+  claimCrossed(a, b) {
+    if (this.isStaff) return null;
+    for (const c of this.claims) {
+      if (c.owner === this.userId) continue;
+      if (this.segmentHitsRect(a, b, c)) return c;
+    }
+    return null;
   }
 
   setClaims(list) {
@@ -1428,6 +1471,27 @@ class Talkoboard {
   commitShape(kind, a, b, shift) {
     const end = this.constrainPoint(a, b, kind, shift);
     if (Math.hypot(end.x - a.x, end.y - a.y) < 2) return; // a tap, not a drag
+    // Every edge, not every corner: a rectangle drawn AROUND somebody's area
+    // has all four corners outside it. The server refuses these too; this is
+    // so it never flashes up on your own screen first.
+    const pts = this.shapePoints(kind, a, end);
+    for (let i = 0; i < pts.length; i++) {
+      const hit = this.claimCrossed(pts[i], pts[i + 1] || pts[i]);
+      if (hit)
+        return this.showHint("That is " + (hit.name || "someone") + "'s area");
+    }
+    const closedShape =
+      kind === "rect" || kind === "ellipse" || kind === "triangle";
+    // A solid shape big enough to swallow an area whole never touches its edge
+    // with one of its own, and would paint straight over it.
+    if (closedShape && this.fillShapes && !this.isStaff) {
+      for (const c of this.claims) {
+        if (c.owner === this.userId) continue;
+        const mid = { x: c.x + c.w / 2, y: c.y + c.h / 2 };
+        if (this.pointInFilled({ points: pts }, mid))
+          return this.showHint("That is " + (c.name || "someone") + "'s area");
+      }
+    }
     const closed = kind === "rect" || kind === "ellipse" || kind === "triangle";
     const stroke = {
       id: this.nextStrokeId(),
@@ -1758,6 +1822,21 @@ class Talkoboard {
       this.socket.emit("board wipe user", { userId: info.userId });
       this.closeModCard();
     });
+
+    // Their fence, if they have one. Erasing what is inside it works either
+    // way, but taking the fence down stops them putting it straight back.
+    if (this.claims.some((c) => c.owner === info.userId)) {
+      act(
+        "",
+        "fa-square-xmark",
+        "Take their area away",
+        "The fence goes. Anybody can draw there again.",
+        () => {
+          this.socket.emit("board unclaim", { owner: info.userId });
+          this.closeModCard();
+        },
+      );
+    }
 
     const barred = info.barredUntil && info.barredUntil > Date.now();
     if (barred) {
@@ -2414,7 +2493,9 @@ class Talkoboard {
 
     // The tag sits at a fixed size on screen, so it stays readable however far
     // out you are zoomed.
-    const label = (mine ? "Your area" : (c.name || "Someone") + "'s area");
+    const label =
+      (mine ? "Your area" : (c.name || "Someone") + "'s area") +
+      (c.away ? " (away)" : "");
     const pad = 4 / z;
     ctx.font = "bold " + 11 / z + "px sans-serif";
     const w = ctx.measureText(label).width + pad * 2;
@@ -2607,8 +2688,14 @@ class Talkoboard {
       return;
     }
 
+    this.startStrokeAt(this.getCanvasPoint(e));
+  }
+
+  // Put the pen down here and open a stroke. Used both when a drag begins and
+  // when one resumes on the far side of somebody's area.
+  startStrokeAt(pt) {
     this.drawing = true;
-    const pt = this.getCanvasPoint(e);
+    this._penLifted = false;
     this.lastPoint = pt;
 
     // Start a new local stroke (id lets us undo/redo it across everyone)
@@ -2639,6 +2726,23 @@ class Talkoboard {
     if (!this.flushTimer) {
       this.flushTimer = setInterval(() => this.flush(), this.FLUSH_INTERVAL);
     }
+  }
+
+  // The line has run into somebody's area. Finish it where it stands and wait
+  // for the pointer to come out the other side; the server does the same, so
+  // both ends agree about where the line stops.
+  liftPenAtFence() {
+    this.flush();
+    this.socket.emit("board stroke end");
+    if (this.currentStroke) {
+      this.strokes.push(this.currentStroke);
+      this.undoStack.push(this.currentStroke.id);
+      this.redoStack = [];
+      this.updateUndoRedoButtons();
+      this.currentStroke = null;
+    }
+    this.drawing = false;
+    this._penLifted = true;
   }
 
   onPointerMove(e) {
@@ -2675,9 +2779,28 @@ class Talkoboard {
       return;
     }
 
-    // Drawing into somebody else's area: the pen stops at the fence rather
-    // than leaving a line here that the server will not keep.
-    if (this.drawing && this.foreignClaimAt(this.getCanvasPoint(e))) return;
+    // Drawing into somebody else's area: the pen lifts at the fence and comes
+    // back down on the far side, so the line has a hole in it rather than a
+    // shortcut across their box.
+    if (this.drawing || this._penLifted) {
+      const pt = this.getCanvasPoint(e);
+      const from = this.lastPoint || pt;
+      if (this.claimCrossed(from, pt)) {
+        if (this.drawing) {
+          this.liftPenAtFence();
+          const c = this.foreignClaimAt(pt) || this.claimCrossed(from, pt);
+          this.showHint("That is " + ((c && c.name) || "someone") + "'s area");
+        }
+        this.lastPoint = pt;
+        return;
+      }
+      // Out the other side: start a fresh stroke from here.
+      if (this._penLifted) {
+        this._penLifted = false;
+        this.startStrokeAt(pt);
+        return;
+      }
+    }
 
     if (!this.drawing) return;
     e.preventDefault();
@@ -2710,6 +2833,9 @@ class Talkoboard {
   }
 
   onPointerUp(e) {
+    // Let go while the pen was lifted at a fence: nothing left to finish.
+    this._penLifted = false;
+
     if (this.isPanning) {
       this.isPanning = false;
       this.panStart = null;

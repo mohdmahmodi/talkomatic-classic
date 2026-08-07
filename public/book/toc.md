@@ -42,6 +42,8 @@
 
 # Example Bots [icon:fa:fa-solid fa-code]
 
+# Drawing Bots [icon:fa:fa-solid fa-pen-nib]
+
 # AI Bot Builder Prompt [icon:fa:fa-solid fa-wand-magic-sparkles]
 
 # Terms and Conditions [icon:fa:fa-solid fa-scale-balanced]

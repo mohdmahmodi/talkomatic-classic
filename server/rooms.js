@@ -225,6 +225,75 @@ function foreignClaimAt(bs, userId, x, y) {
   return null;
 }
 
+// Does the line from a to b touch this box at all? Testing the POINTS was not
+// enough: draw fast and the samples land far apart, so a stroke could step
+// clean over somebody's area - point outside, next point outside, and the
+// straight line between them scribbled right through the middle. Everything
+// has to be asked about the segment, not the ends.
+function segmentHitsRect(x1, y1, x2, y2, r) {
+  // Liang-Barsky clip: is any of the segment inside the box?
+  let t0 = 0;
+  let t1 = 1;
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const p = [-dx, dx, -dy, dy];
+  const q = [x1 - r.x, r.x + r.w - x1, y1 - r.y, r.y + r.h - y1];
+  for (let i = 0; i < 4; i++) {
+    if (p[i] === 0) {
+      if (q[i] < 0) return false; // parallel and outside this edge
+      continue;
+    }
+    const t = q[i] / p[i];
+    if (p[i] < 0) {
+      if (t > t1) return false;
+      if (t > t0) t0 = t;
+    } else {
+      if (t < t0) return false;
+      if (t < t1) t1 = t;
+    }
+  }
+  return true;
+}
+
+// Is this point inside a filled shape? Even-odd across every ring, the same
+// rule the board fills with, so a hole in the shape is not "inside" it.
+function pointInRings(rings, pt) {
+  let inside = false;
+  for (const ring of rings) {
+    if (!Array.isArray(ring) || ring.length < 3) continue;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const a = ring[i];
+      const b = ring[j];
+      if (
+        a.y > pt.y !== b.y > pt.y &&
+        pt.x < ((b.x - a.x) * (pt.y - a.y)) / (b.y - a.y) + a.x
+      )
+        inside = !inside;
+    }
+  }
+  return inside;
+}
+
+// The claim this line runs into, if any.
+function claimCrossed(socket, bs, x1, y1, x2, y2) {
+  if (isStaffSocket(socket)) return null;
+  const userId = socket.handshake.session?.userId;
+  for (const c of boardClaims(bs)) {
+    if (c.owner === userId) continue;
+    if (segmentHitsRect(x1, y1, x2, y2, c)) return c;
+  }
+  return null;
+}
+
+// The same question, asked on behalf of a socket: STAFF ARE NEVER FENCED OUT.
+// A claimed area is there to stop other users drawing over your work, and it
+// was immediately used the other way round - fence off a patch, draw something
+// vile in it, and be untouchable. A fence has no authority over a moderator.
+function claimBlocking(socket, bs, x, y) {
+  if (isStaffSocket(socket)) return null;
+  return foreignClaimAt(bs, socket.handshake.session?.userId, x, y);
+}
+
 function sendClaims(roomId) {
   const bs = boardState.get(roomId);
   if (!io() || !bs) return;
@@ -238,17 +307,60 @@ function sendClaims(roomId) {
         y: c.y,
         w: c.w,
         h: c.h,
+        // Held open for somebody who has stepped out. Said out loud, so an
+        // empty-looking fence is not a mystery.
+        away: !!c.away,
       })),
     });
 }
 
-// Called when somebody leaves the room: their fence goes with them.
-function dropBoardClaim(roomId, userId) {
+// Leaving does not take your fence down straight away. A refresh, a dropped
+// connection or a quick trip to the lobby all look like leaving, and losing
+// your patch of board to any of those - possibly to somebody else claiming it
+// while you reconnect - is worse than a fence standing empty for a few
+// minutes. It is deliberately NOT kept for longer than that: a fence with
+// nobody behind it is dead space, and one left on purpose would be a way to
+// wall off the board and walk away.
+const CLAIM_GRACE_MS = 5 * 60 * 1000;
+
+function markBoardClaimAway(roomId, userId) {
   const bs = boardState.get(roomId);
   if (!bs || !Array.isArray(bs.claims)) return;
-  const before = bs.claims.length;
-  bs.claims = bs.claims.filter((c) => c.owner !== userId);
-  if (bs.claims.length !== before) sendClaims(roomId);
+  let changed = false;
+  for (const c of bs.claims)
+    if (c.owner === userId && !c.away) {
+      c.away = Date.now();
+      changed = true;
+    }
+  if (changed) sendClaims(roomId);
+}
+
+// Back before the grace ran out: it is still theirs, and stops looking empty.
+function markBoardClaimBack(roomId, userId) {
+  const bs = boardState.get(roomId);
+  if (!bs || !Array.isArray(bs.claims)) return;
+  let changed = false;
+  for (const c of bs.claims)
+    if (c.owner === userId && c.away) {
+      delete c.away;
+      changed = true;
+    }
+  if (changed) sendClaims(roomId);
+}
+
+// Fences whose owner never came back.
+function sweepBoardClaims() {
+  const now = Date.now();
+  for (const [roomId, bs] of boardState) {
+    if (!bs || !Array.isArray(bs.claims) || !bs.claims.length) continue;
+    const kept = bs.claims.filter(
+      (c) => !c.away || now - c.away < CLAIM_GRACE_MS,
+    );
+    if (kept.length !== bs.claims.length) {
+      bs.claims = kept;
+      sendClaims(roomId);
+    }
+  }
 }
 
 // ── Keeping one person from burying the board ───────────────────────────────
@@ -2468,7 +2580,7 @@ async function leaveRoom(socket, userId) {
     clearAFKTimers(userId);
 
     finalizeBoardUserStroke(roomId, userId);
-    dropBoardClaim(roomId, userId);
+    markBoardClaimAway(roomId, userId);
     pianoDropPresence(roomId, userId, true);
 
     const room = state.rooms.get(roomId);
@@ -3341,6 +3453,8 @@ function registerSocketHandlers(opts) {
         );
         if (barred) return socket.emit("board barred", { until: barred });
         socket.boardOpen = true;
+        // Back inside the grace window: the area is theirs again.
+        markBoardClaimBack(socket.roomId, socket.handshake.session.userId);
         clearAFKTimers(socket.handshake.session.userId);
 
         const bs = getBoardState(socket.roomId);
@@ -3669,10 +3783,11 @@ function registerSocketHandlers(opts) {
           typeof data.id === "string" && data.id.length <= 64 ? data.id : null;
 
         // Somebody else's patch of board: not yours to draw on, or rub out.
+        // Staff excepted - see claimBlocking.
         const bsClaim = getBoardState(socket.roomId);
-        const blocked = foreignClaimAt(
+        const blocked = claimBlocking(
+          socket,
           bsClaim,
-          userId,
           data.point.x,
           data.point.y,
         );
@@ -3721,15 +3836,43 @@ function registerSocketHandlers(opts) {
         const active = bs.active.get(userId);
         if (!active) return;
 
+        // A line that runs into somebody else's area ENDS there. Skipping the
+        // points inside and joining what was left either side is what let a
+        // fast scribble cross the box in one straight line.
         const validPoints = [];
+        let last = active.points[active.points.length - 1] || null;
+        let stoppedBy = null;
         for (const p of data.points) {
-          if (typeof p.x === "number" && typeof p.y === "number") {
-            // A line drawn into somebody else's area stops at the fence
-            // rather than carrying on inside it.
-            if (foreignClaimAt(bs, userId, p.x, p.y)) continue;
-            validPoints.push({ x: p.x, y: p.y });
+          if (typeof p.x !== "number" || typeof p.y !== "number") continue;
+          const hit = last
+            ? claimCrossed(socket, bs, last.x, last.y, p.x, p.y)
+            : claimBlocking(socket, bs, p.x, p.y);
+          if (hit) {
+            stoppedBy = hit;
+            break;
           }
+          validPoints.push({ x: p.x, y: p.y });
+          last = p;
         }
+
+        if (stoppedBy) {
+          // Finish what they drew up to the fence and refuse the rest. Anything
+          // further needs a fresh stroke, which has to start outside.
+          if (validPoints.length) {
+            active.points.push(...validPoints);
+            emitSubAppEvent(
+              socket,
+              "board stroke move",
+              { userId, points: validPoints },
+              false,
+            );
+          }
+          finalizeBoardUserStroke(socket.roomId, userId);
+          emitSubAppEvent(socket, "board stroke end", { userId }, false);
+          socket.emit("board blocked", { name: stoppedBy.name || "Someone" });
+          return;
+        }
+
         if (validPoints.length === 0) return;
 
         active.points.push(...validPoints);
@@ -3825,15 +3968,32 @@ function registerSocketHandlers(opts) {
         if (points.length === 0) return;
 
         // A shape or a fill is all or nothing: if any of it lands in somebody
-        // else's area, none of it does.
+        // else's area, none of it does. Staff excepted.
+        //
+        // Every EDGE is checked, not every corner: a rectangle drawn around
+        // somebody's area has all four corners outside it. And a filled shape
+        // is checked for swallowing the area whole, which would paint over it
+        // without any edge going near it.
         const bsAdd = getBoardState(socket.roomId);
-        for (const p of points) {
-          const c = foreignClaimAt(bsAdd, userId, p.x, p.y);
-          if (c)
-            return socket.emit("board blocked", {
-              id: s.id,
-              name: c.name || "Someone",
-            });
+        const refuse = (c) =>
+          socket.emit("board blocked", {
+            id: s.id,
+            name: c.name || "Someone",
+          });
+        for (let i = 0; i < points.length; i++) {
+          const a = points[i];
+          const b = points[i + 1] || a;
+          const c = claimCrossed(socket, bsAdd, a.x, a.y, b.x, b.y);
+          if (c) return refuse(c);
+        }
+        if (s.fill && !isStaffSocket(socket)) {
+          const rings =
+            Array.isArray(s.rings) && s.rings.length ? s.rings : [points];
+          for (const c of boardClaims(bsAdd)) {
+            if (c.owner === userId) continue;
+            const mid = { x: c.x + c.w / 2, y: c.y + c.h / 2 };
+            if (pointInRings(rings, mid)) return refuse(c);
+          }
         }
 
         const stroke = {
@@ -8387,6 +8547,15 @@ function startCleanupIntervals() {
         state.suspiciousUsers.delete(id);
     }
   }, 120000);
+
+  // Board areas whose owner never came back (every 30s)
+  setInterval(() => {
+    try {
+      sweepBoardClaims();
+    } catch (e) {
+      console.error("board claim sweep failed:", e);
+    }
+  }, 30000);
 
   // Bot token cleanup (daily)
   setInterval(() => {

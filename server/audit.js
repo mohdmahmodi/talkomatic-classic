@@ -406,6 +406,7 @@ const ACTION_GROUPS = [
       // repeatable - a mod could draw and wipe all afternoon. They count as
       // work done, and deliberately NOT toward the promotion number.
       "wipe board drawings", "remove from board", "allow back on board",
+      "release board area",
       "spotlight on", "spotlight off", "set room size", "party mode",
     ],
   },
