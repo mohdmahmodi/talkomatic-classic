@@ -36,6 +36,8 @@ blocklist.json
 warnings.json
 appeals.json
 suggestions.json
+announcements.json
+announcements.json.tmp
 community-themes.json
 ban-history.json
 

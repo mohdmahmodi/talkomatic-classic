@@ -335,6 +335,32 @@ function publicList({ deviceId, isDev, limit = MAX } = {}) {
   return out;
 }
 
+// What has happened to THIS person's own posts since they last looked, split
+// into the three things worth pulling somebody back to the board for: a
+// decision that went their way, one that did not, and somebody talking to them.
+//
+// `since` comes from the browser rather than being stored per device: it is a
+// read marker on the reader's own posts, so the worst a tampered value can do
+// is show somebody their own history again.
+function unreadFor(deviceId, since) {
+  const out = { approved: 0, declined: 0, replies: 0 };
+  if (!deviceId) return out;
+  const from = Number(since) || 0;
+  for (const s of suggestions) {
+    if (s.deviceId !== deviceId) continue;
+    if ((s.statusAt || 0) > from) {
+      // "Built" is the same good news as "approved" as far as a notification
+      // goes - three colours is already the most a chip row can say clearly.
+      if (s.status === "approved" || s.status === "implemented") out.approved++;
+      else if (s.status === "declined") out.declined++;
+    }
+    for (const r of s.replies || [])
+      // Your own reply to your own thread is not news.
+      if ((r.at || 0) > from && r.deviceId !== deviceId) out.replies++;
+  }
+  return out;
+}
+
 // ── Legacy API kept for the old mod-dashboard events ────────────────────────
 
 function submit({ deviceId, userId, name, text }) {
@@ -368,6 +394,7 @@ module.exports = {
   KINDS,
   remainingPosts,
   publicList,
+  unreadFor,
   submit,
   resolve,
   openCount,

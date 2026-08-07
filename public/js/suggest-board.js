@@ -869,6 +869,71 @@
     return wrap;
   }
 
+  // ── Unread badges on the lobby button ─────────────────────────────────────
+  // Somebody who posts an idea has no reason to come back unless something
+  // happened to it, so the button says what did. Three counts, each with its
+  // own icon as well as its own colour: colour alone is not a label, and a
+  // bare number tells a reader nothing about which kind of news it is.
+
+  var SEEN_KEY = "tkBoardSeen";
+
+  function lastSeen() {
+    try {
+      return Number(localStorage.getItem(SEEN_KEY)) || 0;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  function markSeen() {
+    try {
+      localStorage.setItem(SEEN_KEY, String(Date.now()));
+    } catch (e) {
+      /* private mode: the badge simply keeps showing */
+    }
+  }
+
+  var BADGES = [
+    { key: "approved", cls: "sb-nb-approved", icon: "fa-check", one: "post approved", many: "posts approved" },
+    { key: "declined", cls: "sb-nb-declined", icon: "fa-xmark", one: "post declined", many: "posts declined" },
+    { key: "replies", cls: "sb-nb-reply", icon: "fa-comment", one: "new reply", many: "new replies" },
+  ];
+
+  function renderBadges(counts) {
+    var link = document.getElementById("suggestBoxLink");
+    if (!link) return;
+    var host = link.querySelector(".sb-notif");
+    if (!host) {
+      host = el("span", "sb-notif");
+      link.appendChild(host);
+    }
+    host.textContent = "";
+    if (!counts) return;
+    var words = [];
+    BADGES.forEach(function (b) {
+      var n = counts[b.key] || 0;
+      if (!n) return;
+      var pill = el("span", "sb-nb " + b.cls);
+      pill.innerHTML = '<i class="fas ' + b.icon + '"></i>' + n;
+      pill.title = n + " " + (n === 1 ? b.one : b.many);
+      host.appendChild(pill);
+      words.push(pill.title);
+    });
+    // Screen readers and long-press tooltips get the sentence, not the colours.
+    link.title = words.length ? words.join(", ") : "";
+    link.classList.toggle("has-notif", words.length > 0);
+  }
+
+  function refreshBadges() {
+    socket.emit("board badges", { since: lastSeen() });
+  }
+
+  socket.on("board badges", renderBadges);
+
+  // Ask once the socket is up, and again on reconnect.
+  if (socket.connected) refreshBadges();
+  socket.on("connect", refreshBadges);
+
   // ── open / close ──────────────────────────────────────────────────────────
 
   function open() {
@@ -877,6 +942,10 @@
     overlay.classList.add("show");
     document.body.style.overflow = "hidden";
     socket.emit("board open");
+    // Opening the board IS reading it, so the badge clears now rather than on
+    // close: somebody who opens it, reads a reply and closes it has seen it.
+    markSeen();
+    renderBadges(null);
   }
 
   function close() {
@@ -886,6 +955,8 @@
     overlay.classList.remove("show");
     document.body.style.overflow = "";
     socket.emit("board close");
+    markSeen();
+    refreshBadges();
   }
 
   window.SuggestBoard = { open: open, close: close };

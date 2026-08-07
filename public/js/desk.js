@@ -186,7 +186,12 @@
     img.referrerPolicy = "no-referrer";
     img.alt = "";
     let retried = false;
-    img.addEventListener("load", () => avatarSeen.add(url));
+    img.addEventListener("load", () => {
+      avatarSeen.add(url);
+      // Arrived: drop the letter. Leaving it under a transparent avatar is
+      // what put an initial inside somebody's picture.
+      wrap.classList.add("has-pic");
+    });
     img.addEventListener("error", () => {
       // A picture that has loaded before gets one retry: a single CDN hiccup
       // used to drop somebody's face for the rest of the session. One that has
@@ -199,6 +204,7 @@
         return;
       }
       img.remove();
+      wrap.classList.remove("has-pic"); // letter comes back
     });
     img.src = url;
     wrap.appendChild(img);
@@ -5269,8 +5275,13 @@
 .dk-av.l2{background: #2b5e9e;}
 .dk-av.l1{background: #6d4b9e;}
 /* The letter sits underneath and the picture covers it, so a slow or failed
-   load degrades to an initial instead of an empty hole. */
+   load degrades to an initial instead of an empty hole. Once the picture has
+   actually arrived the letter is taken out: a Discord avatar with transparency
+   in it does NOT cover what is behind it, and the initial showed through the
+   gaps. The rank colour stays as the backdrop, which is what a transparent
+   avatar should sit on anyway. */
 .dk-av-i{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;}
+.dk-av.has-pic .dk-av-i{display:none;}
 .dk-av img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;}
 .dk-quote{display:flex;align-items:baseline;gap:6px;width:100%;text-align:left;background:none;border:none;
   font-family:inherit;color: #8d8d8d;font-size:11.5px;padding:0 0 3px 0;cursor:pointer;min-width:0;}

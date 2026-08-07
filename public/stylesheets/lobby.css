@@ -1960,3 +1960,53 @@ button:disabled {
 .fa-circle-question {
   margin-right: 8px;
 }
+
+/* ── Unread badges on the Ideas & Bugs button ───────────────────────────────
+   What happened to YOUR posts since you last looked. Each count carries an
+   icon as well as a colour, because colour on its own is not a label - and
+   roughly one reader in twelve cannot tell the red from the green. */
+.ideas-card-btn.has-notif {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.sb-notif {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.sb-nb {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 20px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: bold;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.sb-nb > i {
+  font-size: 9px;
+}
+
+.sb-nb-approved {
+  background-color: #2e7d32;
+  color: #ffffff;
+}
+
+.sb-nb-declined {
+  background-color: #c62828;
+  color: #ffffff;
+}
+
+/* A reply is neither good nor bad news, so it stays neutral. */
+.sb-nb-reply {
+  background-color: #ffffff;
+  color: #1a1a1a;
+}

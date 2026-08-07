@@ -42,6 +42,7 @@ const invites = require("./invites");
 const reports = require("./reports");
 const appeals = require("./appeals");
 const suggestions = require("./suggestions");
+const announcements = require("./announcements");
 const puzzle = require("./puzzle");
 const banhistory = require("./banhistory");
 const blocklist = require("./blocklist");
@@ -1347,8 +1348,29 @@ function boardPayloadFor(socket) {
 // it the way drawing in a room does.
 function broadcastBoard() {
   if (!io()) return;
-  for (const [, s] of io().sockets.sockets)
-    if (s.suggestBoardOpen) s.emit("board data", boardPayloadFor(s));
+  for (const [, s] of io().sockets.sockets) {
+    if (s.suggestBoardOpen) {
+      s.emit("board data", boardPayloadFor(s));
+      continue;
+    }
+    // Everyone else sitting in the lobby gets just the unread counts, so a
+    // reply or a decision lights the button up without the board being open.
+    if (s.boardSince != null && s.deviceId)
+      s.emit("board badges", suggestions.unreadFor(s.deviceId, s.boardSince));
+  }
+}
+
+// Pushes the current notice to everybody who has asked for one. Sent per
+// socket because the reaction counts carry "did I react", which differs per
+// reader. A notice going live this way reaches people already sitting in the
+// lobby, not just the next person to load the page.
+function broadcastAnnouncement() {
+  if (!io()) return;
+  const cur = announcements.current();
+  for (const [, s] of io().sockets.sockets) {
+    if (!s.connected || !s.announceSub) continue;
+    s.emit("announcement current", announcements.publicOne(cur, s.deviceId || null));
+  }
 }
 
 // Called from the HTTP appeal route after an appeal is filed: drop a staff
@@ -7572,6 +7594,163 @@ function registerSocketHandlers(opts) {
       "board close",
       safe(async () => {
         socket.suggestBoardOpen = false;
+      }),
+    );
+
+    // The lobby asking "is there anything for me?". The browser sends the
+    // moment it last had the board open; the server answers with counts over
+    // that person's OWN posts only.
+    socket.on(
+      "board badges",
+      safe(async (data) => {
+        var since = Number(data && data.since) || 0;
+        socket.boardSince = since;
+        socket.emit(
+          "board badges",
+          suggestions.unreadFor(socket.deviceId || null, since),
+        );
+      }),
+    );
+
+    // ── Announcements ───────────────────────────────────────────────────────
+    // The lobby asks once on load. The answer is the single newest live notice
+    // (or null); the browser decides whether it has already read that id.
+    socket.on(
+      "announcement current",
+      safe(async () => {
+        socket.announceSub = true;
+        socket.emit(
+          "announcement current",
+          announcements.publicOne(
+            announcements.current(),
+            socket.deviceId || null,
+          ),
+        );
+      }),
+    );
+
+    socket.on(
+      "announcement react",
+      safe(async (data) => {
+        if (!socket.deviceId) return;
+        const now = Date.now();
+        if (now - (socket._lastAnnounceReact || 0) < 400) return;
+        socket._lastAnnounceReact = now;
+        const updated = announcements.react({
+          id: Number(data?.id),
+          deviceId: socket.deviceId,
+          emoji: typeof data?.emoji === "string" ? data.emoji : "",
+        });
+        if (!updated)
+          return socket.emit("announcement result", {
+            ok: false,
+            error: "That reaction could not be added.",
+          });
+        broadcastAnnouncement();
+      }),
+    );
+
+    // ── Announcements: the dev side ─────────────────────────────────────────
+    socket.on(
+      "announcement list",
+      safe(async () => {
+        if (!requireDev(socket)) return;
+        socket.emit("announcement list", {
+          items: announcements.listFor(socket.deviceId || null),
+        });
+      }),
+    );
+
+    socket.on(
+      "announcement post",
+      safe(async (data) => {
+        if (!requireDev(socket)) return;
+        const fail = (error) =>
+          socket.emit("announcement result", { ok: false, error });
+        const title = sanitizeMessage(
+          typeof data?.title === "string" ? data.title : "",
+        );
+        // NOT run through the word filter: this is a developer writing to the
+        // whole site, and the filter mangling their own notice is worse than
+        // the risk it guards against.
+        const body = typeof data?.body === "string" ? data.body : "";
+        const r = announcements.post({
+          kind: data?.kind,
+          title,
+          body,
+          by: socket.staffLabel || "Talkomatic",
+          byRole: "dev",
+        });
+        if (!r.ok)
+          return fail(
+            r.code === "title"
+              ? "Give it a title first."
+              : "Write something in the body.",
+          );
+        logStaff(socket, "post announcement", title.slice(0, 60), "-");
+        socket.emit("announcement result", { ok: true, action: "post" });
+        socket.emit("announcement list", {
+          items: announcements.listFor(socket.deviceId || null),
+        });
+        broadcastAnnouncement();
+      }),
+    );
+
+    socket.on(
+      "announcement edit",
+      safe(async (data) => {
+        if (!requireDev(socket)) return;
+        const r = announcements.edit({
+          id: Number(data?.id),
+          kind: data?.kind,
+          title: sanitizeMessage(
+            typeof data?.title === "string" ? data.title : "",
+          ),
+          body: typeof data?.body === "string" ? data.body : "",
+        });
+        if (!r.ok)
+          return socket.emit("announcement result", {
+            ok: false,
+            error: "Could not save that.",
+          });
+        logStaff(socket, "edit announcement", String(data?.id || "?"), "-");
+        socket.emit("announcement result", { ok: true, action: "edit" });
+        socket.emit("announcement list", {
+          items: announcements.listFor(socket.deviceId || null),
+        });
+        broadcastAnnouncement();
+      }),
+    );
+
+    socket.on(
+      "announcement live",
+      safe(async (data) => {
+        if (!requireDev(socket)) return;
+        const live = !!data?.live;
+        if (!announcements.setLive(Number(data?.id), live)) return;
+        logStaff(
+          socket,
+          live ? "show announcement" : "hide announcement",
+          String(data?.id || "?"),
+          "-",
+        );
+        socket.emit("announcement list", {
+          items: announcements.listFor(socket.deviceId || null),
+        });
+        broadcastAnnouncement();
+      }),
+    );
+
+    socket.on(
+      "announcement delete",
+      safe(async (data) => {
+        if (!requireDev(socket)) return;
+        if (!announcements.remove(Number(data?.id))) return;
+        logStaff(socket, "delete announcement", String(data?.id || "?"), "-");
+        socket.emit("announcement list", {
+          items: announcements.listFor(socket.deviceId || null),
+        });
+        broadcastAnnouncement();
       }),
     );
 

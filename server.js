@@ -84,6 +84,9 @@ function gracefulFlush() {
     require("./server/suggestions").flushSync();
   } catch (e) {}
   try {
+    require("./server/announcements").flushSync();
+  } catch (e) {}
+  try {
     require("./server/themes").flushSync();
   } catch (e) {}
   try {

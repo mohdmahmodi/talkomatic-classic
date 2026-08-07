@@ -464,10 +464,10 @@ const MAX_RETRIES = 3;
 const MAX_USERNAME_LENGTH = 15;
 const MAX_LOCATION_LENGTH = 20;
 const MAX_ROOM_NAME_LENGTH = 25;
-// How many people a room can hold, picked on the slider. The server clamps to
-// the same numbers, so a hand-sent value cannot open a 40-seat room.
+// How many people a room can hold, picked on the slider. The ceiling depends on
+// what the person holds and lives in roomSizeCeiling() below; the server clamps
+// to the same numbers, so a hand-sent value cannot open a 50-seat room.
 const ROOM_SIZE_MIN = 5;
-const ROOM_SIZE_MAX = 10;
 let devLobbyCodes = {};
 let statsModal = null;
 let currentUserIsDev = false;
@@ -841,6 +841,9 @@ function showBanScreen(info) {
       #banScreen .ac-av.dev{background:#a3323f;}
       #banScreen .ac-av-i{position:absolute;inset:0;display:flex;align-items:center;
         justify-content:center;}
+      /* Taken out once the picture is really there: a transparent avatar does
+         not cover the letter, so the initial showed through its gaps. */
+      #banScreen .ac-av.has-pic .ac-av-i{display:none;}
       #banScreen .ac-av img{position:absolute;inset:0;width:100%;height:100%;
         object-fit:cover;display:block;}
       #banScreen .ac-name{color:#fff;font-size:12.5px;}
@@ -1026,7 +1029,10 @@ function showBanScreen(info) {
     img.referrerPolicy = "no-referrer";
     img.alt = "";
     let retried = false;
-    img.addEventListener("load", () => banAvatarSeen.add(url));
+    img.addEventListener("load", () => {
+      banAvatarSeen.add(url);
+      wrap.classList.add("has-pic"); // drop the letter behind it
+    });
     img.addEventListener("error", () => {
       if (banAvatarSeen.has(url) && !retried) {
         retried = true;
@@ -1036,6 +1042,7 @@ function showBanScreen(info) {
         return;
       }
       img.remove();
+      wrap.classList.remove("has-pic");
     });
     img.src = url;
     wrap.appendChild(img);
@@ -1608,11 +1615,13 @@ goChatButton.addEventListener("click", () => {
   const roomType = document.querySelector(
     'input[name="roomType"]:checked',
   )?.value;
-  // The slider, clamped here and again on the server.
+  // The slider, clamped here and again on the server. The ceiling has to be
+  // the LEVEL's, not a fixed 10: this clamp is what was quietly cutting a
+  // staff member's 50 back down to 10 after the slider had offered it.
   const sizeEl = document.getElementById("roomSizeSlider");
   const maxSize = Math.max(
     ROOM_SIZE_MIN,
-    Math.min(ROOM_SIZE_MAX, Number(sizeEl?.value) || ROOM_SIZE_MIN),
+    Math.min(roomSizeCeiling(), Number(sizeEl?.value) || ROOM_SIZE_MIN),
   );
   const accessCode = accessCodeInput.querySelector("input").value;
 

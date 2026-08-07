@@ -3908,6 +3908,238 @@
           flex-basis: 100%;
         }
       }
+
+      /* ── Announcements: composing one ────────────────────────────────────
+         The preview matters more than usual here: a notice goes to everybody
+         at once, and there is no taking it back after they have read it. */
+      .an-compose {
+        padding: 14px 16px 16px;
+        background: var(--panel, #1b1b1b);
+        border: 1px solid var(--border, #333);
+        border-radius: 8px;
+        margin-bottom: 18px;
+      }
+      .an-row {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 10px;
+        flex-wrap: wrap;
+      }
+      .an-select,
+      .an-field {
+        background: var(--bg, #141414);
+        border: 1px solid var(--border, #333);
+        border-radius: 6px;
+        color: var(--text, #eee);
+        font-family: inherit;
+        font-size: 14px;
+        padding: 9px 11px;
+      }
+      .an-select {
+        flex: none;
+        min-width: 130px;
+        cursor: pointer;
+      }
+      .an-row .an-field {
+        flex: 1;
+        min-width: 200px;
+      }
+      .an-textarea {
+        width: 100%;
+        box-sizing: border-box;
+        resize: vertical;
+        line-height: 1.55;
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        font-size: 13px;
+      }
+      .an-field:focus,
+      .an-select:focus {
+        outline: none;
+        border-color: var(--accent, #ff9800);
+      }
+      .an-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 10px;
+        flex-wrap: wrap;
+      }
+      .an-count {
+        margin-right: auto;
+        color: var(--muted, #999);
+        font-size: 12px;
+      }
+      .an-preview-box {
+        margin-top: 12px;
+        padding: 16px 18px;
+        background: var(--bg, #141414);
+        border: 1px dashed var(--accent, #ff9800);
+        border-radius: 8px;
+        color: var(--text, #eee);
+        font-size: 14px;
+        line-height: 1.6;
+        overflow-wrap: anywhere;
+      }
+      .an-preview-box > :first-child {
+        margin-top: 0;
+      }
+      .an-preview-box > :last-child {
+        margin-bottom: 0;
+      }
+      .an-preview-box h2,
+      .an-preview-box h3,
+      .an-preview-box h4 {
+        color: var(--accent, #ff9800);
+        margin: 16px 0 7px;
+      }
+      .an-preview-box h2 {
+        font-size: 18px;
+      }
+      .an-preview-box h3 {
+        font-size: 16px;
+      }
+      .an-preview-box h4 {
+        font-size: 14px;
+      }
+      .an-preview-box p {
+        margin: 0 0 10px;
+      }
+      .an-preview-box ul,
+      .an-preview-box ol {
+        margin: 0 0 10px;
+        padding-left: 22px;
+      }
+      .an-preview-box li {
+        margin-bottom: 4px;
+      }
+      .an-preview-box a {
+        color: #01ffff;
+      }
+      .an-preview-box code {
+        background: rgba(255, 255, 255, 0.08);
+        padding: 1px 5px;
+        border-radius: 4px;
+        font-size: 0.9em;
+      }
+      .an-preview-box pre {
+        background: rgba(0, 0, 0, 0.45);
+        border: 1px solid var(--border, #333);
+        border-radius: 6px;
+        padding: 10px 12px;
+        overflow-x: auto;
+      }
+      .an-preview-box pre code {
+        background: none;
+        padding: 0;
+      }
+      .an-preview-box blockquote {
+        margin: 0 0 10px;
+        padding-left: 12px;
+        border-left: 3px solid var(--accent, #ff9800);
+        color: var(--muted, #999);
+      }
+      .an-preview-box img {
+        max-width: 100%;
+        border-radius: 6px;
+      }
+      .an-preview-box hr {
+        border: none;
+        border-top: 1px solid var(--border, #333);
+        margin: 16px 0;
+      }
+
+      /* ── Announcements: what has been posted ── */
+      .an-list {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .an-item {
+        padding: 12px 14px;
+        background: var(--panel, #1b1b1b);
+        border: 1px solid var(--border, #333);
+        border-radius: 8px;
+      }
+      .an-item.showing {
+        border-color: var(--accent, #ff9800);
+      }
+      .an-item-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-bottom: 5px;
+      }
+      .an-item-title {
+        font-size: 15px;
+        font-weight: bold;
+        color: var(--text, #eee);
+        overflow-wrap: anywhere;
+      }
+      .an-tag {
+        flex: none;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 10px;
+        font-weight: bold;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+      .an-tag.update {
+        background: #6a3fb5;
+        color: #fff;
+      }
+      .an-tag.notice {
+        background: #ff9800;
+        color: #1a1a1a;
+      }
+      .an-tag.alert {
+        background: #c62828;
+        color: #fff;
+      }
+      .an-tag.live {
+        background: #2e7d32;
+        color: #fff;
+      }
+      .an-tag.hidden {
+        background: #444;
+        color: #ccc;
+      }
+      .an-item-meta {
+        color: var(--muted, #999);
+        font-size: 12px;
+      }
+      .an-item-reacts {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        margin-top: 8px;
+      }
+      .an-item-react {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px 8px;
+        border: 1px solid var(--border, #333);
+        border-radius: 999px;
+        font-size: 13px;
+        color: var(--text, #eee);
+      }
+      .an-item-react b {
+        font-size: 11px;
+      }
+      .an-item-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 10px;
+        flex-wrap: wrap;
+      }
+      .an-empty {
+        padding: 22px;
+        text-align: center;
+        color: var(--muted, #999);
+        font-size: 13px;
+      }
     </style>
   </head>
   <body>
@@ -3989,6 +4221,10 @@
           <button class="nav-item" data-tab="sessions" data-dev>
             <i class="fas fa-key"></i> Sessions
             <span class="ni-badge" id="sessionsBadge">0</span>
+          </button>
+          <button class="nav-item" data-tab="announce" data-dev>
+            <i class="fas fa-bullhorn"></i> Announcements
+            <span class="ni-badge" id="announceBadge">0</span>
           </button>
           <button class="nav-item" data-tab="guide">
             <i class="fas fa-circle-question"></i> Guide
@@ -4338,6 +4574,79 @@
             <span class="sub">Every network a key has connected from</span>
           </div>
           <div id="sessionsHistory" class="grid3"></div>
+        </section>
+
+        <!-- Announcements -->
+        <section id="tab-announce" class="panel">
+          <div class="strip">
+            <i class="fas fa-bullhorn lead ic-orange"></i> Announcements
+            <span class="sub">
+              A full-screen notice shown to everyone in the lobby
+            </span>
+          </div>
+          <p class="note-box">
+            <i class="fas fa-circle-info"></i>
+            <span>
+              Only the newest <b>showing</b> notice is ever displayed, and each
+              person sees it once - closing it means they will not see it again
+              until you post a newer one. Hiding a notice takes it off the
+              lobby but keeps it here. Markdown works:
+              <code>#</code> headings, <code>-</code> lists,
+              <code>**bold**</code>, <code>`code`</code>, <code>&gt;</code>
+              quotes and links.
+            </span>
+          </p>
+
+          <div class="strip mini">
+            <i class="fas fa-pen-to-square lead" style="color: #57d9a3"></i>
+            Write a notice
+          </div>
+          <div class="an-compose">
+            <div class="an-row">
+              <select id="anKind" class="an-select" aria-label="Notice type">
+                <option value="update">Update</option>
+                <option value="notice" selected>Notice</option>
+                <option value="alert">Important</option>
+              </select>
+              <input
+                id="anTitle"
+                class="an-field"
+                type="text"
+                maxlength="120"
+                placeholder="Title, e.g. “Version 5.6 is here”"
+              />
+            </div>
+            <textarea
+              id="anBody"
+              class="an-field an-textarea"
+              maxlength="4000"
+              rows="9"
+              placeholder="What do you want to tell everyone?&#10;&#10;## What's new&#10;- Bigger rooms for staff&#10;- Ideas &amp; Bugs board&#10;&#10;**Thanks for playing.**"
+            ></textarea>
+            <div class="an-actions">
+              <span class="an-count" id="anCount">0 / 4000</span>
+              <button id="anPreviewBtn" class="btn sm">
+                <i class="fas fa-eye"></i> Preview
+              </button>
+              <button id="anCancelEdit" class="btn sm" style="display: none">
+                Cancel edit
+              </button>
+              <button id="anPost" class="btn sm primary">
+                <i class="fas fa-paper-plane"></i> Post notice
+              </button>
+            </div>
+            <div
+              id="anPreview"
+              class="an-preview-box"
+              style="display: none"
+            ></div>
+          </div>
+
+          <div class="strip mini">
+            <i class="fas fa-clock-rotate-left lead ic-orange"></i> Posted
+            <span class="sub">Newest first</span>
+          </div>
+          <div id="anList" class="an-list"></div>
         </section>
 
         <!-- Guide -->

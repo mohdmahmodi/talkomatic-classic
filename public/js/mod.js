@@ -4861,6 +4861,7 @@
       socket.emit("staff get mod leaderboard");
     }
     if (name === "sessions") socket.emit("dev get sessions");
+    if (name === "announce") socket.emit("announcement list");
     if (name === "applications") socket.emit("mod applications list");
     if (name === "reports") socket.emit("staff get reports");
     if (name === "appeals") socket.emit("staff get appeals");
@@ -5438,6 +5439,308 @@
 
   // Open the sidebar by default on wider screens.
   if (window.innerWidth > 860) document.body.classList.remove("nav-closed");
+
+  // ── Announcements ─────────────────────────────────────────────────────────
+  // Writing the one thing every person on the site is shown. The markdown
+  // renderer here is the SAME one the lobby card uses (announce.js), pasted
+  // rather than shared because the dashboard is a separate page with no module
+  // system - so the preview is the real thing, not an approximation of it.
+  const anEsc = (s) =>
+    String(s == null ? "" : s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+
+  function anInline(s) {
+    return s
+      .replace(/!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)/g, (m, alt, src) =>
+        '<img src="' + anEsc(src) + '" alt="' + anEsc(alt) + '" loading="lazy">')
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (m, txt, href) =>
+        '<a href="' + anEsc(href) + '" target="_blank" rel="noopener noreferrer">' +
+        txt + "</a>")
+      .replace(/`([^`\n]+?)`/g, "<code>$1</code>")
+      .replace(/\*\*([^*\n][^*]*?)\*\*/g, "<strong>$1</strong>")
+      .replace(/(^|[^*])\*([^*\n]+?)\*/g, "$1<em>$2</em>")
+      .replace(/~~([^~\n][^~]*?)~~/g, "<s>$1</s>");
+  }
+
+  function anMarkdown(src) {
+    const lines = anEsc(String(src || "")).split("\n");
+    const out = [];
+    let list = null;
+    let inCode = false;
+    let code = [];
+    const closeList = () => {
+      if (list) {
+        out.push("</" + list + ">");
+        list = null;
+      }
+    };
+    for (const raw of lines) {
+      if (/^\s*```/.test(raw)) {
+        if (inCode) {
+          out.push("<pre><code>" + code.join("\n") + "</code></pre>");
+          code = [];
+          inCode = false;
+        } else {
+          closeList();
+          inCode = true;
+        }
+        continue;
+      }
+      if (inCode) {
+        code.push(raw);
+        continue;
+      }
+      const line = raw.trim();
+      if (!line) {
+        closeList();
+        continue;
+      }
+      if (/^(-{3,}|\*{3,}|_{3,})$/.test(line)) {
+        closeList();
+        out.push("<hr>");
+        continue;
+      }
+      const h = /^(#{1,4})\s+(.*)$/.exec(line);
+      if (h) {
+        closeList();
+        const lvl = Math.min(6, h[1].length + 1);
+        out.push("<h" + lvl + ">" + anInline(h[2]) + "</h" + lvl + ">");
+        continue;
+      }
+      const q = /^&gt;\s?(.*)$/.exec(line);
+      if (q) {
+        closeList();
+        out.push("<blockquote>" + anInline(q[1]) + "</blockquote>");
+        continue;
+      }
+      const ul = /^[-*+]\s+(.*)$/.exec(line);
+      if (ul) {
+        if (list !== "ul") {
+          closeList();
+          out.push("<ul>");
+          list = "ul";
+        }
+        out.push("<li>" + anInline(ul[1]) + "</li>");
+        continue;
+      }
+      const ol = /^\d+[.)]\s+(.*)$/.exec(line);
+      if (ol) {
+        if (list !== "ol") {
+          closeList();
+          out.push("<ol>");
+          list = "ol";
+        }
+        out.push("<li>" + anInline(ol[1]) + "</li>");
+        continue;
+      }
+      closeList();
+      out.push("<p>" + anInline(line) + "</p>");
+    }
+    if (inCode && code.length)
+      out.push("<pre><code>" + code.join("\n") + "</code></pre>");
+    closeList();
+    return out.join("");
+  }
+
+  let anEditingId = null;
+
+  function anSyncCount() {
+    const body = $("anBody");
+    const c = $("anCount");
+    if (body && c) c.textContent = body.value.length + " / 4000";
+  }
+
+  function anResetForm() {
+    anEditingId = null;
+    if ($("anTitle")) $("anTitle").value = "";
+    if ($("anBody")) $("anBody").value = "";
+    if ($("anKind")) $("anKind").value = "notice";
+    if ($("anPreview")) $("anPreview").style.display = "none";
+    if ($("anCancelEdit")) $("anCancelEdit").style.display = "none";
+    if ($("anPost"))
+      $("anPost").innerHTML = '<i class="fas fa-paper-plane"></i> Post notice';
+    anSyncCount();
+  }
+
+  function anRenderList(items) {
+    const wrap = $("anList");
+    if (!wrap) return;
+    wrap.textContent = "";
+    const badge = $("announceBadge");
+    const liveCount = (items || []).filter((a) => a.live).length;
+    if (badge) {
+      badge.textContent = String(liveCount);
+      badge.style.display = liveCount ? "" : "none";
+    }
+    if (!items || !items.length) {
+      const e = document.createElement("div");
+      e.className = "an-empty";
+      e.textContent = "Nothing posted yet.";
+      wrap.appendChild(e);
+      return;
+    }
+    // Only the newest live one is actually on screen for people.
+    const showingId = (items.find((a) => a.live) || {}).id;
+    items.forEach((a) => {
+      const item = document.createElement("div");
+      item.className = "an-item" + (a.id === showingId ? " showing" : "");
+
+      const head = document.createElement("div");
+      head.className = "an-item-head";
+      const kindTag = document.createElement("span");
+      kindTag.className = "an-tag " + a.kind;
+      kindTag.textContent =
+        a.kind === "update" ? "Update" : a.kind === "alert" ? "Important" : "Notice";
+      head.appendChild(kindTag);
+      const title = document.createElement("span");
+      title.className = "an-item-title";
+      title.textContent = a.title;
+      head.appendChild(title);
+      const state = document.createElement("span");
+      if (a.id === showingId) {
+        state.className = "an-tag live";
+        state.textContent = "Showing now";
+      } else if (a.live) {
+        state.className = "an-tag hidden";
+        state.textContent = "Superseded";
+        state.title = "Live, but a newer notice is the one people see.";
+      } else {
+        state.className = "an-tag hidden";
+        state.textContent = "Hidden";
+      }
+      head.appendChild(state);
+      item.appendChild(head);
+
+      const meta = document.createElement("div");
+      meta.className = "an-item-meta";
+      meta.textContent =
+        (a.by || "?") +
+        " · " +
+        new Date(a.at).toLocaleString() +
+        (a.editedAt ? " · edited" : "");
+      item.appendChild(meta);
+
+      if (a.reactions && a.reactions.length) {
+        const rr = document.createElement("div");
+        rr.className = "an-item-reacts";
+        a.reactions.forEach((r) => {
+          const chip = document.createElement("span");
+          chip.className = "an-item-react";
+          const e = document.createElement("span");
+          e.textContent = r.e;
+          const n = document.createElement("b");
+          n.textContent = String(r.n);
+          chip.appendChild(e);
+          chip.appendChild(n);
+          rr.appendChild(chip);
+        });
+        item.appendChild(rr);
+      }
+
+      const acts = document.createElement("div");
+      acts.className = "an-item-actions";
+      const mk = (label, icon, fn, cls) => {
+        const b = document.createElement("button");
+        b.className = "btn sm" + (cls ? " " + cls : "");
+        b.innerHTML = '<i class="fas ' + icon + '"></i> ' + label;
+        b.addEventListener("click", fn);
+        acts.appendChild(b);
+        return b;
+      };
+      mk("Edit", "fa-pen", () => {
+        anEditingId = a.id;
+        $("anKind").value = a.kind;
+        $("anTitle").value = a.title;
+        $("anBody").value = a.body;
+        $("anCancelEdit").style.display = "";
+        $("anPost").innerHTML = '<i class="fas fa-check"></i> Save changes';
+        anSyncCount();
+        $("anTitle").scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+      mk(a.live ? "Hide" : "Show", a.live ? "fa-eye-slash" : "fa-eye", () => {
+        socket.emit("announcement live", { id: a.id, live: !a.live });
+      });
+      mk("Delete", "fa-trash", () => {
+        const go = () => socket.emit("announcement delete", { id: a.id });
+        if (window.StaffUI)
+          StaffUI.confirm({
+            title: "Delete notice",
+            message:
+              "Remove it from the history for good? Hiding it is usually enough.",
+            danger: true,
+            confirmText: "Delete",
+          }).then((ok) => ok && go());
+        else go();
+      }, "danger");
+      item.appendChild(acts);
+
+      const preview = document.createElement("div");
+      preview.className = "an-preview-box";
+      preview.style.marginTop = "10px";
+      preview.innerHTML = anMarkdown(a.body);
+      item.appendChild(preview);
+
+      wrap.appendChild(item);
+    });
+  }
+
+  socket.on("announcement list", (d) => anRenderList((d && d.items) || []));
+  socket.on("announcement result", (d) => {
+    if (!d) return;
+    if (!d.ok) {
+      if (window.StaffUI)
+        StaffUI.toast(d.error || "Could not save that.", { type: "error" });
+      return;
+    }
+    if (d.action === "post" || d.action === "edit") {
+      anResetForm();
+      if (window.StaffUI)
+        StaffUI.toast(d.action === "post" ? "Notice posted." : "Saved.", {
+          type: "success",
+        });
+    }
+  });
+
+  if ($("anBody")) {
+    $("anBody").addEventListener("input", anSyncCount);
+    $("anPreviewBtn").addEventListener("click", () => {
+      const box = $("anPreview");
+      const show = box.style.display === "none";
+      box.style.display = show ? "block" : "none";
+      if (show) box.innerHTML = anMarkdown($("anBody").value);
+    });
+    $("anCancelEdit").addEventListener("click", anResetForm);
+    $("anPost").addEventListener("click", () => {
+      const payload = {
+        kind: $("anKind").value,
+        title: $("anTitle").value.trim(),
+        body: $("anBody").value.trim(),
+      };
+      if (payload.title.length < 3)
+        return StaffUI && StaffUI.toast("Give it a title first.", { type: "error" });
+      if (payload.body.length < 3)
+        return StaffUI && StaffUI.toast("Write something in the body.", { type: "error" });
+      if (anEditingId) {
+        payload.id = anEditingId;
+        socket.emit("announcement edit", payload);
+        return;
+      }
+      // Posting shows it to everybody at once, so it asks first.
+      const go = () => socket.emit("announcement post", payload);
+      if (window.StaffUI)
+        StaffUI.confirm({
+          title: "Post this notice?",
+          message:
+            "Everyone in the lobby sees it full-screen, once, until they close it.",
+          confirmText: "Post it",
+        }).then((ok) => ok && go());
+      else go();
+    });
+    anSyncCount();
+  }
 
   window.addEventListener("beforeunload", () => {
     try {

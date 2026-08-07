@@ -1,0 +1,251 @@
+// server/announcements.js
+// Notices from the developers, shown to everybody as a full-screen card the
+// next time they open the lobby. Same flat-array JSON store as the suggestion
+// board, same tmp/rename write.
+//
+// The rules that matter:
+//   - only ONE announcement is ever "current": the newest live one. Showing a
+//     queue of them would train people to dismiss without reading.
+//   - "seen" is remembered by the browser, not here. The server says which
+//     announcement is current; the browser knows whether it has read that id.
+//     Nothing about a reader is stored, and there is no per-device table to
+//     grow forever.
+//   - reactions are keyed by device id so one browser is one reaction per
+//     emoji, and the emoji itself is validated: it is rendered as text on the
+//     client, but an unbounded string is still a way to bloat the file.
+
+const path = require("path");
+const fs = require("fs");
+const fsp = require("fs").promises;
+
+const { DATA_DIR } = require("./datadir");
+
+const STORE_PATH = path.join(DATA_DIR, "announcements.json");
+
+const MAX_KEPT = 200; // history for the dashboard
+const MAX_TITLE = 120;
+const MAX_BODY = 4000;
+const MAX_REACTIONS_PER_POST = 24; // distinct emoji
+const MAX_EMOJI_LEN = 16; // a family emoji with joiners is genuinely this long
+
+const KINDS = ["update", "notice", "alert"];
+
+let items = []; // oldest first
+let seq = 0;
+let saveTimer = null;
+
+function load() {
+  try {
+    const arr = JSON.parse(fs.readFileSync(STORE_PATH, "utf8"));
+    items = Array.isArray(arr) ? arr : [];
+    for (const a of items) migrate(a);
+    seq = items.reduce((m, a) => Math.max(m, a.id || 0), 0);
+  } catch (err) {
+    if (err.code !== "ENOENT")
+      console.error("Error loading announcements.json:", err);
+    items = [];
+  }
+}
+
+function migrate(a) {
+  if (!KINDS.includes(a.kind)) a.kind = "notice";
+  if (!a.reactions || typeof a.reactions !== "object") a.reactions = {};
+  if (a.editedAt === undefined) a.editedAt = null;
+  if (a.live === undefined) a.live = true;
+}
+
+function saveSoon() {
+  if (saveTimer) return;
+  saveTimer = setTimeout(async () => {
+    saveTimer = null;
+    try {
+      if (items.length > MAX_KEPT) items = items.slice(-MAX_KEPT);
+      const tmp = STORE_PATH + ".tmp";
+      await fsp.writeFile(tmp, JSON.stringify(items, null, 2), "utf8");
+      await fsp.rename(tmp, STORE_PATH);
+    } catch (e) {
+      console.error("announcements save failed:", e);
+    }
+  }, 2000);
+}
+
+function flushSync() {
+  try {
+    if (saveTimer) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+    }
+    if (items.length > MAX_KEPT) items = items.slice(-MAX_KEPT);
+    const tmp = STORE_PATH + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify(items, null, 2), "utf8");
+    fs.renameSync(tmp, STORE_PATH);
+  } catch (e) {
+    console.error("announcements flush failed:", e);
+  }
+}
+
+function get(id) {
+  return items.find((a) => a.id === Number(id)) || null;
+}
+
+function post({ kind, title, body, by, byRole }) {
+  const t = String(title || "").trim().slice(0, MAX_TITLE);
+  const b = String(body || "").trim().slice(0, MAX_BODY);
+  if (t.length < 3) return { ok: false, code: "title" };
+  if (b.length < 3) return { ok: false, code: "body" };
+  const a = {
+    id: ++seq,
+    kind: KINDS.includes(kind) ? kind : "notice",
+    title: t,
+    body: b,
+    by: by || "Talkomatic",
+    byRole: byRole || "dev",
+    at: Date.now(),
+    editedAt: null,
+    live: true,
+    reactions: {}, // emoji -> { deviceId: ts }
+  };
+  items.push(a);
+  saveSoon();
+  return { ok: true, id: a.id };
+}
+
+function edit({ id, kind, title, body }) {
+  const a = get(id);
+  if (!a) return { ok: false, code: "not_found" };
+  const t = String(title || "").trim().slice(0, MAX_TITLE);
+  const b = String(body || "").trim().slice(0, MAX_BODY);
+  if (t.length < 3) return { ok: false, code: "title" };
+  if (b.length < 3) return { ok: false, code: "body" };
+  a.title = t;
+  a.body = b;
+  if (KINDS.includes(kind)) a.kind = kind;
+  a.editedAt = Date.now();
+  saveSoon();
+  return { ok: true };
+}
+
+// Taking one down leaves it in the history but stops it being current, so a
+// notice sent by mistake can be pulled without erasing the record of it.
+function setLive(id, live) {
+  const a = get(id);
+  if (!a) return false;
+  a.live = !!live;
+  saveSoon();
+  return true;
+}
+
+function remove(id) {
+  const before = items.length;
+  items = items.filter((a) => a.id !== Number(id));
+  if (items.length === before) return false;
+  saveSoon();
+  return true;
+}
+
+// The newest live one. This is the only announcement anybody is ever shown.
+function current() {
+  for (let i = items.length - 1; i >= 0; i--) if (items[i].live) return items[i];
+  return null;
+}
+
+// A single skin-tone modifier, a joiner, a variation selector - an emoji is
+// several code points and a plain length check is not enough on its own. The
+// test is deliberately loose about WHICH emoji and strict about size and about
+// containing no plain letters, digits or punctuation, so this cannot become a
+// second chat.
+const EMOJI_ONLY_RE =
+  /^[\p{Extended_Pictographic}\p{Emoji_Component}‍️⃣]+$/u;
+// Emoji_Component on its own is not enough: it covers the plain digits, so
+// "12" passed the shape test. A real emoji has a pictograph in it, or is a
+// keycap ("1 combining-enclosing-keycap").
+const HAS_SYMBOL_RE = /[\p{Extended_Pictographic}⃣]/u;
+
+function validEmoji(e) {
+  const s = String(e || "");
+  if (!s || s.length > MAX_EMOJI_LEN) return false;
+  try {
+    return EMOJI_ONLY_RE.test(s) && HAS_SYMBOL_RE.test(s);
+  } catch (_) {
+    // No Unicode property escapes: fall back to "not ASCII and short".
+    return !/[\x00-\x7f]/.test(s);
+  }
+}
+
+// Toggles this device's reaction. Returns the new public counts, or null.
+function react({ id, deviceId, emoji }) {
+  const a = get(id);
+  if (!a || !deviceId) return null;
+  if (!validEmoji(emoji)) return null;
+  const key = String(emoji);
+  const holders = a.reactions[key];
+  if (holders && holders[deviceId]) {
+    delete holders[deviceId];
+    if (!Object.keys(holders).length) delete a.reactions[key];
+  } else {
+    if (
+      !holders &&
+      Object.keys(a.reactions).length >= MAX_REACTIONS_PER_POST
+    )
+      return null;
+    if (!a.reactions[key]) a.reactions[key] = {};
+    a.reactions[key][deviceId] = Date.now();
+  }
+  saveSoon();
+  return publicOne(a, deviceId);
+}
+
+// Counts, and whether THIS reader is one of them. Device ids never leave here.
+function reactionsFor(a, deviceId) {
+  const out = [];
+  for (const emoji in a.reactions) {
+    const holders = a.reactions[emoji];
+    const n = Object.keys(holders).length;
+    if (!n) continue;
+    out.push({ e: emoji, n, me: !!(deviceId && holders[deviceId]) });
+  }
+  out.sort((x, y) => y.n - x.n || (x.e < y.e ? -1 : 1));
+  return out;
+}
+
+function publicOne(a, deviceId) {
+  if (!a) return null;
+  return {
+    id: a.id,
+    kind: a.kind,
+    title: a.title,
+    body: a.body,
+    by: a.by,
+    byRole: a.byRole,
+    at: a.at,
+    editedAt: a.editedAt,
+    live: !!a.live,
+    reactions: reactionsFor(a, deviceId),
+  };
+}
+
+// Newest first, for the dashboard.
+function listFor(deviceId, limit = 50) {
+  return items
+    .slice()
+    .reverse()
+    .slice(0, limit)
+    .map((a) => publicOne(a, deviceId));
+}
+
+load();
+
+module.exports = {
+  post,
+  edit,
+  remove,
+  setLive,
+  react,
+  get,
+  current,
+  publicOne,
+  listFor,
+  validEmoji,
+  flushSync,
+  KINDS,
+};
