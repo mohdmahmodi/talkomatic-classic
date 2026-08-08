@@ -6312,6 +6312,14 @@ function registerSocketHandlers(opts) {
             "error",
             createErrorResponse(ERROR_CODES.NOT_FOUND, "Room not found."),
           );
+        if (!socket.isDev && room.type !== "public")
+          return socket.emit(
+            "error",
+            createErrorResponse(
+              ERROR_CODES.FORBIDDEN,
+              "You can only spectate public rooms.",
+            ),
+          );
         if (socket.roomId && !socket.spectating)
           return socket.emit(
             "error",
@@ -6327,13 +6335,14 @@ function registerSocketHandlers(opts) {
 
         socket.emit("spectate joined", spectatePayload(socket, room));
         sendDevRoomContext(roomId);
-        logStaff(socket, "spectate", null, room);
+        if (!socket.isDev) logStaff(socket, "spectate", null, room);
       }),
     );
 
     // Public read-only spectate: anyone can watch a PUBLIC room. Semi-private
-    // and private rooms need the access code, so non-staff can't spectate them.
-    // Spectators never enter room.users, so this works even on a full room.
+    // and private rooms need the access code, so they cannot be spectated
+    // (devs excepted). Spectators never enter room.users, so this works even
+    // on a full room.
     socket.on(
       "spectate room",
       safe(async (data) => {
@@ -6345,7 +6354,7 @@ function registerSocketHandlers(opts) {
             createErrorResponse(ERROR_CODES.NOT_FOUND, "Room not found."),
           );
         const staff = isStaffSocket(socket);
-        if (!staff && room.type !== "public")
+        if (!socket.isDev && room.type !== "public")
           return socket.emit(
             "error",
             createErrorResponse(
@@ -6369,7 +6378,7 @@ function registerSocketHandlers(opts) {
         socket.emit("spectate joined", spectatePayload(socket, room));
         if (staff) {
           sendDevRoomContext(roomId);
-          logStaff(socket, "spectate", null, room);
+          if (!socket.isDev) logStaff(socket, "spectate", null, room);
         }
       }),
     );

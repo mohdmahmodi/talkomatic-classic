@@ -5233,7 +5233,6 @@ window.addEventListener("hashchange", () => {
     .mod-badge{display:inline-block;background:#5aa9ff;color:#001229;font-size:9px;font-weight:bold;padding:1px 5px;border-radius:8px;margin:0 5px 0 0;letter-spacing:.5px;vertical-align:middle;flex:0 0 auto;}
     .mod-badge.mod-badge-jr{background:#c08bff;color:#16002b;}
     .bot-badge{display:inline-block;background:var(--bot-flair,#9aa3ae);color:#16191d;font-size:9px;font-weight:bold;padding:1px 5px;border-radius:8px;margin:0 5px 0 0;letter-spacing:.5px;vertical-align:middle;flex:0 0 auto;}
-    .bot-user .ui-name{color:var(--bot-flair,#9aa3ae);}
     .bot-user .chat-input{border-left:2px solid rgba(154,163,174,.4);}
     .device-icon{color:#7f8794;font-size:11px;margin-right:6px;flex:0 0 auto;}
     .invite-trophy{height:15px;width:auto;margin-right:5px;flex:0 0 auto;vertical-align:middle;}

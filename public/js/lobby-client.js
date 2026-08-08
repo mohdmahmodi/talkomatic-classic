@@ -1958,14 +1958,14 @@ function createRoomElement(room) {
   roomElement.appendChild(roomActions);
   roomElement.appendChild(roomTop);
 
-  // Per-room staff controls: spectate is dev + mod; spotlight stays dev-only.
+  // Per-room staff controls; spotlight stays dev-only.
   if (currentUserIsDev || (currentUserIsMod && currentUserModLevel >= 2)) {
     const devRow = document.createElement("div");
     devRow.className = "lobby-dev-controls";
 
-    // Public rooms already have the everyone-eye next to Enter; keep a staff
-    // spectate button only where that eye isn't shown (semi-private).
-    if (room.type !== "public") {
+    // Public rooms already have the everyone-eye next to Enter; a spectate
+    // button appears here only for the rooms that eye does not cover.
+    if (currentUserIsDev && room.type !== "public") {
       const spectateBtn = document.createElement("button");
       spectateBtn.type = "button";
       spectateBtn.className = "lobby-dev-btn";
@@ -3934,7 +3934,6 @@ socket.on("maintenance status", (data) => {
     .mod-lobby-badge{display:inline-block;background:#00bcd4;color:#003;font-size:8px;font-weight:bold;padding:1px 4px;border-radius:6px;margin:0 4px;letter-spacing:.5px;vertical-align:middle;}
     .mod-lobby-badge.mod-lobby-badge-jr{background:#ab47bc;color:#fff;}
     .bot-lobby-badge{display:inline-block;background:var(--bot-flair,#9aa3ae);color:#16191d;font-size:8px;font-weight:bold;padding:1px 4px;border-radius:6px;margin:0 4px 0 0;letter-spacing:.5px;vertical-align:middle;}
-    .bot-lobby-user .user-name,.bot-lobby-user .user-loc{color:var(--bot-flair,#9aa3ae);}
     .invite-trophy{height:14px;width:auto;vertical-align:middle;margin:0 4px 0 0;}
     .official-badge{display:inline-block;background:#ffd700;color:#3a2c00;font-size:9px;font-weight:bold;padding:1px 6px;border-radius:8px;margin-right:6px;letter-spacing:.5px;}
     .room.spotlight-room{border:1px solid #ffd700 !important;box-shadow:0 0 0 1px rgba(255,215,0,.25) inset;}

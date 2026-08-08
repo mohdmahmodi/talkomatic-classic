@@ -364,6 +364,14 @@ function recent(limit = 500, includeIp = true, modLevel = 2, since = 0) {
   } else {
     slice = entries.slice(-n);
   }
+  slice = slice.filter(
+    (e) =>
+      !(
+        e.type === "action" &&
+        e.role === "dev" &&
+        baseAction(e.action) === "spectate"
+      ),
+  );
   // Devs see everything; mods get IP-redacted entries with dev-only ones and
   // anything above their level removed.
   if (includeIp) return slice;
