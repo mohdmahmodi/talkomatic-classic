@@ -91,10 +91,14 @@ const MIN_VY_FRAC = 0.06;
 const TARGET = 7;
 const STEP_MS = 1000 / 60;
 const MAX_CATCHUP = 6; // physics steps one frame may swallow
-// Heartbeat snapshot, so thirty a second. The browser draws the court one gap
-// behind the clock and that gap is felt in the hand, so buying it down costs
-// about a kilobyte a second per person watching and is worth it.
-const PUSH_EVERY = 2;
+// Heartbeat snapshot every physics step, so sixty a second. The opponent's
+// paddle only exists between real samples, drawn far enough in the past that a
+// sample sits either side of the drawing moment - so the snapshot gap IS the
+// floor on how fresh that paddle can ever be. Halving the gap took the far
+// paddle from ~45ms behind to ~30ms behind for a few kilobytes a second per
+// person at the board, which is the cheapest latency on offer anywhere in
+// this file.
+const PUSH_EVERY = 1;
 const SERVE_MS = 1500;
 const FIRST_SERVE_MS = 2600;
 // Two ways to notice somebody has walked off. The counter is the one that

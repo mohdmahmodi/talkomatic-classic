@@ -1715,7 +1715,7 @@
     let root, canvas, ctx, courtBox, wrapEl, floatEl;
     let nameL, nameR, ptsL, ptsR, midEl, rallyEl;
     let matchKey = "";
-    let padsEl, cheerEl, lineupEl, hintEl, dbgBtn, copyEl;
+    let padsEl, cheerEl, lineupEl, hintEl, dbgBtn, copyEl, saveEl;
     let ro = null, raf = null, sendTimer = null;
     let cssFont = "sans-serif";
 
@@ -1757,8 +1757,8 @@
     // sample on both sides of the drawing moment. Measured, because guessing
     // low means holding still constantly and guessing high is needless lag on
     // the one paddle that has any.
-    let netDelay = 70;
-    let gapMax = 34, lateMax = 12;
+    let netDelay = 50;
+    let gapMax = 20, lateMax = 12;
 
     let myWant = null, myDir = 0;
     let sentY = null, sentDir = 0, lastSentAt = 0;
@@ -2183,7 +2183,10 @@
         clamp(serverNow() - f.t, 0, 300),
         lateMax * 0.97,
       );
-      netDelay = clamp(gapMax + lateMax * 0.5 + 8, 45, 150);
+      // Floor of 30: at 60Hz snapshots the gap term is ~17ms, so a healthy
+      // link settles near the floor and the far paddle is a frame or two back
+      // instead of three.
+      netDelay = clamp(gapMax + lateMax * 0.5 + 8, 30, 150);
 
       for (let i = 0; i < 2; i++) {
         netY[i] = f.p[i];
@@ -2462,6 +2465,13 @@
           e: Math.round(dbgErr * 10) / 10,
           h: dbgHardRate,
           p: sim.phase,
+          // Whether a match was actually running and whether this browser was
+          // in it. Without these the report cannot tell "sat waiting for an
+          // opponent" from "seated mid-rally with the paddle on the wire",
+          // and it counted ten seconds of waiting as 42% lag.
+          m: detail && detail.state === "playing" ? 1 : 0,
+          q: detail && detail.seated ? 1 : 0,
+          c: last ? last.s[0] + "-" + last.s[1] : "",
         });
         while (rec.length > 720) rec.shift();
       }
@@ -2637,20 +2647,25 @@
         );
       }
 
+      // Measured whether or not the readout is showing. The flight recorder
+      // runs always, and it reads these; when this arithmetic lived inside the
+      // readout every report sent with the readout off said fps 0 and the one
+      // number that would have told us about a struggling machine was missing.
+      dbgFrames++;
+      if (nowMs - dbgAt > 500) {
+        dbgFps = Math.round((dbgFrames * 1000) / (nowMs - dbgAt));
+        dbgRate = Math.round((dbgFix * 1000) / (nowMs - dbgAt));
+        dbgHardRate = Math.round((dbgHard * 1000) / (nowMs - dbgAt));
+        dbgErr = dbgFix ? dbgFixSum / dbgFix : 0;
+        dbgFrames = 0;
+        dbgFix = 0;
+        dbgFixSum = 0;
+        dbgHard = 0;
+        dbgAt = nowMs;
+      }
+
       if (PG_DEBUG) {
         ctx.setTransform(1, 0, 0, 1, 0, 0);
-        dbgFrames++;
-        if (nowMs - dbgAt > 500) {
-          dbgFps = Math.round((dbgFrames * 1000) / (nowMs - dbgAt));
-          dbgRate = Math.round((dbgFix * 1000) / (nowMs - dbgAt));
-          dbgHardRate = Math.round((dbgHard * 1000) / (nowMs - dbgAt));
-          dbgErr = dbgFix ? dbgFixSum / dbgFix : 0;
-          dbgFrames = 0;
-          dbgFix = 0;
-          dbgFixSum = 0;
-          dbgHard = 0;
-          dbgAt = nowMs;
-        }
         // The gap between your paddle and the server's copy of it. THIS is
         // the number that matters: everything the other player sees, and every
         // hit-or-miss ruling, is made against the server's copy. A gap of more
@@ -2707,46 +2722,73 @@
       return s[Math.min(s.length - 1, Math.floor(s.length * q))];
     }
 
-    function statsText() {
+    function statsText(full) {
       if (!rec.length) return "pong: nothing recorded yet";
       const L = [];
       const secs = (rec[rec.length - 1].t / 1000).toFixed(0);
-      const wire = rec.filter((r) => r.s === "W");
-      const gaps = rec.filter((r) => r.s === "H").map((r) => r.g);
-      const fps = rec.map((r) => r.f).filter((x) => x > 0);
+      // Only moments where a match was running and this browser was seated in
+      // it can say anything about lag. Waiting for an opponent and watching
+      // from the rail both have no seat BY DESIGN, and counting them here is
+      // how ten seconds of waiting once read as "42% of the time on the wire"
+      // in a match that was actually healthy end to end.
+      const live = rec.filter((r) => r.m && r.q);
+      const base = live.length ? live : rec;
+      const wire = live.filter((r) => r.s === "W");
+      const gaps = live.filter((r) => r.s === "H").map((r) => r.g);
+      const fps = base.map((r) => r.f).filter((x) => x > 0);
       const why = {};
       for (const r of wire) why[r.w] = (why[r.w] || 0) + 1;
+      const hand = live.length
+        ? (100 - (wire.length / live.length) * 100).toFixed(0)
+        : null;
 
-      L.push("=== TALKOMATIC PONG REPORT ===");
-      L.push("recorded " + secs + "s over " + rec.length + " samples");
+      // The first line is the whole verdict, sized to survive being pasted
+      // into a chat that cuts messages short. Everything under it is detail.
+      L.push(
+        "=== PONG " + secs + "s === " +
+          (hand == null
+            ? "no match played"
+            : "hand " + hand + "%, gap med " + pct(gaps, 0.5) + "u p90 " +
+              pct(gaps, 0.9) + "u") +
+          ", fps " + pct(fps, 0.5) +
+          ", ball " + pct(base.map((r) => r.e), 0.5) + "u" +
+          ", farpad " + pct(base.map((r) => r.d), 0.5) + "ms",
+      );
+      L.push("recorded " + secs + "s over " + rec.length + " samples, " +
+        live.length + " in a live match, " + (rec.length - live.length) +
+        " waiting or watching (not counted below)");
       L.push("");
-      L.push("PADDLE DRIVEN BY YOUR HAND: " +
-        (100 - (wire.length / rec.length) * 100).toFixed(0) + "% of the time");
-      if (wire.length)
-        L.push("  on the wire instead " + wire.length + " samples, reasons: " +
-          Object.keys(why).map((k) => k + " x" + why[k]).join(", "));
-      L.push("");
-      L.push("SERVER'S COPY OF YOUR PADDLE, how far behind yours (units, paddle is " +
-        C.paddleH + " tall)");
-      L.push("  median " + pct(gaps, 0.5) + "   90th " + pct(gaps, 0.9) +
-        "   worst " + pct(gaps, 0.999));
+      if (hand == null) {
+        L.push("No seated in-match time in this recording, so there are no");
+        L.push("paddle numbers to report. Play a point and press the button again.");
+      } else {
+        L.push("PADDLE DRIVEN BY YOUR HAND: " + hand + "% of in-match time");
+        if (wire.length)
+          L.push("  on the wire instead " + wire.length + " samples, reasons: " +
+            Object.keys(why).map((k) => k + " x" + why[k]).join(", "));
+        L.push("");
+        L.push("SERVER'S COPY OF YOUR PADDLE, how far behind yours (units, paddle is " +
+          C.paddleH + " tall)");
+        L.push("  median " + pct(gaps, 0.5) + "   90th " + pct(gaps, 0.9) +
+          "   worst " + pct(gaps, 0.999));
+      }
       L.push("");
       L.push("FRAME RATE   median " + pct(fps, 0.5) + "   worst " + pct(fps, 0.02));
       L.push("BALL         off the server by " +
-        pct(rec.map((r) => r.e), 0.5) + "u median, " +
-        pct(rec.map((r) => r.e), 0.9) + "u at the 90th; rebuilt " +
-        pct(rec.map((r) => r.h), 0.5) + "/s median, " +
-        pct(rec.map((r) => r.h), 0.95) + "/s worst");
-      L.push("FAR PADDLE   drawn " + pct(rec.map((r) => r.d), 0.5) +
-        "ms back (median), " + pct(rec.map((r) => r.d), 0.95) + "ms worst");
+        pct(base.map((r) => r.e), 0.5) + "u median, " +
+        pct(base.map((r) => r.e), 0.9) + "u at the 90th; rebuilt " +
+        pct(base.map((r) => r.h), 0.5) + "/s median, " +
+        pct(base.map((r) => r.h), 0.95) + "/s worst");
+      L.push("FAR PADDLE   drawn " + pct(base.map((r) => r.d), 0.5) +
+        "ms back (median), " + pct(base.map((r) => r.d), 0.95) + "ms worst");
       L.push("CLOCK OFFSET " + rec[rec.length - 1].o +
         "ms (a plain clock difference, not a fault)");
       L.push("SPEEDS       pointer " + C.paddleSpeed + " key " +
         (C.keySpeed || "?") + " u/s, court " + C.w + "x" + C.h);
       L.push("");
-      L.push("CONTROL CHANGES (only when the paddle changed hands)");
+      L.push("CONTROL CHANGES (in-match only, when the paddle changed hands)");
       let prev = null, n = 0;
-      for (const r of rec) {
+      for (const r of live) {
         // Deliberately NOT keyed on the phase: serve/live flips every point
         // and drowns the one transition anybody cares about.
         const k = r.s + r.w;
@@ -2759,10 +2801,24 @@
         }
       }
       L.push("");
-      L.push("LAST 20 SAMPLES  t=sec fps src gap netDelay ballErr rebuilds");
-      for (const r of rec.slice(-20))
-        L.push("  " + (r.t / 1000).toFixed(1) + " " + r.f + " " + r.s + " " +
-          r.g + " " + r.d + " " + r.e + " " + r.h);
+      L.push("PER-SECOND TRACE  sec score src fps gap farpad ballErr rebuilds phase");
+      let lastSec = -1;
+      for (const r of rec) {
+        const sec = Math.floor(r.t / 1000);
+        if (sec === lastSec) continue;
+        lastSec = sec;
+        L.push("  " + sec + " " + (r.c || "-") + " " +
+          (r.m && r.q ? r.s : "idle") + " " + r.f + " " + r.g + " " + r.d +
+          " " + r.e + " " + r.h + " " + r.p);
+      }
+      if (full) {
+        L.push("");
+        L.push("RAW SAMPLES (250ms)  t fps src why gap farpad offset ballErr rebuilds phase match seated score");
+        for (const r of rec)
+          L.push("  " + (r.t / 1000).toFixed(2) + " " + r.f + " " + r.s + " " +
+            r.w + " " + r.g + " " + r.d + " " + r.o + " " + r.e + " " + r.h +
+            " " + r.p + " " + r.m + " " + r.q + " " + (r.c || "-"));
+      }
       return L.join("\n");
     }
 
@@ -2776,6 +2832,29 @@
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(text).then(done, () => fallback(text, done));
       } else fallback(text, done);
+    }
+
+    // The full log as a file. Chat cuts long messages short, which is how
+    // every report pasted mid-match arrived missing the half that mattered.
+    // A file cannot be truncated by a textbox, so this is the one to share
+    // when somebody actually needs the numbers.
+    function saveStats() {
+      const blob = new Blob([statsText(true)], { type: "text/plain" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "pong-log-" +
+        new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-") + ".txt";
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        a.remove();
+        URL.revokeObjectURL(url);
+      }, 200);
+      if (saveEl) {
+        saveEl.textContent = "✅";
+        setTimeout(() => { if (saveEl) saveEl.textContent = "💾"; }, 1200);
+      }
     }
 
     // Clipboard access is refused outside a secure context and in some
@@ -2984,6 +3063,16 @@
           onclick: copyStats,
         });
         cheerEl.appendChild(copyEl);
+
+        // Download the whole recording, raw samples included, as a text file.
+        saveEl = el("button", {
+          class: "gm-pg-cheer-btn gm-pg-stats",
+          title: "Download full connection log",
+          "aria-label": "Download the full connection log as a text file",
+          text: "💾",
+          onclick: saveStats,
+        });
+        cheerEl.appendChild(saveEl);
 
         root.appendChild(el("div", { class: "gm-pg-under" }, [padsEl, cheerEl]));
 
