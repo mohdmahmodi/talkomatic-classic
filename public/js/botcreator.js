@@ -94,7 +94,10 @@
             if: [],
             do: [
               { type: "wait", seconds: 1 },
-              { type: "say", text: "Welcome to {room}, {name}! 👋 That makes {humans} of us." },
+              {
+                type: "say",
+                text: "Welcome to {room}, {name}! 👋 That makes {humans} of us.",
+              },
             ],
           },
           {
@@ -142,7 +145,10 @@
             on: { type: "command", word: "quiz" },
             if: [],
             do: [
-              { type: "say", text: "❓ What has keys but can't open doors? Answer with: !answer yourguess" },
+              {
+                type: "say",
+                text: "❓ What has keys but can't open doors? Answer with: !answer yourguess",
+              },
             ],
           },
           {
@@ -150,13 +156,16 @@
             if: [{ a: "{word1}", op: "is", b: "piano" }],
             do: [
               { type: "add", var: "points", per: "user", amount: "1" },
-              { type: "say", text: "🏆 Right, {name}! A piano. You have {mymemory:points} points." },
+              {
+                type: "say",
+                text: "🏆 Right, {name}! A piano. You have {mymemory:points} points.",
+              },
             ],
           },
           {
             on: { type: "command", word: "answer" },
             if: [{ a: "{word1}", op: "not", b: "piano" }],
-            do: [{ type: "say", text: "Nope, not \"{word1}\". Try again!" }],
+            do: [{ type: "say", text: 'Nope, not "{word1}". Try again!' }],
           },
           {
             on: { type: "command", word: "points" },
@@ -171,7 +180,8 @@
       icon: "fa-bullseye",
       level: "medium",
       name: "Guess the Number",
-      blurb: "The whole room guesses together. First right answer wins the round.",
+      blurb:
+        "The whole room guesses together. First right answer wins the round.",
       bot: {
         name: "GuessBot",
         rules: [
@@ -180,13 +190,21 @@
             if: [],
             do: [
               { type: "random", var: "secret", per: "bot", from: "1-100" },
-              { type: "say", text: "🎯 I picked a number from 1 to 100. Anyone can guess: !guess 50" },
+              {
+                type: "say",
+                text: "🎯 I picked a number from 1 to 100. Anyone can guess: !guess 50",
+              },
             ],
           },
           {
             on: { type: "command", word: "guess" },
             if: [{ a: "{memory:secret}", op: "is", b: "0" }],
-            do: [{ type: "say", text: "No number picked yet. Type !start to begin a round." }],
+            do: [
+              {
+                type: "say",
+                text: "No number picked yet. Type !start to begin a round.",
+              },
+            ],
           },
           {
             on: { type: "command", word: "guess" },
@@ -212,7 +230,10 @@
             ],
             do: [
               { type: "add", var: "wins", per: "user", amount: "1" },
-              { type: "say", text: "🎉 {name} got it! It was {memory:secret}. That makes {mymemory:wins} wins. Type !start for a new round." },
+              {
+                type: "say",
+                text: "🎉 {name} got it! It was {memory:secret}. That makes {mymemory:wins} wins. Type !start for a new round.",
+              },
               { type: "set", var: "secret", per: "bot", value: "0" },
             ],
           },
@@ -231,7 +252,14 @@
           {
             on: { type: "command", word: "rps" },
             if: [],
-            do: [{ type: "random", var: "m", per: "bot", from: "rock, paper, scissors" }],
+            do: [
+              {
+                type: "random",
+                var: "m",
+                per: "bot",
+                from: "rock, paper, scissors",
+              },
+            ],
           },
           {
             on: { type: "command", word: "rps" },
@@ -240,7 +268,12 @@
               { a: "{word1}", op: "not", b: "paper" },
               { a: "{word1}", op: "not", b: "scissors" },
             ],
-            do: [{ type: "say", text: "That's not a throw, {name}. Try: !rps rock" }],
+            do: [
+              {
+                type: "say",
+                text: "That's not a throw, {name}. Try: !rps rock",
+              },
+            ],
           },
           {
             on: { type: "command", word: "rps" },
@@ -255,7 +288,10 @@
             ],
             do: [
               { type: "add", var: "wins", per: "user", amount: "1" },
-              { type: "say", text: "You throw rock, I throw scissors. {name} wins! 🎉 ({mymemory:wins} wins)" },
+              {
+                type: "say",
+                text: "You throw rock, I throw scissors. {name} wins! 🎉 ({mymemory:wins} wins)",
+              },
             ],
           },
           {
@@ -266,7 +302,10 @@
             ],
             do: [
               { type: "add", var: "wins", per: "user", amount: "1" },
-              { type: "say", text: "You throw paper, I throw rock. {name} wins! 🎉 ({mymemory:wins} wins)" },
+              {
+                type: "say",
+                text: "You throw paper, I throw rock. {name} wins! 🎉 ({mymemory:wins} wins)",
+              },
             ],
           },
           {
@@ -277,7 +316,10 @@
             ],
             do: [
               { type: "add", var: "wins", per: "user", amount: "1" },
-              { type: "say", text: "You throw scissors, I throw paper. {name} wins! 🎉 ({mymemory:wins} wins)" },
+              {
+                type: "say",
+                text: "You throw scissors, I throw paper. {name} wins! 🎉 ({mymemory:wins} wins)",
+              },
             ],
           },
           {
@@ -286,7 +328,12 @@
               { a: "{word1}", op: "is", b: "rock" },
               { a: "{memory:m}", op: "is", b: "paper" },
             ],
-            do: [{ type: "say", text: "You throw rock, I throw paper. {bot} wins! 😎" }],
+            do: [
+              {
+                type: "say",
+                text: "You throw rock, I throw paper. {bot} wins! 😎",
+              },
+            ],
           },
           {
             on: { type: "command", word: "rps" },
@@ -294,7 +341,12 @@
               { a: "{word1}", op: "is", b: "paper" },
               { a: "{memory:m}", op: "is", b: "scissors" },
             ],
-            do: [{ type: "say", text: "You throw paper, I throw scissors. {bot} wins! 😎" }],
+            do: [
+              {
+                type: "say",
+                text: "You throw paper, I throw scissors. {bot} wins! 😎",
+              },
+            ],
           },
           {
             on: { type: "command", word: "rps" },
@@ -302,7 +354,12 @@
               { a: "{word1}", op: "is", b: "scissors" },
               { a: "{memory:m}", op: "is", b: "rock" },
             ],
-            do: [{ type: "say", text: "You throw scissors, I throw rock. {bot} wins! 😎" }],
+            do: [
+              {
+                type: "say",
+                text: "You throw scissors, I throw rock. {bot} wins! 😎",
+              },
+            ],
           },
         ],
       },
@@ -312,7 +369,8 @@
       icon: "fa-fish",
       level: "hard",
       name: "Fishing",
-      blurb: "!fish to cast, !coins for your money. A little economy the whole room shares.",
+      blurb:
+        "!fish to cast, !coins for your money. A little economy the whole room shares.",
       bot: {
         name: "FishBot",
         rules: [
@@ -329,7 +387,10 @@
               { type: "add", var: "casts", per: "user", amount: "1" },
               { type: "say", text: "{name} casts a line... 🎣" },
               { type: "wait", seconds: 2.5 },
-              { type: "say", text: "...and reels in {mymemory:catch}! (cast #{mymemory:casts})" },
+              {
+                type: "say",
+                text: "...and reels in {mymemory:catch}! (cast #{mymemory:casts})",
+              },
             ],
           },
           {
@@ -363,7 +424,12 @@
           {
             on: { type: "command", word: "coins" },
             if: [],
-            do: [{ type: "say", text: "💰 {name} has {mymemory:coins} coins from {mymemory:casts} casts." }],
+            do: [
+              {
+                type: "say",
+                text: "💰 {name} has {mymemory:coins} coins from {mymemory:casts} casts.",
+              },
+            ],
           },
         ],
       },
@@ -437,7 +503,8 @@
     if (d.pending) {
       toastr.info("Room made! Taking you there, your bot follows you in.");
       setTimeout(() => {
-        window.location.href = "room.html?roomId=" + encodeURIComponent(d.roomId);
+        window.location.href =
+          "room.html?roomId=" + encodeURIComponent(d.roomId);
       }, 900);
       return;
     }
@@ -480,7 +547,8 @@
       name.appendChild(document.createTextNode(b.name));
       const meta = document.createElement("div");
       meta.className = "bc-bot-card-meta";
-      meta.textContent = b.rules.length + (b.rules.length === 1 ? " rule" : " rules");
+      meta.textContent =
+        b.rules.length + (b.rules.length === 1 ? " rule" : " rules");
       card.appendChild(name);
       card.appendChild(meta);
       card.addEventListener("click", () =>
@@ -519,8 +587,14 @@
       card.appendChild(meta);
       card.addEventListener("click", () => {
         if (!me) return showView("gate");
-        loadBot(JSON.parse(JSON.stringify({ id: null, name: t.bot.name, rules: t.bot.rules })));
-        toastr.info("This is a ready-made bot. Try it, change it, then press Save to keep your copy.");
+        loadBot(
+          JSON.parse(
+            JSON.stringify({ id: null, name: t.bot.name, rules: t.bot.rules }),
+          ),
+        );
+        toastr.info(
+          "This is a ready-made bot. Try it, change it, then press Save to keep your copy.",
+        );
       });
       host.appendChild(card);
     }
@@ -540,7 +614,9 @@
     const mins = Math.max(0, Math.round((Date.now() - d.since) / 60000));
     $("liveSince").textContent =
       (mins < 1 ? "Just went in" : "In there " + mins + " min") +
-      (d.dropped ? " · " + d.dropped + " messages skipped (going too fast)" : "");
+      (d.dropped
+        ? " · " + d.dropped + " messages skipped (going too fast)"
+        : "");
     card.classList.add("show");
   }
 
@@ -568,7 +644,11 @@
       el.appendChild(h);
       el.appendChild(p);
       el.addEventListener("click", () => {
-        loadBot(JSON.parse(JSON.stringify({ id: null, name: t.bot.name, rules: t.bot.rules })));
+        loadBot(
+          JSON.parse(
+            JSON.stringify({ id: null, name: t.bot.name, rules: t.bot.rules }),
+          ),
+        );
       });
       grid.appendChild(el);
     }
@@ -577,7 +657,9 @@
   $("newBotBtn").addEventListener("click", () => {
     if (!me) return showView("gate");
     if ((status?.bots || []).length >= (status?.limits?.maxSaved || 8))
-      return toastr.error("You have the most bots you can keep. Delete one first.");
+      return toastr.error(
+        "You have the most bots you can keep. Delete one first.",
+      );
     edit = null;
     showView("editor");
     $("tplCard").style.display = "";
@@ -756,7 +838,9 @@
   function renderRules() {
     const host = $("rulesHost");
     host.innerHTML = "";
-    (edit.rules || []).forEach((rule, ri) => host.appendChild(ruleCard(rule, ri)));
+    (edit.rules || []).forEach((rule, ri) =>
+      host.appendChild(ruleCard(rule, ri)),
+    );
   }
 
   function ruleCard(rule, ri) {
@@ -772,13 +856,18 @@
     kicker.textContent = "WHEN";
     head.appendChild(kicker);
     head.appendChild(
-      mkSelect(TRIGGER_OPTIONS, rule.on.type, (v) => {
-        rule.on = { type: v };
-        if (v === "command") rule.on.word = "hello";
-        if (v === "says") rule.on.text = "";
-        if (v === "timer") rule.on.minutes = 5;
-        renderRules();
-      }, "w-trig"),
+      mkSelect(
+        TRIGGER_OPTIONS,
+        rule.on.type,
+        (v) => {
+          rule.on = { type: v };
+          if (v === "command") rule.on.word = "hello";
+          if (v === "says") rule.on.text = "";
+          if (v === "timer") rule.on.minutes = 5;
+          renderRules();
+        },
+        "w-trig",
+      ),
     );
     if (rule.on.type === "command") {
       const bang = document.createElement("span");
@@ -786,12 +875,29 @@
       bang.textContent = "!";
       head.appendChild(bang);
       head.appendChild(
-        mkInput(rule.on.word, "word", (v) => (rule.on.word = v.replace(/^!/, "")), "w-word"),
+        mkInput(
+          rule.on.word,
+          "word",
+          (v) => (rule.on.word = v.replace(/^!/, "")),
+          "w-word",
+        ),
       );
     } else if (rule.on.type === "says") {
-      head.appendChild(mkInput(rule.on.text, "the phrase to listen for", (v) => (rule.on.text = v), "w-grow"));
+      head.appendChild(
+        mkInput(
+          rule.on.text,
+          "the phrase to listen for",
+          (v) => (rule.on.text = v),
+          "w-grow",
+        ),
+      );
     } else if (rule.on.type === "timer") {
-      const n = mkInput(rule.on.minutes, "5", (v) => (rule.on.minutes = Number(v)), "w-num");
+      const n = mkInput(
+        rule.on.minutes,
+        "5",
+        (v) => (rule.on.minutes = Number(v)),
+        "w-num",
+      );
       n.type = "number";
       n.min = "2";
       n.max = "120";
@@ -825,8 +931,12 @@
       const aInput = mkInput(cond.a, "{word1}", (v) => (cond.a = v), "w-val");
       row.appendChild(aInput);
       row.appendChild(mkMagicButton(aInput));
-      row.appendChild(mkSelect(OP_OPTIONS, cond.op, (v) => (cond.op = v), "w-per"));
-      row.appendChild(mkInput(cond.b, "what it should be", (v) => (cond.b = v), "w-val"));
+      row.appendChild(
+        mkSelect(OP_OPTIONS, cond.op, (v) => (cond.op = v), "w-per"),
+      );
+      row.appendChild(
+        mkInput(cond.b, "what it should be", (v) => (cond.b = v), "w-val"),
+      );
       row.appendChild(
         mkRowButtons([
           mkIconButton("Remove this check", "fa-xmark", () => {
@@ -884,17 +994,25 @@
     k.textContent = ai === 0 ? "DO" : "THEN";
     row.appendChild(k);
     row.appendChild(
-      mkSelect(ACTION_OPTIONS, act.type, (v) => {
-        const idx = rule.do.indexOf(act);
-        const fresh = { type: v };
-        if (v === "say") fresh.text = "";
-        if (v === "wait") fresh.seconds = 2;
-        if (v === "set") Object.assign(fresh, { var: "prize", per: "bot", value: "" });
-        if (v === "add") Object.assign(fresh, { var: "points", per: "user", amount: "1" });
-        if (v === "random") Object.assign(fresh, { var: "prize", per: "bot", from: "a, b, c" });
-        rule.do[idx] = fresh;
-        renderRules();
-      }, "w-act"),
+      mkSelect(
+        ACTION_OPTIONS,
+        act.type,
+        (v) => {
+          const idx = rule.do.indexOf(act);
+          const fresh = { type: v };
+          if (v === "say") fresh.text = "";
+          if (v === "wait") fresh.seconds = 2;
+          if (v === "set")
+            Object.assign(fresh, { var: "prize", per: "bot", value: "" });
+          if (v === "add")
+            Object.assign(fresh, { var: "points", per: "user", amount: "1" });
+          if (v === "random")
+            Object.assign(fresh, { var: "prize", per: "bot", from: "a, b, c" });
+          rule.do[idx] = fresh;
+          renderRules();
+        },
+        "w-act",
+      ),
     );
 
     const perSelect = (a) =>
@@ -923,7 +1041,12 @@
       row.appendChild(t);
       row.appendChild(mkMagicButton(t));
     } else if (act.type === "wait") {
-      const n = mkInput(act.seconds, "2", (v) => (act.seconds = Number(v)), "w-num");
+      const n = mkInput(
+        act.seconds,
+        "2",
+        (v) => (act.seconds = Number(v)),
+        "w-num",
+      );
       n.type = "number";
       n.step = "0.5";
       n.min = "0.5";
@@ -934,48 +1057,76 @@
       lbl.textContent = "seconds";
       row.appendChild(lbl);
     } else if (act.type === "set") {
-      row.appendChild(mkInput(act.var, "memory name", (v) => (act.var = v), "w-mem"));
+      row.appendChild(
+        mkInput(act.var, "memory name", (v) => (act.var = v), "w-mem"),
+      );
       row.appendChild(perSelect(act));
       const eq = document.createElement("span");
       eq.className = "bc-unit";
       eq.textContent = "=";
       row.appendChild(eq);
-      const vInput = mkInput(act.value, "what to write down", (v) => (act.value = v), "w-val");
+      const vInput = mkInput(
+        act.value,
+        "what to write down",
+        (v) => (act.value = v),
+        "w-val",
+      );
       row.appendChild(vInput);
       row.appendChild(mkMagicButton(vInput));
     } else if (act.type === "add") {
-      row.appendChild(mkInput(act.var, "memory name", (v) => (act.var = v), "w-mem"));
+      row.appendChild(
+        mkInput(act.var, "memory name", (v) => (act.var = v), "w-mem"),
+      );
       row.appendChild(perSelect(act));
       const plus = document.createElement("span");
       plus.className = "bc-unit";
       plus.textContent = "+";
       row.appendChild(plus);
-      row.appendChild(mkInput(act.amount, "1", (v) => (act.amount = v), "w-num"));
+      row.appendChild(
+        mkInput(act.amount, "1", (v) => (act.amount = v), "w-num"),
+      );
     } else if (act.type === "random") {
-      row.appendChild(mkInput(act.var, "memory name", (v) => (act.var = v), "w-mem"));
+      row.appendChild(
+        mkInput(act.var, "memory name", (v) => (act.var = v), "w-mem"),
+      );
       row.appendChild(perSelect(act));
       const from = document.createElement("span");
       from.className = "bc-unit";
       from.textContent = "from";
       row.appendChild(from);
       row.appendChild(
-        mkInput(act.from, "red, green, blue (or 1-100)", (v) => (act.from = v), "w-grow"),
+        mkInput(
+          act.from,
+          "red, green, blue (or 1-100)",
+          (v) => (act.from = v),
+          "w-grow",
+        ),
       );
     }
 
     // Order matters: picking a random prize has to happen ABOVE saying it.
     row.appendChild(
       mkRowButtons([
-        mkIconButton("Move up", "fa-chevron-up", () => {
-          rule.do.splice(ai - 1, 0, rule.do.splice(ai, 1)[0]);
-          touch();
-          renderRules();
-        }, ai === 0),
-        mkIconButton("Move down", "fa-chevron-down", () => {
-          rule.do.splice(ai + 1, 0, rule.do.splice(ai, 1)[0]);
-          touch();
-          renderRules();
-        }, ai === rule.do.length - 1),
+        mkIconButton(
+          "Move up",
+          "fa-chevron-up",
+          () => {
+            rule.do.splice(ai - 1, 0, rule.do.splice(ai, 1)[0]);
+            touch();
+            renderRules();
+          },
+          ai === 0,
+        ),
+        mkIconButton(
+          "Move down",
+          "fa-chevron-down",
+          () => {
+            rule.do.splice(ai + 1, 0, rule.do.splice(ai, 1)[0]);
+            touch();
+            renderRules();
+          },
+          ai === rule.do.length - 1,
+        ),
         mkIconButton("Remove this action", "fa-xmark", () => {
           rule.do.splice(ai, 1);
           touch();
@@ -1055,7 +1206,9 @@
 
   socket.on("bots test error", (d) => {
     testWaiting = null;
-    setTestStatus("Problem with the rules: " + (d?.message || "something is not right."));
+    setTestStatus(
+      "Problem with the rules: " + (d?.message || "something is not right."),
+    );
     toastr.error(d?.message || "Something in the rules is not right.");
   });
 
@@ -1070,11 +1223,14 @@
     $("trMyBox").value = "";
     $("trBotBox").textContent = "";
     $("trBotTyping").style.display = "none";
-    $("trMyName").textContent = me ? me.username + " / " + (me.location || "here") : "You";
+    $("trMyName").textContent = me
+      ? me.username + " / " + (me.location || "here")
+      : "You";
     $("trBotName").textContent = (edit?.name || "Bot") + " / Bot";
     setTestStatus(
       "Type in your box. When your last line sits still for a second, " +
-        (edit?.name || "the bot") + " reads it.",
+        (edit?.name || "the bot") +
+        " reads it.",
     );
   }
 
@@ -1139,17 +1295,31 @@
     );
 
     for (const s of d.says || []) {
-      if (s.clear) botTimers.push(setTimeout(() => ($("trBotBox").textContent = ""), s.delayMs));
+      if (s.clear)
+        botTimers.push(
+          setTimeout(() => ($("trBotBox").textContent = ""), s.delayMs),
+        );
       else typeIntoBotBox(s.text, s.delayMs);
     }
 
-    if (d.left) setTestStatus((edit?.name || "The bot") + " left the room. Its rule told it to.");
-    else if (d.about === "say" && !(d.fired || []).length && !(d.skipped || []).length)
+    if (d.left)
+      setTestStatus(
+        (edit?.name || "The bot") + " left the room. Its rule told it to.",
+      );
+    else if (
+      d.about === "say" &&
+      !(d.fired || []).length &&
+      !(d.skipped || []).length
+    )
       setTestStatus("No rule woke up for that line. Check the WHEN parts.");
-    else if (d.about === "say" && !(d.says || []).length && (d.skipped || []).length && !(d.fired || []).length)
+    else if (
+      d.about === "say" &&
+      !(d.says || []).length &&
+      (d.skipped || []).length &&
+      !(d.fired || []).length
+    )
       setTestStatus("A rule heard you, but its checks said no.");
-    else if (d.about === "say")
-      setTestStatus("");
+    else if (d.about === "say") setTestStatus("");
 
     renderTestMemories(d);
   });
@@ -1166,7 +1336,7 @@
     if (d.myMemories && Object.keys(d.myMemories).length)
       parts.push("Yours: " + fmt(d.myMemories));
     if (d.friendMemories && Object.keys(d.friendMemories).length)
-      parts.push("Testy's: " + fmt(d.friendMemories));
+      parts.push("TestBot's: " + fmt(d.friendMemories));
     body.innerHTML = parts.length ? parts.join("<br/>") : "Nothing yet.";
   }
 
@@ -1178,12 +1348,12 @@
 
   $("testJoinBtn").addEventListener("click", () => {
     if (!edit) return;
-    setTestStatus("Testy walks into the room...");
+    setTestStatus("TestBot walks into the room...");
     ensureTest(() => socket.emit("bots test event", { kind: "join" }));
   });
   $("testLeaveBtn").addEventListener("click", () => {
     if (!edit) return;
-    setTestStatus("Testy walks out...");
+    setTestStatus("TestBot walks out...");
     ensureTest(() => socket.emit("bots test event", { kind: "leave" }));
   });
   $("testTimerBtn").addEventListener("click", () => {
@@ -1218,7 +1388,9 @@
     } else {
       btn.disabled = false;
       note.textContent =
-        status?.enabled === false ? "Bots are switched off by the mods right now." : "";
+        status?.enabled === false
+          ? "Bots are switched off by the mods right now."
+          : "";
       if (status?.enabled === false) btn.disabled = true;
     }
   }
@@ -1268,11 +1440,13 @@
     if (!edit?.id) return;
     if (deployMode === "existing") {
       const roomId = $("roomSelect").value;
-      if (!roomId) return toastr.error("Pick a room first (or make a new one).");
+      if (!roomId)
+        return toastr.error("Pick a room first (or make a new one).");
       socket.emit("bots deploy", { id: edit.id, roomId });
     } else {
       const name = $("newRoomName").value.trim();
-      if (name.length < 3) return toastr.error("Give the new room a name (3+ letters).");
+      if (name.length < 3)
+        return toastr.error("Give the new room a name (3+ letters).");
       socket.emit("bots deploy", { id: edit.id, newRoom: { name } });
     }
   });
@@ -1288,7 +1462,8 @@
     if (me?.isDev) {
       $("staffMasterWrap").style.display = "";
       const btn = $("masterToggleBtn");
-      btn.textContent = d?.enabled === false ? "Turn bots ON" : "Turn ALL bots OFF";
+      btn.textContent =
+        d?.enabled === false ? "Turn bots ON" : "Turn ALL bots OFF";
       btn.onclick = () =>
         socket.emit("staff bots toggle", { enabled: d?.enabled === false });
     }

@@ -62,7 +62,8 @@
 
         <div class="bc-live" id="liveCard">
           <div class="bc-live-title">
-            <i class="fas fa-circle-play"></i> <span id="liveName"></span> is live
+            <i class="fas fa-circle-play"></i> <span id="liveName"></span> is
+            live
           </div>
           <div class="bc-live-line" id="liveRoom"></div>
           <div class="bc-live-line" id="liveSince"></div>
@@ -71,7 +72,9 @@
           </button>
         </div>
 
-        <div class="bc-strip"><i class="fas fa-box-open"></i>READY-MADE BOTS</div>
+        <div class="bc-strip">
+          <i class="fas fa-box-open"></i>READY-MADE BOTS
+        </div>
         <div class="bc-side-note">
           Open one, try it in the test room, change it, save your own copy.
           Start easy, work up.
@@ -89,7 +92,12 @@
           <button class="bc-nav-item" data-view="api">
             <i class="fas fa-code"></i>For coders
           </button>
-          <button class="bc-nav-item" data-view="staff" id="staffNav" style="display: none">
+          <button
+            class="bc-nav-item"
+            data-view="staff"
+            id="staffNav"
+            style="display: none"
+          >
             <i class="fas fa-shield-halved"></i>Moderation
           </button>
         </nav>
@@ -103,8 +111,8 @@
             <i class="fas fa-door-open"></i>
             <h2>First, tell Talkomatic who you are</h2>
             <p>
-              Every bot belongs to a person. Go to the lobby, type your name
-              in the "Be Known As" box, then come back here. This page will
+              Every bot belongs to a person. Go to the lobby, type your name in
+              the "Be Known As" box, then come back here. This page will
               remember you.
             </p>
             <a class="bc-lobby-link" href="index.html">
@@ -119,7 +127,10 @@
           <div class="bc-card" id="tplCard" style="display: none">
             <div class="bc-card-head">
               <i class="fas fa-wand-magic-sparkles"></i>Pick a starting point
-              <span class="hint">Every one of these already works. Try them, then change them.</span>
+              <span class="hint"
+                >Every one of these already works. Try them, then change
+                them.</span
+              >
             </div>
             <div class="bc-card-body">
               <div class="bc-tpl-grid" id="tplGrid"></div>
@@ -133,7 +144,10 @@
                 <div class="bc-card">
                   <div class="bc-card-head">
                     <i class="fas fa-id-card"></i>Bot name
-                    <span class="hint">Everyone sees it with a <span class="bot-badge-demo">BOT</span> badge</span>
+                    <span class="hint"
+                      >Everyone sees it with a
+                      <span class="bot-badge-demo">BOT</span> badge</span
+                    >
                   </div>
                   <div class="bc-card-body">
                     <input
@@ -149,7 +163,10 @@
                 <div class="bc-card">
                   <div class="bc-card-head">
                     <i class="fas fa-list-check"></i>Rules
-                    <span class="hint">A bot is a list of rules. Each one: WHEN &rarr; ONLY IF &rarr; DO.</span>
+                    <span class="hint"
+                      >A bot is a list of rules. Each one: WHEN &rarr; ONLY IF
+                      &rarr; DO.</span
+                    >
                   </div>
                   <div class="bc-card-body">
                     <div id="rulesHost"></div>
@@ -160,11 +177,18 @@
                 </div>
 
                 <div class="bc-card">
-                  <div class="bc-card-body" style="display: flex; gap: 10px; flex-wrap: wrap">
+                  <div
+                    class="bc-card-body"
+                    style="display: flex; gap: 10px; flex-wrap: wrap"
+                  >
                     <button class="bc-btn primary" id="saveBtn">
                       <i class="fas fa-floppy-disk"></i>Save my bot
                     </button>
-                    <button class="bc-btn danger" id="deleteBtn" style="display: none">
+                    <button
+                      class="bc-btn danger"
+                      id="deleteBtn"
+                      style="display: none"
+                    >
                       <i class="fas fa-trash"></i>Delete
                     </button>
                   </div>
@@ -173,15 +197,24 @@
                 <div class="bc-card" id="deployCard" style="display: none">
                   <div class="bc-card-head">
                     <i class="fas fa-rocket"></i>Send it to a real room
-                    <span class="hint">2 bots per room. It runs while you are on Talkomatic.</span>
+                    <span class="hint"
+                      >2 bots per room. It runs while you are on
+                      Talkomatic.</span
+                    >
                   </div>
                   <div class="bc-card-body">
                     <div class="bc-deploy-grid">
                       <div class="bc-deploy-opt sel" id="optExisting">
-                        <h4><i class="fas fa-door-open"></i>A room that exists</h4>
+                        <h4>
+                          <i class="fas fa-door-open"></i>A room that exists
+                        </h4>
                         <div class="bc-room-row">
                           <select class="bc-select" id="roomSelect"></select>
-                          <button class="bc-btn" id="roomRefresh" title="Look again">
+                          <button
+                            class="bc-btn"
+                            id="roomRefresh"
+                            title="Look again"
+                          >
                             <i class="fas fa-rotate"></i>
                           </button>
                         </div>
@@ -199,12 +232,19 @@
                           style="width: 100%"
                         />
                         <div class="bc-deploy-note">
-                          The room opens, you go in first, and your bot walks
-                          in right behind you.
+                          The room opens, you go in first, and your bot walks in
+                          right behind you.
                         </div>
                       </div>
                     </div>
-                    <div style="margin-top: 14px; display: flex; gap: 10px; align-items: center">
+                    <div
+                      style="
+                        margin-top: 14px;
+                        display: flex;
+                        gap: 10px;
+                        align-items: center;
+                      "
+                    >
                       <button class="bc-btn primary" id="deployBtn">
                         <i class="fas fa-rocket"></i>Send it in
                       </button>
@@ -221,7 +261,9 @@
                 <div class="bc-card bc-test-card">
                   <div class="bc-card-head">
                     <i class="fas fa-flask"></i>Test room
-                    <span class="hint">Works like a real room. Type, pause, watch.</span>
+                    <span class="hint"
+                      >Works like a real room. Type, pause, watch.</span
+                    >
                   </div>
                   <div class="bc-test-room">
                     <div class="bc-tr-panel me">
@@ -240,7 +282,12 @@
                       <div class="bc-tr-head">
                         <span class="bot-badge-demo">BOT</span>
                         <span class="bc-tr-name" id="trBotName">Bot / Bot</span>
-                        <span class="bc-tr-typing" id="trBotTyping" style="display: none">typing</span>
+                        <span
+                          class="bc-tr-typing"
+                          id="trBotTyping"
+                          style="display: none"
+                          >typing</span
+                        >
                       </div>
                       <div class="bc-tr-box bot" id="trBotBox"></div>
                     </div>
@@ -249,16 +296,34 @@
                     Pick a bot, then talk to it here.
                   </div>
                   <div class="bc-test-tools">
-                    <button class="bc-mini-btn" id="testJoinBtn" title="Pretend a person called Testy walks in">
-                      <i class="fas fa-person-walking-arrow-right"></i> Someone joins
+                    <button
+                      class="bc-mini-btn"
+                      id="testJoinBtn"
+                      title="Pretend a person called TestBot walks in"
+                    >
+                      <i class="fas fa-person-walking-arrow-right"></i> Someone
+                      joins
                     </button>
-                    <button class="bc-mini-btn" id="testLeaveBtn" title="Pretend Testy walks out">
-                      <i class="fas fa-person-walking-arrow-loop-left"></i> Someone leaves
+                    <button
+                      class="bc-mini-btn"
+                      id="testLeaveBtn"
+                      title="Pretend TestBot walks out"
+                    >
+                      <i class="fas fa-person-walking-arrow-loop-left"></i>
+                      Someone leaves
                     </button>
-                    <button class="bc-mini-btn" id="testTimerBtn" title="Make every timer rule go off right now">
+                    <button
+                      class="bc-mini-btn"
+                      id="testTimerBtn"
+                      title="Make every timer rule go off right now"
+                    >
                       <i class="fas fa-clock"></i> Ring the timers
                     </button>
-                    <button class="bc-mini-btn" id="testResetBtn" title="The bot forgets everything it remembered in the test">
+                    <button
+                      class="bc-mini-btn"
+                      id="testResetBtn"
+                      title="The bot forgets everything it remembered in the test"
+                    >
                       <i class="fas fa-eraser"></i> Wipe memory
                     </button>
                   </div>
@@ -279,7 +344,9 @@
         <!-- ── The Bot Book (docs) ── -->
         <div class="bc-view" id="learnView">
           <div class="bc-card">
-            <div class="bc-card-head"><i class="fas fa-graduation-cap"></i>The Bot Book</div>
+            <div class="bc-card-head">
+              <i class="fas fa-graduation-cap"></i>The Bot Book
+            </div>
             <div class="bc-card-body bc-doc">
               <p class="bc-doc-lede">
                 Everything about making bots, from your very first one to a
@@ -290,60 +357,79 @@
               <h3><i class="fas fa-1"></i> What is a bot?</h3>
               <p>
                 A bot is a pretend person that sits in a room with its own
-                textbox and follows <b>rules you wrote</b>. Everyone can see
-                it is a bot - it wears a
-                <span class="bot-badge-demo">BOT</span> badge with your name
-                on it. It types letter by letter, just like a person.
+                textbox and follows <b>rules you wrote</b>. Everyone can see it
+                is a bot - it wears a
+                <span class="bot-badge-demo">BOT</span> badge with your name on
+                it. It types letter by letter, just like a person.
               </p>
               <p>Every rule is one sentence with three parts:</p>
               <div class="bc-doc-diagram">
-                <span class="d-when">WHEN</span> someone types <code>!fish</code>
-                <span class="d-if">ONLY IF</span> the checks pass (you can skip this part)
-                <span class="d-do">DO</span> say "You caught a fish!"
+                <span class="d-when">WHEN</span> someone types
+                <code>!fish</code> <span class="d-if">ONLY IF</span> the checks
+                pass (you can skip this part) <span class="d-do">DO</span> say
+                "You caught a fish!"
               </div>
 
               <h3><i class="fas fa-2"></i> Your first bot in one minute</h3>
               <ol>
                 <li>Press <b>Make a new bot</b> and pick <b>Dice</b>.</li>
-                <li>Look at its one rule: WHEN someone types <code>!roll</code> &rarr; DO say something.</li>
-                <li>In the Test room on the right, type <code>!roll</code> in your box and stop typing.</li>
-                <li>Watch the rule light up and the bot type in its own box. That's it, that's a bot.</li>
+                <li>
+                  Look at its one rule: WHEN someone types
+                  <code>!roll</code> &rarr; DO say something.
+                </li>
+                <li>
+                  In the Test room on the right, type <code>!roll</code> in your
+                  box and stop typing.
+                </li>
+                <li>
+                  Watch the rule light up and the bot type in its own box.
+                  That's it, that's a bot.
+                </li>
                 <li>Change the say text. Test again. It changed instantly.</li>
-                <li>Press <b>Save my bot</b>, then <b>Send it to a real room</b>.</li>
+                <li>
+                  Press <b>Save my bot</b>, then <b>Send it to a real room</b>.
+                </li>
               </ol>
 
-              <h3><i class="fas fa-3"></i> The WHEN part (what wakes your bot up)</h3>
+              <h3>
+                <i class="fas fa-3"></i> The WHEN part (what wakes your bot up)
+              </h3>
               <p>
-                One important thing first: Talkomatic has no send button.
-                So how does the bot know you finished? It waits until your
-                <b>last line</b> stops changing for about 2 seconds, then
-                reads that line. Press Enter for a new line when you want to
-                say a new thing to the bot.
+                One important thing first: Talkomatic has no send button. So how
+                does the bot know you finished? It waits until your
+                <b>last line</b> stops changing for about 2 seconds, then reads
+                that line. Press Enter for a new line when you want to say a new
+                thing to the bot.
               </p>
               <div class="bc-chip-table">
                 <code>someone types !word</code>
                 <span>
                   The classic. The line must <b>start</b> with the command:
-                  <code>!roll</code> works, "please !roll" does not. Words
-                  typed after it (like <code>!guess 7</code>) become
+                  <code>!roll</code> works, "please !roll" does not. Words typed
+                  after it (like <code>!guess 7</code>) become
                   <code>{word1}</code>, <code>{word2}</code>...
                 </span>
                 <code>someone says a phrase</code>
                 <span>
-                  Fires when the phrase is anywhere in the line. If the
-                  phrase is "pizza", then "i love pizza so much" wakes the
-                  bot up.
+                  Fires when the phrase is anywhere in the line. If the phrase
+                  is "pizza", then "i love pizza so much" wakes the bot up.
                 </span>
                 <code>someone says the bot's name</code>
-                <span>Someone wrote your bot's name in their line. Nice for "hey FishBot".</span>
+                <span
+                  >Someone wrote your bot's name in their line. Nice for "hey
+                  FishBot".</span
+                >
                 <code>someone joins the room</code>
-                <span>A person walks in. Perfect for welcome bots. (Bots never trigger other bots - only people count.)</span>
+                <span
+                  >A person walks in. Perfect for welcome bots. (Bots never
+                  trigger other bots - only people count.)</span
+                >
                 <code>someone leaves the room</code>
                 <span>A person walks out.</span>
                 <code>every X minutes</code>
                 <span>
-                  A clock, no person needed. Shortest is 2 minutes. In the
-                  Test room, press "Ring the timers" instead of waiting.
+                  A clock, no person needed. Shortest is 2 minutes. In the Test
+                  room, press "Ring the timers" instead of waiting.
                 </span>
               </div>
 
@@ -351,33 +437,33 @@
               <div class="bc-chip-table">
                 <code>say</code>
                 <span>
-                  The bot types a message into its box, letter by letter.
-                  This is where you use magic words (next section). Up to 300
+                  The bot types a message into its box, letter by letter. This
+                  is where you use magic words (next section). Up to 300
                   letters.
                 </span>
                 <code>wait</code>
                 <span>
                   Pause before the next action. <b>Timing makes jokes work</b>:
-                  say "Shaking the 8 ball..." then wait 2 seconds, then say
-                  the answer.
+                  say "Shaking the 8 ball..." then wait 2 seconds, then say the
+                  answer.
                 </span>
                 <code>remember</code>
                 <span>
                   Write something down in the bot's memory, under a name you
-                  pick, like <code>prize</code> or <code>coins</code>. See
-                  the Memory section, it is the part that makes games possible.
+                  pick, like <code>prize</code> or <code>coins</code>. See the
+                  Memory section, it is the part that makes games possible.
                 </span>
                 <code>count up</code>
                 <span>
-                  Add a number to a memory. Counting points, coins, visits -
-                  it is all this one action. (Add a negative number, like
-                  -5, to take points away.)
+                  Add a number to a memory. Counting points, coins, visits - it
+                  is all this one action. (Add a negative number, like -5, to
+                  take points away.)
                 </span>
                 <code>pick random</code>
                 <span>
-                  Put a random pick into a memory. Give it choices
-                  (<code>rock, paper, scissors</code>) or a number range
-                  (<code>1-100</code>).
+                  Put a random pick into a memory. Give it choices (<code
+                    >rock, paper, scissors</code
+                  >) or a number range (<code>1-100</code>).
                 </span>
                 <code>erase the box</code>
                 <span>The bot wipes its own textbox clean.</span>
@@ -386,37 +472,52 @@
               </div>
               <p>
                 Actions run <b>in order, top to bottom</b> - use the little
-                arrows to reorder them. If a rule picks a random prize and
-                then says it, "pick random" has to be <b>above</b> the say.
+                arrows to reorder them. If a rule picks a random prize and then
+                says it, "pick random" has to be <b>above</b> the say.
               </p>
 
               <h3><i class="fas fa-5"></i> Magic words</h3>
               <p>
-                Write these (with the curly brackets) inside anything your
-                bot says, checks, or remembers. The bot swaps them for the
-                real thing at that moment:
+                Write these (with the curly brackets) inside anything your bot
+                says, checks, or remembers. The bot swaps them for the real
+                thing at that moment:
               </p>
               <div class="bc-chip-table">
                 <code>{name}</code>
-                <span>The person who woke the bot up. Say "Hi {name}!" and Sara reads "Hi Sara!"</span>
+                <span
+                  >The person who woke the bot up. Say "Hi {name}!" and Sara
+                  reads "Hi Sara!"</span
+                >
                 <code>{word1} {word2} {word3}</code>
                 <span>
                   The words typed after a command. If someone types
-                  <code>!guess 7 please</code>, then {word1} is "7" and
-                  {word2} is "please".
+                  <code>!guess 7 please</code>, then {word1} is "7" and {word2}
+                  is "please".
                 </span>
                 <code>{words}</code>
                 <span>ALL the words after the command, together.</span>
                 <code>{line}</code>
                 <span>The whole line the person typed.</span>
                 <code>{memory:coins}</code>
-                <span>What is written in the memory called "coins" (works for any memory name).</span>
+                <span
+                  >What is written in the memory called "coins" (works for any
+                  memory name).</span
+                >
                 <code>{mymemory:coins}</code>
-                <span>That person's OWN "coins" memory. Sara's coins, when Sara asked. See Memory below.</span>
+                <span
+                  >That person's OWN "coins" memory. Sara's coins, when Sara
+                  asked. See Memory below.</span
+                >
                 <code>{rand:1-6}</code>
-                <span>A fresh random number from 1 to 6, different every time. Any range works: {rand:1-100}.</span>
+                <span
+                  >A fresh random number from 1 to 6, different every time. Any
+                  range works: {rand:1-100}.</span
+                >
                 <code>{pick:red|green|blue}</code>
-                <span>A fresh random choice from your list. Split the choices with the | line.</span>
+                <span
+                  >A fresh random choice from your list. Split the choices with
+                  the | line.</span
+                >
                 <code>{bot}</code>
                 <span>Your bot's own name.</span>
                 <code>{room}</code>
@@ -427,15 +528,15 @@
                 <span>The time right now (UTC).</span>
               </div>
               <p>
-                In the editor there is a <b>✨ button</b> next to every say
-                box - it drops these in for you so you never have to remember
-                the spelling.
+                In the editor there is a <b>✨ button</b> next to every say box
+                - it drops these in for you so you never have to remember the
+                spelling.
               </p>
 
               <h3><i class="fas fa-6"></i> Memory (how games work)</h3>
               <p>
-                A memory is a little labelled box the bot keeps. You invent
-                the label. There are two kinds, and the difference matters:
+                A memory is a little labelled box the bot keeps. You invent the
+                label. There are two kinds, and the difference matters:
               </p>
               <div class="bc-chip-table">
                 <code>shared by everyone</code>
@@ -446,10 +547,10 @@
                 </span>
                 <code>each person their own</code>
                 <span>
-                  EVERY person gets their own box with the same label.
-                  Sara's "coins" and Omar's "coins" are different boxes.
-                  Good for: points, coins, personal bests, "have I welcomed
-                  this person before".
+                  EVERY person gets their own box with the same label. Sara's
+                  "coins" and Omar's "coins" are different boxes. Good for:
+                  points, coins, personal bests, "have I welcomed this person
+                  before".
                 </span>
               </div>
               <p>
@@ -466,80 +567,130 @@
                 <b>is smaller than</b>, or <b>contains</b>.
               </p>
               <p>
-                "Is exactly" means <i>exactly</i> (capital letters don't
-                matter, but spelling does). Use magic words in either side:
+                "Is exactly" means <i>exactly</i> (capital letters don't matter,
+                but spelling does). Use magic words in either side:
               </p>
               <div class="bc-doc-diagram">
                 <span class="d-when">WHEN</span> someone types <code>!buy</code>
-                <span class="d-if">ONLY IF</span> <code>{mymemory:coins}</code> is bigger than <code>9</code>
-                <span class="d-do">DO</span> count up coins by -10, then say "Sold! You have {mymemory:coins} coins left."
+                <span class="d-if">ONLY IF</span>
+                <code>{mymemory:coins}</code> is bigger than <code>9</code>
+                <span class="d-do">DO</span> count up coins by -10, then say
+                "Sold! You have {mymemory:coins} coins left."
               </div>
               <p>
                 Want an "otherwise"? Make a second rule for the same command
-                with the opposite check ("is smaller than 10") that says
-                "You can't afford it yet!"
+                with the opposite check ("is smaller than 10") that says "You
+                can't afford it yet!"
               </p>
 
-              <h3><i class="fas fa-book-open"></i> Recipes (how do I make...)</h3>
+              <h3>
+                <i class="fas fa-book-open"></i> Recipes (how do I make...)
+              </h3>
 
               <h4>A quiz with points</h4>
               <ol>
-                <li>Rule 1: WHEN someone types <code>!quiz</code> &rarr; DO say "What has keys but can't open doors? Answer with !answer"</li>
-                <li>Rule 2: WHEN someone types <code>!answer</code> &rarr; ONLY IF <code>{word1}</code> is exactly <code>piano</code> &rarr; DO count up <code>points</code> (each person their own) by 1, then say "Right! {name} has {mymemory:points} points 🏆"</li>
-                <li>Rule 3: WHEN someone types <code>!answer</code> &rarr; ONLY IF <code>{word1}</code> is not <code>piano</code> &rarr; DO say "Nope, try again!"</li>
+                <li>
+                  Rule 1: WHEN someone types <code>!quiz</code> &rarr; DO say
+                  "What has keys but can't open doors? Answer with !answer"
+                </li>
+                <li>
+                  Rule 2: WHEN someone types <code>!answer</code> &rarr; ONLY IF
+                  <code>{word1}</code> is exactly <code>piano</code> &rarr; DO
+                  count up <code>points</code> (each person their own) by 1,
+                  then say "Right! {name} has {mymemory:points} points 🏆"
+                </li>
+                <li>
+                  Rule 3: WHEN someone types <code>!answer</code> &rarr; ONLY IF
+                  <code>{word1}</code> is not <code>piano</code> &rarr; DO say
+                  "Nope, try again!"
+                </li>
               </ol>
 
               <h4>A secret password door</h4>
               <ol>
-                <li>Rule 1: WHEN someone types <code>!door</code> &rarr; ONLY IF <code>{word1}</code> is exactly <code>banana</code> &rarr; DO say "🚪 The door swings open for {name}..."</li>
-                <li>Rule 2: WHEN someone types <code>!door</code> &rarr; ONLY IF <code>{word1}</code> is not <code>banana</code> &rarr; DO say "Wrong password."</li>
+                <li>
+                  Rule 1: WHEN someone types <code>!door</code> &rarr; ONLY IF
+                  <code>{word1}</code> is exactly <code>banana</code> &rarr; DO
+                  say "🚪 The door swings open for {name}..."
+                </li>
+                <li>
+                  Rule 2: WHEN someone types <code>!door</code> &rarr; ONLY IF
+                  <code>{word1}</code> is not <code>banana</code> &rarr; DO say
+                  "Wrong password."
+                </li>
               </ol>
 
               <h4>A shop</h4>
               <p>
                 Give people coins with a command (count up), check coins with
-                "is bigger than" before selling (see the ONLY IF example
-                above), and show a menu with a plain say rule for
-                <code>!shop</code>. Open the ready-made <b>Fishing</b> bot -
-                it is a whole tiny economy you can copy.
+                "is bigger than" before selling (see the ONLY IF example above),
+                and show a menu with a plain say rule for
+                <code>!shop</code>. Open the ready-made <b>Fishing</b> bot - it
+                is a whole tiny economy you can copy.
               </p>
 
               <h4>A bot that argues back differently every time</h4>
               <p>
                 One rule: WHEN someone says the bot's name &rarr; DO say
-                <code>{pick:Who, me?|I heard that.|Leave me out of this.|{name}, please.}</code>
+                <code
+                  >{pick:Who, me?|I heard that.|Leave me out of this.|{name},
+                  please.}</code
+                >
               </p>
 
               <h4>A reminder bot</h4>
               <p>
-                WHEN every 10 minutes &rarr; DO say "💧 Water break! It is {time}."
-                (Test it with the "Ring the timers" button - no waiting.)
+                WHEN every 10 minutes &rarr; DO say "💧 Water break! It is
+                {time}." (Test it with the "Ring the timers" button - no
+                waiting.)
               </p>
 
               <h3><i class="fas fa-wrench"></i> "My bot isn't answering!"</h3>
               <div class="bc-chip-table">
                 <code>Wrong start</code>
-                <span>Commands must START the line. Put <code>!roll</code> on its own line.</span>
+                <span
+                  >Commands must START the line. Put <code>!roll</code> on its
+                  own line.</span
+                >
                 <code>Too fast</code>
-                <span>The bot reads your line after it stops changing for ~2 seconds. Give it a beat. (The Test room answers instantly.)</span>
+                <span
+                  >The bot reads your line after it stops changing for ~2
+                  seconds. Give it a beat. (The Test room answers
+                  instantly.)</span
+                >
                 <code>Spelling</code>
-                <span>"is exactly" means exactly. <code>!fish</code> and <code>!fishing</code> are different commands.</span>
+                <span
+                  >"is exactly" means exactly. <code>!fish</code> and
+                  <code>!fishing</code> are different commands.</span
+                >
                 <code>Curly brackets</code>
-                <span>If your bot literally says "{wrod1}", the magic word is misspelled - the bot leaves typos visible so you can find them. Use the ✨ button.</span>
+                <span
+                  >If your bot literally says "{wrod1}", the magic word is
+                  misspelled - the bot leaves typos visible so you can find
+                  them. Use the ✨ button.</span
+                >
                 <code>Bot pace</code>
-                <span>Bots take a short breath between messages and can't spam. If you queue 10 says, they come out one at a time.</span>
+                <span
+                  >Bots take a short breath between messages and can't spam. If
+                  you queue 10 says, they come out one at a time.</span
+                >
                 <code>It vanished</code>
-                <span>Your bot goes home when: you leave Talkomatic, its room empties, the room votes it out, or a moderator stops it.</span>
+                <span
+                  >Your bot goes home when: you leave Talkomatic, its room
+                  empties, the room votes it out, or a moderator stops it.</span
+                >
               </div>
 
-              <h3><i class="fas fa-shield-heart"></i> The rules (read this once)</h3>
+              <h3>
+                <i class="fas fa-shield-heart"></i> The rules (read this once)
+              </h3>
               <p>
-                Bots follow the same rules people do. Everything they say
-                goes through the same filter. A room can vote a bot out.
-                Two bots per room, one running bot per person, and
-                <b>whatever your bot does counts as YOU doing it</b> - so
-                make things people will like having around. Moderators can
-                see every bot and its owner, and can turn any bot off.
+                Bots follow the same rules people do. Everything they say goes
+                through the same filter. A room can vote a bot out. Two bots per
+                room, one running bot per person, and
+                <b>whatever your bot does counts as YOU doing it</b> - so make
+                things people will like having around. Moderators can see every
+                bot and its owner, and can turn any bot off.
               </p>
             </div>
           </div>
@@ -548,14 +699,16 @@
         <!-- ── For coders (tier 2) ── -->
         <div class="bc-view" id="apiView">
           <div class="bc-card">
-            <div class="bc-card-head"><i class="fas fa-code"></i>For coders: the bot API</div>
+            <div class="bc-card-head">
+              <i class="fas fa-code"></i>For coders: the bot API
+            </div>
             <div class="bc-card-body bc-doc">
               <p>
                 Already writing Node or Python? You can skip the editor and
-                drive a bot with real code. Your program gets an ordinary
-                seat with a <span class="bot-badge-demo">BOT</span> badge,
-                and follows the same rules: 2 bots per room, the word
-                filter, and moderation.
+                drive a bot with real code. Your program gets an ordinary seat
+                with a <span class="bot-badge-demo">BOT</span> badge, and
+                follows the same rules: 2 bots per room, the word filter, and
+                moderation.
               </p>
 
               <h4><i class="fas fa-key"></i>1. Get a token</h4>
@@ -585,8 +738,11 @@ socket.on("signin status", (s) => {
 
 socket.on("room joined", (d) => console.log("seated in", d.roomName));</pre>
 
-              <h4><i class="fas fa-comments"></i>3. Read the room, type replies</h4>
-              <pre>// Everyone's textbox, live. data.diff.text is their full box.
+              <h4>
+                <i class="fas fa-comments"></i>3. Read the room, type replies
+              </h4>
+              <pre>
+// Everyone's textbox, live. data.diff.text is their full box.
 socket.on("chat update", (data) => {
   const line = (data.diff?.text || "").split("\n").pop().trim();
   if (line === "!price") say(socket, "Fish is 3 coins today.");
@@ -597,7 +753,8 @@ function say(socket, text) {
   socket.emit("chat update", {
     diff: { type: "full-replace", text },
   });
-}</pre>
+}</pre
+              >
 
               <h4><i class="fab fa-python"></i>The same thing in Python</h4>
               <pre># pip install "python-socketio[client]"
@@ -631,8 +788,8 @@ sio.wait()</pre>
                 <code>chat update</code>, <code>kicked</code>,
                 <code>error</code>. Leave with <code>leave room</code>. Bot
                 traffic has its own rate limits; hammering the socket gets
-                events dropped, and staff can disconnect any bot at any
-                time. Rooms are 6-digit ids - the number in the room page URL.
+                events dropped, and staff can disconnect any bot at any time.
+                Rooms are 6-digit ids - the number in the room page URL.
               </p>
             </div>
           </div>
@@ -651,12 +808,21 @@ sio.wait()</pre>
               <table class="bc-staff-table">
                 <thead>
                   <tr>
-                    <th>TIER</th><th>NAME</th><th>ROOM</th><th>OWNER</th><th>UP</th><th></th>
+                    <th>TIER</th>
+                    <th>NAME</th>
+                    <th>ROOM</th>
+                    <th>OWNER</th>
+                    <th>UP</th>
+                    <th></th>
                   </tr>
                 </thead>
                 <tbody id="staffBotsBody"></tbody>
               </table>
-              <div class="bc-empty-note" id="staffEmpty" style="padding-top: 12px">
+              <div
+                class="bc-empty-note"
+                id="staffEmpty"
+                style="padding-top: 12px"
+              >
                 No bots are running.
               </div>
             </div>
