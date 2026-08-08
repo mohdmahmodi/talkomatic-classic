@@ -1772,6 +1772,10 @@
     // minutes deep. Costs nothing and means a report is a paste rather than a
     // description - which is what the last several rounds of this needed.
     const rec = [];
+    // Every crossing of the ball over this player's own paddle plane, with
+    // the exact geometry and the verdict. The one moment 4Hz sampling can
+    // never catch, and the only moment that decides a point.
+    const xing = [];
     let recAt = 0, recT0 = 0;
     let needScore = false; // a frame changed the score; redraw the scoreline
     const rings = [];
@@ -1993,8 +1997,31 @@
           // frame, so testing the end position turns fair edge hits into
           // misses - the same reason the server keeps yPrev.
           const py = paddleAt(hit, dt > 0 ? clamp((dt - left) / dt, 0, 1) : 1);
-          if (py != null && Math.abs(sim.y - py) <= C.paddleH / 2 + C.ballR)
-            bounceSim(hit, py, quiet);
+          const returned =
+            py != null && Math.abs(sim.y - py) <= C.paddleH / 2 + C.ballR;
+          // The crossing journal. "It hit my paddle dead centre and they got
+          // the point" cannot be adjudicated from 4Hz samples, so the moment
+          // itself is recorded: what this simulation ruled, exactly where the
+          // ball and the paddle were, and how far the DRAWN ball (sim plus
+          // the gliding correction offset) was from the simulated one. When
+          // a score lands moments later, takeFrame stamps the outcome on it.
+          if (hit === mySide && !quiet) {
+            xing.push({
+              at: performance.now(),
+              t: recT0 ? Math.round(performance.now() - recT0) : 0,
+              ruled: returned ? "RETURN" : "MISS",
+              by: Math.round(sim.y * 10) / 10,
+              offY: Math.round(offY * 10) / 10,
+              py: py == null ? null : Math.round(py * 10) / 10,
+              srv: netY[hit] == null ? null : Math.round(netY[hit] * 10) / 10,
+              miss: py == null ? null :
+                Math.round(Math.max(0,
+                  Math.abs(sim.y - py) - (C.paddleH / 2 + C.ballR)) * 10) / 10,
+              out: "",
+            });
+            while (xing.length > 40) xing.shift();
+          }
+          if (returned) bounceSim(hit, py, quiet);
           else sim.past = true;
           continue;
         }
@@ -2200,7 +2227,20 @@
       }
 
       if (scored) {
-        fire({ k: "point", side: f.s[0] !== (last ? last.s[0] : 0) ? 1 : 0 });
+        // Stamp the outcome on the crossing it belongs to, so the journal
+        // reads "ruled RETURN ... point against you" when the two disagree.
+        const side0Scored = f.s[0] !== (last ? last.s[0] : 0);
+        const against =
+          mySide >= 0 && (side0Scored ? mySide === 1 : mySide === 0);
+        for (let i = xing.length - 1; i >= 0; i--) {
+          if (performance.now() - xing[i].at > 900) break;
+          if (!xing[i].out) {
+            xing[i].out = (against ? "POINT AGAINST YOU" : "you scored") +
+              ", server ball y " + f.b[1];
+            break;
+          }
+        }
+        fire({ k: "point", side: side0Scored ? 1 : 0 });
         // Repaint the scoreline HERE, off the frame that carries the new score.
         //
         // It used to be repainted only from update(), which runs on a "games
@@ -2829,6 +2869,16 @@
               "  gap " + r.g + "u");
         }
       }
+      L.push("");
+      L.push("CROSSINGS AT YOUR OWN PADDLE (every one, with the on-screen geometry)");
+      if (!xing.length) L.push("  none recorded");
+      for (const x of xing)
+        L.push("  " + (x.t / 1000).toFixed(1) + "s " + x.ruled +
+          (x.ruled === "MISS" && x.miss != null ? " by " + x.miss + "u" : "") +
+          "  ball y " + x.by +
+          (x.offY ? " (drawn " + (x.offY > 0 ? "+" : "") + x.offY + ")" : "") +
+          "  your paddle " + x.py + "  server's copy " + x.srv +
+          (x.out ? "  -> " + x.out : ""));
       L.push("");
       L.push("PER-SECOND TRACE  sec score src fps gap farpad snapAge ballErr rebuilds phase");
       let lastSec = -1;
