@@ -3051,3 +3051,15 @@ button.gm-side-fold:hover {
   outline: 2px solid var(--tk-accent);
   outline-offset: -2px;
 }
+
+/* Off-screen holding pen for the report when the clipboard API is unavailable
+   (insecure context, embedded view). It still gets selected, so a manual copy
+   works even when the automatic one does not. */
+.gm-pg-dump {
+  position: fixed;
+  left: -9999px;
+  top: 0;
+  width: 10px;
+  height: 10px;
+  opacity: 0;
+}

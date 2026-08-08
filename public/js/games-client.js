@@ -1715,7 +1715,7 @@
     let root, canvas, ctx, courtBox, wrapEl, floatEl;
     let nameL, nameR, ptsL, ptsR, midEl, rallyEl;
     let matchKey = "";
-    let padsEl, cheerEl, lineupEl, hintEl, dbgBtn;
+    let padsEl, cheerEl, lineupEl, hintEl, dbgBtn, copyEl;
     let ro = null, raf = null, sendTimer = null;
     let cssFont = "sans-serif";
 
@@ -1768,6 +1768,11 @@
     let shake = 0, lastPaint = 0;
     let dbgFrames = 0, dbgAt = 0, dbgFps = 0, dbgFix = 0, dbgRate = 0;
     let dbgFixSum = 0, dbgHard = 0, dbgHardRate = 0, dbgErr = 0, dbgGap = 0;
+    // A rolling flight recorder. Always on, four samples a second, about three
+    // minutes deep. Costs nothing and means a report is a paste rather than a
+    // description - which is what the last several rounds of this needed.
+    const rec = [];
+    let recAt = 0, recT0 = 0;
     let needScore = false; // a frame changed the score; redraw the scoreline
     const rings = [];
     let hitGlow = [0, 0], sideFlash = [0, 0];
@@ -1778,13 +1783,35 @@
       return Date.now() + offset;
     }
 
+    // Do I drive my own paddle this frame?
+    //
+    // This used to also require detail.state === "playing" and detail.seated.
+    // Both come off a table snapshot that is only sent on discrete events -
+    // somebody joining, a match starting - while the game itself runs at 30Hz.
+    // So for any stretch where that snapshot was stale, missing or simply
+    // hadn't arrived yet, this returned false and the paddle SILENTLY fell
+    // through to the network path: drawn interpolated in the past, at the far
+    // end of a round trip. Which is precisely the lag being reported, and the
+    // readout caught it saying WIRE mid-rally.
+    //
+    // mySide comes off the game view itself, in the same payload as the court,
+    // so it moves with the game rather than alongside it. And nothing here is
+    // trusted anyway: realtimeInput on the server refuses input from anyone
+    // who is not seated at a table that is actually playing. There is no
+    // reason for this end to second-guess that, and a great deal of harm in
+    // getting it wrong.
     function canControl() {
-      return !!(
-        detail &&
-        detail.state === "playing" &&
-        detail.seated &&
-        mySide >= 0
-      );
+      return mySide >= 0;
+    }
+
+    // Kept only so the recorder can say which condition WOULD have blocked
+    // control, if we ever have to ask this question again.
+    function controlWhy() {
+      if (mySide < 0) return "noseat";
+      if (!detail) return "nodetail";
+      if (!detail.seated) return "notseated";
+      if (detail.state !== "playing") return "state:" + detail.state;
+      return "ok";
     }
 
     // A new match, or sitting down at one we were watching. Everything here
@@ -2419,6 +2446,26 @@
         if (detail) paintScore(detail);
       }
 
+      if (mySide >= 0 && netY[mySide] != null && padY[mySide] != null)
+        dbgGap = Math.abs(netY[mySide] - padY[mySide]);
+      if (!recT0) recT0 = nowMs;
+      if (nowMs - recAt > 250) {
+        recAt = nowMs;
+        rec.push({
+          t: Math.round(nowMs - recT0),
+          f: dbgFps,
+          s: canControl() ? "H" : "W",
+          w: controlWhy(),
+          g: Math.round(dbgGap * 10) / 10,
+          d: Math.round(netDelay),
+          o: Math.round(offset),
+          e: Math.round(dbgErr * 10) / 10,
+          h: dbgHardRate,
+          p: sim.phase,
+        });
+        while (rec.length > 720) rec.shift();
+      }
+
       const cw = canvas.width, chh = canvas.height;
       const sc = cw / C.w;
       const newest = last;
@@ -2610,9 +2657,7 @@
         // than a paddle height is why a clean return can be scored against
         // you. The old readout counted "corrections" instead, which fired on
         // every snapshot no matter how healthy things were and said nothing.
-        const mine = mySide >= 0 && canControl();
-        if (mine && netY[mySide] != null && padY[mySide] != null)
-          dbgGap = Math.abs(netY[mySide] - padY[mySide]);
+        const mine = canControl();
         ctx.font = "bold " + Math.round(chh * 0.042) + "px " + cssFont;
         ctx.textAlign = "left";
         ctx.textBaseline = "top";
@@ -2650,6 +2695,103 @@
     function loop(nowMs) {
       raf = requestAnimationFrame(loop);
       paint(nowMs);
+    }
+
+    // ── The report ──
+    // Written to be pasted into a message, so it leads with the answers to the
+    // questions that actually get asked and keeps the raw trace short.
+
+    function pct(a, q) {
+      if (!a.length) return 0;
+      const s = a.slice().sort((x, y) => x - y);
+      return s[Math.min(s.length - 1, Math.floor(s.length * q))];
+    }
+
+    function statsText() {
+      if (!rec.length) return "pong: nothing recorded yet";
+      const L = [];
+      const secs = (rec[rec.length - 1].t / 1000).toFixed(0);
+      const wire = rec.filter((r) => r.s === "W");
+      const gaps = rec.filter((r) => r.s === "H").map((r) => r.g);
+      const fps = rec.map((r) => r.f).filter((x) => x > 0);
+      const why = {};
+      for (const r of wire) why[r.w] = (why[r.w] || 0) + 1;
+
+      L.push("=== TALKOMATIC PONG REPORT ===");
+      L.push("recorded " + secs + "s over " + rec.length + " samples");
+      L.push("");
+      L.push("PADDLE DRIVEN BY YOUR HAND: " +
+        (100 - (wire.length / rec.length) * 100).toFixed(0) + "% of the time");
+      if (wire.length)
+        L.push("  on the wire instead " + wire.length + " samples, reasons: " +
+          Object.keys(why).map((k) => k + " x" + why[k]).join(", "));
+      L.push("");
+      L.push("SERVER'S COPY OF YOUR PADDLE, how far behind yours (units, paddle is " +
+        C.paddleH + " tall)");
+      L.push("  median " + pct(gaps, 0.5) + "   90th " + pct(gaps, 0.9) +
+        "   worst " + pct(gaps, 0.999));
+      L.push("");
+      L.push("FRAME RATE   median " + pct(fps, 0.5) + "   worst " + pct(fps, 0.02));
+      L.push("BALL         off the server by " +
+        pct(rec.map((r) => r.e), 0.5) + "u median, " +
+        pct(rec.map((r) => r.e), 0.9) + "u at the 90th; rebuilt " +
+        pct(rec.map((r) => r.h), 0.5) + "/s median, " +
+        pct(rec.map((r) => r.h), 0.95) + "/s worst");
+      L.push("FAR PADDLE   drawn " + pct(rec.map((r) => r.d), 0.5) +
+        "ms back (median), " + pct(rec.map((r) => r.d), 0.95) + "ms worst");
+      L.push("CLOCK OFFSET " + rec[rec.length - 1].o +
+        "ms (a plain clock difference, not a fault)");
+      L.push("SPEEDS       pointer " + C.paddleSpeed + " key " +
+        (C.keySpeed || "?") + " u/s, court " + C.w + "x" + C.h);
+      L.push("");
+      L.push("CONTROL CHANGES (only when the paddle changed hands)");
+      let prev = null, n = 0;
+      for (const r of rec) {
+        // Deliberately NOT keyed on the phase: serve/live flips every point
+        // and drowns the one transition anybody cares about.
+        const k = r.s + r.w;
+        if (k !== prev) {
+          prev = k;
+          if (n++ < 40)
+            L.push("  " + (r.t / 1000).toFixed(1) + "s  " +
+              (r.s === "H" ? "HAND" : "WIRE") + "  " + r.w + "  " + r.p +
+              "  gap " + r.g + "u");
+        }
+      }
+      L.push("");
+      L.push("LAST 20 SAMPLES  t=sec fps src gap netDelay ballErr rebuilds");
+      for (const r of rec.slice(-20))
+        L.push("  " + (r.t / 1000).toFixed(1) + " " + r.f + " " + r.s + " " +
+          r.g + " " + r.d + " " + r.e + " " + r.h);
+      return L.join("\n");
+    }
+
+    function copyStats() {
+      const text = statsText();
+      const done = () => {
+        if (!copyEl) return;
+        copyEl.textContent = "✅";
+        setTimeout(() => { if (copyEl) copyEl.textContent = "📋"; }, 1200);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, () => fallback(text, done));
+      } else fallback(text, done);
+    }
+
+    // Clipboard access is refused outside a secure context and in some
+    // embedded views, and a report nobody can copy is no report at all.
+    function fallback(text, done) {
+      const ta = el("textarea", { class: "gm-pg-dump" });
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        document.execCommand("copy");
+        done();
+      } catch (_) {
+        /* leave it on screen to copy by hand */
+      }
+      setTimeout(() => ta.remove(), 100);
     }
 
     // ── Cheers ──
@@ -2830,6 +2972,18 @@
         });
         if (PG_DEBUG) dbgBtn.classList.add("gm-pg-on");
         cheerEl.appendChild(dbgBtn);
+
+        // Copy the recording. Always available, whether or not the readout is
+        // showing - the recorder runs regardless, so this works even if the
+        // trouble happened before anybody thought to turn anything on.
+        copyEl = el("button", {
+          class: "gm-pg-cheer-btn gm-pg-stats",
+          title: "Copy connection report",
+          "aria-label": "Copy connection report to the clipboard",
+          text: "📋",
+          onclick: copyStats,
+        });
+        cheerEl.appendChild(copyEl);
 
         root.appendChild(el("div", { class: "gm-pg-under" }, [padsEl, cheerEl]));
 
