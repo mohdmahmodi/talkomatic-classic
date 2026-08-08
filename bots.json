@@ -1,0 +1,74 @@
+{
+  "enabled": true,
+  "owners": {
+    "73fc192c-927b-4f42-b071-212965fdaab9": {
+      "bots": [
+        {
+          "id": "b38b07e62b9",
+          "name": "MathBot",
+          "location": "the lab",
+          "rules": [
+            {
+              "on": {
+                "type": "command",
+                "word": "double"
+              },
+              "if": [],
+              "do": [
+                {
+                  "type": "set",
+                  "var": "n",
+                  "per": "bot",
+                  "value": "{word1}"
+                },
+                {
+                  "type": "add",
+                  "var": "n",
+                  "per": "bot",
+                  "amount": "2",
+                  "op": "mul"
+                },
+                {
+                  "type": "say",
+                  "text": "{word1} doubled is {memory:n}!"
+                }
+              ]
+            },
+            {
+              "on": {
+                "type": "command",
+                "word": "half"
+              },
+              "if": [],
+              "do": [
+                {
+                  "type": "set",
+                  "var": "n",
+                  "per": "bot",
+                  "value": "{word1}"
+                },
+                {
+                  "type": "add",
+                  "var": "n",
+                  "per": "bot",
+                  "amount": "2",
+                  "op": "div"
+                },
+                {
+                  "type": "say",
+                  "text": "Half of {word1} is {memory:n}."
+                }
+              ]
+            }
+          ],
+          "createdAt": 1786220672911,
+          "updatedAt": 1786220672911,
+          "vars": {
+            "n": "100"
+          },
+          "uvars": {}
+        }
+      ]
+    }
+  }
+}

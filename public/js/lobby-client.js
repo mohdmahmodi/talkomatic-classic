@@ -1891,6 +1891,16 @@ function createRoomElement(room) {
       userDiv.appendChild(mb);
     }
 
+    // Bots wear the same gray flair here as in the room itself.
+    if (user.isBotUser) {
+      userDiv.classList.add("bot-lobby-user");
+      const bb = document.createElement("span");
+      bb.className = "bot-lobby-badge";
+      bb.textContent = "BOT";
+      bb.title = user.botOwner ? "Bot, run by " + user.botOwner : "Automated user";
+      userDiv.appendChild(bb);
+    }
+
     if (user.avatar) {
       const url = avatarUrl(user.avatar, 32);
       if (url) {
@@ -1904,7 +1914,10 @@ function createRoomElement(room) {
     }
 
     userDiv.appendChild(userNameSpan);
-    userDiv.append(` / ${user.location}`);
+    const locSpan = document.createElement("span");
+    locSpan.className = "user-loc";
+    locSpan.textContent = ` / ${user.location}`;
+    userDiv.appendChild(locSpan);
 
     usersDetailDiv.appendChild(userDiv);
   });
@@ -3920,6 +3933,8 @@ socket.on("maintenance status", (data) => {
   const css = `
     .mod-lobby-badge{display:inline-block;background:#00bcd4;color:#003;font-size:8px;font-weight:bold;padding:1px 4px;border-radius:6px;margin:0 4px;letter-spacing:.5px;vertical-align:middle;}
     .mod-lobby-badge.mod-lobby-badge-jr{background:#ab47bc;color:#fff;}
+    .bot-lobby-badge{display:inline-block;background:var(--bot-flair,#9aa3ae);color:#16191d;font-size:8px;font-weight:bold;padding:1px 4px;border-radius:6px;margin:0 4px 0 0;letter-spacing:.5px;vertical-align:middle;}
+    .bot-lobby-user .user-name,.bot-lobby-user .user-loc{color:var(--bot-flair,#9aa3ae);}
     .invite-trophy{height:14px;width:auto;vertical-align:middle;margin:0 4px 0 0;}
     .official-badge{display:inline-block;background:#ffd700;color:#3a2c00;font-size:9px;font-weight:bold;padding:1px 6px;border-radius:8px;margin-right:6px;letter-spacing:.5px;}
     .room.spotlight-room{border:1px solid #ffd700 !important;box-shadow:0 0 0 1px rgba(255,215,0,.25) inset;}

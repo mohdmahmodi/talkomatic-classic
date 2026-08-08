@@ -2916,12 +2916,13 @@ function joinRoom(socket, roomId, userId) {
 
     // API (tier 2) bots take a normal seat but are capped per room, same
     // budget the hosted bots share, so a room is never mostly machines.
-    if (socket.isBot && bots.botCountInRoom(room) >= bots.MAX_BOTS_PER_ROOM)
+    // The budget scales with the room: 1 bot per 5 seats, at most 5.
+    if (socket.isBot && bots.botCountInRoom(room) >= bots.maxBotsForRoom(room))
       return socket.emit(
         "error",
         createErrorResponse(
           ERROR_CODES.FORBIDDEN,
-          `This room already has ${bots.MAX_BOTS_PER_ROOM} bots (the limit).`,
+          `This room is at its bot limit (${bots.maxBotsForRoom(room)} for its size).`,
         ),
       );
 

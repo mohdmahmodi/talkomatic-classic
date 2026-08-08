@@ -88,6 +88,7 @@
       blurb: "Says hello and goodbye to everyone.",
       bot: {
         name: "Greeter",
+        location: "the door",
         rules: [
           {
             on: { type: "join" },
@@ -127,6 +128,36 @@
                 type: "say",
                 text: "🎱 {pick:It is certain|Without a doubt|Signs point to yes|Ask again later|Better not tell you now|Outlook not so good|Absolutely not}",
               },
+            ],
+          },
+        ],
+      },
+    },
+    {
+      key: "math",
+      icon: "fa-calculator",
+      level: "easy",
+      name: "Calculator",
+      blurb: "!double 7 and !half 40. Shows the math actions.",
+      bot: {
+        name: "MathBot",
+        rules: [
+          {
+            on: { type: "command", word: "double" },
+            if: [],
+            do: [
+              { type: "set", var: "n", per: "bot", value: "{word1}" },
+              { type: "add", var: "n", per: "bot", amount: "2", op: "mul" },
+              { type: "say", text: "{word1} doubled is {memory:n}!" },
+            ],
+          },
+          {
+            on: { type: "command", word: "half" },
+            if: [],
+            do: [
+              { type: "set", var: "n", per: "bot", value: "{word1}" },
+              { type: "add", var: "n", per: "bot", amount: "2", op: "div" },
+              { type: "say", text: "Half of {word1} is {memory:n}." },
             ],
           },
         ],
@@ -373,6 +404,7 @@
         "!fish to cast, !coins for your money. A little economy the whole room shares.",
       bot: {
         name: "FishBot",
+        location: "the lake",
         rules: [
           {
             on: { type: "command", word: "fish" },
@@ -489,9 +521,95 @@
     renderBotList();
     renderLive();
     renderDeployCard();
+    maybeShowNews();
   });
 
-  socket.on("bots error", (d) => toastr.error(d?.message || "Bot problem."));
+  // Deploy problems get a real modal: what went wrong and what to do next.
+  // Anything without a known code stays a plain toast.
+  const DEPLOY_HELP = {
+    room_full: {
+      title: "That room is full",
+      body: "Every seat is taken. Pick another room, or make a brand new one and your bot will follow you in.",
+    },
+    room_bots_full: {
+      title: "No bot seats left there",
+      body: "Rooms get 1 bot seat for every 5 people they can hold, up to 5. That room's bot seats are taken, so pick another room or a bigger one.",
+    },
+    room_empty: {
+      title: "Nobody is in that room",
+      body: "Bots need at least one person to talk to, or they walk right back out. Join the room first, or pick one with people in it.",
+    },
+    room_gone: {
+      title: "That room closed",
+      body: "It emptied out and Talkomatic cleaned it up. The list has been refreshed, pick another one.",
+    },
+    room_locked: {
+      title: "That room is locked",
+      body: "The room is not letting anyone new in right now, bots included.",
+    },
+    room_banned: {
+      title: "That room said no",
+      body: "This bot was removed from that room, so it cannot go back in there. Any other room will still take it.",
+    },
+    already_running: {
+      title: "One bot at a time",
+      body: "You already have a bot out in a room. Bring it home from the sidebar first, then send this one.",
+    },
+    bots_off: {
+      title: "Bots are off right now",
+      body: "The moderators switched bots off for everyone. Try again later.",
+    },
+    busy: {
+      title: "Too many bots right now",
+      body: "The server is already running its limit of bots. Try again in a little while.",
+    },
+    maintenance: {
+      title: "Maintenance in progress",
+      body: "Talkomatic is being worked on. Try again in a few minutes.",
+    },
+  };
+
+  function closeModal() {
+    document.querySelectorAll(".bc-modal-back").forEach((el) => el.remove());
+  }
+
+  function showModal(title, body) {
+    closeModal();
+    const back = document.createElement("div");
+    back.className = "bc-modal-back";
+    const box = document.createElement("div");
+    box.className = "bc-modal";
+    const h = document.createElement("h3");
+    h.innerHTML = '<i class="fas fa-circle-info"></i> ';
+    h.appendChild(document.createTextNode(title));
+    const p = document.createElement("p");
+    p.textContent = body;
+    const btns = document.createElement("div");
+    btns.className = "bc-modal-btns";
+    const ok = document.createElement("button");
+    ok.className = "bc-btn primary";
+    ok.textContent = "OK";
+    ok.addEventListener("click", closeModal);
+    btns.appendChild(ok);
+    box.appendChild(h);
+    box.appendChild(p);
+    box.appendChild(btns);
+    back.appendChild(box);
+    back.addEventListener("click", (e) => {
+      if (e.target === back) closeModal();
+    });
+    document.body.appendChild(back);
+  }
+
+  socket.on("bots error", (d) => {
+    const help = d?.code && DEPLOY_HELP[d.code];
+    if (help) {
+      socket.emit("get rooms"); // whatever bounced, the list is stale
+      showModal(help.title, help.body);
+      return;
+    }
+    toastr.error(d?.message || "Bot problem.");
+  });
 
   socket.on("bots saved", (d) => {
     toastr.success("Saved!");
@@ -552,7 +670,12 @@
       card.appendChild(name);
       card.appendChild(meta);
       card.addEventListener("click", () =>
-        loadBot({ id: b.id, name: b.name, rules: b.rules }),
+        loadBot({
+          id: b.id,
+          name: b.name,
+          location: b.location || "Bot",
+          rules: b.rules,
+        }),
       );
       host.appendChild(card);
     }
@@ -589,7 +712,12 @@
         if (!me) return showView("gate");
         loadBot(
           JSON.parse(
-            JSON.stringify({ id: null, name: t.bot.name, rules: t.bot.rules }),
+            JSON.stringify({
+              id: null,
+              name: t.bot.name,
+              location: t.bot.location || "Bot",
+              rules: t.bot.rules,
+            }),
           ),
         );
         toastr.info(
@@ -646,7 +774,12 @@
       el.addEventListener("click", () => {
         loadBot(
           JSON.parse(
-            JSON.stringify({ id: null, name: t.bot.name, rules: t.bot.rules }),
+            JSON.stringify({
+              id: null,
+              name: t.bot.name,
+              location: t.bot.location || "Bot",
+              rules: t.bot.rules,
+            }),
           ),
         );
       });
@@ -669,24 +802,44 @@
 
   function loadBot(bot) {
     edit = JSON.parse(JSON.stringify(bot));
+    if (!edit.location) edit.location = "Bot";
     testDirty = true;
     showView("editor");
     $("tplCard").style.display = "none";
     $("editorBody").style.display = "";
     $("botName").value = edit.name || "";
+    $("botLocation").value = edit.location;
     $("deleteBtn").style.display = edit.id ? "" : "none";
+    updateNamePreview();
     resetTestRoom();
     renderRules();
     renderBotList();
     renderDeployCard();
   }
 
+  // "FishBot / the lake" everywhere the bot is seen: the preview line here,
+  // the test room header, and the real room once deployed.
+  function botHeaderText() {
+    return (edit?.name || "Bot") + " / " + (edit?.location || "Bot");
+  }
+
+  function updateNamePreview() {
+    $("namePreview").textContent = botHeaderText();
+    $("trBotName").textContent = botHeaderText();
+  }
+
   $("botName").addEventListener("input", () => {
-    if (edit) {
-      edit.name = $("botName").value;
-      testDirty = true;
-      $("trBotName").textContent = (edit.name || "Bot") + " / Bot";
-    }
+    if (!edit) return;
+    edit.name = $("botName").value;
+    testDirty = true;
+    updateNamePreview();
+  });
+
+  $("botLocation").addEventListener("input", () => {
+    if (!edit) return;
+    edit.location = $("botLocation").value;
+    testDirty = true;
+    updateNamePreview();
   });
 
   // ── The rule editor ───────────────────────────────────────────────────────
@@ -700,14 +853,24 @@
     { v: "timer", label: "every X minutes" },
   ];
 
+  // Each action also carries the one-line description the add-a-block menu
+  // shows, so picking an action never means guessing.
   const ACTION_OPTIONS = [
-    { v: "say", label: "say something" },
-    { v: "wait", label: "wait a moment" },
-    { v: "set", label: "remember something" },
-    { v: "add", label: "count up a memory" },
-    { v: "random", label: "pick something random" },
-    { v: "clear", label: "erase the bot's box" },
-    { v: "leave", label: "leave the room" },
+    { v: "say", label: "say something", desc: "The bot types into its box" },
+    { v: "wait", label: "wait a moment", desc: "Pause before the next thing" },
+    { v: "set", label: "remember something", desc: "Write a value into a memory" },
+    {
+      v: "add",
+      label: "change a memory",
+      desc: "Add, take away, multiply or divide it",
+    },
+    {
+      v: "random",
+      label: "pick something random",
+      desc: "Choices or a number range, into a memory",
+    },
+    { v: "clear", label: "erase the bot's box", desc: "Wipe what it wrote" },
+    { v: "leave", label: "leave the room", desc: "The bot goes home" },
   ];
 
   const OP_OPTIONS = [
@@ -716,6 +879,13 @@
     { v: "gt", label: "is bigger than" },
     { v: "lt", label: "is smaller than" },
     { v: "has", label: "contains" },
+  ];
+
+  const MATH_OPTIONS = [
+    { v: "add", label: "add" },
+    { v: "sub", label: "take away" },
+    { v: "mul", label: "multiply by" },
+    { v: "div", label: "divide by" },
   ];
 
   const MAGIC = [
@@ -727,6 +897,7 @@
     { tok: "{mymemory:coins}", desc: "that person's own memory" },
     { tok: "{rand:1-6}", desc: "random number, new every time" },
     { tok: "{pick:red|green|blue}", desc: "random choice, new every time" },
+    { tok: "{newline}", desc: "start a new line mid-message" },
     { tok: "{bot}", desc: "the bot's name" },
     { tok: "{room}", desc: "the room's name" },
     { tok: "{humans}", desc: "how many people are here" },
@@ -825,6 +996,78 @@
     return wrap;
   }
 
+  // The colored WHEN / ONLY IF / DO tags that make a rule read like a
+  // sentence made of blocks.
+  function mkChip(kind, text) {
+    const chip = document.createElement("span");
+    chip.className = "bc-blk-chip chip-" + kind;
+    chip.textContent = text;
+    return chip;
+  }
+
+  // A picker menu with a label AND a plain sentence per choice, so adding a
+  // block never means guessing what an option does. Shares the one-open-menu
+  // slot with the magic word menu.
+  function openMenu(anchorWrap, items, onPick) {
+    if (openMagicMenu) openMagicMenu.remove();
+    const menu = document.createElement("div");
+    menu.className = "bc-magic-menu left";
+    for (const it of items) {
+      const item = document.createElement("button");
+      item.className = "bc-magic-item";
+      item.type = "button";
+      const b = document.createElement("b");
+      b.textContent = it.label;
+      const span = document.createElement("span");
+      span.textContent = it.desc || "";
+      item.appendChild(b);
+      item.appendChild(document.createElement("br"));
+      item.appendChild(span);
+      item.addEventListener("click", () => {
+        menu.remove();
+        openMagicMenu = null;
+        onPick(it.v);
+      });
+      menu.appendChild(item);
+    }
+    anchorWrap.appendChild(menu);
+    openMagicMenu = menu;
+  }
+
+  function freshAction(v) {
+    const fresh = { type: v };
+    if (v === "say") fresh.text = "";
+    if (v === "wait") fresh.seconds = 2;
+    if (v === "set")
+      Object.assign(fresh, { var: "prize", per: "bot", value: "" });
+    if (v === "add")
+      Object.assign(fresh, { var: "points", per: "user", amount: "1", op: "add" });
+    if (v === "random")
+      Object.assign(fresh, { var: "prize", per: "bot", from: "a, b, c" });
+    return fresh;
+  }
+
+  // What a folded rule shows instead of its blocks.
+  function ruleSummary(rule) {
+    const on = rule.on || {};
+    let t = "";
+    if (on.type === "command") t = "!" + (on.word || "?");
+    else if (on.type === "says") t = '"' + (on.text || "...") + '"';
+    else if (on.type === "mention") t = "its name is said";
+    else if (on.type === "join") t = "someone joins";
+    else if (on.type === "leave") t = "someone leaves";
+    else if (on.type === "timer") t = "every " + (on.minutes || "?") + " min";
+    const checks = (rule.if || []).length;
+    const acts = (rule.do || []).length;
+    return (
+      t +
+      " · " +
+      (checks ? checks + (checks === 1 ? " check · " : " checks · ") : "") +
+      acts +
+      (acts === 1 ? " thing it does" : " things it does")
+    );
+  }
+
   function mkIconButton(title, icon, onClick, disabled) {
     const btn = document.createElement("button");
     btn.className = "bc-row-del";
@@ -846,15 +1089,13 @@
   function ruleCard(rule, ri) {
     const card = document.createElement("div");
     card.className = "bc-rule";
+    if (rule._folded) card.classList.add("collapsed");
     card.dataset.ri = String(ri);
 
-    // WHEN
+    // WHEN: the hat block. The whole rule's toolbar lives on it.
     const head = document.createElement("div");
-    head.className = "bc-rule-head";
-    const kicker = document.createElement("span");
-    kicker.className = "bc-rule-kicker";
-    kicker.textContent = "WHEN";
-    head.appendChild(kicker);
+    head.className = "bc-blk blk-when bc-rule-head";
+    head.appendChild(mkChip("when", "WHEN"));
     head.appendChild(
       mkSelect(
         TRIGGER_OPTIONS,
@@ -871,7 +1112,7 @@
     );
     if (rule.on.type === "command") {
       const bang = document.createElement("span");
-      bang.style.color = "var(--tk-detail)";
+      bang.className = "bc-unit bc-bang";
       bang.textContent = "!";
       head.appendChild(bang);
       head.appendChild(
@@ -907,8 +1148,51 @@
       lbl.textContent = "minutes";
       head.appendChild(lbl);
     }
+
+    const summary = document.createElement("span");
+    summary.className = "bc-rule-summary";
+    summary.textContent = ruleSummary(rule);
+    head.appendChild(summary);
+
     head.appendChild(
       mkRowButtons([
+        mkIconButton(
+          rule._folded ? "Open this rule" : "Fold this rule away",
+          rule._folded ? "fa-caret-right" : "fa-caret-down",
+          () => {
+            rule._folded = !rule._folded;
+            renderRules();
+          },
+        ),
+        mkIconButton("Make a copy of this rule", "fa-copy", () => {
+          if (edit.rules.length >= (status?.limits?.maxRules || 20))
+            return toastr.error("That's the most rules a bot can have.");
+          const copy = JSON.parse(JSON.stringify(rule));
+          delete copy._folded;
+          edit.rules.splice(ri + 1, 0, copy);
+          touch();
+          renderRules();
+        }),
+        mkIconButton(
+          "Move this rule up",
+          "fa-arrow-up",
+          () => {
+            edit.rules.splice(ri - 1, 0, edit.rules.splice(ri, 1)[0]);
+            touch();
+            renderRules();
+          },
+          ri === 0,
+        ),
+        mkIconButton(
+          "Move this rule down",
+          "fa-arrow-down",
+          () => {
+            edit.rules.splice(ri + 1, 0, edit.rules.splice(ri, 1)[0]);
+            touch();
+            renderRules();
+          },
+          ri === edit.rules.length - 1,
+        ),
         mkIconButton("Throw this rule away", "fa-trash", () => {
           edit.rules.splice(ri, 1);
           touch();
@@ -918,25 +1202,28 @@
     );
     card.appendChild(head);
 
-    // ONLY IF
-    const ifSec = document.createElement("div");
-    ifSec.className = "bc-rule-section";
+    // The blocks under the hat. Folding hides these, not the hat.
+    const body = document.createElement("div");
+    body.className = "bc-rule-body";
+
     (rule.if || []).forEach((cond, ci) => {
       const row = document.createElement("div");
-      row.className = "bc-cond-row";
-      const k = document.createElement("span");
-      k.className = "bc-rule-kicker";
-      k.textContent = ci === 0 ? "ONLY IF" : "AND";
-      row.appendChild(k);
+      row.className = "bc-blk blk-if";
+      row.appendChild(mkChip("if", ci === 0 ? "ONLY IF" : "AND"));
       const aInput = mkInput(cond.a, "{word1}", (v) => (cond.a = v), "w-val");
       row.appendChild(aInput);
       row.appendChild(mkMagicButton(aInput));
       row.appendChild(
         mkSelect(OP_OPTIONS, cond.op, (v) => (cond.op = v), "w-per"),
       );
-      row.appendChild(
-        mkInput(cond.b, "what it should be", (v) => (cond.b = v), "w-val"),
+      const bInput = mkInput(
+        cond.b,
+        "what it should be",
+        (v) => (cond.b = v),
+        "w-val",
       );
+      row.appendChild(bInput);
+      row.appendChild(mkMagicButton(bInput));
       row.appendChild(
         mkRowButtons([
           mkIconButton("Remove this check", "fa-xmark", () => {
@@ -946,8 +1233,15 @@
           }),
         ]),
       );
-      ifSec.appendChild(row);
+      body.appendChild(row);
     });
+
+    (rule.do || []).forEach((act, ai) => {
+      body.appendChild(actionRow(rule, act, ai));
+    });
+
+    const adders = document.createElement("div");
+    adders.className = "bc-blk-adders";
     if ((rule.if || []).length < 3) {
       const addIf = document.createElement("button");
       addIf.className = "bc-mini-btn";
@@ -960,55 +1254,42 @@
         touch();
         renderRules();
       });
-      ifSec.appendChild(addIf);
+      adders.appendChild(addIf);
     }
-    card.appendChild(ifSec);
-
-    // DO
-    const doSec = document.createElement("div");
-    doSec.className = "bc-rule-section";
-    (rule.do || []).forEach((act, ai) => {
-      doSec.appendChild(actionRow(rule, act, ai));
-    });
     if ((rule.do || []).length < 6) {
+      const wrap = document.createElement("span");
+      wrap.className = "bc-magic-wrap";
       const addDo = document.createElement("button");
       addDo.className = "bc-mini-btn";
       addDo.innerHTML = '<i class="fas fa-plus"></i> another thing to do';
-      addDo.addEventListener("click", () => {
-        rule.do.push({ type: "say", text: "" });
-        touch();
-        renderRules();
+      addDo.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openMenu(wrap, ACTION_OPTIONS, (v) => {
+          rule.do.push(freshAction(v));
+          touch();
+          renderRules();
+        });
       });
-      doSec.appendChild(addDo);
+      wrap.appendChild(addDo);
+      adders.appendChild(wrap);
     }
-    card.appendChild(doSec);
+    body.appendChild(adders);
+    card.appendChild(body);
 
     return card;
   }
 
   function actionRow(rule, act, ai) {
     const row = document.createElement("div");
-    row.className = "bc-act-row";
-    const k = document.createElement("span");
-    k.className = "bc-rule-kicker";
-    k.textContent = ai === 0 ? "DO" : "THEN";
-    row.appendChild(k);
+    row.className = "bc-blk blk-do";
+    row.appendChild(mkChip("do", ai === 0 ? "DO" : "THEN"));
     row.appendChild(
       mkSelect(
         ACTION_OPTIONS,
         act.type,
         (v) => {
           const idx = rule.do.indexOf(act);
-          const fresh = { type: v };
-          if (v === "say") fresh.text = "";
-          if (v === "wait") fresh.seconds = 2;
-          if (v === "set")
-            Object.assign(fresh, { var: "prize", per: "bot", value: "" });
-          if (v === "add")
-            Object.assign(fresh, { var: "points", per: "user", amount: "1" });
-          if (v === "random")
-            Object.assign(fresh, { var: "prize", per: "bot", from: "a, b, c" });
-          rule.do[idx] = fresh;
+          rule.do[idx] = freshAction(v);
           renderRules();
         },
         "w-act",
@@ -1029,15 +1310,23 @@
 
     if (act.type === "say") {
       const t = document.createElement("textarea");
-      t.className = "bc-input w-grow";
-      t.rows = 1;
+      t.className = "bc-input w-grow w-say";
+      t.rows = 2;
       t.maxLength = 300;
-      t.placeholder = "Hi {name}!";
+      t.placeholder = "Hi {name}! (press Enter for a new line)";
       t.value = act.text || "";
+      // Two visible lines from the start, growing with the message, so
+      // nobody has to guess that a say can have more than one line.
+      const grow = () => {
+        t.style.height = "auto";
+        t.style.height = Math.min(160, Math.max(52, t.scrollHeight)) + "px";
+      };
       t.addEventListener("input", () => {
         act.text = t.value;
+        grow();
         touch();
       });
+      requestAnimationFrame(grow);
       row.appendChild(t);
       row.appendChild(mkMagicButton(t));
     } else if (act.type === "wait") {
@@ -1078,13 +1367,18 @@
         mkInput(act.var, "memory name", (v) => (act.var = v), "w-mem"),
       );
       row.appendChild(perSelect(act));
-      const plus = document.createElement("span");
-      plus.className = "bc-unit";
-      plus.textContent = "+";
-      row.appendChild(plus);
       row.appendChild(
-        mkInput(act.amount, "1", (v) => (act.amount = v), "w-num"),
+        mkSelect(
+          MATH_OPTIONS,
+          act.op || "add",
+          (v) => (act.op = v),
+          "w-math",
+          "Add, take away, multiply or divide",
+        ),
       );
+      const amt = mkInput(act.amount, "1", (v) => (act.amount = v), "w-num");
+      row.appendChild(amt);
+      row.appendChild(mkMagicButton(amt));
     } else if (act.type === "random") {
       row.appendChild(
         mkInput(act.var, "memory name", (v) => (act.var = v), "w-mem"),
@@ -1155,7 +1449,7 @@
     if (!edit) return;
     socket.emit("bots save", {
       id: edit.id || undefined,
-      bot: { name: edit.name, rules: edit.rules },
+      bot: { name: edit.name, location: edit.location, rules: edit.rules },
     });
   });
 
@@ -1174,7 +1468,8 @@
 
   const SETTLE_MS = 1200; // a touch quicker than a live room, same idea
   let settleTimer = null;
-  let lastProcessedLine = "";
+  let prevLine = ""; // the last line as of the previous keystroke
+  let lineDirty = false; // did the last line actually change since the last send
   let testWaiting = null; // callback parked until "bots test ready"
   let botTimers = []; // pending say animations, cleared on bot switch
 
@@ -1187,12 +1482,23 @@
     return "";
   }
 
+  // Row + text, same identity the server uses: a pasted duplicate of the
+  // last line is a new line even though the text reads the same.
+  function lastLineKey(text) {
+    const lines = String(text || "").split("\n");
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const l = lines[i].trim();
+      if (l) return i + ":" + l;
+    }
+    return "";
+  }
+
   function ensureTest(then) {
     if (!edit) return;
     if (!testDirty) return then();
     testWaiting = then;
     socket.emit("bots test start", {
-      bot: { name: edit.name, rules: edit.rules },
+      bot: { name: edit.name, location: edit.location, rules: edit.rules },
       keepMemory: true,
     });
   }
@@ -1219,14 +1525,15 @@
   function resetTestRoom() {
     for (const t of botTimers) clearTimeout(t);
     botTimers = [];
-    lastProcessedLine = "";
+    prevLine = "";
+    lineDirty = false;
     $("trMyBox").value = "";
     $("trBotBox").textContent = "";
     $("trBotTyping").style.display = "none";
     $("trMyName").textContent = me
       ? me.username + " / " + (me.location || "here")
       : "You";
-    $("trBotName").textContent = (edit?.name || "Bot") + " / Bot";
+    $("trBotName").textContent = botHeaderText();
     setTestStatus(
       "Type in your box. When your last line sits still for a second, " +
         (edit?.name || "the bot") +
@@ -1234,17 +1541,22 @@
     );
   }
 
+  // Same idea as the live server: the bot answers when the LAST LINE moved
+  // through a real change, so clearing the box and typing !roll a second
+  // time works, while poking around on old lines stays silent.
   $("trMyBox").addEventListener("input", () => {
+    const key = lastLineKey($("trMyBox").value);
+    if (key !== prevLine) lineDirty = true;
+    prevLine = key;
     if (settleTimer) clearTimeout(settleTimer);
     settleTimer = setTimeout(settledLine, SETTLE_MS);
   });
 
   function settledLine() {
-    if (!edit) return;
+    if (!edit || !lineDirty) return;
+    lineDirty = false;
     const text = $("trMyBox").value;
-    const line = lastNonEmptyLine(text);
-    if (!line || line === lastProcessedLine) return;
-    lastProcessedLine = line;
+    if (!lastNonEmptyLine(text)) return;
     ensureTest(() => socket.emit("bots test say", { text }));
   }
 
@@ -1278,7 +1590,7 @@
       const tag = document.createElement("span");
       tag.className = "bc-rule-tag " + (cls === "fired" ? "ran" : "skip");
       tag.textContent = tagText;
-      head.appendChild(tag);
+      head.insertBefore(tag, head.querySelector(".bc-row-btns"));
       setTimeout(() => {
         card.classList.remove(cls);
         tag.remove();
@@ -1374,8 +1686,10 @@
   function renderDeployCard() {
     const card = $("deployCard");
     const saved = edit && (status?.bots || []).some((b) => b.id === edit.id);
+    const wasHidden = card.style.display === "none";
     card.style.display = saved ? "" : "none";
     if (!saved) return;
+    if (wasHidden) socket.emit("get rooms"); // fresh list the moment it appears
     const d = deployedInfo();
     const btn = $("deployBtn");
     const note = $("deployNote");
@@ -1406,33 +1720,63 @@
 
   $("roomRefresh").addEventListener("click", () => socket.emit("get rooms"));
 
+  // Bot seats mirror the server rule: 1 per 5 seats, capped at 5.
+  function botSeats(capacity) {
+    return Math.max(1, Math.min(5, Math.floor((capacity || 5) / 5)));
+  }
+
+  // Every public room is listed, even the ones a bot cannot join right now.
+  // Those stay visible but disabled with the reason in the row, so "why is
+  // my room not in the list" never needs asking.
   socket.on("initial rooms", (list) => {
     const rooms = Array.isArray(list) ? list : [];
     const sel = $("roomSelect");
+    const prev = sel.value;
     sel.innerHTML = "";
-    const open = rooms.filter(
-      (r) => r.type === "public" && (r.users || []).some((u) => !u.isBotUser),
-    );
-    if (!open.length) {
+    const pub = rooms.filter((r) => r.type === "public");
+    if (!pub.length) {
       const opt = document.createElement("option");
       opt.value = "";
-      opt.textContent = "No rooms with people right now";
+      opt.textContent = "No public rooms right now. Make a new one!";
       sel.appendChild(opt);
       return;
     }
-    for (const r of open) {
+    const rows = pub.map((r) => {
       const users = r.users || [];
       const humans = users.filter((u) => !u.isBotUser).length;
       const bots = users.filter((u) => u.isBotUser).length;
+      const cap = r.capacity || 5;
+      const seats = botSeats(cap);
+      let why = "";
+      if (r.locked) why = "locked";
+      else if (!humans) why = "empty";
+      else if (r.isFull) why = "full";
+      else if (bots >= seats) why = "no bot seats left";
+      return { r, humans, bots, seats, why };
+    });
+    rows.sort((a, b) => (a.why ? 1 : 0) - (b.why ? 1 : 0));
+    for (const row of rows) {
       const opt = document.createElement("option");
-      opt.value = r.id;
+      opt.value = row.r.id;
       opt.textContent =
-        r.name +
+        row.r.name +
         " · " +
-        humans +
-        (humans === 1 ? " person" : " people") +
-        (bots ? ", " + bots + (bots === 1 ? " bot" : " bots") : "");
+        row.humans +
+        (row.humans === 1 ? " person" : " people") +
+        " · " +
+        row.bots +
+        "/" +
+        row.seats +
+        (row.seats === 1 ? " bot" : " bots") +
+        (row.why ? " (" + row.why + ")" : "");
+      if (row.why) opt.disabled = true;
       sel.appendChild(opt);
+    }
+    const keep = [...sel.options].find((o) => o.value === prev && !o.disabled);
+    if (keep) sel.value = prev;
+    else {
+      const first = [...sel.options].find((o) => !o.disabled);
+      if (first) sel.value = first.value;
     }
   });
 
@@ -1506,6 +1850,67 @@
   });
 
   socket.on("staff action result", () => socket.emit("staff bots list"));
+
+  // ── What's new ────────────────────────────────────────────────────────────
+  // Bumped whenever the creator gains something, so regulars hear it from us
+  // instead of noticing by accident. Nothing here ever breaks a saved bot,
+  // and the card says so. Someone with no saved bots skips the card: it is
+  // all new to them anyway.
+
+  const NEWS_VERSION = 2;
+  const NEWS = [
+    "Say boxes are bigger, and Enter makes a new line inside a message. There is a {newline} magic word too.",
+    "Typing the same command twice in a row now works, in rooms and in the test room.",
+    'The "change a memory" action can take away, multiply and divide, not just add.',
+    "Your bot can have its own location, the part after the slash: FishBot / the lake.",
+    "Bigger rooms fit more bots: 1 bot seat for every 5 people a room can hold, up to 5.",
+    "Rules can be folded, copied and moved up or down with the buttons on the WHEN block.",
+  ];
+
+  let newsChecked = false;
+
+  function maybeShowNews() {
+    if (newsChecked || !status) return;
+    newsChecked = true;
+    const seen = Number(localStorage.getItem("bc_news_seen") || 0);
+    if (seen >= NEWS_VERSION) return;
+    if (!(status.bots || []).length) {
+      // First-timer: everything is new, the page itself is the news.
+      localStorage.setItem("bc_news_seen", String(NEWS_VERSION));
+      return;
+    }
+    const card = document.createElement("div");
+    card.className = "bc-card bc-news";
+    const head = document.createElement("div");
+    head.className = "bc-card-head";
+    head.innerHTML = '<i class="fas fa-bullhorn"></i>New since your last visit';
+    const bodyEl = document.createElement("div");
+    bodyEl.className = "bc-card-body";
+    const ul = document.createElement("ul");
+    ul.className = "bc-news-list";
+    for (const n of NEWS) {
+      const li = document.createElement("li");
+      li.textContent = n;
+      ul.appendChild(li);
+    }
+    const note = document.createElement("p");
+    note.className = "bc-news-note";
+    note.textContent = "Bots you already saved keep working exactly as before.";
+    const got = document.createElement("button");
+    got.className = "bc-btn primary";
+    got.innerHTML = '<i class="fas fa-check"></i>Got it';
+    got.addEventListener("click", () => {
+      localStorage.setItem("bc_news_seen", String(NEWS_VERSION));
+      card.remove();
+    });
+    bodyEl.appendChild(ul);
+    bodyEl.appendChild(note);
+    bodyEl.appendChild(got);
+    card.appendChild(head);
+    card.appendChild(bodyEl);
+    const view = $("editorView");
+    view.insertBefore(card, view.firstElementChild);
+  }
 
   // ── Misc ──────────────────────────────────────────────────────────────────
 

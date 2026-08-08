@@ -15,7 +15,7 @@
 // and the staff surface here can see and kill them like any hosted bot.
 //
 // The rules that keep this from ever hurting the server or the rooms:
-//   - at most MAX_BOTS_PER_ROOM bots in a room, both tiers combined
+//   - a room holds 1 bot per 5 seats, capped at 5, both tiers combined
 //   - one deployed bot per owner, MAX_SAVED saved configs per owner
 //   - a bot runs only while its owner is connected somewhere on the site;
 //     the sweep retires it (grace period) when the owner is gone
@@ -42,6 +42,7 @@ const {
   sanitizeMessage,
   sanitizeName,
   enforceRoomNameLimit,
+  enforceLocationLimit,
   isReservedName,
 } = require("./state");
 const ipredact = require("./ipredact");
@@ -52,7 +53,7 @@ const STORE_PATH = path.join(DATA_DIR, "bots.json");
 // ── Limits (the whole abuse posture in one place) ───────────────────────────
 
 const LIMITS = {
-  MAX_BOTS_PER_ROOM: 2, // both tiers combined
+  MAX_BOTS_PER_ROOM: 5, // the hard ceiling; rooms earn 1 bot per 5 seats
   MAX_SAVED: 8, // saved configs per owner
   MAX_DEPLOYED_PER_OWNER: 1,
   MAX_ACTIVE_TOTAL: 20, // hosted bots server-wide, a hard load ceiling
@@ -143,6 +144,7 @@ function ownerRecord(ownerKey, create) {
 const TRIGGERS = ["command", "says", "mention", "join", "leave", "timer"];
 const ACTIONS = ["say", "wait", "set", "add", "random", "clear", "leave"];
 const OPS = ["is", "not", "gt", "lt", "has"];
+const MATH_OPS = ["add", "sub", "mul", "div"];
 
 const VAR_NAME = /^[a-z0-9_]{1,20}$/i;
 const CMD_WORD = /^[a-z0-9]{1,16}$/i;
@@ -165,6 +167,15 @@ function validateConfig(input, existingId) {
     return { ok: false, error: "That name is reserved." };
   if (ipredact.containsIp(name))
     return { ok: false, error: "Names cannot contain an IP address." };
+
+  // The line after the slash, like a person's "Sara / Earth". Their choice;
+  // the BOT badge is what marks it as a bot, not this text.
+  let location = enforceLocationLimit(sanitizeName(String(input.location || "")));
+  if (location && wordFilter.checkText(location).hasOffensiveWord)
+    return { ok: false, error: "That location is not allowed." };
+  if (location && ipredact.containsIp(location))
+    return { ok: false, error: "Locations cannot contain an IP address." };
+  if (!location) location = "Bot";
 
   const rulesIn = Array.isArray(input.rules) ? input.rules : [];
   if (!rulesIn.length)
@@ -252,8 +263,11 @@ function validateConfig(input, existingId) {
         act.var = name0.toLowerCase();
         act.per = a.per === "user" ? "user" : "bot";
         if (a.type === "set") act.value = cleanTemplate(a.value, 120);
-        else if (a.type === "add") act.amount = cleanTemplate(a.amount, 40) || "1";
-        else {
+        else if (a.type === "add") {
+          act.amount = cleanTemplate(a.amount, 40) || "1";
+          // Older saved bots have no op; they keep plain adding forever.
+          act.op = MATH_OPS.includes(a.op) ? a.op : "add";
+        } else {
           act.from = cleanTemplate(a.from, 400);
           if (!act.from.trim())
             return {
@@ -273,6 +287,7 @@ function validateConfig(input, existingId) {
   const bot = {
     id: existingId || "b" + crypto.randomBytes(5).toString("hex"),
     name,
+    location,
     rules,
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -306,6 +321,14 @@ function botCountInRoom(room) {
   return (room?.users || []).filter((u) => u.isBotUser).length;
 }
 
+// How many bots a room may hold, both tiers combined: 1 per 5 seats, so the
+// default 5-person room gets 1, a 10-person room 2, and a 25+ seat room the
+// ceiling of 5. Bigger rooms have the people to absorb more bot chatter.
+function maxBotsForRoom(room) {
+  const cap = deps && deps.roomCapacity ? deps.roomCapacity(room) : 5;
+  return Math.max(1, Math.min(LIMITS.MAX_BOTS_PER_ROOM, Math.floor(cap / 5)));
+}
+
 function humanCount(room) {
   return (room?.users || []).filter(
     (u) => !u.isBotUser && !(u.isDev && u.isVanished),
@@ -321,13 +344,15 @@ function activeBotOfOwner(ownerKey) {
 // roomId, id, and the session identity off it - verified against
 // emitRoomChatUpdate / emitRoomTyping / canRecipientSeeDevUser before this
 // shape was settled - so this is every field they touch.
-function makeFakeSocket(botUserId, name, roomId) {
+function makeFakeSocket(botUserId, name, roomId, location) {
   return {
     id: "bot:" + botUserId,
     roomId,
     connected: true,
     isBotRuntime: true,
-    handshake: { session: { userId: botUserId, username: name, location: "Bot" } },
+    handshake: {
+      session: { userId: botUserId, username: name, location: location || "Bot" },
+    },
     emit() {},
     join() {},
     leave() {},
@@ -363,6 +388,8 @@ function expand(rt, template, ctx) {
       return row && row[n] != null ? String(row[n]) : "0";
     }
     if (low === "bot") return rt.name;
+    // A line break mid-say, for people who miss that Enter works in the box.
+    if (low === "newline") return "\n";
     if (low === "room") return rt.roomName || "";
     if (low === "humans") {
       const room = state.rooms.get(rt.roomId);
@@ -452,6 +479,21 @@ function getVar(rt, act, ctx) {
     return row ? row[act.var] : undefined;
   }
   return rt.bot.vars[act.var];
+}
+
+// The "change a memory" action's arithmetic, one place for both the live tick
+// and the test sandbox. Divide by zero keeps the old value instead of turning
+// a counter into Infinity, and results are trimmed to two decimals so a
+// divided score stays readable.
+function applyMath(cur, op, amt) {
+  const a = Number.isFinite(cur) ? cur : 0;
+  const b = Number.isFinite(amt) ? amt : 0;
+  let out;
+  if (op === "sub") out = a - b;
+  else if (op === "mul") out = a * b;
+  else if (op === "div") out = b === 0 ? a : a / b;
+  else out = a + b;
+  return Math.round(out * 100) / 100;
 }
 
 // ── The interpreter ─────────────────────────────────────────────────────────
@@ -544,10 +586,7 @@ function runAction(rt, act, ctx) {
     case "add": {
       const cur = Number(getVar(rt, act, ctx));
       const amt = Number(expand(rt, act.amount, ctx));
-      setVar(
-        rt, act, ctx,
-        (Number.isFinite(cur) ? cur : 0) + (Number.isFinite(amt) ? amt : 0),
-      );
+      setVar(rt, act, ctx, applyMath(cur, act.op, amt));
       return true;
     }
     case "random": {
@@ -608,7 +647,7 @@ function deploy(socket, bot, room, ownerKey) {
   const entry = {
     id: botUserId,
     username: bot.name,
-    location: "Bot",
+    location: bot.location || "Bot",
     isBotUser: true,
     botOwnerId: ownerId,
     botOwnerName: ownerName,
@@ -628,7 +667,7 @@ function deploy(socket, bot, room, ownerKey) {
     ownerName,
     roomId: room.id,
     roomName: room.name,
-    fake: makeFakeSocket(botUserId, bot.name, room.id),
+    fake: makeFakeSocket(botUserId, bot.name, room.id, bot.location),
     queue: [],
     typing: null,
     waitUntil: 0,
@@ -708,9 +747,12 @@ function tick() {
   tickCount++;
   const now = Date.now();
 
-  // Utterances: a person's text has settled and differs from what was already
-  // handled. The LAST LINE of the box is the working line - the box persists,
-  // so matching the whole thing would re-fire on every old phrase forever.
+  // Utterances: a person's text has settled and their LAST LINE moved through
+  // an actual change since the last settle. The box persists, so two things
+  // must both work: clearing the box and retyping the same command fires again
+  // (the line changed on the way, even though the final text looks identical),
+  // and fixing a typo on an OLD line, or adding blank lines, fires nothing
+  // (the last line never changed). lineDirty tracks exactly that.
   for (const [roomId, users] of roomText) {
     let anyBotHere = false;
     for (const rt of active.values()) if (rt.roomId === roomId) { anyBotHere = true; break; }
@@ -719,9 +761,12 @@ function tick() {
       continue;
     }
     for (const [userId, rec] of users) {
-      if (rec.text === rec.doneText) continue;
+      if (!rec.lineDirty && rec.text === rec.doneText) continue;
       if (now - rec.changedAt < LIMITS.UTTERANCE_IDLE_MS) continue;
       rec.doneText = rec.text;
+      const fire = rec.lineDirty;
+      rec.lineDirty = false;
+      if (!fire) continue;
       const line = lastLine(rec.text);
       if (!line) continue;
       for (const rt of active.values())
@@ -776,6 +821,19 @@ function lastLine(text) {
   for (let i = lines.length - 1; i >= 0; i--) {
     const l = lines[i].trim();
     if (l) return l.slice(0, 200);
+  }
+  return "";
+}
+
+// Identity of the last non-empty line: its row AND its text. The row matters
+// for one paste-shaped case: dropping a second "!roll" under an old "!roll"
+// in a single update keeps the text identical, but it is a new line and must
+// count as one.
+function lastLineKey(text) {
+  const lines = String(text || "").split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const l = lines[i].trim();
+    if (l) return i + ":" + l.slice(0, 200);
   }
   return "";
 }
@@ -853,6 +911,11 @@ function onText(roomId, userId, username, text) {
     username,
     changedAt: Date.now(),
     doneText: rec ? rec.doneText : "",
+    // Sticky until the next settle: the moment the last line differs from
+    // what it just was, this update cycle counts as a real utterance.
+    lineDirty:
+      (rec ? rec.lineDirty : false) ||
+      lastLineKey(text) !== lastLineKey(rec ? rec.text : ""),
   });
 }
 
@@ -916,6 +979,7 @@ function ownerStatus(ownerKey) {
     bots: (rec?.bots || []).map((b) => ({
       id: b.id,
       name: b.name,
+      location: b.location || "Bot",
       rules: b.rules,
       updatedAt: b.updatedAt,
       vars: b.vars || {},
@@ -947,8 +1011,10 @@ function requireSignin(socket) {
   return false;
 }
 
-function fail(socket, message) {
-  socket.emit("bots error", { message });
+// The code names WHY it failed, so the page can answer with a proper modal
+// ("that room is full, here is what to do") instead of a bare toast.
+function fail(socket, message, code) {
+  socket.emit("bots error", { message, code: code || null });
 }
 
 function register(socket, safe) {
@@ -1018,66 +1084,75 @@ function register(socket, safe) {
       const ownerKey = ownerKeyOf(socket);
       const rec = ownerRecord(ownerKey, false);
       const bot = rec?.bots.find((b) => b.id === data?.id);
-      if (!bot) return fail(socket, "Save the bot first.");
+      if (!bot) return fail(socket, "Save the bot first.", "save_first");
 
       if (!store.enabled)
-        return fail(socket, "Bots are turned off by staff right now.");
+        return fail(socket, "Bots are turned off by staff right now.", "bots_off");
       if (state.maintenance)
-        return fail(socket, "Talkomatic is in maintenance mode. Try again shortly.");
+        return fail(socket, "Talkomatic is in maintenance mode. Try again shortly.", "maintenance");
       if (active.size >= LIMITS.MAX_ACTIVE_TOTAL)
-        return fail(socket, "Too many bots are running right now. Try again in a while.");
+        return fail(socket, "Too many bots are running right now. Try again in a while.", "busy");
       const already = activeBotOfOwner(ownerKey);
       if (already)
         return fail(
           socket,
           `You already have "${already.name}" running. Stop it first.`,
+          "already_running",
         );
 
       // The room: an existing one by id, or a fresh one they name here.
       let room = null;
       if (data?.roomId) {
         room = state.rooms.get(String(data.roomId));
-        if (!room) return fail(socket, "That room is gone.");
+        if (!room) return fail(socket, "That room is gone.", "room_gone");
         if (room.type !== "public")
-          return fail(socket, "Bots can only join public rooms.");
-        if (room.locked) return fail(socket, "That room is locked.");
+          return fail(socket, "Bots can only join public rooms.", "room_private");
+        if (room.locked)
+          return fail(socket, "That room is locked.", "room_locked");
         if (room.bannedUserIds?.has?.(bot.id))
-          return fail(socket, "This bot was removed from that room.");
+          return fail(socket, "This bot was removed from that room.", "room_banned");
         if (humanCount(room) === 0)
-          return fail(socket, "That room is empty. Bots need someone to talk to.");
-        if (botCountInRoom(room) >= LIMITS.MAX_BOTS_PER_ROOM)
           return fail(
             socket,
-            `That room already has ${LIMITS.MAX_BOTS_PER_ROOM} bots (the limit).`,
+            "That room is empty. Bots need someone to talk to.",
+            "room_empty",
+          );
+        const maxBots = maxBotsForRoom(room);
+        if (botCountInRoom(room) >= maxBots)
+          return fail(
+            socket,
+            `That room is at its bot limit (${maxBots} for its size).`,
+            "room_bots_full",
           );
         const seats = (room.users || []).filter(
           (u) => !(u.isDev && u.isVanished),
         ).length;
         if (seats >= deps.roomCapacity(room))
-          return fail(socket, "That room is full.");
+          return fail(socket, "That room is full.", "room_full");
       } else if (data?.newRoom) {
         if (!CONFIG.FEATURES.ENABLE_ROOM_CREATION)
-          return fail(socket, "Room creation is turned off right now.");
+          return fail(socket, "Room creation is turned off right now.", "no_new_rooms");
         // The bot needs its owner in the room (a bot alone leaves), so a new
         // room deploy sends the OWNER there; the bot follows them in.
         const name = enforceRoomNameLimit(sanitizeName(String(data.newRoom.name || "")));
         if (!name || name.length < 3)
-          return fail(socket, "Give the new room a name (3+ characters).");
+          return fail(socket, "Give the new room a name (3+ characters).", "name_room");
         if (wordFilter.checkText(name).hasOffensiveWord)
-          return fail(socket, "That room name is not allowed.");
+          return fail(socket, "That room name is not allowed.", "bad_room_name");
         if (deps.roomNameExists(name))
-          return fail(socket, "A room with that name already exists.");
+          return fail(socket, "A room with that name already exists.", "room_exists");
         if (state.rooms.size >= deps.calculateCurrentRoomLimit())
-          return fail(socket, "The room limit has been reached. Try an existing room.");
+          return fail(socket, "The room limit has been reached. Try an existing room.", "room_limit");
         const ip = socket.clientIp || "";
         const last = state.lastRoomCreationTimes.get(ip) || 0;
         if (Date.now() - last < CONFIG.TIMING.ROOM_CREATION_COOLDOWN)
-          return fail(socket, "You are creating rooms too fast. Give it a few seconds.");
+          return fail(socket, "You are creating rooms too fast. Give it a few seconds.", "too_fast");
         let roomId, attempts = 0;
         do {
           roomId = Math.floor(100000 + Math.random() * 900000).toString();
         } while (state.rooms.has(roomId) && ++attempts < 100);
-        if (state.rooms.has(roomId)) return fail(socket, "Could not create the room.");
+        if (state.rooms.has(roomId))
+          return fail(socket, "Could not create the room.", "create_fail");
         state.lastRoomCreationTimes.set(ip, Date.now());
         room = {
           id: roomId,
@@ -1098,7 +1173,7 @@ function register(socket, safe) {
         // The page navigates the owner there on "bots deployed".
         deps.startRoomDeletionTimer(roomId);
       } else {
-        return fail(socket, "Pick a room, or name a new one.");
+        return fail(socket, "Pick a room, or name a new one.", "pick_room");
       }
 
       // New rooms start empty: the bot deploys pending, seated the moment its
@@ -1364,10 +1439,7 @@ function drainTest(rt) {
         case "add": {
           const cur = Number(getVar(rt, act, group.ctx));
           const amt = Number(expand(rt, act.amount, group.ctx));
-          setVar(
-            rt, act, group.ctx,
-            (Number.isFinite(cur) ? cur : 0) + (Number.isFinite(amt) ? amt : 0),
-          );
+          setVar(rt, act, group.ctx, applyMath(cur, act.op, amt));
           break;
         }
         case "random": {
@@ -1425,7 +1497,7 @@ function onOwnerJoined(socket, room) {
   const bot = rec?.bots.find((b) => b.id === pend.botId);
   if (!bot) return;
   if (activeBotOfOwner(pend.ownerKey)) return;
-  if (botCountInRoom(room) >= LIMITS.MAX_BOTS_PER_ROOM) return;
+  if (botCountInRoom(room) >= maxBotsForRoom(room)) return;
   const seats = (room.users || []).filter((u) => !(u.isDev && u.isVanished)).length;
   if (seats >= deps.roomCapacity(room)) return;
   const rt = deploy(socket, bot, room, pend.ownerKey);
@@ -1462,5 +1534,5 @@ module.exports = {
   noteEvicted,
   isActiveBot,
   botCountInRoom,
-  MAX_BOTS_PER_ROOM: LIMITS.MAX_BOTS_PER_ROOM,
+  maxBotsForRoom,
 };

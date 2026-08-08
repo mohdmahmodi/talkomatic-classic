@@ -356,7 +356,9 @@ a {
   border: 1px solid var(--tk-border);
   border-radius: 8px;
   margin-bottom: 18px;
-  overflow: hidden;
+  /* Menus (magic words, add-a-block) open past the card edge, so cards must
+     never clip. Small cards were swallowing the dropdowns. */
+  overflow: visible;
 }
 
 .bc-card-head {
@@ -469,71 +471,125 @@ textarea.bc-input {
   cursor: not-allowed;
 }
 
-/* ── Rule cards ── */
+/* ── Rules as block stacks ──
+   Every rule is a stack of snap-together blocks, Scratch style: an orange
+   WHEN hat, gold ONLY IF blocks, cyan DO blocks. Each block reads as one
+   sentence. The little tab on top of a block makes the stack look clicked
+   together. */
 
 .bc-rule {
-  background: var(--tk-card);
-  border: 1px solid var(--tk-border);
-  border-radius: 8px;
-  margin-bottom: 14px;
-  overflow: hidden;
+  position: relative;
+  margin-bottom: 18px;
 }
 
-.bc-rule-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  background: var(--tk-tile);
-  border-bottom: 1px solid var(--tk-border);
-  flex-wrap: wrap;
-}
-
-.bc-rule-kicker {
-  font-size: 11px;
-  font-weight: bold;
-  letter-spacing: 1px;
-  color: var(--tk-detail);
-  width: 46px;
-  flex-shrink: 0;
-}
-
-.bc-rule-del {
-  margin-left: auto;
-  background: none;
-  border: none;
-  color: var(--tk-muted);
-  cursor: pointer;
-  font-size: 14px;
-  padding: 4px 6px;
-}
-
-.bc-rule-del:hover {
-  color: var(--tk-error);
-}
-
-.bc-rule-section {
-  padding: 10px 14px;
-  border-bottom: 1px solid #2a2a2a;
-}
-
-.bc-rule-section:last-child {
-  border-bottom: none;
-}
-
-.bc-cond-row,
-.bc-act-row {
+.bc-blk {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 6px 0;
   flex-wrap: wrap;
+  border: 1px solid;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 0 0 5px;
+  background: var(--tk-card);
 }
 
-.bc-act-row .drag-dots {
-  color: #555;
+/* The snap tab. Hats do not have one. */
+.bc-blk::before {
+  content: "";
+  position: absolute;
+  top: -5px;
+  left: 26px;
+  width: 18px;
+  height: 5px;
+  background: inherit;
+  border: 1px solid;
+  border-color: inherit;
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
+}
+
+.blk-when {
+  background: #221602;
+  border-color: #8a5b00;
+  border-top-left-radius: 16px;
+}
+
+.blk-when::before {
+  display: none;
+}
+
+.blk-if {
+  background: #1d1704;
+  border-color: #7a5c00;
+  margin-left: 16px;
+}
+
+.blk-do {
+  background: #001d1f;
+  border-color: #015f5f;
+  margin-left: 16px;
+}
+
+.bc-blk-adders {
+  display: flex;
+  gap: 8px;
+  margin: 4px 0 0 16px;
+}
+
+.bc-blk-chip {
+  display: inline-block;
+  width: 56px;
+  text-align: center;
+  font-size: 10px;
+  font-weight: bold;
+  letter-spacing: 0.8px;
+  border-radius: 8px;
+  padding: 3px 0;
+  flex-shrink: 0;
+}
+
+.chip-when {
+  background: var(--tk-accent);
+  color: #000;
+}
+
+.chip-if {
+  background: #7a5c00;
+  color: #fff2cc;
+}
+
+.chip-do {
+  background: var(--tk-detail);
+  color: #00292b;
+}
+
+.bc-bang {
+  color: var(--tk-detail);
+  font-weight: bold;
+}
+
+/* Folding: the hat stays, the blocks tuck away, a summary takes their place */
+
+.bc-rule.collapsed .bc-rule-body {
+  display: none;
+}
+
+.bc-rule-summary {
+  display: none;
+  color: var(--tk-muted);
   font-size: 12px;
-  cursor: grab;
+}
+
+.bc-rule.collapsed .bc-rule-summary {
+  display: inline;
+}
+
+.bc-rule.collapsed .bc-rule-head .bc-select,
+.bc-rule.collapsed .bc-rule-head .bc-input,
+.bc-rule.collapsed .bc-rule-head .bc-unit {
+  display: none;
 }
 
 .bc-mini-btn {
@@ -798,17 +854,110 @@ textarea.bc-input {
   line-height: 1.6;
 }
 
-/* Badge preview used in the learn view */
+/* Badge preview used in the learn view. Gray on purpose, same as the badge
+   bots wear in real rooms: light enough (#9aa3ae) to read on dark themes
+   without looking like a muted or timed out user. */
 .bot-badge-demo {
   display: inline-block;
-  background: #01ffff;
-  color: #00292b;
+  background: #9aa3ae;
+  color: #16191d;
   font-size: 9px;
   font-weight: bold;
   padding: 1px 5px;
   border-radius: 8px;
   letter-spacing: 0.5px;
   vertical-align: middle;
+}
+
+/* ── Name tag card ── */
+
+.bc-name-grid {
+  display: grid;
+  grid-template-columns: 220px 260px;
+  gap: 14px;
+}
+
+.bc-name-grid .bc-input {
+  width: 100%;
+}
+
+.bc-name-preview {
+  margin-top: 12px;
+  color: var(--tk-muted);
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bc-name-preview #namePreview {
+  color: var(--tk-text);
+  font-weight: bold;
+}
+
+/* ── Modals (deploy answers) ── */
+
+.bc-modal-back {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.bc-modal {
+  background: var(--tk-tile);
+  border: 1px solid var(--tk-accent);
+  border-radius: 10px;
+  max-width: 430px;
+  width: 100%;
+  padding: 20px 22px;
+}
+
+.bc-modal h3 {
+  margin: 0 0 10px;
+  font-size: 17px;
+}
+
+.bc-modal h3 i {
+  color: var(--tk-accent);
+  margin-right: 6px;
+}
+
+.bc-modal p {
+  margin: 0 0 16px;
+  color: var(--tk-muted);
+  line-height: 1.6;
+  font-size: 14px;
+}
+
+.bc-modal-btns {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+/* ── What's new card ── */
+
+.bc-news {
+  border-color: var(--tk-accent);
+}
+
+.bc-news-list {
+  margin: 0 0 12px;
+  padding-left: 20px;
+  line-height: 1.8;
+  font-size: 13.5px;
+  color: var(--tk-muted);
+}
+
+.bc-news-note {
+  color: var(--tk-ok);
+  font-size: 13px;
+  margin: 0 0 14px;
 }
 
 /* ── Build workspace: editor on the left, test room on the right ── */
@@ -984,13 +1133,20 @@ textarea.bc-input {
   overflow-y: auto;
 }
 
-.bc-rule-kicker {
-  width: 58px;
-  flex-shrink: 0;
+/* Say boxes are the exception: two lines tall from the start and they grow
+   with the message, so multi-line says are impossible to miss. */
+.bc-rule textarea.w-say {
+  height: 52px;
+  min-height: 52px;
+  white-space: pre-wrap;
 }
 
 .w-trig {
   width: 218px;
+}
+
+.w-math {
+  width: 110px;
 }
 
 .w-act {
@@ -1020,11 +1176,6 @@ textarea.bc-input {
 .w-grow {
   flex: 1;
   min-width: 160px;
-}
-
-.bc-cond-row,
-.bc-act-row {
-  margin: 5px 0;
 }
 
 .bc-row-btns {
@@ -1068,15 +1219,18 @@ textarea.bc-input {
 
 /* Rules light up when the test room runs them */
 
-.bc-rule.fired {
+.bc-rule.fired .bc-blk {
   border-color: var(--tk-detail);
-  box-shadow: 0 0 0 1px var(--tk-detail);
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  transition: border-color 0.2s ease;
 }
 
-.bc-rule.skipped {
-  border-color: #7a5c00;
-  transition: border-color 0.2s ease;
+.bc-rule.fired .blk-when {
+  box-shadow: 0 0 0 1px var(--tk-detail);
+}
+
+.bc-rule.skipped .blk-when {
+  box-shadow: 0 0 0 1px #7a5c00;
+  transition: box-shadow 0.2s ease;
 }
 
 .bc-rule-tag {
@@ -1122,7 +1276,7 @@ textarea.bc-input {
   position: absolute;
   right: 0;
   top: calc(100% + 4px);
-  z-index: 50;
+  z-index: 300;
   background: var(--tk-bg);
   border: 1px solid var(--tk-detail);
   border-radius: 8px;
@@ -1130,6 +1284,17 @@ textarea.bc-input {
   max-height: 300px;
   overflow-y: auto;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+}
+
+/* The add-a-block menu opens from a left-side button, so it hangs left */
+.bc-magic-menu.left {
+  left: 0;
+  right: auto;
+}
+
+.bc-magic-item b {
+  color: var(--tk-accent);
+  font-size: 12.5px;
 }
 
 .bc-magic-item {
@@ -1261,6 +1426,9 @@ textarea.bc-input {
     overflow-y: visible;
   }
   .bc-deploy-grid {
+    grid-template-columns: 1fr;
+  }
+  .bc-name-grid {
     grid-template-columns: 1fr;
   }
   .bc-top {

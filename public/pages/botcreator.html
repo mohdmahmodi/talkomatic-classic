@@ -143,20 +143,40 @@
               <div class="bc-build-left">
                 <div class="bc-card">
                   <div class="bc-card-head">
-                    <i class="fas fa-id-card"></i>Bot name
+                    <i class="fas fa-id-card"></i>Name tag
                     <span class="hint"
                       >Everyone sees it with a
                       <span class="bot-badge-demo">BOT</span> badge</span
                     >
                   </div>
                   <div class="bc-card-body">
-                    <input
-                      class="bc-input"
-                      id="botName"
-                      maxlength="14"
-                      placeholder="FishBot"
-                      style="width: 240px"
-                    />
+                    <div class="bc-name-grid">
+                      <div>
+                        <label class="bc-label" for="botName">Name</label>
+                        <input
+                          class="bc-input"
+                          id="botName"
+                          maxlength="14"
+                          placeholder="FishBot"
+                        />
+                      </div>
+                      <div>
+                        <label class="bc-label" for="botLocation"
+                          >Location (the part after the slash)</label
+                        >
+                        <input
+                          class="bc-input"
+                          id="botLocation"
+                          maxlength="20"
+                          placeholder="Bot"
+                        />
+                      </div>
+                    </div>
+                    <div class="bc-name-preview">
+                      Seen in rooms as
+                      <span id="namePreview">Bot / Bot</span>
+                      <span class="bot-badge-demo">BOT</span>
+                    </div>
                   </div>
                 </div>
 
@@ -164,8 +184,8 @@
                   <div class="bc-card-head">
                     <i class="fas fa-list-check"></i>Rules
                     <span class="hint"
-                      >A bot is a list of rules. Each one: WHEN &rarr; ONLY IF
-                      &rarr; DO.</span
+                      >Each rule: WHEN &rarr; ONLY IF &rarr; DO. In a say box,
+                      Enter makes a new line.</span
                     >
                   </div>
                   <div class="bc-card-body">
@@ -198,8 +218,8 @@
                   <div class="bc-card-head">
                     <i class="fas fa-rocket"></i>Send it to a real room
                     <span class="hint"
-                      >2 bots per room. It runs while you are on
-                      Talkomatic.</span
+                      >1 bot seat per 5 people a room holds. It runs while you
+                      are on Talkomatic.</span
                     >
                   </div>
                   <div class="bc-card-body">
@@ -453,11 +473,11 @@
                   pick, like <code>prize</code> or <code>coins</code>. See the
                   Memory section, it is the part that makes games possible.
                 </span>
-                <code>count up</code>
+                <code>change a memory</code>
                 <span>
-                  Add a number to a memory. Counting points, coins, visits - it
-                  is all this one action. (Add a negative number, like -5, to
-                  take points away.)
+                  Do math on a memory: add, take away, multiply by, or divide
+                  by a number. Counting points, doubling coins, halving a score
+                  - all this one action.
                 </span>
                 <code>pick random</code>
                 <span>
@@ -517,6 +537,11 @@
                 <span
                   >A fresh random choice from your list. Split the choices with
                   the | line.</span
+                >
+                <code>{newline}</code>
+                <span
+                  >Starts a new line in the middle of a message. (Pressing
+                  Enter inside a say box does the same thing.)</span
                 >
                 <code>{bot}</code>
                 <span>Your bot's own name.</span>
@@ -629,6 +654,15 @@
                 is a whole tiny economy you can copy.
               </p>
 
+              <h4>A doubling machine</h4>
+              <p>
+                One rule: WHEN someone types <code>!double</code> &rarr; DO
+                remember <code>n</code> = <code>{word1}</code>, then change
+                <code>n</code> multiply by 2, then say "{word1} doubled is
+                {memory:n}!" Open the ready-made <b>Calculator</b> bot to see
+                it working, halving included.
+              </p>
+
               <h4>A bot that argues back differently every time</h4>
               <p>
                 One rule: WHEN someone says the bot's name &rarr; DO say
@@ -686,8 +720,9 @@
               </h3>
               <p>
                 Bots follow the same rules people do. Everything they say goes
-                through the same filter. A room can vote a bot out. Two bots per
-                room, one running bot per person, and
+                through the same filter. A room can vote a bot out. Rooms have
+                bot seats by size (1 for every 5 people they can hold, up to
+                5), you can run one bot at a time, and
                 <b>whatever your bot does counts as YOU doing it</b> - so make
                 things people will like having around. Moderators can see every
                 bot and its owner, and can turn any bot off.
@@ -707,8 +742,8 @@
                 Already writing Node or Python? You can skip the editor and
                 drive a bot with real code. Your program gets an ordinary seat
                 with a <span class="bot-badge-demo">BOT</span> badge, and
-                follows the same rules: 2 bots per room, the word filter, and
-                moderation.
+                follows the same rules: bot seats by room size (1 per 5 seats,
+                up to 5), the word filter, and moderation.
               </p>
 
               <h4><i class="fas fa-key"></i>1. Get a token</h4>
