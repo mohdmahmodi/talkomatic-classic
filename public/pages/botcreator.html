@@ -349,10 +349,11 @@
             <div class="bc-chip-table">
               <code>someone types !word</code>
               <span>
-                The classic. The line must <b>start</b> with the command:
-                <code>!roll</code> works, "please !roll" does not. Words typed
-                after it (like <code>!guess 7</code>) become
-                <code>{word1}</code>, <code>{word2}</code>...
+                The classic. It can sit anywhere in your line:
+                <code>!roll</code> and "please !roll" both work. Words typed
+                after it (like <code>!guess 7 fast</code>) become
+                <code>{word1}</code>, <code>{word2}</code>... up to
+                <code>{word8}</code>.
               </span>
               <code>someone says a phrase</code>
               <span>
@@ -529,6 +530,12 @@
               and are saved with your bot. In the Test room, the "What it
               remembers" panel shows them changing live.
             </p>
+            <p>
+              You never have to type the curly brackets: the
+              <b>MEMORIES</b> part of the palette lists every memory your bot
+              has, plus a <b>+ new memory</b> button. Click into a say or
+              check box, then click a memory chip and it drops right in.
+            </p>
 
           </div>
         </div>
@@ -646,10 +653,10 @@
           </div>
           <div class="bc-card-body bc-doc">
             <div class="bc-chip-table">
-              <code>Wrong start</code>
+              <code>Old line</code>
               <span
-                >Commands must START the line. Put <code>!roll</code> on its
-                own line.</span
+                >The bot only reads your LAST line. A command sitting higher
+                up in your box is old news; type it again at the bottom.</span
               >
               <code>Too fast</code>
               <span

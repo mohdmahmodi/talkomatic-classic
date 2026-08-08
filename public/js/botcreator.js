@@ -19,11 +19,16 @@
 
   // ── Socket ────────────────────────────────────────────────────────────────
 
+  // Reconnection never gives up. The page used to stop retrying after five
+  // attempts, so a server update mid-deploy left a stale "your bot is live"
+  // bar with a dead stop button. Now it keeps trying with backoff and
+  // re-syncs the real status the moment the server is back.
   const socket = io({
     transports: ["websocket"],
     upgrade: false,
-    reconnectionAttempts: 5,
+    reconnectionAttempts: Infinity,
     reconnectionDelay: 1000,
+    reconnectionDelayMax: 5000,
     withCredentials: true,
     auth: {
       devKey: localStorage.getItem("talkomatic_devKey") || undefined,
@@ -521,10 +526,10 @@
   const MAGIC = [
     { tok: "{name}", desc: "who said it" },
     { tok: "{word1}", desc: "1st word after the command" },
-    { tok: "{word2}", desc: "2nd word after the command" },
+    { tok: "{word2}", desc: "2nd word after the command (up to {word8})" },
     { tok: "{words}", desc: "all the words after the command" },
-    { tok: "{memory:coins}", desc: "a shared memory (any name)" },
-    { tok: "{mymemory:coins}", desc: "that person's own memory" },
+    { tok: "{memory:coins}", desc: "the room's shared memory (any name)" },
+    { tok: "{mymemory:coins}", desc: "that person's own memory (any name)" },
     { tok: "{rand:1-6}", desc: "random number, new every time" },
     { tok: "{pick:red|green|blue}", desc: "random choice, new every time" },
     { tok: "{newline}", desc: "start a new line mid-message" },
@@ -533,6 +538,202 @@
     { tok: "{humans}", desc: "how many people are here" },
     { tok: "{time}", desc: "the time right now" },
   ];
+
+  // ── Memories, visually ────────────────────────────────────────────────────
+  // A memory exists the moment a block writes it. This list is what the
+  // palette shows: everything the blocks already use, plus ones made with
+  // the + button that no block uses yet. Chips click their token into the
+  // text box that was last focused, so nobody types curly brackets.
+
+  let lastField = null;
+
+  function fieldQualifies(el) {
+    return !!(
+      el &&
+      el.closest &&
+      el.closest("#rulesHost") &&
+      ((el.matches("input.bc-input") && el.type !== "number") ||
+        el.matches("textarea.bc-input"))
+    );
+  }
+
+  // Both signals, because a click sees pointerdown even when focus events
+  // are swallowed, and keyboard users produce only focusin.
+  document.addEventListener("focusin", (e) => {
+    if (fieldQualifies(e.target)) lastField = e.target;
+  });
+  document.addEventListener("pointerdown", (e) => {
+    if (fieldQualifies(e.target)) lastField = e.target;
+  });
+
+  function collectMemories() {
+    const found = new Map(); // name -> "bot" | "user"
+    if (!edit) return [];
+    for (const m of edit._memories || [])
+      if (!found.has(m.name)) found.set(m.name, m.per);
+    for (const r of edit.rules || []) {
+      const texts = [];
+      for (const a of r.do || []) {
+        if (
+          (a.type === "set" || a.type === "add" || a.type === "random") &&
+          a.var &&
+          !found.has(String(a.var).toLowerCase())
+        )
+          found.set(
+            String(a.var).toLowerCase(),
+            a.per === "user" ? "user" : "bot",
+          );
+        if (a.text) texts.push(a.text);
+        if (a.value) texts.push(a.value);
+        if (a.amount) texts.push(a.amount);
+        if (a.from) texts.push(a.from);
+      }
+      for (const c of r.if || []) texts.push(c.a || "", c.b || "");
+      for (const t of texts) {
+        const re = /\{(memory|mymemory):([a-z0-9_]{1,20})\}/gi;
+        let m;
+        while ((m = re.exec(t))) {
+          const nm = m[2].toLowerCase();
+          if (!found.has(nm))
+            found.set(nm, m[1].toLowerCase() === "mymemory" ? "user" : "bot");
+        }
+      }
+    }
+    return [...found].map(([name, per]) => ({ name, per }));
+  }
+
+  function memToken(m) {
+    return (m.per === "user" ? "{mymemory:" : "{memory:") + m.name + "}";
+  }
+
+  function memKindLabel(per) {
+    return per === "user" ? "each person's own" : "everyone's";
+  }
+
+  function insertIntoField(tok) {
+    const t = fieldQualifies(document.activeElement)
+      ? document.activeElement
+      : lastField && document.body.contains(lastField)
+        ? lastField
+        : null;
+    if (!t) {
+      toastr.info("Click into a say or check box first, then click the memory.");
+      return false;
+    }
+    const start = t.selectionStart ?? t.value.length;
+    const end = t.selectionEnd ?? t.value.length;
+    t.value = t.value.slice(0, start) + tok + t.value.slice(end);
+    t.dispatchEvent(new Event("input", { bubbles: false }));
+    t.focus();
+    return true;
+  }
+
+  function openNewMemory() {
+    const box = openModal(false);
+    const h = document.createElement("h3");
+    h.innerHTML = '<i class="fas fa-brain"></i> Make a memory';
+    const p = document.createElement("p");
+    p.textContent =
+      "A memory is a labelled box the bot keeps, like coins or points. Pick a name and who it belongs to. Give it a value with a remember or change block; say it back by clicking the chip into a say box.";
+    box.appendChild(h);
+    box.appendChild(p);
+    const inp = document.createElement("input");
+    inp.className = "bc-input";
+    inp.style.width = "100%";
+    inp.maxLength = 20;
+    inp.placeholder = "coins";
+    box.appendChild(inp);
+    const kinds = document.createElement("div");
+    kinds.style.marginTop = "10px";
+    let per = "user";
+    const mkKind = (v, t, d) => {
+      const c = document.createElement("button");
+      c.type = "button";
+      c.className = "bc-choice" + (per === v ? " sel" : "");
+      const b = document.createElement("b");
+      b.textContent = t;
+      const s = document.createElement("span");
+      s.textContent = d;
+      c.appendChild(b);
+      c.appendChild(s);
+      c.addEventListener("click", () => {
+        per = v;
+        [...kinds.children].forEach((el) => el.classList.remove("sel"));
+        c.classList.add("sel");
+      });
+      kinds.appendChild(c);
+    };
+    mkKind(
+      "user",
+      "Each person their own",
+      "Sara's coins and Omar's coins are different boxes. For points and scores.",
+    );
+    mkKind(
+      "bot",
+      "One for everyone",
+      "A single box the whole room shares. For a quiz answer or a group total.",
+    );
+    box.appendChild(kinds);
+    const btns = document.createElement("div");
+    btns.className = "bc-modal-btns";
+    const cancel = document.createElement("button");
+    cancel.className = "bc-btn";
+    cancel.textContent = "Cancel";
+    cancel.addEventListener("click", closeModal);
+    const make = document.createElement("button");
+    make.className = "bc-btn primary";
+    make.textContent = "Make it";
+    make.addEventListener("click", () => {
+      const name = inp.value.trim().toLowerCase().replace(/^\{|\}$/g, "");
+      if (!/^[a-z0-9_]{1,20}$/i.test(name))
+        return toastr.error("Memory names are 1-20 letters, digits or _.");
+      if (!edit._memories) edit._memories = [];
+      if (!collectMemories().some((m) => m.name === name))
+        edit._memories.push({ name, per });
+      closeModal();
+      renderMemories();
+      toastr.success(
+        name +
+          " is ready. Click into a text box, then click the chip to use it.",
+      );
+    });
+    btns.appendChild(cancel);
+    btns.appendChild(make);
+    box.appendChild(btns);
+    setTimeout(() => inp.focus(), 30);
+  }
+
+  function renderMemories() {
+    const host = document.getElementById("palMemHost");
+    if (!host) return;
+    host.innerHTML = "";
+    const mems = collectMemories();
+    for (const m of mems) {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "bc-pal-blk p-mem";
+      chip.title =
+        "Click to drop " +
+        memToken(m) +
+        " into the box you were typing in";
+      chip.innerHTML = '<i class="fas fa-brain"></i>';
+      const label = document.createElement("span");
+      label.className = "bc-pal-label";
+      label.textContent = m.name + " · " + memKindLabel(m.per);
+      chip.appendChild(label);
+      // Never steal focus from the box being typed in.
+      chip.addEventListener("pointerdown", (e) => e.preventDefault());
+      chip.addEventListener("click", () => insertIntoField(memToken(m)));
+      host.appendChild(chip);
+    }
+    const add = document.createElement("button");
+    add.type = "button";
+    add.className = "bc-mini-btn";
+    add.style.width = "100%";
+    add.innerHTML = '<i class="fas fa-plus"></i> new memory';
+    add.addEventListener("click", openNewMemory);
+    host.appendChild(add);
+  }
 
   function maxRules() {
     return status?.limits?.maxRules || 20;
@@ -583,15 +784,55 @@
 
   // ── Sign-in flow ──────────────────────────────────────────────────────────
 
-  socket.on("connect", () => socket.emit("check signin status"));
+  let connLost = false;
+  let triedAutoSignin = false;
+
+  socket.on("connect", () => {
+    connLost = false;
+    triedAutoSignin = false;
+    socket.emit("check signin status");
+    renderLive();
+  });
+
+  socket.on("disconnect", () => {
+    connLost = true;
+    renderLive();
+  });
 
   socket.on("connect_error", (err) => {
-    toastr.error(err?.message || "Could not connect.");
+    // Quiet while retrying; the live bar explains what is happening.
+    if (!connLost) toastr.error(err?.message || "Could not connect.");
+    connLost = true;
+    renderLive();
+    // The manager auto-retries transport failures, but a handshake the
+    // server REFUSED (which happens when a page reconnects in the first
+    // moments of a server update, before it is ready) stops the socket
+    // for good unless someone calls connect() again. This is what used to
+    // leave a stale "your bot is live" bar that nothing could fix.
+    setTimeout(() => {
+      if (!socket.connected) socket.connect();
+    }, 2500);
   });
 
   socket.on("signin status", (s) => {
     if (!s?.isSignedIn) {
+      // A server update wipes sessions but not people: sign back in with
+      // the name the lobby saved, the same way the lobby itself would.
+      // Without this, an update left this page signed out with a stale
+      // "your bot is live" bar nothing could clear.
+      const savedName = localStorage.getItem("talkomaticUsername");
+      if (savedName && !triedAutoSignin) {
+        triedAutoSignin = true;
+        socket.emit("join lobby", {
+          username: savedName,
+          location:
+            localStorage.getItem("talkomaticLocation") || "On The Web",
+        });
+        return;
+      }
       me = null;
+      status = null;
+      renderHome();
       showView("gate");
       return;
     }
@@ -850,16 +1091,25 @@
 
   function renderLive() {
     const host = $("liveHost");
+    if (!host) return;
     host.innerHTML = "";
     const d = deployedInfo();
     if (!d) return;
     const bot = (status?.bots || []).find((b) => b.id === d.botId);
     const bar = document.createElement("div");
     bar.className = "bc-live";
-    const mins = Math.max(0, Math.round((Date.now() - d.since) / 60000));
     bar.innerHTML =
       '<i class="fas fa-circle-play"></i><b></b><span class="bc-live-meta"></span>';
     bar.querySelector("b").textContent = bot?.name || "Your bot";
+    // Connection down: say so honestly instead of showing a stop button
+    // that cannot reach the server.
+    if (connLost) {
+      bar.querySelector(".bc-live-meta").textContent =
+        "reconnecting to Talkomatic... its true status shows in a moment";
+      host.appendChild(bar);
+      return;
+    }
+    const mins = Math.max(0, Math.round((Date.now() - d.since) / 60000));
     bar.querySelector(".bc-live-meta").textContent =
       'is live in "' +
       (d.roomName || d.roomId) +
@@ -869,7 +1119,11 @@
     const stop = document.createElement("button");
     stop.className = "bc-btn danger";
     stop.innerHTML = '<i class="fas fa-stop"></i>Bring it home';
-    stop.addEventListener("click", () => socket.emit("bots stop"));
+    stop.addEventListener("click", () => {
+      if (!socket.connected)
+        return toastr.info("Reconnecting... try again in a moment.");
+      socket.emit("bots stop");
+    });
     bar.appendChild(stop);
     host.appendChild(bar);
   }
@@ -1038,8 +1292,23 @@
     for (let ri = 0; ri < edit.rules.length; ri++) {
       const r = edit.rules[ri];
       const n = "Rule " + (ri + 1);
-      if (r.on.type === "command" && !/^[a-z0-9]{1,16}$/i.test(String(r.on.word || "").trim()))
-        return { ok: false, ri, msg: n + ": the command needs a word (letters or digits), like !roll." };
+      if (r.on.type === "command") {
+        const w = String(r.on.word || "").trim();
+        if (/\s/.test(w))
+          return {
+            ok: false,
+            ri,
+            msg:
+              n +
+              ": a command is ONE word, like !test. What people type after it comes out as {word1}, {word2}...",
+          };
+        if (!/^[a-z0-9]{1,16}$/i.test(w))
+          return {
+            ok: false,
+            ri,
+            msg: n + ": the command needs a word (letters or digits), like !roll.",
+          };
+      }
       if (r.on.type === "says" && !String(r.on.text || "").trim())
         return { ok: false, ri, msg: n + ': "someone says" needs a phrase to listen for.' };
       if (r.on.type === "timer") {
@@ -1080,6 +1349,11 @@
 
   $("saveBtn").addEventListener("click", () => {
     if (!edit) return;
+    if (!socket.connected)
+      return setSaveNote(
+        "err",
+        "Reconnecting to Talkomatic... try again in a moment. Your work is kept as a draft.",
+      );
     const v = validateLocal();
     if (!v.ok) {
       setSaveNote("err", v.msg);
@@ -1207,6 +1481,8 @@
         ex: "ONLY IF {word1} is exactly goodnight, then leave",
       },
     },
+    { group: "MEMORIES" },
+    { memhost: true },
     { group: "READY COMBOS" },
     {
       kind: "pal-combo",
@@ -1369,6 +1645,12 @@
         g.className = "bc-pal-group";
         g.textContent = item.group;
         host.appendChild(g);
+        continue;
+      }
+      if (item.memhost) {
+        const mh = document.createElement("div");
+        mh.id = "palMemHost";
+        host.appendChild(mh);
         continue;
       }
       const b = document.createElement("button");
@@ -1713,7 +1995,12 @@
       if (openMagicMenu) openMagicMenu.remove();
       const menu = document.createElement("div");
       menu.className = "bc-magic-menu";
-      for (const m of MAGIC) {
+      // The bot's own memories come first, by name, in plain words.
+      const mine = collectMemories().map((m) => ({
+        tok: memToken(m),
+        desc: "your memory: " + m.name + " (" + memKindLabel(m.per) + ")",
+      }));
+      for (const m of [...mine, ...MAGIC]) {
         const item = document.createElement("button");
         item.className = "bc-magic-item";
         item.type = "button";
@@ -1828,6 +2115,7 @@
     (edit.rules || []).forEach((rule, ri) =>
       host.appendChild(ruleCard(rule, ri)),
     );
+    renderMemories();
   }
 
   function ruleCard(rule, ri) {
@@ -2869,14 +3157,13 @@
   // and the card says so. Someone with no saved bots skips the card: it is
   // all new to them anyway.
 
-  const NEWS_VERSION = 3;
+  const NEWS_VERSION = 4;
   const NEWS = [
-    "The whole creator got a redesign: a home page for your bots, a cleaner editor, and it works on phones now.",
-    "Blocks and whole rules can be dragged: grab the grip dots and move them, even between rules.",
-    "Saving now tells you exactly what is missing and points at the rule. Your work also keeps itself as a draft until you save.",
-    "New: Start from an idea. Answer three questions and a working bot is built for you to tweak.",
-    'The "change a memory" action can take away, multiply and divide. Say boxes grow, and Enter makes a new line.',
-    "Your bot can have its own location (FishBot / the lake), and bigger rooms fit more bots: 1 seat per 5 people, up to 5.",
+    "Commands work anywhere in your line now: hello !roll fires too. No need to press Enter first.",
+    "Words after a command become {word1}, {word2}, up to {word8}: !guess 50 fast gives you two of them.",
+    "Memories are visual: make one in the palette, click into a text box, click the chip. No curly brackets to type.",
+    "If Talkomatic updates while your bot is out, the page now reconnects by itself and shows your bot's true status.",
+    "Blocks and whole rules can be dragged by their grip dots, saving points at exactly what is missing, and Start from an idea builds a bot from three questions.",
   ];
 
   let newsChecked = false;

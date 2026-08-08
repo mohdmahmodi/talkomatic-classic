@@ -532,6 +532,22 @@ function takeToken(rt) {
   return true;
 }
 
+// Where "!word" sits in the line as its own word: at the start, or after a
+// space, and not glued to more letters ("!fishing" is not "!fish"). Anywhere
+// in the line counts, so nobody has to know that Enter starts a fresh line.
+function commandIndex(lowerLine, word) {
+  const token = "!" + word;
+  let i = lowerLine.indexOf(token);
+  while (i !== -1) {
+    const okBefore = i === 0 || /\s/.test(lowerLine[i - 1]);
+    const afterCh = lowerLine[i + token.length];
+    const okAfter = afterCh === undefined || /\s/.test(afterCh);
+    if (okBefore && okAfter) return i;
+    i = lowerLine.indexOf(token, i + 1);
+  }
+  return -1;
+}
+
 function onUtterance(rt, userId, username, line, fullText) {
   const lower = line.toLowerCase();
   for (let ri = 0; ri < rt.bot.rules.length; ri++) {
@@ -541,10 +557,10 @@ function onUtterance(rt, userId, username, line, fullText) {
     // plain "says" rule that fired off the same line.
     const ctx = { userId, username, line, args: [] };
     if (on.type === "command") {
-      if (!lower.startsWith("!" + on.word)) continue;
-      const after = line.slice(1 + on.word.length);
-      if (after && !/^\s/.test(after)) continue; // "!fishing" is not "!fish"
-      ctx.args = after.trim() ? after.trim().split(/\s+/).slice(0, 8) : [];
+      const at = commandIndex(lower, on.word);
+      if (at === -1) continue;
+      const after = line.slice(at + 1 + on.word.length).trim();
+      ctx.args = after ? after.split(/\s+/).slice(0, 8) : [];
     } else if (on.type === "says") {
       if (!lower.includes(on.text.toLowerCase())) continue;
     } else if (on.type === "mention") {

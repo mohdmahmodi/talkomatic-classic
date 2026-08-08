@@ -719,6 +719,13 @@ a {
   border-color: var(--blk-do-edge);
 }
 
+/* Memory chips: click to drop the token into the last-focused box */
+.bc-pal-blk.p-mem {
+  background: #5b3591;
+  border-color: #7e54b8;
+  cursor: pointer;
+}
+
 .bc-pal-blk .bc-pal-label {
   flex: 1;
   min-width: 0;
