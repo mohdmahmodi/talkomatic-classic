@@ -1,9 +1,10 @@
 // botcreator.js
-// The Bot Creator page. The editor uses plain words, the ready-made bots go
-// from easy to hard, and the test room next to the editor behaves like a
-// real Talkomatic room: two textboxes, no send button, the bot reads your
-// last line after you stop typing. Rules run through the real server
-// interpreter (server/bots.js) even before they are saved.
+// The Bot Creator page, in two screens. HOME: your bots, the ready-made
+// bots, and a guided "start from an idea" wizard. EDITOR: an action bar
+// that is always in reach, a palette of blocks on the left, rule stacks on
+// a canvas, and the live test room on the right. Blocks move by real drag
+// and drop (pointer events, no native drag ghost). Rules still run through
+// the real server interpreter (server/bots.js) even before they are saved.
 
 /* global io, toastr */
 
@@ -37,7 +38,8 @@
 
   let me = null; // { userId, username, isDev, isMod }
   let status = null; // last "bots status" payload
-  let edit = null; // the bot being edited: { id?, name, rules[] }
+  let edit = null; // the bot being edited: { id?, name, location, rules[] }
+  let dirty = false; // unsaved edits exist
   let deployMode = "existing"; // or "new"
   let testDirty = true; // the test sandbox needs the current rules re-sent
 
@@ -470,379 +472,7 @@
 
   const LEVEL_LABEL = { easy: "EASY", medium: "MEDIUM", hard: "HARD" };
 
-  // ── Views ─────────────────────────────────────────────────────────────────
-
-  function showView(name) {
-    document
-      .querySelectorAll(".bc-view")
-      .forEach((v) => v.classList.remove("active"));
-    document
-      .querySelectorAll(".bc-nav-item")
-      .forEach((b) => b.classList.toggle("active", b.dataset.view === name));
-    const el = $(name + "View");
-    if (el) el.classList.add("active");
-    if (name === "staff") socket.emit("staff bots list");
-  }
-
-  document.querySelectorAll(".bc-nav-item").forEach((b) =>
-    b.addEventListener("click", () => {
-      if (!me && b.dataset.view === "editor") return showView("gate");
-      showView(b.dataset.view);
-    }),
-  );
-
-  // ── Sign-in flow ──────────────────────────────────────────────────────────
-
-  socket.on("connect", () => socket.emit("check signin status"));
-
-  socket.on("connect_error", (err) => {
-    toastr.error(err?.message || "Could not connect.");
-  });
-
-  socket.on("signin status", (s) => {
-    if (!s?.isSignedIn) {
-      me = null;
-      showView("gate");
-      return;
-    }
-    me = s;
-    $("userChip").style.display = "";
-    $("userChipName").textContent = s.username + " / " + (s.location || "");
-    if (s.isDev || s.isMod) $("staffNav").style.display = "";
-    socket.emit("bots status");
-    socket.emit("get rooms");
-    if (document.querySelector("#gateView.active")) showView("editor");
-  });
-
-  // ── Bots status: list, live card ──────────────────────────────────────────
-
-  socket.on("bots status", (st) => {
-    status = st;
-    renderBotList();
-    renderLive();
-    renderDeployCard();
-    maybeShowNews();
-  });
-
-  // Deploy problems get a real modal: what went wrong and what to do next.
-  // Anything without a known code stays a plain toast.
-  const DEPLOY_HELP = {
-    room_full: {
-      title: "That room is full",
-      body: "Every seat is taken. Pick another room, or make a brand new one and your bot will follow you in.",
-    },
-    room_bots_full: {
-      title: "No bot seats left there",
-      body: "Rooms get 1 bot seat for every 5 people they can hold, up to 5. That room's bot seats are taken, so pick another room or a bigger one.",
-    },
-    room_empty: {
-      title: "Nobody is in that room",
-      body: "Bots need at least one person to talk to, or they walk right back out. Join the room first, or pick one with people in it.",
-    },
-    room_gone: {
-      title: "That room closed",
-      body: "It emptied out and Talkomatic cleaned it up. The list has been refreshed, pick another one.",
-    },
-    room_locked: {
-      title: "That room is locked",
-      body: "The room is not letting anyone new in right now, bots included.",
-    },
-    room_banned: {
-      title: "That room said no",
-      body: "This bot was removed from that room, so it cannot go back in there. Any other room will still take it.",
-    },
-    already_running: {
-      title: "One bot at a time",
-      body: "You already have a bot out in a room. Bring it home from the sidebar first, then send this one.",
-    },
-    bots_off: {
-      title: "Bots are off right now",
-      body: "The moderators switched bots off for everyone. Try again later.",
-    },
-    busy: {
-      title: "Too many bots right now",
-      body: "The server is already running its limit of bots. Try again in a little while.",
-    },
-    maintenance: {
-      title: "Maintenance in progress",
-      body: "Talkomatic is being worked on. Try again in a few minutes.",
-    },
-  };
-
-  function closeModal() {
-    document.querySelectorAll(".bc-modal-back").forEach((el) => el.remove());
-  }
-
-  function showModal(title, body) {
-    closeModal();
-    const back = document.createElement("div");
-    back.className = "bc-modal-back";
-    const box = document.createElement("div");
-    box.className = "bc-modal";
-    const h = document.createElement("h3");
-    h.innerHTML = '<i class="fas fa-circle-info"></i> ';
-    h.appendChild(document.createTextNode(title));
-    const p = document.createElement("p");
-    p.textContent = body;
-    const btns = document.createElement("div");
-    btns.className = "bc-modal-btns";
-    const ok = document.createElement("button");
-    ok.className = "bc-btn primary";
-    ok.textContent = "OK";
-    ok.addEventListener("click", closeModal);
-    btns.appendChild(ok);
-    box.appendChild(h);
-    box.appendChild(p);
-    box.appendChild(btns);
-    back.appendChild(box);
-    back.addEventListener("click", (e) => {
-      if (e.target === back) closeModal();
-    });
-    document.body.appendChild(back);
-  }
-
-  socket.on("bots error", (d) => {
-    const help = d?.code && DEPLOY_HELP[d.code];
-    if (help) {
-      socket.emit("get rooms"); // whatever bounced, the list is stale
-      showModal(help.title, help.body);
-      return;
-    }
-    toastr.error(d?.message || "Bot problem.");
-  });
-
-  socket.on("bots saved", (d) => {
-    toastr.success("Saved!");
-    if (edit && !edit.id) edit.id = d.id;
-    if (edit) $("deleteBtn").style.display = "";
-  });
-
-  socket.on("bots deployed", (d) => {
-    if (d.pending) {
-      toastr.info("Room made! Taking you there, your bot follows you in.");
-      setTimeout(() => {
-        window.location.href =
-          "room.html?roomId=" + encodeURIComponent(d.roomId);
-      }, 900);
-      return;
-    }
-    toastr.success(`Your bot is now in "${d.roomName}".`);
-    socket.emit("bots status");
-  });
-
-  socket.on("bot stopped", (d) => {
-    toastr.info("Your bot came home: " + (d?.why || "stopped"));
-    socket.emit("bots status");
-  });
-
-  function deployedInfo() {
-    return status?.deployed || null;
-  }
-
-  function renderBotList() {
-    const host = $("botList");
-    host.innerHTML = "";
-    const bots = status?.bots || [];
-    if (!bots.length) {
-      const note = document.createElement("div");
-      note.className = "bc-empty-note";
-      note.innerHTML =
-        "Nothing here yet! Open a <b>ready-made bot</b> below to see how one works, or press <b>Make a new bot</b>.";
-      host.appendChild(note);
-      return;
-    }
-    for (const b of bots) {
-      const card = document.createElement("div");
-      card.className = "bc-bot-card";
-      if (edit && edit.id === b.id) card.classList.add("active");
-      const name = document.createElement("div");
-      name.className = "bc-bot-card-name";
-      if (deployedInfo()?.botId === b.id) {
-        const dot = document.createElement("span");
-        dot.className = "live-dot";
-        name.appendChild(dot);
-      }
-      name.appendChild(document.createTextNode(b.name));
-      const meta = document.createElement("div");
-      meta.className = "bc-bot-card-meta";
-      meta.textContent =
-        b.rules.length + (b.rules.length === 1 ? " rule" : " rules");
-      card.appendChild(name);
-      card.appendChild(meta);
-      card.addEventListener("click", () =>
-        loadBot({
-          id: b.id,
-          name: b.name,
-          location: b.location || "Bot",
-          rules: b.rules,
-        }),
-      );
-      host.appendChild(card);
-    }
-  }
-
-  function diffChip(level) {
-    const chip = document.createElement("span");
-    chip.className = "bc-diff " + level;
-    chip.textContent = LEVEL_LABEL[level] || "EASY";
-    return chip;
-  }
-
-  function renderExamples() {
-    const host = $("exampleList");
-    host.innerHTML = "";
-    for (const t of TEMPLATES) {
-      if (t.key === "blank") continue;
-      const card = document.createElement("div");
-      card.className = "bc-bot-card";
-      const name = document.createElement("div");
-      name.className = "bc-bot-card-name";
-      const icon = document.createElement("i");
-      icon.className = "fas " + t.icon;
-      icon.style.color = "var(--tk-accent)";
-      name.appendChild(icon);
-      name.appendChild(document.createTextNode(" " + t.name));
-      name.appendChild(diffChip(t.level));
-      const meta = document.createElement("div");
-      meta.className = "bc-bot-card-meta";
-      meta.textContent = t.blurb;
-      card.appendChild(name);
-      card.appendChild(meta);
-      card.addEventListener("click", () => {
-        if (!me) return showView("gate");
-        loadBot(
-          JSON.parse(
-            JSON.stringify({
-              id: null,
-              name: t.bot.name,
-              location: t.bot.location || "Bot",
-              rules: t.bot.rules,
-            }),
-          ),
-        );
-        toastr.info(
-          "This is a ready-made bot. Try it, change it, then press Save to keep your copy.",
-        );
-      });
-      host.appendChild(card);
-    }
-  }
-  renderExamples();
-
-  function renderLive() {
-    const d = deployedInfo();
-    const card = $("liveCard");
-    if (!d) {
-      card.classList.remove("show");
-      return;
-    }
-    const bot = (status?.bots || []).find((b) => b.id === d.botId);
-    $("liveName").textContent = bot?.name || "Your bot";
-    $("liveRoom").textContent = 'In "' + (d.roomName || d.roomId) + '"';
-    const mins = Math.max(0, Math.round((Date.now() - d.since) / 60000));
-    $("liveSince").textContent =
-      (mins < 1 ? "Just went in" : "In there " + mins + " min") +
-      (d.dropped
-        ? " · " + d.dropped + " messages skipped (going too fast)"
-        : "");
-    card.classList.add("show");
-  }
-
-  $("liveStopBtn").addEventListener("click", () => socket.emit("bots stop"));
-
-  // ── Template picker / editor open ─────────────────────────────────────────
-
-  function renderTemplates() {
-    const grid = $("tplGrid");
-    grid.innerHTML = "";
-    for (const t of TEMPLATES) {
-      const el = document.createElement("div");
-      el.className = "bc-tpl";
-      const top = document.createElement("div");
-      top.style.cssText = "display:flex;align-items:center";
-      const icon = document.createElement("i");
-      icon.className = "fas " + t.icon;
-      top.appendChild(icon);
-      top.appendChild(diffChip(t.level));
-      const h = document.createElement("h4");
-      h.textContent = t.name;
-      const p = document.createElement("p");
-      p.textContent = t.blurb;
-      el.appendChild(top);
-      el.appendChild(h);
-      el.appendChild(p);
-      el.addEventListener("click", () => {
-        loadBot(
-          JSON.parse(
-            JSON.stringify({
-              id: null,
-              name: t.bot.name,
-              location: t.bot.location || "Bot",
-              rules: t.bot.rules,
-            }),
-          ),
-        );
-      });
-      grid.appendChild(el);
-    }
-  }
-
-  $("newBotBtn").addEventListener("click", () => {
-    if (!me) return showView("gate");
-    if ((status?.bots || []).length >= (status?.limits?.maxSaved || 8))
-      return toastr.error(
-        "You have the most bots you can keep. Delete one first.",
-      );
-    edit = null;
-    showView("editor");
-    $("tplCard").style.display = "";
-    $("editorBody").style.display = "none";
-    renderTemplates();
-  });
-
-  function loadBot(bot) {
-    edit = JSON.parse(JSON.stringify(bot));
-    if (!edit.location) edit.location = "Bot";
-    testDirty = true;
-    showView("editor");
-    $("tplCard").style.display = "none";
-    $("editorBody").style.display = "";
-    $("botName").value = edit.name || "";
-    $("botLocation").value = edit.location;
-    $("deleteBtn").style.display = edit.id ? "" : "none";
-    updateNamePreview();
-    resetTestRoom();
-    renderRules();
-    renderBotList();
-    renderDeployCard();
-  }
-
-  // "FishBot / the lake" everywhere the bot is seen: the preview line here,
-  // the test room header, and the real room once deployed.
-  function botHeaderText() {
-    return (edit?.name || "Bot") + " / " + (edit?.location || "Bot");
-  }
-
-  function updateNamePreview() {
-    $("namePreview").textContent = botHeaderText();
-    $("trBotName").textContent = botHeaderText();
-  }
-
-  $("botName").addEventListener("input", () => {
-    if (!edit) return;
-    edit.name = $("botName").value;
-    testDirty = true;
-    updateNamePreview();
-  });
-
-  $("botLocation").addEventListener("input", () => {
-    if (!edit) return;
-    edit.location = $("botLocation").value;
-    testDirty = true;
-    updateNamePreview();
-  });
-
-  // ── The rule editor ───────────────────────────────────────────────────────
+  // ── Vocabulary ────────────────────────────────────────────────────────────
 
   const TRIGGER_OPTIONS = [
     { v: "command", label: "someone types !command" },
@@ -853,8 +483,8 @@
     { v: "timer", label: "every X minutes" },
   ];
 
-  // Each action also carries the one-line description the add-a-block menu
-  // shows, so picking an action never means guessing.
+  // Each action also carries the one-line description the palette and the
+  // add-a-block menu show, so picking one never means guessing.
   const ACTION_OPTIONS = [
     { v: "say", label: "say something", desc: "The bot types into its box" },
     { v: "wait", label: "wait a moment", desc: "Pause before the next thing" },
@@ -904,9 +534,1138 @@
     { tok: "{time}", desc: "the time right now" },
   ];
 
-  function touch() {
-    testDirty = true;
+  function maxRules() {
+    return status?.limits?.maxRules || 20;
   }
+
+  function freshRule() {
+    return {
+      on: { type: "command", word: "hello" },
+      if: [],
+      do: [{ type: "say", text: "" }],
+    };
+  }
+
+  function freshAction(v) {
+    const fresh = { type: v };
+    if (v === "say") fresh.text = "";
+    if (v === "wait") fresh.seconds = 2;
+    if (v === "set")
+      Object.assign(fresh, { var: "prize", per: "bot", value: "" });
+    if (v === "add")
+      Object.assign(fresh, { var: "points", per: "user", amount: "1", op: "add" });
+    if (v === "random")
+      Object.assign(fresh, { var: "prize", per: "bot", from: "a, b, c" });
+    return fresh;
+  }
+
+  // ── Views ─────────────────────────────────────────────────────────────────
+
+  function showView(name) {
+    document
+      .querySelectorAll(".bc-view")
+      .forEach((v) => v.classList.remove("active"));
+    document
+      .querySelectorAll(".bc-nav-item")
+      .forEach((b) => b.classList.toggle("active", b.dataset.view === name));
+    const el = $(name + "View");
+    if (el) el.classList.add("active");
+    document.body.classList.remove("bc-test-open");
+    if (name === "staff") socket.emit("staff bots list");
+  }
+
+  document.querySelectorAll(".bc-nav-item").forEach((b) =>
+    b.addEventListener("click", () => {
+      if (!me && b.dataset.view === "home") return showView("gate");
+      showView(b.dataset.view);
+    }),
+  );
+
+  // ── Sign-in flow ──────────────────────────────────────────────────────────
+
+  socket.on("connect", () => socket.emit("check signin status"));
+
+  socket.on("connect_error", (err) => {
+    toastr.error(err?.message || "Could not connect.");
+  });
+
+  socket.on("signin status", (s) => {
+    if (!s?.isSignedIn) {
+      me = null;
+      showView("gate");
+      return;
+    }
+    me = s;
+    $("userChip").style.display = "";
+    $("userChipName").textContent = s.username + " / " + (s.location || "");
+    if (s.isDev || s.isMod) $("staffNav").style.display = "";
+    socket.emit("bots status");
+    if (document.querySelector("#gateView.active")) showView("home");
+  });
+
+  // ── Bots status ───────────────────────────────────────────────────────────
+
+  socket.on("bots status", (st) => {
+    status = st;
+    renderHome();
+    renderEditorChrome();
+    maybeShowNews();
+  });
+
+  function deployedInfo() {
+    return status?.deployed || null;
+  }
+
+  // ── Modals (one at a time) ────────────────────────────────────────────────
+
+  function closeModal() {
+    document.querySelectorAll(".bc-modal-back").forEach((el) => el.remove());
+  }
+
+  // Returns the modal element so callers can fill it.
+  function openModal(wide) {
+    closeModal();
+    const back = document.createElement("div");
+    back.className = "bc-modal-back";
+    const box = document.createElement("div");
+    box.className = "bc-modal" + (wide ? " wide" : "");
+    back.appendChild(box);
+    back.addEventListener("click", (e) => {
+      if (e.target === back) closeModal();
+    });
+    document.body.appendChild(back);
+    return box;
+  }
+
+  function infoModal(title, body) {
+    const box = openModal(false);
+    const h = document.createElement("h3");
+    h.innerHTML = '<i class="fas fa-circle-info"></i> ';
+    h.appendChild(document.createTextNode(title));
+    const p = document.createElement("p");
+    p.textContent = body;
+    const btns = document.createElement("div");
+    btns.className = "bc-modal-btns";
+    const ok = document.createElement("button");
+    ok.className = "bc-btn primary";
+    ok.textContent = "OK";
+    ok.addEventListener("click", closeModal);
+    btns.appendChild(ok);
+    box.appendChild(h);
+    box.appendChild(p);
+    box.appendChild(btns);
+  }
+
+  // Deploy problems get a real answer: what went wrong and what to do next.
+  const DEPLOY_HELP = {
+    room_full: {
+      title: "That room is full",
+      body: "Every seat is taken. Pick another room, or make a brand new one and your bot will follow you in.",
+    },
+    room_bots_full: {
+      title: "No bot seats left there",
+      body: "Rooms get 1 bot seat for every 5 people they can hold, up to 5. That room's bot seats are taken, so pick another room or a bigger one.",
+    },
+    room_empty: {
+      title: "Nobody is in that room",
+      body: "Bots need at least one person to talk to, or they walk right back out. Join the room first, or pick one with people in it.",
+    },
+    room_gone: {
+      title: "That room closed",
+      body: "It emptied out and Talkomatic cleaned it up. The list has been refreshed, pick another one.",
+    },
+    room_locked: {
+      title: "That room is locked",
+      body: "The room is not letting anyone new in right now, bots included.",
+    },
+    room_banned: {
+      title: "That room said no",
+      body: "This bot was removed from that room, so it cannot go back in there. Any other room will still take it.",
+    },
+    already_running: {
+      title: "One bot at a time",
+      body: "You already have a bot out in a room. Bring it home first, then send this one.",
+    },
+    bots_off: {
+      title: "Bots are off right now",
+      body: "The moderators switched bots off for everyone. Try again later.",
+    },
+    busy: {
+      title: "Too many bots right now",
+      body: "The server is already running its limit of bots. Try again in a little while.",
+    },
+    maintenance: {
+      title: "Maintenance in progress",
+      body: "Talkomatic is being worked on. Try again in a few minutes.",
+    },
+  };
+
+  socket.on("bots error", (d) => {
+    const help = d?.code && DEPLOY_HELP[d.code];
+    if (help) {
+      socket.emit("get rooms"); // whatever bounced, the list is stale
+      infoModal(help.title, help.body);
+      return;
+    }
+    // Save-shaped problems land in the bar, right next to the button.
+    if (edit && document.querySelector("#editorView.active")) {
+      setSaveNote("err", d?.message || "That could not be saved.");
+      return;
+    }
+    toastr.error(d?.message || "Bot problem.");
+  });
+
+  socket.on("bots saved", (d) => {
+    dirty = false;
+    if (edit && !edit.id) edit.id = d.id;
+    setSaveNote("ok", "Saved ✓");
+    saveDraftNow();
+    renderEditorChrome();
+  });
+
+  socket.on("bots deployed", (d) => {
+    if (d.pending) {
+      closeModal();
+      toastr.info("Room made! Taking you there, your bot follows you in.");
+      setTimeout(() => {
+        window.location.href =
+          "room.html?roomId=" + encodeURIComponent(d.roomId);
+      }, 900);
+      return;
+    }
+    closeModal();
+    toastr.success(`Your bot is now in "${d.roomName}".`);
+    socket.emit("bots status");
+  });
+
+  socket.on("bot stopped", (d) => {
+    toastr.info("Your bot came home: " + (d?.why || "stopped"));
+    socket.emit("bots status");
+  });
+
+  // ── Home ──────────────────────────────────────────────────────────────────
+
+  function renderHome() {
+    renderBotList();
+    renderLive();
+    renderContinue();
+  }
+
+  function renderBotList() {
+    const host = $("botList");
+    host.innerHTML = "";
+    const bots = status?.bots || [];
+    if (!bots.length) {
+      const note = document.createElement("div");
+      note.className = "bc-empty-note";
+      note.innerHTML =
+        "Nothing here yet! Press <b>Start from an idea</b> up there, or open a <b>ready-made bot</b> below to see how one works.";
+      host.appendChild(note);
+      return;
+    }
+    for (const b of bots) {
+      const card = document.createElement("button");
+      card.type = "button";
+      card.className = "bc-bot-card";
+      const name = document.createElement("div");
+      name.className = "bc-bot-card-name";
+      if (deployedInfo()?.botId === b.id) {
+        const dot = document.createElement("span");
+        dot.className = "live-dot";
+        name.appendChild(dot);
+      }
+      name.appendChild(document.createTextNode(b.name));
+      const meta = document.createElement("div");
+      meta.className = "bc-bot-card-meta";
+      meta.textContent =
+        b.rules.length +
+        (b.rules.length === 1 ? " rule" : " rules") +
+        " · " +
+        (b.location || "Bot");
+      card.appendChild(name);
+      card.appendChild(meta);
+      card.addEventListener("click", () =>
+        loadBot({
+          id: b.id,
+          name: b.name,
+          location: b.location || "Bot",
+          rules: b.rules,
+        }),
+      );
+      host.appendChild(card);
+    }
+  }
+
+  function diffChip(level) {
+    const chip = document.createElement("span");
+    chip.className = "bc-diff " + level;
+    chip.textContent = LEVEL_LABEL[level] || "EASY";
+    return chip;
+  }
+
+  function renderExamples() {
+    const host = $("exampleList");
+    host.innerHTML = "";
+    for (const t of TEMPLATES) {
+      if (t.key === "blank") continue;
+      const card = document.createElement("button");
+      card.type = "button";
+      card.className = "bc-bot-card";
+      const name = document.createElement("div");
+      name.className = "bc-bot-card-name";
+      const icon = document.createElement("i");
+      icon.className = "fas " + t.icon;
+      name.appendChild(icon);
+      name.appendChild(document.createTextNode(" " + t.name));
+      name.appendChild(diffChip(t.level));
+      const meta = document.createElement("div");
+      meta.className = "bc-bot-card-meta";
+      meta.textContent = t.blurb;
+      card.appendChild(name);
+      card.appendChild(meta);
+      card.addEventListener("click", () => {
+        if (!me) return showView("gate");
+        loadTemplate(t);
+        toastr.info(
+          "This is a ready-made bot. Try it, change it, then press Save to keep your copy.",
+        );
+      });
+      host.appendChild(card);
+    }
+  }
+  renderExamples();
+
+  function loadTemplate(t) {
+    loadBot(
+      JSON.parse(
+        JSON.stringify({
+          id: null,
+          name: t.bot.name,
+          location: t.bot.location || "Bot",
+          rules: t.bot.rules,
+        }),
+      ),
+    );
+  }
+
+  function renderLive() {
+    const host = $("liveHost");
+    host.innerHTML = "";
+    const d = deployedInfo();
+    if (!d) return;
+    const bot = (status?.bots || []).find((b) => b.id === d.botId);
+    const bar = document.createElement("div");
+    bar.className = "bc-live";
+    const mins = Math.max(0, Math.round((Date.now() - d.since) / 60000));
+    bar.innerHTML =
+      '<i class="fas fa-circle-play"></i><b></b><span class="bc-live-meta"></span>';
+    bar.querySelector("b").textContent = bot?.name || "Your bot";
+    bar.querySelector(".bc-live-meta").textContent =
+      'is live in "' +
+      (d.roomName || d.roomId) +
+      '" · ' +
+      (mins < 1 ? "just went in" : mins + " min") +
+      (d.dropped ? " · " + d.dropped + " messages skipped" : "");
+    const stop = document.createElement("button");
+    stop.className = "bc-btn danger";
+    stop.innerHTML = '<i class="fas fa-stop"></i>Bring it home';
+    stop.addEventListener("click", () => socket.emit("bots stop"));
+    bar.appendChild(stop);
+    host.appendChild(bar);
+  }
+
+  // ── Drafts: nothing typed here is ever lost ───────────────────────────────
+
+  let draftTimer = null;
+
+  function saveDraftNow() {
+    if (!edit) return;
+    try {
+      localStorage.setItem(
+        "bc_draft",
+        JSON.stringify({
+          id: edit.id || null,
+          name: edit.name,
+          location: edit.location,
+          rules: edit.rules,
+          at: Date.now(),
+        }),
+      );
+    } catch (e) {}
+  }
+
+  function saveDraftSoon() {
+    clearTimeout(draftTimer);
+    draftTimer = setTimeout(saveDraftNow, 600);
+  }
+
+  function readDraft() {
+    try {
+      const d = JSON.parse(localStorage.getItem("bc_draft"));
+      return d && Array.isArray(d.rules) && d.rules.length ? d : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function renderContinue() {
+    const host = $("continueHost");
+    host.innerHTML = "";
+    const d = readDraft();
+    if (!d) return;
+    // Editing right now, or the draft is just the saved version: no card.
+    if (edit && document.querySelector("#editorView.active")) return;
+    const bar = document.createElement("div");
+    bar.className = "bc-continue";
+    const mins = Math.max(0, Math.round((Date.now() - (d.at || 0)) / 60000));
+    bar.innerHTML =
+      '<i class="fas fa-pen-ruler"></i><b></b><span class="bc-live-meta"></span>';
+    bar.querySelector("b").textContent = d.name || "Unnamed bot";
+    bar.querySelector(".bc-live-meta").textContent =
+      "you were working on this " +
+      (mins < 1 ? "moments ago" : mins < 60 ? mins + " min ago" : "a while ago");
+    const open = document.createElement("button");
+    open.className = "bc-btn primary";
+    open.innerHTML = '<i class="fas fa-arrow-right"></i>Keep going';
+    open.addEventListener("click", () =>
+      loadBot({ id: d.id, name: d.name, location: d.location, rules: d.rules }),
+    );
+    const drop = document.createElement("button");
+    drop.className = "bc-row-del";
+    drop.title = "Forget this draft";
+    drop.innerHTML = '<i class="fas fa-xmark"></i>';
+    drop.addEventListener("click", () => {
+      localStorage.removeItem("bc_draft");
+      renderContinue();
+    });
+    bar.appendChild(open);
+    bar.appendChild(drop);
+    host.appendChild(bar);
+  }
+
+  $("newBlankBtn").addEventListener("click", () => {
+    if (!me) return showView("gate");
+    loadTemplate(TEMPLATES[0]);
+  });
+
+  // ── Editor open / chrome ──────────────────────────────────────────────────
+
+  function loadBot(bot) {
+    edit = JSON.parse(JSON.stringify(bot));
+    if (!edit.location) edit.location = "Bot";
+    dirty = false;
+    testDirty = true;
+    saveDraftNow(); // the continue card always offers the last thing opened
+    showView("editor");
+    $("botName").value = edit.name || "";
+    $("botLocation").value = edit.location;
+    setSaveNote("", "");
+    updateNamePreview();
+    resetTestRoom();
+    renderRules();
+    renderEditorChrome();
+  }
+
+  function botHeaderText() {
+    return (edit?.name || "Bot") + " / " + (edit?.location || "Bot");
+  }
+
+  function updateNamePreview() {
+    $("trBotName").textContent = botHeaderText();
+  }
+
+  function renderEditorChrome() {
+    if (!edit) return;
+    $("deleteBtn").style.display = edit.id ? "" : "none";
+    const d = deployedInfo();
+    const label = $("deployOpenLabel");
+    if (d && d.botId === edit.id) label.textContent = "Live · manage";
+    else label.textContent = "Send to a room";
+  }
+
+  $("backHomeBtn").addEventListener("click", () => {
+    showView("home");
+    renderHome();
+  });
+
+  $("botName").addEventListener("input", () => {
+    if (!edit) return;
+    edit.name = $("botName").value;
+    touch();
+    updateNamePreview();
+  });
+
+  $("botLocation").addEventListener("input", () => {
+    if (!edit) return;
+    edit.location = $("botLocation").value;
+    touch();
+    updateNamePreview();
+  });
+
+  $("testToggleBtn").addEventListener("click", () => {
+    if (window.innerWidth <= 1250)
+      document.body.classList.toggle("bc-test-open");
+    else document.body.classList.toggle("bc-test-hidden");
+  });
+
+  $("testCloseBtn").addEventListener("click", () =>
+    document.body.classList.remove("bc-test-open"),
+  );
+
+  // ── Saving: the bar tells you exactly what is missing ─────────────────────
+
+  function setSaveNote(kind, text) {
+    const el = $("saveNote");
+    el.className = "bc-save-note" + (kind ? " " + kind : "");
+    el.textContent = text;
+  }
+
+  function touch() {
+    dirty = true;
+    testDirty = true;
+    setSaveNote("dirty", "Unsaved changes");
+    saveDraftSoon();
+  }
+
+  // The same checks the server runs, done here first so the message can
+  // name the rule and the page can point at it.
+  function validateLocal() {
+    if (!edit) return { ok: false, msg: "Nothing to save yet." };
+    if ((edit.name || "").trim().length < 2)
+      return { ok: false, msg: "Give the bot a name first (2-14 characters)." };
+    if (!(edit.rules || []).length)
+      return { ok: false, msg: "The bot needs at least one rule." };
+    for (let ri = 0; ri < edit.rules.length; ri++) {
+      const r = edit.rules[ri];
+      const n = "Rule " + (ri + 1);
+      if (r.on.type === "command" && !/^[a-z0-9]{1,16}$/i.test(String(r.on.word || "").trim()))
+        return { ok: false, ri, msg: n + ": the command needs a word (letters or digits), like !roll." };
+      if (r.on.type === "says" && !String(r.on.text || "").trim())
+        return { ok: false, ri, msg: n + ': "someone says" needs a phrase to listen for.' };
+      if (r.on.type === "timer") {
+        const m = Math.round(Number(r.on.minutes));
+        if (!Number.isFinite(m) || m < 2 || m > 120)
+          return { ok: false, ri, msg: n + ": timers run every 2-120 minutes." };
+      }
+      if (!(r.do || []).length)
+        return { ok: false, ri, msg: n + " has nothing to do. Add a block from the palette." };
+      for (const a of r.do) {
+        if (a.type === "say" && !String(a.text || "").trim())
+          return { ok: false, ri, msg: n + ": a say block is empty. Write the message, or remove the block." };
+        if (
+          (a.type === "set" || a.type === "add" || a.type === "random") &&
+          !/^[a-z0-9_]{1,20}$/i.test(String(a.var || "").trim())
+        )
+          return { ok: false, ri, msg: n + ": memory names are 1-20 letters, digits or _." };
+        if (a.type === "random" && !String(a.from || "").trim())
+          return { ok: false, ri, msg: n + ": the random block needs choices (a, b, c) or a range like 1-100." };
+      }
+    }
+    return { ok: true };
+  }
+
+  function flashRule(ri) {
+    const card = document.querySelector('.bc-rule[data-ri="' + ri + '"]');
+    if (!card) return;
+    if (card.classList.contains("collapsed")) {
+      const rule = edit.rules[ri];
+      if (rule) delete rule._folded;
+      renderRules();
+      return flashRule(ri);
+    }
+    card.scrollIntoView({ block: "center", behavior: "smooth" });
+    card.classList.add("flash");
+    setTimeout(() => card.classList.remove("flash"), 2400);
+  }
+
+  $("saveBtn").addEventListener("click", () => {
+    if (!edit) return;
+    const v = validateLocal();
+    if (!v.ok) {
+      setSaveNote("err", v.msg);
+      if (typeof v.ri === "number") flashRule(v.ri);
+      return;
+    }
+    setSaveNote("", "Saving...");
+    socket.emit("bots save", {
+      id: edit.id || undefined,
+      bot: { name: edit.name, location: edit.location, rules: edit.rules },
+    });
+  });
+
+  $("deleteBtn").addEventListener("click", () => {
+    if (!edit?.id) return;
+    if (!confirm(`Delete "${edit.name}" forever?`)) return;
+    socket.emit("bots delete", { id: edit.id });
+    localStorage.removeItem("bc_draft");
+    edit = null;
+    showView("home");
+  });
+
+  // ── The palette ───────────────────────────────────────────────────────────
+  // Every entry carries plain-words help behind its ? button: what the block
+  // does, how to use it, one example. The READY COMBOS are prefilled blocks
+  // (one or several actions) for the things people build most.
+
+  const PAL_ITEMS = [
+    { group: "RULES" },
+    {
+      kind: "pal-rule",
+      cls: "p-when",
+      label: "WHEN · new rule",
+      help: {
+        title: "WHEN starts every rule",
+        text: "It is the moment that wakes your bot up: a !command, a phrase, someone joining, or a timer. Drag it between rules, or click to add one at the end.",
+        ex: "WHEN someone types !roll",
+      },
+    },
+    {
+      kind: "pal-cond",
+      cls: "p-if",
+      label: "ONLY IF · a check",
+      help: {
+        title: "A test the rule must pass",
+        text: "The rule only runs when the check is true. Compare a magic word or a memory against a value. Up to 3 per rule; skipping checks is fine.",
+        ex: "ONLY IF {word1} is exactly banana",
+      },
+    },
+    { group: "THINGS TO DO" },
+    {
+      kind: "pal-act",
+      av: "say",
+      cls: "p-do",
+      label: "say something",
+      help: {
+        title: "The bot types a message",
+        text: "It replaces what was in its box, letter by letter. Magic words get swapped in (the ✨ button lists them). Enter makes a new line.",
+        ex: 'say "Hi {name}!"',
+      },
+    },
+    {
+      kind: "pal-act",
+      av: "wait",
+      cls: "p-do",
+      label: "wait a moment",
+      help: {
+        title: "A pause between blocks",
+        text: "Half a second to 10 seconds. Timing makes jokes work: announce, wait, answer.",
+        ex: 'say "Shaking..." / wait 2 seconds / say the answer',
+      },
+    },
+    {
+      kind: "pal-act",
+      av: "set",
+      cls: "p-do",
+      label: "remember something",
+      help: {
+        title: "Write into a memory",
+        text: "A labelled box the bot keeps. Shared by everyone, or one per person. Say it back later with {memory:name} or {mymemory:name}.",
+        ex: "remember prize = {word1}",
+      },
+    },
+    {
+      kind: "pal-act",
+      av: "add",
+      cls: "p-do",
+      label: "change a memory",
+      help: {
+        title: "Do math on a memory",
+        text: "Add, take away, multiply or divide it by a number (or a magic word). Points, coins, doubling: all this one block.",
+        ex: "change coins add 5",
+      },
+    },
+    {
+      kind: "pal-act",
+      av: "random",
+      cls: "p-do",
+      label: "pick something random",
+      help: {
+        title: "Random, into a memory",
+        text: "Give it choices or a number range. The pick lands in a memory so later blocks and checks can read it.",
+        ex: "pick m from rock, paper, scissors",
+      },
+    },
+    {
+      kind: "pal-act",
+      av: "clear",
+      cls: "p-do",
+      label: "erase the bot's box",
+      help: {
+        title: "Wipe the bot's textbox",
+        text: "Clears what the bot last said, like a person deleting their text.",
+        ex: "say the secret / wait 3 seconds / erase the box",
+      },
+    },
+    {
+      kind: "pal-act",
+      av: "leave",
+      cls: "p-do",
+      label: "leave the room",
+      help: {
+        title: "The bot goes home",
+        text: "Usually behind a check, like a goodbye password only you know.",
+        ex: "ONLY IF {word1} is exactly goodnight, then leave",
+      },
+    },
+    { group: "READY COMBOS" },
+    {
+      kind: "pal-combo",
+      cls: "p-do",
+      label: "a random answer",
+      actions: [
+        { type: "say", text: "{pick:Yes!|No way.|Maybe...|Ask me tomorrow.}" },
+      ],
+      help: {
+        title: "One say, different every time",
+        text: "A say block prefilled with {pick}. Change the choices to yours, split with the | line.",
+        ex: 'say "{pick:Yes!|No way.|Maybe...}"',
+      },
+    },
+    {
+      kind: "pal-combo",
+      cls: "p-do",
+      label: "a dice roll",
+      actions: [{ type: "say", text: "🎲 {name} rolls a {rand:1-6}!" }],
+      help: {
+        title: "A fresh number every time",
+        text: "A say block prefilled with {rand:1-6}. Any range works: {rand:1-100}.",
+        ex: 'say "🎲 {name} rolls a {rand:1-6}!"',
+      },
+    },
+    {
+      kind: "pal-combo",
+      cls: "p-do",
+      label: "a point + announcement",
+      actions: [
+        { type: "add", var: "points", per: "user", amount: "1", op: "add" },
+        { type: "say", text: "🏆 {name} now has {mymemory:points} points!" },
+      ],
+      help: {
+        title: "Two blocks: score, then say it",
+        text: "Gives the person 1 point in their own memory and announces the total. The start of any game.",
+        ex: "change points add 1 / say the total",
+      },
+    },
+  ];
+
+  let openHelpPop = null;
+
+  function closeHelpPop() {
+    if (openHelpPop) {
+      openHelpPop.remove();
+      openHelpPop = null;
+    }
+  }
+
+  function showHelpPop(anchor, help) {
+    closeHelpPop();
+    const pop = document.createElement("div");
+    pop.className = "bc-help-pop";
+    const b = document.createElement("b");
+    b.textContent = help.title;
+    const p = document.createElement("p");
+    p.textContent = help.text;
+    pop.appendChild(b);
+    pop.appendChild(p);
+    if (help.ex) {
+      const code = document.createElement("code");
+      code.textContent = help.ex;
+      pop.appendChild(code);
+    }
+    document.body.appendChild(pop);
+    const r = anchor.getBoundingClientRect();
+    const top = Math.min(r.top, window.innerHeight - pop.offsetHeight - 12);
+    pop.style.left = Math.min(r.right + 8, window.innerWidth - 282) + "px";
+    pop.style.top = Math.max(8, top) + "px";
+    openHelpPop = pop;
+  }
+
+  document.addEventListener("click", closeHelpPop);
+
+  function lastRuleOrComplain() {
+    const rule = edit.rules[edit.rules.length - 1];
+    if (!rule) toastr.error("Add a rule first.");
+    return rule || null;
+  }
+
+  function paletteSpec(item) {
+    if (item.kind === "pal-rule")
+      return {
+        kind: "pal-rule",
+        el: null,
+        label: item.label,
+        cls: item.cls,
+        clickAdd: () => {
+          if (edit.rules.length >= maxRules())
+            return toastr.error("That's the most rules a bot can have.");
+          edit.rules.push(freshRule());
+          touch();
+          renderRules();
+          const cards = document.querySelectorAll(".bc-rule");
+          cards[cards.length - 1]?.scrollIntoView({
+            block: "center",
+            behavior: "smooth",
+          });
+        },
+      };
+    if (item.kind === "pal-cond")
+      return {
+        kind: "pal-cond",
+        el: null,
+        label: item.label,
+        cls: item.cls,
+        clickAdd: () => {
+          const rule = lastRuleOrComplain();
+          if (!rule) return;
+          if ((rule.if || []).length >= 3)
+            return toastr.error("At most 3 checks per rule.");
+          if (!rule.if) rule.if = [];
+          rule.if.push({ a: "{word1}", op: "is", b: "" });
+          touch();
+          renderRules();
+        },
+      };
+    if (item.kind === "pal-combo")
+      return {
+        kind: "pal-combo",
+        actions: item.actions,
+        el: null,
+        label: item.label,
+        cls: item.cls,
+        clickAdd: () => {
+          const rule = lastRuleOrComplain();
+          if (!rule) return;
+          if (rule.do.length + item.actions.length > 6)
+            return toastr.error("At most 6 actions per rule.");
+          rule.do.push(...JSON.parse(JSON.stringify(item.actions)));
+          touch();
+          renderRules();
+        },
+      };
+    return {
+      kind: "pal-act",
+      av: item.av,
+      el: null,
+      label: item.label,
+      cls: item.cls,
+      clickAdd: () => {
+        const rule = lastRuleOrComplain();
+        if (!rule) return;
+        if (rule.do.length >= 6)
+          return toastr.error("At most 6 actions per rule.");
+        rule.do.push(freshAction(item.av));
+        touch();
+        renderRules();
+      },
+    };
+  }
+
+  function renderPalette() {
+    const host = $("paletteHost");
+    host.innerHTML = "";
+    for (const item of PAL_ITEMS) {
+      if (item.group) {
+        const g = document.createElement("div");
+        g.className = "bc-pal-group";
+        g.textContent = item.group;
+        host.appendChild(g);
+        continue;
+      }
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "bc-pal-blk " + item.cls;
+      b.innerHTML = '<i class="fas fa-grip-vertical"></i>';
+      const label = document.createElement("span");
+      label.className = "bc-pal-label";
+      label.textContent = item.label;
+      b.appendChild(label);
+      if (item.help) {
+        const q = document.createElement("button");
+        q.type = "button";
+        q.className = "bc-pal-help";
+        q.title = "What does this do?";
+        q.innerHTML = '<i class="fas fa-circle-question"></i>';
+        q.addEventListener("pointerdown", (e) => e.stopPropagation());
+        q.addEventListener("click", (e) => {
+          e.stopPropagation();
+          showHelpPop(b, item.help);
+        });
+        b.appendChild(q);
+      }
+      b.addEventListener("pointerdown", (e) => beginDrag(e, paletteSpec(item)));
+      host.appendChild(b);
+    }
+  }
+  renderPalette();
+
+  // ── Drag and drop ─────────────────────────────────────────────────────────
+  // Pointer events, no native HTML5 drag: a solid clone follows the pointer
+  // and an orange line shows exactly where the block will land. A press that
+  // never moves counts as a click (palette blocks add to the last rule).
+
+  let drag = null;
+
+  function mkGrip() {
+    const g = document.createElement("span");
+    g.className = "bc-grip";
+    g.innerHTML = '<i class="fas fa-grip-vertical"></i>';
+    g.title = "Drag to move";
+    return g;
+  }
+
+  function beginDrag(e, spec) {
+    if (e.button !== undefined && e.button !== 0) return;
+    if (drag) return;
+    e.preventDefault();
+    drag = Object.assign({}, spec, {
+      sx: e.clientX,
+      sy: e.clientY,
+      started: false,
+      ghost: null,
+      line: null,
+      target: null,
+    });
+    window.addEventListener("pointermove", onDragMove);
+    window.addEventListener("pointerup", endDrag);
+    window.addEventListener("pointercancel", cancelDrag);
+  }
+
+  function startGhost() {
+    drag.started = true;
+    let ghost;
+    if (drag.el) {
+      ghost = drag.el.cloneNode(true);
+      ghost.style.width =
+        Math.min(360, drag.el.getBoundingClientRect().width) + "px";
+      drag.el.classList.add("drag-src");
+      if (drag.kind === "rule") drag.el.closest(".bc-rule")?.classList.add("drag-src");
+    } else {
+      ghost = document.createElement("div");
+      ghost.className = "bc-pal-blk " + (drag.cls || "p-do");
+      ghost.textContent = drag.label || "";
+      ghost.style.width = "220px";
+    }
+    ghost.classList.add("bc-ghost");
+    document.body.appendChild(ghost);
+    drag.ghost = ghost;
+    const line = document.createElement("div");
+    line.className = "bc-drop-line";
+    line.style.display = "none";
+    document.body.appendChild(line);
+    drag.line = line;
+    document.body.classList.add("bc-dragging");
+  }
+
+  function onDragMove(e) {
+    if (!drag) return;
+    if (!drag.started) {
+      if (
+        Math.abs(e.clientX - drag.sx) < 6 &&
+        Math.abs(e.clientY - drag.sy) < 6
+      )
+        return;
+      startGhost();
+    }
+    drag.ghost.style.left = e.clientX + 12 + "px";
+    drag.ghost.style.top = e.clientY + 10 + "px";
+
+    // Keep the canvas scrolling when dragging near the edges.
+    const main = document.querySelector(".bc-main");
+    if (e.clientY < 110) main.scrollBy(0, -14);
+    else if (e.clientY > window.innerHeight - 70) main.scrollBy(0, 14);
+
+    const t = computeTarget(e.clientX, e.clientY);
+    drag.target = t;
+    if (t) {
+      drag.line.style.display = "";
+      drag.line.style.left = t.line.x + "px";
+      drag.line.style.top = t.line.y + "px";
+      drag.line.style.width = t.line.w + "px";
+      drag.line.classList.toggle("invalid", !t.valid);
+      drag.ghost.classList.toggle("invalid", !t.valid);
+    } else {
+      drag.line.style.display = "none";
+      drag.ghost.classList.remove("invalid");
+    }
+  }
+
+  function computeTarget(x, y) {
+    const host = $("rulesHost");
+    if (!host || !edit) return null;
+
+    if (drag.kind === "rule" || drag.kind === "pal-rule") {
+      const cards = [...host.querySelectorAll(".bc-rule")];
+      const hostRect = host.getBoundingClientRect();
+      if (x < hostRect.left - 80 || x > hostRect.right + 80) return null;
+      let idx = cards.length;
+      for (let i = 0; i < cards.length; i++) {
+        const r = cards[i].getBoundingClientRect();
+        if (y < r.top + r.height / 2) {
+          idx = i;
+          break;
+        }
+      }
+      let ly;
+      if (!cards.length) ly = hostRect.top + 6;
+      else if (idx === 0) ly = cards[0].getBoundingClientRect().top - 9;
+      else if (idx >= cards.length)
+        ly = cards[cards.length - 1].getBoundingClientRect().bottom + 9;
+      else ly = cards[idx].getBoundingClientRect().top - 9;
+      const valid =
+        drag.kind === "rule" ? true : edit.rules.length < maxRules();
+      return {
+        scope: "rules",
+        idx,
+        line: { x: hostRect.left, w: Math.min(760, hostRect.width), y: ly },
+        valid,
+      };
+    }
+
+    const wantDo =
+      drag.kind === "act" ||
+      drag.kind === "pal-act" ||
+      drag.kind === "pal-combo";
+    const cards = [...host.querySelectorAll(".bc-rule")];
+    let best = null;
+    for (let i = 0; i < cards.length; i++) {
+      const card = cards[i];
+      if (card.classList.contains("collapsed")) continue;
+      const rect = card.getBoundingClientRect();
+      if (x < rect.left - 60 || x > rect.right + 60) continue;
+      const dist =
+        y < rect.top ? rect.top - y : y > rect.bottom ? y - rect.bottom : 0;
+      if (best == null || dist < best.dist) best = { i, card, dist };
+    }
+    if (!best || best.dist > 90) return null;
+    const ri = Number(best.card.dataset.ri);
+    const rule = edit.rules[ri];
+    if (!rule) return null;
+
+    const rows = [
+      ...best.card.querySelectorAll(wantDo ? ".blk-do" : ".blk-if"),
+    ];
+    let idx = rows.length;
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i].getBoundingClientRect();
+      if (y < r.top + r.height / 2) {
+        idx = i;
+        break;
+      }
+    }
+    const cardRect = best.card.getBoundingClientRect();
+    let ly;
+    if (!rows.length) {
+      const anchor =
+        (wantDo
+          ? best.card.querySelector(".bc-blk-adders")
+          : best.card.querySelector(".blk-do") ||
+            best.card.querySelector(".bc-blk-adders")) ||
+        best.card.querySelector(".blk-when");
+      const ar = anchor.getBoundingClientRect();
+      ly = anchor.classList.contains("blk-when") ? ar.bottom + 3 : ar.top - 4;
+    } else if (idx >= rows.length)
+      ly = rows[rows.length - 1].getBoundingClientRect().bottom + 3;
+    else ly = rows[idx].getBoundingClientRect().top - 4;
+
+    let valid = true;
+    if (wantDo) {
+      if (drag.kind === "pal-combo") {
+        if (rule.do.length + drag.actions.length > 6) valid = false;
+      } else {
+        const adding = drag.kind === "pal-act" || drag.ri !== ri;
+        if (adding && rule.do.length >= 6) valid = false;
+      }
+    } else {
+      const adding = drag.kind === "pal-cond" || drag.ri !== ri;
+      if (adding && (rule.if || []).length >= 3) valid = false;
+    }
+    return {
+      scope: wantDo ? "do" : "if",
+      ri,
+      idx,
+      line: { x: cardRect.left + 16, w: cardRect.width - 16, y: ly },
+      valid,
+    };
+  }
+
+  function cleanupDrag() {
+    window.removeEventListener("pointermove", onDragMove);
+    window.removeEventListener("pointerup", endDrag);
+    window.removeEventListener("pointercancel", cancelDrag);
+    document.body.classList.remove("bc-dragging");
+    if (drag?.ghost) drag.ghost.remove();
+    if (drag?.line) drag.line.remove();
+    document
+      .querySelectorAll(".drag-src")
+      .forEach((el) => el.classList.remove("drag-src"));
+  }
+
+  function cancelDrag() {
+    cleanupDrag();
+    drag = null;
+  }
+
+  function endDrag() {
+    const d = drag;
+    cleanupDrag();
+    drag = null;
+    if (!d) return;
+    if (!d.started) {
+      if (d.clickAdd) d.clickAdd();
+      return;
+    }
+    const t = d.target;
+    if (!t || !t.valid) return;
+    applyDrop(d, t);
+    touch();
+    renderRules();
+  }
+
+  function applyDrop(d, t) {
+    if (t.scope === "rules") {
+      if (d.kind === "pal-rule") {
+        edit.rules.splice(t.idx, 0, freshRule());
+        return;
+      }
+      const [r] = edit.rules.splice(d.ri, 1);
+      let at = t.idx;
+      if (at > d.ri) at--;
+      edit.rules.splice(at, 0, r);
+      return;
+    }
+    if (t.scope === "do") {
+      const to = edit.rules[t.ri].do;
+      if (d.kind === "pal-act") {
+        to.splice(t.idx, 0, freshAction(d.av));
+        return;
+      }
+      if (d.kind === "pal-combo") {
+        to.splice(t.idx, 0, ...JSON.parse(JSON.stringify(d.actions)));
+        return;
+      }
+      const from = edit.rules[d.ri].do;
+      const [a] = from.splice(d.idx, 1);
+      let at = t.idx;
+      if (t.ri === d.ri && at > d.idx) at--;
+      to.splice(at, 0, a);
+      return;
+    }
+    if (t.scope === "if") {
+      const rule = edit.rules[t.ri];
+      if (!rule.if) rule.if = [];
+      if (d.kind === "pal-cond") {
+        rule.if.splice(t.idx, 0, { a: "{word1}", op: "is", b: "" });
+        return;
+      }
+      const from = edit.rules[d.ri].if;
+      const [c] = from.splice(d.idx, 1);
+      let at = t.idx;
+      if (t.ri === d.ri && at > d.idx) at--;
+      rule.if.splice(at, 0, c);
+    }
+  }
+
+  // ── Small builders shared by the rule cards ───────────────────────────────
 
   function mkSelect(options, value, onChange, cls, title) {
     const sel = document.createElement("select");
@@ -989,25 +1748,7 @@
     }
   });
 
-  function mkRowButtons(buttons) {
-    const wrap = document.createElement("span");
-    wrap.className = "bc-row-btns";
-    for (const b of buttons) wrap.appendChild(b);
-    return wrap;
-  }
-
-  // The colored WHEN / ONLY IF / DO tags that make a rule read like a
-  // sentence made of blocks.
-  function mkChip(kind, text) {
-    const chip = document.createElement("span");
-    chip.className = "bc-blk-chip chip-" + kind;
-    chip.textContent = text;
-    return chip;
-  }
-
-  // A picker menu with a label AND a plain sentence per choice, so adding a
-  // block never means guessing what an option does. Shares the one-open-menu
-  // slot with the magic word menu.
+  // A picker menu with a label AND a plain sentence per choice.
   function openMenu(anchorWrap, items, onPick) {
     if (openMagicMenu) openMagicMenu.remove();
     const menu = document.createElement("div");
@@ -1034,17 +1775,28 @@
     openMagicMenu = menu;
   }
 
-  function freshAction(v) {
-    const fresh = { type: v };
-    if (v === "say") fresh.text = "";
-    if (v === "wait") fresh.seconds = 2;
-    if (v === "set")
-      Object.assign(fresh, { var: "prize", per: "bot", value: "" });
-    if (v === "add")
-      Object.assign(fresh, { var: "points", per: "user", amount: "1", op: "add" });
-    if (v === "random")
-      Object.assign(fresh, { var: "prize", per: "bot", from: "a, b, c" });
-    return fresh;
+  function mkRowButtons(buttons) {
+    const wrap = document.createElement("span");
+    wrap.className = "bc-row-btns";
+    for (const b of buttons) wrap.appendChild(b);
+    return wrap;
+  }
+
+  function mkIconButton(title, icon, onClick, disabled) {
+    const btn = document.createElement("button");
+    btn.className = "bc-row-del";
+    btn.title = title;
+    btn.innerHTML = '<i class="fas ' + icon + '"></i>';
+    if (disabled) btn.disabled = true;
+    btn.addEventListener("click", onClick);
+    return btn;
+  }
+
+  function mkChip(text) {
+    const chip = document.createElement("span");
+    chip.className = "bc-blk-chip";
+    chip.textContent = text;
+    return chip;
   }
 
   // What a folded rule shows instead of its blocks.
@@ -1068,15 +1820,7 @@
     );
   }
 
-  function mkIconButton(title, icon, onClick, disabled) {
-    const btn = document.createElement("button");
-    btn.className = "bc-row-del";
-    btn.title = title;
-    btn.innerHTML = '<i class="fas ' + icon + '"></i>';
-    if (disabled) btn.disabled = true;
-    btn.addEventListener("click", onClick);
-    return btn;
-  }
+  // ── The rule cards ────────────────────────────────────────────────────────
 
   function renderRules() {
     const host = $("rulesHost");
@@ -1092,10 +1836,15 @@
     if (rule._folded) card.classList.add("collapsed");
     card.dataset.ri = String(ri);
 
-    // WHEN: the hat block. The whole rule's toolbar lives on it.
+    // WHEN: the hat block. Grip drags the whole rule; the toolbar lives here.
     const head = document.createElement("div");
     head.className = "bc-blk blk-when bc-rule-head";
-    head.appendChild(mkChip("when", "WHEN"));
+    const grip = mkGrip();
+    grip.addEventListener("pointerdown", (e) =>
+      beginDrag(e, { kind: "rule", ri, el: head }),
+    );
+    head.appendChild(grip);
+    head.appendChild(mkChip("WHEN"));
     head.appendChild(
       mkSelect(
         TRIGGER_OPTIONS,
@@ -1165,7 +1914,7 @@
           },
         ),
         mkIconButton("Make a copy of this rule", "fa-copy", () => {
-          if (edit.rules.length >= (status?.limits?.maxRules || 20))
+          if (edit.rules.length >= maxRules())
             return toastr.error("That's the most rules a bot can have.");
           const copy = JSON.parse(JSON.stringify(rule));
           delete copy._folded;
@@ -1173,26 +1922,6 @@
           touch();
           renderRules();
         }),
-        mkIconButton(
-          "Move this rule up",
-          "fa-arrow-up",
-          () => {
-            edit.rules.splice(ri - 1, 0, edit.rules.splice(ri, 1)[0]);
-            touch();
-            renderRules();
-          },
-          ri === 0,
-        ),
-        mkIconButton(
-          "Move this rule down",
-          "fa-arrow-down",
-          () => {
-            edit.rules.splice(ri + 1, 0, edit.rules.splice(ri, 1)[0]);
-            touch();
-            renderRules();
-          },
-          ri === edit.rules.length - 1,
-        ),
         mkIconButton("Throw this rule away", "fa-trash", () => {
           edit.rules.splice(ri, 1);
           touch();
@@ -1209,7 +1938,12 @@
     (rule.if || []).forEach((cond, ci) => {
       const row = document.createElement("div");
       row.className = "bc-blk blk-if";
-      row.appendChild(mkChip("if", ci === 0 ? "ONLY IF" : "AND"));
+      const g = mkGrip();
+      g.addEventListener("pointerdown", (e) =>
+        beginDrag(e, { kind: "cond", ri, idx: ci, el: row }),
+      );
+      row.appendChild(g);
+      row.appendChild(mkChip(ci === 0 ? "ONLY IF" : "AND"));
       const aInput = mkInput(cond.a, "{word1}", (v) => (cond.a = v), "w-val");
       row.appendChild(aInput);
       row.appendChild(mkMagicButton(aInput));
@@ -1237,7 +1971,7 @@
     });
 
     (rule.do || []).forEach((act, ai) => {
-      body.appendChild(actionRow(rule, act, ai));
+      body.appendChild(actionRow(rule, ri, act, ai));
     });
 
     const adders = document.createElement("div");
@@ -1279,10 +2013,15 @@
     return card;
   }
 
-  function actionRow(rule, act, ai) {
+  function actionRow(rule, ri, act, ai) {
     const row = document.createElement("div");
     row.className = "bc-blk blk-do";
-    row.appendChild(mkChip("do", ai === 0 ? "DO" : "THEN"));
+    const g = mkGrip();
+    g.addEventListener("pointerdown", (e) =>
+      beginDrag(e, { kind: "act", ri, idx: ai, el: row }),
+    );
+    row.appendChild(g);
+    row.appendChild(mkChip(ai === 0 ? "DO" : "THEN"));
     row.appendChild(
       mkSelect(
         ACTION_OPTIONS,
@@ -1398,30 +2137,9 @@
       );
     }
 
-    // Order matters: picking a random prize has to happen ABOVE saying it.
     row.appendChild(
       mkRowButtons([
-        mkIconButton(
-          "Move up",
-          "fa-chevron-up",
-          () => {
-            rule.do.splice(ai - 1, 0, rule.do.splice(ai, 1)[0]);
-            touch();
-            renderRules();
-          },
-          ai === 0,
-        ),
-        mkIconButton(
-          "Move down",
-          "fa-chevron-down",
-          () => {
-            rule.do.splice(ai + 1, 0, rule.do.splice(ai, 1)[0]);
-            touch();
-            renderRules();
-          },
-          ai === rule.do.length - 1,
-        ),
-        mkIconButton("Remove this action", "fa-xmark", () => {
+        mkIconButton("Remove this block", "fa-xmark", () => {
           rule.do.splice(ai, 1);
           touch();
           renderRules();
@@ -1432,33 +2150,251 @@
   }
 
   $("addRuleBtn").addEventListener("click", () => {
-    if (edit.rules.length >= (status?.limits?.maxRules || 20))
+    if (edit.rules.length >= maxRules())
       return toastr.error("That's the most rules a bot can have.");
-    edit.rules.push({
-      on: { type: "command", word: "hello" },
-      if: [],
-      do: [{ type: "say", text: "" }],
-    });
+    edit.rules.push(freshRule());
     touch();
     renderRules();
   });
 
-  // ── Save / delete ─────────────────────────────────────────────────────────
+  // ── The wizard: from an idea to a working bot in three questions ─────────
 
-  $("saveBtn").addEventListener("click", () => {
-    if (!edit) return;
-    socket.emit("bots save", {
-      id: edit.id || undefined,
-      bot: { name: edit.name, location: edit.location, rules: edit.rules },
-    });
-  });
+  const WIZ_WHEN = [
+    {
+      v: "command",
+      t: "Someone types a !command",
+      d: "Like !roll or !joke. Words typed after it become {word1}, {word2}...",
+      extra: "word",
+      label: "The command word (no ! needed)",
+      ph: "roll",
+    },
+    {
+      v: "says",
+      t: "Someone says a phrase",
+      d: 'Anywhere in their line. "pizza" wakes it up.',
+      extra: "text",
+      label: "The phrase to listen for",
+      ph: "pizza",
+    },
+    {
+      v: "mention",
+      t: "Someone says the bot's name",
+      d: '"hey FishBot..." and it answers.',
+    },
+    {
+      v: "join",
+      t: "Someone walks into the room",
+      d: "Perfect for a welcome bot.",
+    },
+    {
+      v: "timer",
+      t: "Every few minutes, on its own",
+      d: "A clock. No person needed. Shortest is 2 minutes.",
+      extra: "minutes",
+      label: "How many minutes between messages",
+      ph: "10",
+    },
+  ];
 
-  $("deleteBtn").addEventListener("click", () => {
-    if (!edit?.id) return;
-    if (!confirm(`Delete "${edit.name}" forever?`)) return;
-    socket.emit("bots delete", { id: edit.id });
-    edit = null;
-    $("editorBody").style.display = "none";
+  const WIZ_DO = [
+    {
+      v: "fixed",
+      t: "Say a message",
+      d: "Always the same answer. Magic words like {name} work.",
+    },
+    {
+      v: "random",
+      t: "Say something different each time",
+      d: "You give the choices, it picks one at random.",
+    },
+    {
+      v: "points",
+      t: "Give points and report them",
+      d: "Each person gets their own score. The start of any game.",
+    },
+  ];
+
+  function openWizard() {
+    const state = { step: 1, when: null, extra: "", doKind: null, name: "" };
+    renderWizard(state);
+  }
+
+  function renderWizard(state) {
+    const box = openModal(true);
+
+    const step = document.createElement("div");
+    step.className = "bc-wiz-step";
+    step.textContent = "STEP " + state.step + " OF 3";
+    box.appendChild(step);
+
+    const h = document.createElement("h3");
+    const p = document.createElement("p");
+    box.appendChild(h);
+    box.appendChild(p);
+
+    const choicesHost = document.createElement("div");
+    box.appendChild(choicesHost);
+
+    const extraHost = document.createElement("div");
+    extraHost.className = "bc-wiz-extra";
+    box.appendChild(extraHost);
+
+    const btns = document.createElement("div");
+    btns.className = "bc-modal-btns";
+    box.appendChild(btns);
+
+    const mkBtn = (label, primary, onClick) => {
+      const b = document.createElement("button");
+      b.className = "bc-btn" + (primary ? " primary" : "");
+      b.textContent = label;
+      b.addEventListener("click", onClick);
+      btns.appendChild(b);
+      return b;
+    };
+
+    const renderExtra = () => {
+      extraHost.innerHTML = "";
+      const sel = WIZ_WHEN.find((w) => w.v === state.when);
+      if (state.step !== 1 || !sel || !sel.extra) return;
+      const lbl = document.createElement("label");
+      lbl.className = "bc-label";
+      lbl.textContent = sel.label;
+      const inp = document.createElement("input");
+      inp.className = "bc-input";
+      inp.style.width = "100%";
+      inp.placeholder = sel.ph;
+      inp.value = state.extra;
+      if (sel.extra === "minutes") inp.type = "number";
+      inp.addEventListener("input", () => (state.extra = inp.value));
+      extraHost.appendChild(lbl);
+      extraHost.appendChild(inp);
+      setTimeout(() => inp.focus(), 30);
+    };
+
+    const renderChoices = (list, getSel, setSel) => {
+      choicesHost.innerHTML = "";
+      for (const it of list) {
+        const c = document.createElement("button");
+        c.type = "button";
+        c.className = "bc-choice" + (getSel() === it.v ? " sel" : "");
+        const b = document.createElement("b");
+        b.textContent = it.t;
+        const s = document.createElement("span");
+        s.textContent = it.d;
+        c.appendChild(b);
+        c.appendChild(s);
+        c.addEventListener("click", () => {
+          setSel(it.v);
+          [...choicesHost.children].forEach((el) => el.classList.remove("sel"));
+          c.classList.add("sel");
+          renderExtra();
+        });
+        choicesHost.appendChild(c);
+      }
+    };
+
+    if (state.step === 1) {
+      h.textContent = "When should your bot speak up?";
+      p.textContent = "Pick the moment that wakes it up. You can add more rules later.";
+      renderChoices(
+        WIZ_WHEN,
+        () => state.when,
+        (v) => (state.when = v),
+      );
+      renderExtra();
+      mkBtn("Cancel", false, closeModal);
+      mkBtn("Next", true, () => {
+        if (!state.when) return toastr.error("Pick one to continue.");
+        const sel = WIZ_WHEN.find((w) => w.v === state.when);
+        if (sel.extra === "word" && !/^[a-z0-9]{1,16}$/i.test(state.extra.trim().replace(/^!/, "")))
+          return toastr.error("Type the command word, like roll.");
+        if (sel.extra === "text" && !state.extra.trim())
+          return toastr.error("Type the phrase to listen for.");
+        if (sel.extra === "minutes") {
+          const m = Math.round(Number(state.extra));
+          if (!Number.isFinite(m) || m < 2 || m > 120)
+            return toastr.error("Minutes are 2-120.");
+        }
+        state.step = 2;
+        renderWizard(state);
+      });
+    } else if (state.step === 2) {
+      h.textContent = "What should it do?";
+      p.textContent = "This becomes the DO part of your first rule. You can change everything after.";
+      renderChoices(
+        WIZ_DO,
+        () => state.doKind,
+        (v) => (state.doKind = v),
+      );
+      mkBtn("Back", false, () => {
+        state.step = 1;
+        renderWizard(state);
+      });
+      mkBtn("Next", true, () => {
+        if (!state.doKind) return toastr.error("Pick one to continue.");
+        state.step = 3;
+        renderWizard(state);
+      });
+    } else {
+      h.textContent = "Name your bot";
+      p.textContent = "2-14 characters. Everyone sees it with a BOT badge.";
+      const inp = document.createElement("input");
+      inp.className = "bc-input";
+      inp.style.width = "100%";
+      inp.maxLength = 14;
+      inp.placeholder = "MyBot";
+      inp.value = state.name;
+      inp.addEventListener("input", () => (state.name = inp.value));
+      choicesHost.appendChild(inp);
+      setTimeout(() => inp.focus(), 30);
+      mkBtn("Back", false, () => {
+        state.step = 2;
+        renderWizard(state);
+      });
+      mkBtn("Build it", true, () => {
+        const name = state.name.trim() || "MyBot";
+        if (name.length < 2) return toastr.error("2-14 characters.");
+        closeModal();
+        loadBot(buildWizardBot(state, name));
+        toastr.success("Built! Try it in the test room, then press Save.");
+      });
+    }
+  }
+
+  function buildWizardBot(state, name) {
+    const on = { type: state.when };
+    if (state.when === "command")
+      on.word = state.extra.trim().replace(/^!/, "").toLowerCase();
+    if (state.when === "says") on.text = state.extra.trim();
+    if (state.when === "timer") on.minutes = Math.round(Number(state.extra));
+
+    let doList;
+    if (state.doKind === "random") {
+      doList = [
+        { type: "say", text: "{pick:Yes!|No way.|Maybe...|Ask me tomorrow.}" },
+      ];
+    } else if (state.doKind === "points") {
+      doList = [
+        { type: "add", var: "points", per: "user", amount: "1", op: "add" },
+        { type: "say", text: "🏆 {name} now has {mymemory:points} points!" },
+      ];
+    } else {
+      doList = [
+        {
+          type: "say",
+          text:
+            state.when === "join"
+              ? "Welcome to {room}, {name}! 👋"
+              : "Hello {name}!",
+        },
+      ];
+    }
+    return { id: null, name, location: "Bot", rules: [{ on, if: [], do: doList }] };
+  }
+
+  $("wizardBtn").addEventListener("click", () => {
+    if (!me) return showView("gate");
+    openWizard();
   });
 
   // ── The test room ─────────────────────────────────────────────────────────
@@ -1681,56 +2617,147 @@
     });
   });
 
-  // ── Deploy ────────────────────────────────────────────────────────────────
+  // ── Deploy: a modal with the room list and plain answers ─────────────────
 
-  function renderDeployCard() {
-    const card = $("deployCard");
-    const saved = edit && (status?.bots || []).some((b) => b.id === edit.id);
-    const wasHidden = card.style.display === "none";
-    card.style.display = saved ? "" : "none";
-    if (!saved) return;
-    if (wasHidden) socket.emit("get rooms"); // fresh list the moment it appears
-    const d = deployedInfo();
-    const btn = $("deployBtn");
-    const note = $("deployNote");
-    if (d) {
-      btn.disabled = true;
-      note.textContent =
-        d.botId === edit.id
-          ? "It's out there right now! Bring it home (sidebar) to send it again."
-          : "One bot out at a time. Bring the other one home first.";
-    } else {
-      btn.disabled = false;
-      note.textContent =
-        status?.enabled === false
-          ? "Bots are switched off by the mods right now."
-          : "";
-      if (status?.enabled === false) btn.disabled = true;
-    }
-  }
-
-  $("optExisting").addEventListener("click", () => setDeployMode("existing"));
-  $("optNew").addEventListener("click", () => setDeployMode("new"));
-
-  function setDeployMode(mode) {
-    deployMode = mode;
-    $("optExisting").classList.toggle("sel", mode === "existing");
-    $("optNew").classList.toggle("sel", mode === "new");
-  }
-
-  $("roomRefresh").addEventListener("click", () => socket.emit("get rooms"));
-
-  // Bot seats mirror the server rule: 1 per 5 seats, capped at 5.
   function botSeats(capacity) {
     return Math.max(1, Math.min(5, Math.floor((capacity || 5) / 5)));
+  }
+
+  $("deployOpenBtn").addEventListener("click", () => {
+    if (!edit) return;
+    openDeployModal();
+  });
+
+  function openDeployModal() {
+    const box = openModal(true);
+    const d = deployedInfo();
+
+    const h = document.createElement("h3");
+    h.innerHTML = '<i class="fas fa-rocket"></i> ';
+    box.appendChild(h);
+
+    // This bot (or another) is already out: manage it here.
+    if (d) {
+      const mine = d.botId === edit.id;
+      h.appendChild(
+        document.createTextNode(
+          mine ? (edit.name || "Your bot") + " is live" : "One bot at a time",
+        ),
+      );
+      const p = document.createElement("p");
+      p.textContent = mine
+        ? 'It is in "' + (d.roomName || d.roomId) + '" right now. Bring it home to edit and send it again.'
+        : "Another of your bots is out in a room. Bring it home first, then send this one.";
+      box.appendChild(p);
+      const btns = document.createElement("div");
+      btns.className = "bc-modal-btns";
+      const stop = document.createElement("button");
+      stop.className = "bc-btn danger";
+      stop.innerHTML = '<i class="fas fa-stop"></i>Bring it home';
+      stop.addEventListener("click", () => {
+        socket.emit("bots stop");
+        closeModal();
+      });
+      const cancel = document.createElement("button");
+      cancel.className = "bc-btn";
+      cancel.textContent = "Close";
+      cancel.addEventListener("click", closeModal);
+      btns.appendChild(stop);
+      btns.appendChild(cancel);
+      box.appendChild(btns);
+      return;
+    }
+
+    h.appendChild(document.createTextNode("Send " + (edit.name || "the bot") + " to a room"));
+
+    const saved = (status?.bots || []).some((b) => b.id === edit.id);
+    const p = document.createElement("p");
+    p.textContent = saved
+      ? "Rooms have bot seats by size: 1 for every 5 people they can hold. The bot runs while you are on Talkomatic."
+      : "Save the bot first, then send it in. Unsaved changes never leave this page.";
+    box.appendChild(p);
+
+    if (!saved || dirty) {
+      const warn = document.createElement("p");
+      warn.style.color = "var(--tk-accent)";
+      warn.textContent = !saved
+        ? "This bot is not saved yet. Press Save, then come back."
+        : "You have unsaved changes. The room gets the last SAVED version.";
+      box.appendChild(warn);
+    }
+
+    const optA = document.createElement("div");
+    optA.className = "bc-deploy-opt" + (deployMode === "existing" ? " sel" : "");
+    optA.innerHTML =
+      '<h4><i class="fas fa-door-open"></i>A room that exists</h4>' +
+      '<div class="bc-room-row"><select class="bc-select" id="roomSelect"></select>' +
+      '<button class="bc-btn" id="roomRefresh" title="Look again"><i class="fas fa-rotate"></i></button></div>' +
+      '<div class="bc-deploy-note">The bot takes a seat right away and starts listening.</div>';
+    const optB = document.createElement("div");
+    optB.className = "bc-deploy-opt" + (deployMode === "new" ? " sel" : "");
+    optB.innerHTML =
+      '<h4><i class="fas fa-plus"></i>A brand new room</h4>' +
+      '<input class="bc-input" id="newRoomName" maxlength="25" placeholder="Name the room" style="width:100%" />' +
+      '<div class="bc-deploy-note">The room opens, you go in first, and your bot walks in right behind you.</div>';
+    box.appendChild(optA);
+    box.appendChild(optB);
+
+    const setMode = (m) => {
+      deployMode = m;
+      optA.classList.toggle("sel", m === "existing");
+      optB.classList.toggle("sel", m === "new");
+    };
+    optA.addEventListener("click", () => setMode("existing"));
+    optB.addEventListener("click", () => setMode("new"));
+
+    const btns = document.createElement("div");
+    btns.className = "bc-modal-btns";
+    const send = document.createElement("button");
+    send.className = "bc-btn primary";
+    send.innerHTML = '<i class="fas fa-rocket"></i>Send it in';
+    send.disabled = !saved || status?.enabled === false;
+    send.addEventListener("click", () => {
+      if (deployMode === "existing") {
+        const roomId = box.querySelector("#roomSelect").value;
+        if (!roomId)
+          return toastr.error("Pick a room first (or make a new one).");
+        socket.emit("bots deploy", { id: edit.id, roomId });
+      } else {
+        const name = box.querySelector("#newRoomName").value.trim();
+        if (name.length < 3)
+          return toastr.error("Give the new room a name (3+ letters).");
+        socket.emit("bots deploy", { id: edit.id, newRoom: { name } });
+      }
+    });
+    const cancel = document.createElement("button");
+    cancel.className = "bc-btn";
+    cancel.textContent = "Cancel";
+    cancel.addEventListener("click", closeModal);
+    btns.appendChild(send);
+    btns.appendChild(cancel);
+    box.appendChild(btns);
+
+    if (status?.enabled === false) {
+      const off = document.createElement("p");
+      off.style.color = "var(--tk-error)";
+      off.textContent = "Bots are switched off by the mods right now.";
+      box.appendChild(off);
+    }
+
+    box.querySelector("#roomRefresh").addEventListener("click", (e) => {
+      e.stopPropagation();
+      socket.emit("get rooms");
+    });
+    socket.emit("get rooms");
   }
 
   // Every public room is listed, even the ones a bot cannot join right now.
   // Those stay visible but disabled with the reason in the row, so "why is
   // my room not in the list" never needs asking.
   socket.on("initial rooms", (list) => {
+    const sel = document.getElementById("roomSelect");
+    if (!sel) return; // the deploy modal is not open
     const rooms = Array.isArray(list) ? list : [];
-    const sel = $("roomSelect");
     const prev = sel.value;
     sel.innerHTML = "";
     const pub = rooms.filter((r) => r.type === "public");
@@ -1777,21 +2804,6 @@
     else {
       const first = [...sel.options].find((o) => !o.disabled);
       if (first) sel.value = first.value;
-    }
-  });
-
-  $("deployBtn").addEventListener("click", () => {
-    if (!edit?.id) return;
-    if (deployMode === "existing") {
-      const roomId = $("roomSelect").value;
-      if (!roomId)
-        return toastr.error("Pick a room first (or make a new one).");
-      socket.emit("bots deploy", { id: edit.id, roomId });
-    } else {
-      const name = $("newRoomName").value.trim();
-      if (name.length < 3)
-        return toastr.error("Give the new room a name (3+ letters).");
-      socket.emit("bots deploy", { id: edit.id, newRoom: { name } });
     }
   });
 
@@ -1857,14 +2869,14 @@
   // and the card says so. Someone with no saved bots skips the card: it is
   // all new to them anyway.
 
-  const NEWS_VERSION = 2;
+  const NEWS_VERSION = 3;
   const NEWS = [
-    "Say boxes are bigger, and Enter makes a new line inside a message. There is a {newline} magic word too.",
-    "Typing the same command twice in a row now works, in rooms and in the test room.",
-    'The "change a memory" action can take away, multiply and divide, not just add.',
-    "Your bot can have its own location, the part after the slash: FishBot / the lake.",
-    "Bigger rooms fit more bots: 1 bot seat for every 5 people a room can hold, up to 5.",
-    "Rules can be folded, copied and moved up or down with the buttons on the WHEN block.",
+    "The whole creator got a redesign: a home page for your bots, a cleaner editor, and it works on phones now.",
+    "Blocks and whole rules can be dragged: grab the grip dots and move them, even between rules.",
+    "Saving now tells you exactly what is missing and points at the rule. Your work also keeps itself as a draft until you save.",
+    "New: Start from an idea. Answer three questions and a working bot is built for you to tweak.",
+    'The "change a memory" action can take away, multiply and divide. Say boxes grow, and Enter makes a new line.',
+    "Your bot can have its own location (FishBot / the lake), and bigger rooms fit more bots: 1 seat per 5 people, up to 5.",
   ];
 
   let newsChecked = false;
@@ -1879,6 +2891,7 @@
       localStorage.setItem("bc_news_seen", String(NEWS_VERSION));
       return;
     }
+    const host = $("newsHost");
     const card = document.createElement("div");
     card.className = "bc-card bc-news";
     const head = document.createElement("div");
@@ -1908,8 +2921,7 @@
     bodyEl.appendChild(got);
     card.appendChild(head);
     card.appendChild(bodyEl);
-    const view = $("editorView");
-    view.insertBefore(card, view.firstElementChild);
+    host.appendChild(card);
   }
 
   // ── Misc ──────────────────────────────────────────────────────────────────

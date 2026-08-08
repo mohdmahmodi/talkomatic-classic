@@ -1,6 +1,7 @@
-/* Bot Creator, styled like the lobby itself: flat dark tiles (--tk-tile),
-   --tk-border borders, black cards, cream section strips, orange fills on
-   hover, cyan detail text. No gradients, no glows. talkoSS font. */
+/* Bot Creator, redesigned flat and solid: opaque surfaces, 1px borders,
+   no blur, no translucent fills. Two screens (home, editor). The editor is
+   a block workshop: palette on the left, rule stacks on a dotted canvas,
+   the live test room on the right. talkoSS font, lobby palette. */
 
 :root {
   --tk-accent: #ff9800;
@@ -10,7 +11,6 @@
   --tk-text: #ffffff;
   --tk-muted: #cccccc;
   --tk-border: #616161;
-  --tk-panel: #616161;
   --tk-tile: #1b1b1b;
   --tk-tile-hover: #242424;
   --tk-card: #000000;
@@ -18,6 +18,14 @@
   --tk-cream-text: #000000;
   --tk-error: #ff5252;
   --tk-ok: #66bb6a;
+
+  /* Block colors: solid, saturated, Scratch-style */
+  --blk-when: #a35a00;
+  --blk-when-edge: #d97e00;
+  --blk-if: #7d650e;
+  --blk-if-edge: #a8891f;
+  --blk-do: #00696b;
+  --blk-do-edge: #019598;
 }
 
 @font-face {
@@ -28,6 +36,10 @@
   font-family: "talkoSS";
   src: url("../fonts/Sansation_Bold.ttf");
   font-weight: bold;
+}
+@font-face {
+  font-family: "talkoText";
+  src: url("../fonts/dited.otf");
 }
 
 * {
@@ -53,34 +65,70 @@ a {
   color: var(--tk-detail);
 }
 
-/* ── Top bar ── */
+/* ── Top bar: brand, nav, user ── */
 
 .bc-top {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 14px 22px;
+  gap: 18px;
+  padding: 10px 18px;
   border-bottom: 2px solid var(--tk-border);
   background: var(--tk-tile);
   flex-shrink: 0;
 }
 
 .bc-top-title {
-  font-size: 24px;
+  font-size: 20px;
   font-weight: bold;
   color: var(--tk-accent);
   white-space: nowrap;
 }
 
 .bc-top-title i {
-  margin-right: 10px;
+  margin-right: 9px;
   color: var(--tk-detail);
 }
 
-.bc-top-sub {
+.bc-top-nav {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.bc-top-nav::-webkit-scrollbar {
+  display: none;
+}
+
+.bc-nav-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--tk-muted);
+  font-family: inherit;
+  font-size: 13px;
+  padding: 8px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.bc-nav-item i {
   color: var(--tk-detail);
-  font-size: 12px;
-  margin-top: 2px;
+}
+
+.bc-nav-item:hover {
+  background: var(--tk-tile-hover);
+  color: var(--tk-text);
+}
+
+.bc-nav-item.active {
+  background: var(--tk-card);
+  border-color: var(--tk-border);
+  color: var(--tk-accent);
+  font-weight: bold;
 }
 
 .bc-top-right {
@@ -97,7 +145,7 @@ a {
   border-radius: 16px;
   padding: 5px 12px;
   background: var(--tk-card);
-  max-width: 260px;
+  max-width: 220px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -116,13 +164,13 @@ a {
   color: var(--tk-text);
   border: 1px solid var(--tk-accent);
   border-radius: 4px;
-  padding: 9px 14px;
+  padding: 8px 13px;
   font-family: inherit;
   font-size: 13px;
   font-weight: bold;
   text-decoration: none;
   cursor: pointer;
-  transition: all 0.15s ease;
+  white-space: nowrap;
 }
 
 .bc-lobby-link:hover {
@@ -130,235 +178,38 @@ a {
   color: #000;
 }
 
-/* ── Shell: sidebar + main ── */
-
-.bc-shell {
-  flex: 1;
-  display: grid;
-  grid-template-columns: 320px 1fr;
-  min-height: 0;
-}
-
-.bc-side {
-  border-right: 2px solid var(--tk-border);
-  background: var(--tk-bg);
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-}
+/* ── Main area and views ── */
 
 .bc-main {
+  flex: 1;
   overflow-y: auto;
-  padding: 22px;
   min-width: 0;
 }
 
-/* Cream strip headers, same as the lobby's section labels */
-
-.bc-strip {
-  background: var(--tk-cream);
-  color: var(--tk-cream-text);
-  font-weight: bold;
-  font-size: 13px;
-  letter-spacing: 0.5px;
-  padding: 8px 16px;
-}
-
-.bc-strip i {
-  margin-right: 8px;
-}
-
-/* ── Sidebar: bot list ── */
-
-.bc-botlist {
-  padding: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.bc-bot-card {
-  background: var(--tk-tile);
-  border: 1px solid var(--tk-border);
-  border-radius: 6px;
-  padding: 10px 12px;
-  cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease;
-}
-
-.bc-bot-card:hover {
-  background: var(--tk-tile-hover);
-}
-
-.bc-bot-card.active {
-  border-color: var(--tk-accent);
-}
-
-.bc-bot-card-name {
-  font-weight: bold;
-  font-size: 15px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.bc-bot-card-name .live-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--tk-ok);
-  flex-shrink: 0;
-  animation: bcPulse 1.6s infinite;
-}
-
-@keyframes bcPulse {
-  50% {
-    opacity: 0.35;
-  }
-}
-
-.bc-bot-card-meta {
-  color: var(--tk-muted);
-  font-size: 12px;
-  margin-top: 3px;
-}
-
-.bc-empty-note {
-  color: var(--tk-muted);
-  font-size: 13px;
-  padding: 6px 8px;
-  line-height: 1.5;
-}
-
-.bc-new-bot {
-  margin: 2px 10px 14px;
-  background: var(--tk-card);
-  border: 1px solid var(--tk-accent);
-  color: var(--tk-accent);
-  border-radius: 6px;
-  font-family: inherit;
-  font-weight: bold;
-  font-size: 14px;
-  padding: 10px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.bc-new-bot:hover {
-  background: var(--tk-accent);
-  color: #000;
-}
-
-/* ── Sidebar: nav ── */
-
-.bc-nav {
-  display: flex;
-  flex-direction: column;
-  padding: 8px 10px 16px;
-  gap: 4px;
-}
-
-.bc-nav-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  background: none;
-  border: none;
-  border-radius: 6px;
-  color: var(--tk-muted);
-  font-family: inherit;
-  font-size: 14px;
-  text-align: left;
-  padding: 10px 12px;
-  cursor: pointer;
-}
-
-.bc-nav-item i {
-  width: 18px;
-  text-align: center;
-  color: var(--tk-detail);
-}
-
-.bc-nav-item:hover {
-  background: var(--tk-tile-hover);
-  color: var(--tk-text);
-}
-
-.bc-nav-item.active {
-  background: var(--tk-tile);
-  color: var(--tk-accent);
-  font-weight: bold;
-}
-
-/* ── Sidebar: live status card ── */
-
-.bc-live {
-  margin: 0 10px 16px;
-  background: var(--tk-card);
-  border: 1px solid var(--tk-ok);
-  border-radius: 6px;
-  padding: 12px;
-  font-size: 13px;
-  display: none;
-}
-
-.bc-live.show {
-  display: block;
-}
-
-.bc-live-title {
-  color: var(--tk-ok);
-  font-weight: bold;
-  margin-bottom: 6px;
-}
-
-.bc-live-line {
-  color: var(--tk-muted);
-  margin: 3px 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.bc-live-stop {
-  margin-top: 9px;
-  width: 100%;
-  background: none;
-  border: 1px solid var(--tk-error);
-  color: var(--tk-error);
-  border-radius: 4px;
-  font-family: inherit;
-  font-weight: bold;
-  font-size: 12px;
-  padding: 7px;
-  cursor: pointer;
-}
-
-.bc-live-stop:hover {
-  background: var(--tk-error);
-  color: #000;
-}
-
-/* ── Main: views + cards ── */
-
 .bc-view {
   display: none;
-  max-width: 1050px;
+  max-width: 1060px;
   margin: 0 auto;
+  padding: 22px 18px 60px;
 }
 
 .bc-view.active {
   display: block;
 }
 
+/* The editor uses the full width */
+#editorView.bc-view {
+  max-width: none;
+  padding: 0;
+}
+
+/* ── Cards (docs, staff, gate) ── */
+
 .bc-card {
   background: var(--tk-tile);
   border: 1px solid var(--tk-border);
   border-radius: 8px;
   margin-bottom: 18px;
-  /* Menus (magic words, add-a-block) open past the card edge, so cards must
-     never clip. Small cards were swallowing the dropdowns. */
-  overflow: visible;
 }
 
 .bc-card-head {
@@ -387,7 +238,7 @@ a {
   padding: 16px 18px;
 }
 
-/* ── Inputs (white boxes, like the lobby forms) ── */
+/* ── Inputs ── */
 
 .bc-input,
 .bc-select {
@@ -410,19 +261,6 @@ a {
   color: #8a8a8a;
 }
 
-textarea.bc-input {
-  resize: vertical;
-  min-height: 38px;
-}
-
-.bc-label {
-  display: block;
-  font-size: 12px;
-  color: var(--tk-muted);
-  margin: 0 0 5px;
-  letter-spacing: 0.4px;
-}
-
 /* ── Buttons ── */
 
 .bc-btn {
@@ -438,7 +276,6 @@ textarea.bc-input {
   font-weight: bold;
   padding: 9px 14px;
   cursor: pointer;
-  transition: all 0.15s ease;
 }
 
 .bc-btn:hover {
@@ -471,129 +308,13 @@ textarea.bc-input {
   cursor: not-allowed;
 }
 
-/* ── Rules as block stacks ──
-   Every rule is a stack of snap-together blocks, Scratch style: an orange
-   WHEN hat, gold ONLY IF blocks, cyan DO blocks. Each block reads as one
-   sentence. The little tab on top of a block makes the stack look clicked
-   together. */
-
-.bc-rule {
-  position: relative;
-  margin-bottom: 18px;
-}
-
-.bc-blk {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  border: 1px solid;
-  border-radius: 6px;
-  padding: 8px 10px;
-  margin: 0 0 5px;
-  background: var(--tk-card);
-}
-
-/* The snap tab. Hats do not have one. */
-.bc-blk::before {
-  content: "";
-  position: absolute;
-  top: -5px;
-  left: 26px;
-  width: 18px;
-  height: 5px;
-  background: inherit;
-  border: 1px solid;
-  border-color: inherit;
-  border-bottom: none;
-  border-radius: 4px 4px 0 0;
-}
-
-.blk-when {
-  background: #221602;
-  border-color: #8a5b00;
-  border-top-left-radius: 16px;
-}
-
-.blk-when::before {
-  display: none;
-}
-
-.blk-if {
-  background: #1d1704;
-  border-color: #7a5c00;
-  margin-left: 16px;
-}
-
-.blk-do {
-  background: #001d1f;
-  border-color: #015f5f;
-  margin-left: 16px;
-}
-
-.bc-blk-adders {
-  display: flex;
-  gap: 8px;
-  margin: 4px 0 0 16px;
-}
-
-.bc-blk-chip {
-  display: inline-block;
-  width: 56px;
-  text-align: center;
-  font-size: 10px;
-  font-weight: bold;
-  letter-spacing: 0.8px;
-  border-radius: 8px;
-  padding: 3px 0;
-  flex-shrink: 0;
-}
-
-.chip-when {
-  background: var(--tk-accent);
-  color: #000;
-}
-
-.chip-if {
-  background: #7a5c00;
-  color: #fff2cc;
-}
-
-.chip-do {
-  background: var(--tk-detail);
-  color: #00292b;
-}
-
-.bc-bang {
-  color: var(--tk-detail);
-  font-weight: bold;
-}
-
-/* Folding: the hat stays, the blocks tuck away, a summary takes their place */
-
-.bc-rule.collapsed .bc-rule-body {
-  display: none;
-}
-
-.bc-rule-summary {
-  display: none;
-  color: var(--tk-muted);
-  font-size: 12px;
-}
-
-.bc-rule.collapsed .bc-rule-summary {
-  display: inline;
-}
-
-.bc-rule.collapsed .bc-rule-head .bc-select,
-.bc-rule.collapsed .bc-rule-head .bc-input,
-.bc-rule.collapsed .bc-rule-head .bc-unit {
-  display: none;
+.bc-btn.big {
+  font-size: 15px;
+  padding: 12px 20px;
 }
 
 .bc-mini-btn {
-  background: none;
+  background: var(--tk-card);
   border: 1px dashed var(--tk-border);
   border-radius: 4px;
   color: var(--tk-muted);
@@ -611,37 +332,1106 @@ textarea.bc-input {
 .bc-row-del {
   background: none;
   border: none;
-  color: #777;
+  color: #e8e8e8;
   cursor: pointer;
   font-size: 13px;
   padding: 2px 5px;
+  opacity: 0.75;
 }
 
 .bc-row-del:hover {
+  opacity: 1;
+  color: #fff;
+}
+
+.bc-row-del:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+
+.bc-row-btns {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 0;
+  flex-shrink: 0;
+}
+
+.bc-empty-note {
+  color: var(--tk-muted);
+  font-size: 13px;
+  padding: 6px 8px;
+  line-height: 1.5;
+}
+
+/* ── Home ── */
+
+.bc-hero {
+  background: var(--tk-tile);
+  border: 1px solid var(--tk-border);
+  border-radius: 10px;
+  padding: 28px 26px;
+  margin-bottom: 20px;
+}
+
+.bc-hero h1 {
+  margin: 0 0 8px;
+  font-size: 26px;
+  color: var(--tk-accent);
+}
+
+.bc-hero p {
+  margin: 0 0 18px;
+  color: var(--tk-muted);
+  font-size: 15px;
+  line-height: 1.6;
+  max-width: 640px;
+}
+
+.bc-hero-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.bc-home-sec {
+  margin: 26px 0;
+}
+
+.bc-home-sec h2 {
+  font-size: 16px;
+  margin: 0 0 4px;
+  color: var(--tk-text);
+}
+
+.bc-home-sec h2 i {
+  color: var(--tk-accent);
+  margin-right: 9px;
+}
+
+.bc-sec-note {
+  color: var(--tk-muted);
+  font-size: 13px;
+  margin: 0 0 12px;
+}
+
+.bc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+/* These are <button>s, and buttons do NOT inherit text color: without an
+   explicit color the UA default (black) lands on the dark tile. */
+.bc-bot-card {
+  background: var(--tk-tile);
+  border: 1px solid var(--tk-border);
+  border-radius: 8px;
+  padding: 14px;
+  cursor: pointer;
+  text-align: left;
+  color: var(--tk-text);
+  font-family: inherit;
+}
+
+.bc-bot-card:hover {
+  background: var(--tk-tile-hover);
+  border-color: var(--tk-accent);
+}
+
+.bc-bot-card-name {
+  font-weight: bold;
+  font-size: 15px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bc-bot-card-name i {
+  color: var(--tk-accent);
+}
+
+.bc-bot-card-name .live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--tk-ok);
+  flex-shrink: 0;
+  animation: bcPulse 1.6s infinite;
+}
+
+@keyframes bcPulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.bc-bot-card-meta {
+  color: var(--tk-muted);
+  font-size: 12px;
+  margin-top: 5px;
+  line-height: 1.5;
+}
+
+/* Live bot bar + continue-draft bar on home */
+
+.bc-live,
+.bc-continue {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: var(--tk-tile);
+  border: 1px solid var(--tk-ok);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 14px;
+  font-size: 13.5px;
+}
+
+.bc-continue {
+  border-color: var(--tk-accent);
+}
+
+.bc-live i,
+.bc-continue i {
+  color: var(--tk-ok);
+}
+
+.bc-continue i {
+  color: var(--tk-accent);
+}
+
+.bc-live b,
+.bc-continue b {
+  color: var(--tk-text);
+}
+
+.bc-live .bc-live-meta,
+.bc-continue .bc-live-meta {
+  color: var(--tk-muted);
+}
+
+.bc-live .bc-btn,
+.bc-continue .bc-btn {
+  margin-left: auto;
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+.bc-continue .bc-row-del {
+  flex-shrink: 0;
+}
+
+/* Difficulty chips on the ready-made bots */
+
+.bc-diff {
+  font-size: 9px;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+  border-radius: 8px;
+  padding: 2px 7px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.bc-diff.easy {
+  background: #66bb6a;
+  color: #0b2310;
+}
+
+.bc-diff.medium {
+  background: var(--tk-accent);
+  color: #2b1a00;
+}
+
+.bc-diff.hard {
+  background: #ff5252;
+  color: #2b0000;
+}
+
+/* ── Editor: the action bar ── */
+
+.bc-editbar {
+  position: sticky;
+  top: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  background: var(--tk-tile);
+  border-bottom: 2px solid var(--tk-border);
+}
+
+.bc-back {
+  padding: 9px 11px;
+}
+
+.bc-nametag {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--tk-card);
+  border: 1px solid var(--tk-border);
+  border-radius: 6px;
+  padding: 4px 10px 4px 4px;
+}
+
+.bc-nametag .bc-input {
+  border: 1px solid transparent;
+  background: var(--tk-card);
+  font-weight: bold;
+  padding: 6px 8px;
+}
+
+.bc-nametag .bc-input:focus {
+  border-color: var(--tk-accent);
+}
+
+.bc-nametag #botName {
+  width: 140px;
+}
+
+.bc-nametag #botLocation {
+  width: 120px;
+  font-weight: normal;
+  color: var(--tk-muted);
+}
+
+.bc-slash {
+  color: var(--tk-border);
+  font-weight: bold;
+}
+
+.bc-save-note {
+  font-size: 12.5px;
+  color: var(--tk-muted);
+  min-width: 0;
+  flex: 1 1 120px;
+}
+
+.bc-save-note.err {
   color: var(--tk-error);
+  font-weight: bold;
+}
+
+.bc-save-note.ok {
+  color: var(--tk-ok);
+}
+
+.bc-save-note.dirty {
+  color: var(--tk-accent);
+}
+
+.bc-editbar-btns {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+/* ── Editor: workspace ── */
+
+.bc-workspace {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr) 400px;
+  gap: 0;
+  align-items: start;
+}
+
+/* Palette */
+
+.bc-palette {
+  position: sticky;
+  top: 62px;
+  padding: 14px 12px;
+  max-height: calc(100vh - 130px);
+  overflow-y: auto;
+}
+
+.bc-palette-head {
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  color: var(--tk-muted);
+  margin-bottom: 2px;
+}
+
+.bc-palette-note {
+  font-size: 11.5px;
+  color: #8a8a8a;
+  line-height: 1.45;
+  margin-bottom: 12px;
+}
+
+.bc-pal-group {
+  font-size: 10px;
+  font-weight: bold;
+  letter-spacing: 0.8px;
+  color: #8a8a8a;
+  margin: 12px 0 6px;
+}
+
+.bc-pal-blk {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 1px solid;
+  border-radius: 6px;
+  color: #fff;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: bold;
+  text-align: left;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.bc-pal-blk:active {
+  cursor: grabbing;
+}
+
+.bc-pal-blk i.fa-grip-vertical {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 11px;
+}
+
+.bc-pal-blk.p-when {
+  background: var(--blk-when);
+  border-color: var(--blk-when-edge);
+  border-top-left-radius: 14px;
+}
+
+.bc-pal-blk.p-if {
+  background: var(--blk-if);
+  border-color: var(--blk-if-edge);
+}
+
+.bc-pal-blk.p-do {
+  background: var(--blk-do);
+  border-color: var(--blk-do-edge);
+}
+
+.bc-pal-blk .bc-pal-label {
+  flex: 1;
+  min-width: 0;
+}
+
+/* The ? on every palette block: opens a plain-words explainer */
+
+.bc-pal-help {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 12px;
+  padding: 2px 4px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.bc-pal-help:hover {
+  color: #fff;
+}
+
+.bc-help-pop {
+  position: fixed;
+  z-index: 900;
+  width: 270px;
+  background: #141414;
+  border: 1px solid var(--tk-accent);
+  border-radius: 8px;
+  padding: 12px 14px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.6);
+}
+
+.bc-help-pop b {
+  display: block;
+  color: var(--tk-accent);
+  font-size: 13px;
+  margin-bottom: 5px;
+}
+
+.bc-help-pop p {
+  margin: 0 0 8px;
+  color: var(--tk-muted);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.bc-help-pop code {
+  display: block;
+  background: var(--tk-card);
+  border: 1px solid var(--tk-border);
+  border-radius: 4px;
+  padding: 5px 8px;
+  color: var(--tk-detail);
+  font-family: Consolas, Monaco, monospace;
+  font-size: 11.5px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Canvas */
+
+.bc-canvas {
+  padding: 18px 18px 80px;
+  min-height: calc(100vh - 120px);
+  background-color: #191919;
+  background-image: radial-gradient(#262626 1px, transparent 1px);
+  background-size: 22px 22px;
+  border-left: 1px solid #2e2e2e;
+  border-right: 1px solid #2e2e2e;
 }
 
 .bc-add-rule {
-  width: 100%;
-  border-style: dashed;
+  display: flex;
+  align-items: center;
   justify-content: center;
-  padding: 12px;
+  gap: 8px;
+  width: 100%;
+  background: #191919;
+  border: 1px dashed var(--tk-border);
+  border-radius: 6px;
+  color: var(--tk-muted);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: bold;
+  padding: 13px;
+  cursor: pointer;
 }
 
-/* ── Deploy area ── */
-
-.bc-deploy-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px;
+.bc-add-rule:hover {
+  color: var(--tk-accent);
+  border-color: var(--tk-accent);
 }
+
+/* ── Rules as solid block stacks ── */
+
+.bc-rule {
+  position: relative;
+  margin-bottom: 20px;
+  max-width: 760px;
+}
+
+.bc-blk {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  border: 1px solid;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 0 0 4px;
+  color: #fff;
+}
+
+/* The snap tab that makes rows read as clicked together. Hats have none. */
+.bc-blk::before {
+  content: "";
+  position: absolute;
+  top: -5px;
+  left: 26px;
+  width: 18px;
+  height: 5px;
+  background: inherit;
+  border: 1px solid;
+  border-color: inherit;
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
+}
+
+.blk-when {
+  background: var(--blk-when);
+  border-color: var(--blk-when-edge);
+  border-top-left-radius: 16px;
+}
+
+.blk-when::before {
+  display: none;
+}
+
+.blk-if {
+  background: var(--blk-if);
+  border-color: var(--blk-if-edge);
+  margin-left: 16px;
+}
+
+.blk-do {
+  background: var(--blk-do);
+  border-color: var(--blk-do-edge);
+  margin-left: 16px;
+}
+
+.bc-blk-adders {
+  display: flex;
+  gap: 8px;
+  margin: 6px 0 0 16px;
+}
+
+/* Kicker labels: plain bold text on the colored block */
+
+.bc-blk-chip {
+  display: inline-block;
+  width: 52px;
+  font-size: 10px;
+  font-weight: bold;
+  letter-spacing: 0.8px;
+  flex-shrink: 0;
+  color: #fff;
+}
+
+/* Drag grip */
+
+.bc-grip {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 12px;
+  cursor: grab;
+  padding: 4px 2px;
+  flex-shrink: 0;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.bc-grip:hover {
+  color: #fff;
+}
+
+/* Controls inside blocks: dark wells on the colored fill */
+
+.bc-rule .bc-select,
+.bc-rule .bc-input {
+  height: 32px;
+  font-size: 13px;
+  padding: 5px 8px;
+  box-sizing: border-box;
+  background: #101010;
+  border: 1px solid rgba(0, 0, 0, 0.55);
+  color: #fff;
+}
+
+.bc-rule .bc-select:focus,
+.bc-rule .bc-input:focus {
+  border-color: #fff;
+}
+
+.bc-rule textarea.bc-input {
+  height: 32px;
+  min-height: 32px;
+  line-height: 20px;
+  resize: none;
+  overflow-y: auto;
+}
+
+/* Say boxes: two lines tall from the start, growing with the message */
+.bc-rule textarea.w-say {
+  height: 52px;
+  min-height: 52px;
+  white-space: pre-wrap;
+}
+
+.bc-unit {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.bc-bang {
+  color: #fff;
+  font-weight: bold;
+}
+
+.w-trig {
+  width: 210px;
+}
+
+.w-act {
+  width: 172px;
+}
+
+.w-word {
+  width: 110px;
+}
+
+.w-mem {
+  width: 104px;
+}
+
+.w-per {
+  width: 168px;
+}
+
+.w-math {
+  width: 108px;
+}
+
+.w-val {
+  width: 140px;
+}
+
+.w-num {
+  width: 70px;
+}
+
+.w-grow {
+  flex: 1;
+  min-width: 160px;
+}
+
+/* Folding: the hat stays, the blocks tuck away, a summary takes their place */
+
+.bc-rule.collapsed .bc-rule-body {
+  display: none;
+}
+
+.bc-rule-summary {
+  display: none;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 12.5px;
+}
+
+.bc-rule.collapsed .bc-rule-summary {
+  display: inline;
+}
+
+.bc-rule.collapsed .bc-rule-head .bc-select,
+.bc-rule.collapsed .bc-rule-head .bc-input,
+.bc-rule.collapsed .bc-rule-head .bc-unit {
+  display: none;
+}
+
+/* Save-problem flash: points straight at the broken rule */
+
+.bc-rule.flash .blk-when {
+  box-shadow: 0 0 0 2px var(--tk-error);
+}
+
+/* Rules light up when the test room runs them */
+
+.bc-rule.fired .bc-blk {
+  border-color: var(--tk-detail);
+}
+
+.bc-rule.fired .blk-when {
+  box-shadow: 0 0 0 1px var(--tk-detail);
+}
+
+.bc-rule.skipped .blk-when {
+  box-shadow: 0 0 0 1px #ffd54f;
+}
+
+.bc-rule-tag {
+  font-size: 10px;
+  font-weight: bold;
+  border-radius: 8px;
+  padding: 2px 7px;
+  margin-left: 8px;
+}
+
+.bc-rule-tag.ran {
+  background: var(--tk-detail);
+  color: #00292b;
+}
+
+.bc-rule-tag.skip {
+  background: #ffd54f;
+  color: #3a2c00;
+}
+
+/* ── Drag and drop ── */
+
+body.bc-dragging {
+  cursor: grabbing;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.bc-ghost {
+  position: fixed;
+  z-index: 2000;
+  pointer-events: none;
+  transform: rotate(-1.5deg);
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.55);
+  opacity: 0.96;
+  margin: 0;
+}
+
+.bc-ghost.invalid {
+  opacity: 0.5;
+}
+
+.bc-drop-line {
+  position: fixed;
+  z-index: 1999;
+  height: 0;
+  border-top: 3px solid var(--tk-accent);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.bc-drop-line.invalid {
+  border-top-color: var(--tk-error);
+}
+
+.drag-src {
+  opacity: 0.3;
+}
+
+/* ── Test room panel ── */
+
+.bc-testpanel {
+  position: sticky;
+  top: 62px;
+  background: var(--tk-tile);
+  border-left: 1px solid var(--tk-border);
+  max-height: calc(100vh - 62px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.bc-test-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 11px 14px;
+  font-weight: bold;
+  font-size: 14px;
+  border-bottom: 1px solid var(--tk-border);
+}
+
+.bc-test-head i {
+  color: var(--tk-accent);
+}
+
+.bc-test-hint {
+  font-weight: normal;
+  font-size: 11.5px;
+  color: var(--tk-muted);
+}
+
+.bc-test-close {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--tk-muted);
+  font-size: 14px;
+  cursor: pointer;
+  display: none;
+}
+
+.bc-test-room {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: var(--tk-bg);
+}
+
+.bc-tr-panel {
+  border: 1px solid var(--tk-border);
+  background: #000;
+  display: flex;
+  flex-direction: column;
+}
+
+.bc-tr-panel.me {
+  border-color: var(--tk-accent);
+}
+
+.bc-tr-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #333;
+  border-bottom: 1px solid var(--tk-border);
+  padding: 5px 10px;
+  font-size: 12px;
+  color: var(--tk-text);
+}
+
+.bc-tr-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bc-tr-typing {
+  margin-left: auto;
+  color: var(--tk-detail);
+  font-size: 10px;
+  animation: bcTyping 1s infinite;
+}
+
+@keyframes bcTyping {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.bc-tr-box {
+  height: 120px;
+  padding: 8px 10px;
+  background: transparent;
+  border: none;
+  outline: none;
+  resize: none;
+  overflow-y: auto;
+  color: #ffa500;
+  font-family: talkoText, Consolas, monospace;
+  font-size: 15px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  width: 100%;
+}
+
+.bc-tr-box::placeholder {
+  color: #7a5b1e;
+  font-size: 12.5px;
+  font-family: talkoSS, Arial, sans-serif;
+}
+
+.bc-tr-status {
+  min-height: 18px;
+  padding: 2px 12px 8px;
+  color: var(--tk-muted);
+  font-size: 11.5px;
+  font-style: italic;
+}
+
+.bc-test-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 12px 10px;
+}
+
+.bc-test-mem {
+  border-top: 1px solid var(--tk-border);
+  padding: 10px 12px;
+}
+
+.bc-test-mem-title {
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 0.6px;
+  color: var(--tk-detail);
+  margin-bottom: 6px;
+}
+
+.bc-test-mem-body {
+  font-size: 12.5px;
+  color: var(--tk-muted);
+  line-height: 1.6;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.bc-test-mem-body b {
+  color: var(--tk-text);
+}
+
+/* ── Magic word inserter ── */
+
+.bc-magic-wrap {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.bc-magic-btn {
+  background: #101010;
+  border: 1px solid rgba(0, 0, 0, 0.55);
+  border-radius: 4px;
+  color: var(--tk-detail);
+  font-size: 13px;
+  padding: 7px 9px;
+  cursor: pointer;
+}
+
+.bc-magic-btn:hover {
+  border-color: var(--tk-detail);
+}
+
+.bc-magic-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 300;
+  background: #141414;
+  border: 1px solid var(--tk-detail);
+  border-radius: 8px;
+  width: 300px;
+  max-height: 300px;
+  overflow-y: auto;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.6);
+}
+
+.bc-magic-menu.left {
+  left: 0;
+  right: auto;
+}
+
+.bc-magic-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-bottom: 1px solid #2a2a2a;
+  color: var(--tk-text);
+  font-family: inherit;
+  font-size: 12.5px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.bc-magic-item:hover {
+  background: var(--tk-tile-hover);
+}
+
+.bc-magic-item code {
+  color: var(--tk-detail);
+  font-family: Consolas, Monaco, monospace;
+  font-size: 12px;
+  margin-right: 6px;
+}
+
+.bc-magic-item b {
+  color: var(--tk-accent);
+  font-size: 12.5px;
+}
+
+.bc-magic-item span {
+  color: var(--tk-muted);
+  font-size: 11.5px;
+}
+
+/* ── Modals (deploy, wizard, answers) ── */
+
+.bc-modal-back {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.bc-modal {
+  background: var(--tk-tile);
+  border: 1px solid var(--tk-accent);
+  border-radius: 10px;
+  max-width: 430px;
+  width: 100%;
+  padding: 20px 22px;
+  max-height: calc(100vh - 60px);
+  overflow-y: auto;
+}
+
+.bc-modal.wide {
+  max-width: 560px;
+}
+
+.bc-modal h3 {
+  margin: 0 0 10px;
+  font-size: 17px;
+}
+
+.bc-modal h3 i {
+  color: var(--tk-accent);
+  margin-right: 6px;
+}
+
+.bc-modal p {
+  margin: 0 0 16px;
+  color: var(--tk-muted);
+  line-height: 1.6;
+  font-size: 14px;
+}
+
+.bc-modal-btns {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+/* Choice cards inside the wizard */
+
+.bc-choice {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: var(--tk-card);
+  border: 1px solid var(--tk-border);
+  border-radius: 8px;
+  color: var(--tk-text);
+  font-family: inherit;
+  padding: 11px 14px;
+  margin-bottom: 8px;
+  cursor: pointer;
+}
+
+.bc-choice:hover {
+  border-color: var(--tk-accent);
+}
+
+.bc-choice.sel {
+  border-color: var(--tk-accent);
+  background: #241a06;
+}
+
+.bc-choice b {
+  display: block;
+  font-size: 14px;
+  margin-bottom: 2px;
+}
+
+.bc-choice span {
+  font-size: 12.5px;
+  color: var(--tk-muted);
+  line-height: 1.5;
+}
+
+.bc-wiz-extra {
+  margin: 4px 0 12px;
+}
+
+.bc-wiz-extra .bc-label {
+  display: block;
+  font-size: 12px;
+  color: var(--tk-muted);
+  margin: 0 0 5px;
+}
+
+.bc-wiz-step {
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  color: var(--tk-muted);
+  margin-bottom: 6px;
+}
+
+/* Deploy options inside the modal */
 
 .bc-deploy-opt {
   background: var(--tk-card);
   border: 1px solid var(--tk-border);
   border-radius: 8px;
-  padding: 14px;
+  padding: 13px;
   cursor: pointer;
+  margin-bottom: 10px;
 }
 
 .bc-deploy-opt.sel {
@@ -675,121 +1465,24 @@ textarea.bc-input {
   min-width: 0;
 }
 
-/* ── Variables table ── */
+/* ── What's new card ── */
 
-.bc-vars {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-
-.bc-vars th {
-  text-align: left;
-  color: var(--tk-detail);
-  font-size: 11px;
-  letter-spacing: 0.6px;
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--tk-border);
-}
-
-.bc-vars td {
-  padding: 6px 8px;
-  border-bottom: 1px solid #2a2a2a;
-  color: var(--tk-muted);
-  word-break: break-all;
-}
-
-/* ── Learn / docs ── */
-
-.bc-doc {
-  line-height: 1.65;
-  font-size: 14px;
-  color: var(--tk-muted);
-}
-
-.bc-doc h4 {
-  color: var(--tk-text);
-  margin: 18px 0 6px;
-  font-size: 15px;
-}
-
-.bc-doc h4 i {
-  color: var(--tk-accent);
-  margin-right: 8px;
-}
-
-.bc-doc code,
-.bc-token {
-  background: var(--tk-card);
-  border: 1px solid var(--tk-border);
-  border-radius: 4px;
-  padding: 1px 6px;
-  font-family: Consolas, Monaco, monospace;
-  font-size: 12.5px;
-  color: var(--tk-detail);
-}
-
-.bc-doc pre {
-  background: var(--tk-card);
-  border: 1px solid var(--tk-border);
-  border-radius: 6px;
-  padding: 14px;
-  overflow-x: auto;
-  font-family: Consolas, Monaco, monospace;
-  font-size: 12.5px;
-  line-height: 1.55;
-  color: #d8d8d8;
-}
-
-.bc-chip-table {
-  display: grid;
-  grid-template-columns: 170px 1fr;
-  gap: 6px 14px;
-  font-size: 13px;
-  margin: 8px 0;
-}
-
-.bc-chip-table code {
-  justify-self: start;
-}
-
-/* ── Template picker ── */
-
-.bc-tpl-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 12px;
-}
-
-.bc-tpl {
-  background: var(--tk-card);
-  border: 1px solid var(--tk-border);
-  border-radius: 8px;
-  padding: 14px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.bc-tpl:hover {
+.bc-news {
   border-color: var(--tk-accent);
-  background: var(--tk-tile-hover);
 }
 
-.bc-tpl i {
-  color: var(--tk-accent);
-  font-size: 20px;
-}
-
-.bc-tpl h4 {
-  margin: 8px 0 4px;
-  font-size: 14px;
-}
-
-.bc-tpl p {
-  margin: 0;
-  font-size: 12px;
+.bc-news-list {
+  margin: 0 0 12px;
+  padding-left: 20px;
+  line-height: 1.8;
+  font-size: 13.5px;
   color: var(--tk-muted);
-  line-height: 1.45;
+}
+
+.bc-news-note {
+  color: var(--tk-ok);
+  font-size: 13px;
+  margin: 0 0 14px;
 }
 
 /* ── Staff table ── */
@@ -854,9 +1547,7 @@ textarea.bc-input {
   line-height: 1.6;
 }
 
-/* Badge preview used in the learn view. Gray on purpose, same as the badge
-   bots wear in real rooms: light enough (#9aa3ae) to read on dark themes
-   without looking like a muted or timed out user. */
+/* Badge preview: same gray bots wear in real rooms (#9aa3ae). */
 .bot-badge-demo {
   display: inline-block;
   background: #9aa3ae;
@@ -869,465 +1560,116 @@ textarea.bc-input {
   vertical-align: middle;
 }
 
-/* ── Name tag card ── */
+/* ── Learn / docs ── */
 
-.bc-name-grid {
-  display: grid;
-  grid-template-columns: 220px 260px;
-  gap: 14px;
-}
+/* Chapter chips at the top of the Bot Book: one tap to any section */
 
-.bc-name-grid .bc-input {
-  width: 100%;
-}
-
-.bc-name-preview {
-  margin-top: 12px;
-  color: var(--tk-muted);
-  font-size: 13px;
+.bc-toc {
   display: flex;
-  align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
+  margin-bottom: 16px;
 }
 
-.bc-name-preview #namePreview {
+.bc-toc a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--tk-tile);
+  border: 1px solid var(--tk-border);
+  border-radius: 16px;
   color: var(--tk-text);
+  font-size: 12px;
   font-weight: bold;
+  text-decoration: none;
+  padding: 6px 12px;
 }
 
-/* ── Modals (deploy answers) ── */
+.bc-toc a:hover {
+  border-color: var(--tk-accent);
+  color: var(--tk-accent);
+}
 
-.bc-modal-back {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.65);
-  z-index: 1000;
-  display: flex;
+.bc-toc a .n {
+  color: var(--tk-accent);
+}
+
+.bc-chapter {
+  scroll-margin-top: 14px;
+}
+
+.bc-chapter .bc-card-head .n {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 20px;
+  background: var(--tk-accent);
+  color: #000;
+  border-radius: 50%;
+  width: 22px;
+  height: 22px;
+  font-size: 11px;
+  flex-shrink: 0;
 }
 
-.bc-modal {
-  background: var(--tk-tile);
-  border: 1px solid var(--tk-accent);
-  border-radius: 10px;
-  max-width: 430px;
-  width: 100%;
-  padding: 20px 22px;
-}
-
-.bc-modal h3 {
-  margin: 0 0 10px;
-  font-size: 17px;
-}
-
-.bc-modal h3 i {
-  color: var(--tk-accent);
-  margin-right: 6px;
-}
-
-.bc-modal p {
-  margin: 0 0 16px;
-  color: var(--tk-muted);
-  line-height: 1.6;
+.bc-doc {
+  line-height: 1.65;
   font-size: 14px;
-}
-
-.bc-modal-btns {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-}
-
-/* ── What's new card ── */
-
-.bc-news {
-  border-color: var(--tk-accent);
-}
-
-.bc-news-list {
-  margin: 0 0 12px;
-  padding-left: 20px;
-  line-height: 1.8;
-  font-size: 13.5px;
   color: var(--tk-muted);
 }
 
-.bc-news-note {
-  color: var(--tk-ok);
-  font-size: 13px;
-  margin: 0 0 14px;
+.bc-doc h4 {
+  color: var(--tk-text);
+  margin: 18px 0 6px;
+  font-size: 15px;
 }
 
-/* ── Build workspace: editor on the left, test room on the right ── */
-
-#editorView.bc-view {
-  max-width: 1500px;
+.bc-doc h4 i {
+  color: var(--tk-accent);
+  margin-right: 8px;
 }
 
-.bc-build-grid {
+.bc-doc code,
+.bc-token {
+  background: var(--tk-card);
+  border: 1px solid var(--tk-border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-family: Consolas, Monaco, monospace;
+  font-size: 12.5px;
+  color: var(--tk-detail);
+}
+
+.bc-doc pre {
+  background: var(--tk-card);
+  border: 1px solid var(--tk-border);
+  border-radius: 6px;
+  padding: 14px;
+  overflow-x: auto;
+  font-family: Consolas, Monaco, monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #d8d8d8;
+}
+
+.bc-chip-table {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 420px;
-  gap: 18px;
+  grid-template-columns: 175px 1fr;
+  gap: 10px 14px;
+  font-size: 13px;
+  margin: 12px 0;
   align-items: start;
 }
 
-.bc-build-right {
-  position: sticky;
-  top: 0;
-}
-
-.bc-side-note {
-  color: var(--tk-muted);
-  font-size: 12px;
-  line-height: 1.5;
-  padding: 8px 16px 2px;
-}
-
-/* ── The test room ──
-   Styled after room.html itself: stacked member panels, each with a dark
-   header bar (name / location) and a black textbox with orange chat text in
-   the room font. No send button anywhere, same as a real room. */
-
-@font-face {
-  font-family: "talkoText";
-  src: url("../fonts/dited.otf");
-}
-
-.bc-test-card {
-  display: flex;
-  flex-direction: column;
-  max-height: calc(100vh - 60px);
-}
-
-.bc-test-room {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px;
-  background: var(--tk-bg);
-}
-
-.bc-tr-panel {
-  border: 1px solid var(--tk-border);
-  background: var(--tk-chat-bg, #000);
-  display: flex;
-  flex-direction: column;
-}
-
-.bc-tr-panel.me {
-  border-color: var(--tk-accent);
-}
-
-.bc-tr-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: #333;
-  border-bottom: 1px solid var(--tk-border);
-  padding: 5px 10px;
-  font-size: 12px;
-  color: var(--tk-text);
-}
-
-.bc-tr-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.bc-tr-typing {
-  margin-left: auto;
-  color: var(--tk-detail);
-  font-size: 10px;
-  animation: bcTyping 1s infinite;
-}
-
-@keyframes bcTyping {
-  50% {
-    opacity: 0.3;
-  }
-}
-
-.bc-tr-box {
-  height: 120px;
-  padding: 8px 10px;
-  background: transparent;
-  border: none;
-  outline: none;
-  resize: none;
-  overflow-y: auto;
-  color: var(--tk-chat-text, #ffa500);
-  font-family: talkoText, Consolas, monospace;
-  font-size: 15px;
-  line-height: 1.45;
-  white-space: pre-wrap;
+.bc-chip-table code {
+  justify-self: start;
+  white-space: normal;
   word-break: break-word;
-  width: 100%;
+  line-height: 1.5;
 }
 
-.bc-tr-box::placeholder {
-  color: #7a5b1e;
-  font-size: 12.5px;
-  font-family: talkoSS, Arial, sans-serif;
-}
-
-.bc-tr-status {
-  min-height: 18px;
-  padding: 2px 12px 8px;
-  color: var(--tk-muted);
-  font-size: 11.5px;
-  font-style: italic;
-}
-
-.bc-test-tools {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 0 12px 10px;
-}
-
-.bc-test-mem {
-  border-top: 1px solid var(--tk-border);
-  padding: 10px 12px;
-}
-
-.bc-test-mem-title {
-  font-size: 11px;
-  font-weight: bold;
-  letter-spacing: 0.6px;
-  color: var(--tk-detail);
-  margin-bottom: 6px;
-}
-
-.bc-test-mem-body {
-  font-size: 12.5px;
-  color: var(--tk-muted);
+.bc-chip-table span {
   line-height: 1.6;
-  max-height: 120px;
-  overflow-y: auto;
 }
-
-.bc-test-mem-body b {
-  color: var(--tk-text);
-}
-
-/* ── Rule rows: one size for every control, so nothing looks bloated ──
-   Labels sit in a fixed column, every select and input is 32px tall, and
-   widths come from these classes instead of ad-hoc inline sizes. */
-
-.bc-rule .bc-select,
-.bc-rule .bc-input {
-  height: 32px;
-  font-size: 13px;
-  padding: 5px 8px;
-  box-sizing: border-box;
-}
-
-.bc-rule textarea.bc-input {
-  height: 32px;
-  min-height: 32px;
-  line-height: 20px;
-  resize: none;
-  overflow-y: auto;
-}
-
-/* Say boxes are the exception: two lines tall from the start and they grow
-   with the message, so multi-line says are impossible to miss. */
-.bc-rule textarea.w-say {
-  height: 52px;
-  min-height: 52px;
-  white-space: pre-wrap;
-}
-
-.w-trig {
-  width: 218px;
-}
-
-.w-math {
-  width: 110px;
-}
-
-.w-act {
-  width: 178px;
-}
-
-.w-word {
-  width: 110px;
-}
-
-.w-mem {
-  width: 104px;
-}
-
-.w-per {
-  width: 168px;
-}
-
-.w-val {
-  width: 140px;
-}
-
-.w-num {
-  width: 70px;
-}
-
-.w-grow {
-  flex: 1;
-  min-width: 160px;
-}
-
-.bc-row-btns {
-  margin-left: auto;
-  display: inline-flex;
-  gap: 0;
-  flex-shrink: 0;
-}
-
-.bc-unit {
-  font-size: 12px;
-  color: var(--tk-muted);
-}
-
-/* Difficulty chips on the ready-made bots */
-
-.bc-diff {
-  font-size: 9px;
-  font-weight: bold;
-  letter-spacing: 0.5px;
-  border-radius: 8px;
-  padding: 2px 7px;
-  margin-left: auto;
-  flex-shrink: 0;
-}
-
-.bc-diff.easy {
-  background: #66bb6a;
-  color: #0b2310;
-}
-
-.bc-diff.medium {
-  background: var(--tk-accent);
-  color: #2b1a00;
-}
-
-.bc-diff.hard {
-  background: #ff5252;
-  color: #2b0000;
-}
-
-/* Rules light up when the test room runs them */
-
-.bc-rule.fired .bc-blk {
-  border-color: var(--tk-detail);
-  transition: border-color 0.2s ease;
-}
-
-.bc-rule.fired .blk-when {
-  box-shadow: 0 0 0 1px var(--tk-detail);
-}
-
-.bc-rule.skipped .blk-when {
-  box-shadow: 0 0 0 1px #7a5c00;
-  transition: box-shadow 0.2s ease;
-}
-
-.bc-rule-tag {
-  font-size: 10px;
-  font-weight: bold;
-  border-radius: 8px;
-  padding: 2px 7px;
-  margin-left: 8px;
-}
-
-.bc-rule-tag.ran {
-  background: var(--tk-detail);
-  color: #00292b;
-}
-
-.bc-rule-tag.skip {
-  background: #7a5c00;
-  color: #fff2cc;
-}
-
-/* ── Magic word inserter ── */
-
-.bc-magic-wrap {
-  position: relative;
-  flex: 0 0 auto;
-}
-
-.bc-magic-btn {
-  background: none;
-  border: 1px solid var(--tk-border);
-  border-radius: 4px;
-  color: var(--tk-detail);
-  font-size: 13px;
-  padding: 7px 9px;
-  cursor: pointer;
-}
-
-.bc-magic-btn:hover {
-  border-color: var(--tk-detail);
-}
-
-.bc-magic-menu {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 4px);
-  z-index: 300;
-  background: var(--tk-bg);
-  border: 1px solid var(--tk-detail);
-  border-radius: 8px;
-  width: 300px;
-  max-height: 300px;
-  overflow-y: auto;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
-}
-
-/* The add-a-block menu opens from a left-side button, so it hangs left */
-.bc-magic-menu.left {
-  left: 0;
-  right: auto;
-}
-
-.bc-magic-item b {
-  color: var(--tk-accent);
-  font-size: 12.5px;
-}
-
-.bc-magic-item {
-  display: block;
-  width: 100%;
-  text-align: left;
-  background: none;
-  border: none;
-  border-bottom: 1px solid #2a2a2a;
-  color: var(--tk-text);
-  font-family: inherit;
-  font-size: 12.5px;
-  padding: 8px 12px;
-  cursor: pointer;
-}
-
-.bc-magic-item:hover {
-  background: var(--tk-tile-hover);
-}
-
-.bc-magic-item code {
-  color: var(--tk-detail);
-  font-family: Consolas, Monaco, monospace;
-  font-size: 12px;
-  margin-right: 6px;
-}
-
-.bc-magic-item span {
-  color: var(--tk-muted);
-  font-size: 11.5px;
-}
-
-/* ── Bot Book extras ── */
 
 .bc-doc-lede {
   font-size: 15px;
@@ -1378,64 +1720,153 @@ textarea.bc-input {
 }
 
 .bc-doc-diagram .d-when {
-  background: var(--tk-accent);
-  color: #000;
+  background: var(--blk-when);
+  color: #fff;
 }
 
 .bc-doc-diagram .d-if {
-  background: #7a5c00;
-  color: #fff2cc;
+  background: var(--blk-if);
+  color: #fff;
 }
 
 .bc-doc-diagram .d-do {
-  background: var(--tk-detail);
-  color: #00292b;
+  background: var(--blk-do);
+  color: #fff;
 }
 
 .bc-doc ol {
   line-height: 1.9;
 }
 
-/* ── Responsive ── */
+/* On big screens the Test button collapses the panel to widen the canvas */
 
-@media (max-width: 1150px) {
-  .bc-build-grid {
-    grid-template-columns: 1fr;
+body.bc-test-hidden .bc-testpanel {
+  display: none;
+}
+
+body.bc-test-hidden .bc-workspace {
+  grid-template-columns: 200px minmax(0, 1fr);
+}
+
+/* ── Responsive ──
+   1250px: the test room becomes a slide-in drawer (toggled from the bar).
+   950px: the palette hides; blocks are added with the + buttons instead.
+   700px: the action bar stacks; everything is one column. */
+
+@media (max-width: 1250px) {
+  .bc-workspace {
+    grid-template-columns: 200px minmax(0, 1fr);
   }
-  .bc-build-right {
-    position: static;
-    order: -1; /* on small screens the test room sits on top, still in reach */
+  .bc-testpanel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(400px, 92vw);
+    max-height: none;
+    z-index: 500;
+    border-left: 2px solid var(--tk-accent);
+    transform: translateX(105%);
+    transition: transform 0.18s ease;
   }
-  .bc-test-chat {
-    min-height: 150px;
-    max-height: 220px;
+  body.bc-test-open .bc-testpanel {
+    transform: translateX(0);
+  }
+  .bc-test-close {
+    display: block;
   }
 }
 
-@media (max-width: 900px) {
-  .bc-shell {
-    grid-template-columns: 1fr;
-    overflow-y: auto;
+@media (max-width: 950px) {
+  .bc-workspace {
+    grid-template-columns: minmax(0, 1fr);
   }
-  .bc-side {
+  .bc-palette {
+    display: none;
+  }
+  .bc-canvas {
+    border-left: none;
     border-right: none;
-    border-bottom: 2px solid var(--tk-border);
-    overflow-y: visible;
+    min-height: 60vh;
+    padding: 14px 12px 60px;
   }
-  .bc-main {
-    overflow-y: visible;
+  .bc-rule {
+    max-width: none;
   }
-  .bc-deploy-grid {
-    grid-template-columns: 1fr;
-  }
-  .bc-name-grid {
-    grid-template-columns: 1fr;
-  }
+}
+
+@media (max-width: 700px) {
   .bc-top {
     flex-wrap: wrap;
+    gap: 10px;
   }
   .bc-top-right {
+    margin-left: auto;
+  }
+  .bc-top-nav {
+    order: 3;
     width: 100%;
+  }
+  .bc-editbar {
+    gap: 8px;
+    padding: 8px 10px;
+  }
+  .bc-nametag {
+    flex: 1 1 100%;
+  }
+  .bc-nametag #botName,
+  .bc-nametag #botLocation {
+    width: 0;
+    flex: 1;
+    min-width: 60px;
+  }
+  .bc-save-note {
+    flex-basis: 100%;
+    order: 5;
+  }
+  .bc-editbar-btns {
     margin-left: 0;
+    width: 100%;
+  }
+  .bc-editbar-btns .bc-btn {
+    flex: 1;
+    justify-content: center;
+    padding: 9px 6px;
+  }
+  .bc-hero {
+    padding: 20px 16px;
+  }
+  .bc-hero h1 {
+    font-size: 21px;
+  }
+  .bc-view {
+    padding: 14px 12px 50px;
+  }
+  .bc-chip-table {
+    grid-template-columns: 1fr;
+    gap: 2px 0;
+  }
+  .bc-chip-table code {
+    margin-top: 8px;
+  }
+  .bc-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .bc-blk-chip {
+    width: 100%;
+  }
+  .w-trig,
+  .w-act,
+  .w-per,
+  .w-val {
+    flex: 1 1 130px;
+    width: auto;
+    min-width: 110px;
+  }
+}
+
+@media (max-width: 440px) {
+  .bc-grid {
+    grid-template-columns: 1fr;
   }
 }
