@@ -363,7 +363,17 @@ const io = socketIo(server, {
   // WebSocket to us is not going to work well anyway.
   transports: ["websocket"],
   allowUpgrades: false,
-  perMessageDeflate: { threshold: 1024 },
+  // Off, which is also what engine.io itself defaults to. It never did much
+  // here - a chat line or a game frame is well under the threshold and went
+  // out uncompressed anyway - but it is not free just because it rarely fires.
+  // ws compresses on the thread pool, and it holds back everything else queued
+  // on that connection until the compressor comes back, so one oversized room
+  // state broadcast would sit in front of a rally's worth of Pong frames. Real
+  // time traffic being stuck behind bulk traffic is exactly what this is for
+  // avoiding, and the bandwidth it saved was never the constraint.
+  perMessageDeflate: false,
+  // Whole-page and asset responses still compress. That path is bulk by
+  // nature and nothing latency sensitive is waiting behind it.
   httpCompression: true,
 });
 

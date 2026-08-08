@@ -110,6 +110,7 @@ const liveTables = new Set(); // tables currently being simulated at 60 Hz
 let deps = null;
 let timer = null;
 let frameTimer = null;
+let frameDue = 0; // next slot on the fixed frame grid
 let seq = 0;
 
 function init(d) {
@@ -1640,7 +1641,32 @@ function tick() {
 
 function armFrames() {
   if (frameTimer || !liveTables.size) return;
-  frameTimer = setInterval(frameTick, FRAME_MS);
+  frameDue = Date.now() + FRAME_MS;
+  frameTimer = setTimeout(frameLoop, FRAME_MS);
+  if (frameTimer.unref) frameTimer.unref();
+}
+
+// A plain repeating timer drifts, and it drifts more the busier the host is:
+// node will not fire one early, so every late frame pushes the next one later
+// still. That unevenness leaves here as unevenly spaced snapshots, and a
+// browser cannot tell it apart from the network being unevenly slow. It
+// answers the only way it can, by widening the buffer it draws behind - and
+// that buffer is felt directly in the hand. So a sloppy beat on this side is
+// paid for as input lag on the other, by everybody at the board.
+//
+// Aiming at the next slot on a fixed grid instead of a fixed distance from
+// whenever this one happened to run keeps the beat even without ever running
+// the physics faster than real time.
+function frameLoop() {
+  frameTimer = null;
+  frameTick();
+  if (!liveTables.size) return;
+  const now = Date.now();
+  frameDue += FRAME_MS;
+  // Far enough behind that catching up slot by slot would mean a burst of
+  // back to back frames. Give up on the missed ones and re-lay the grid.
+  if (frameDue < now) frameDue = now + FRAME_MS;
+  frameTimer = setTimeout(frameLoop, frameDue - now);
   if (frameTimer.unref) frameTimer.unref();
 }
 
@@ -1671,10 +1697,9 @@ function frameTick() {
     }
     if (out.push) emitFrame(t, { kind: "frame", f: rules.frameView(t.game) });
   }
-  if (!liveTables.size && frameTimer) {
-    clearInterval(frameTimer);
-    frameTimer = null;
-  }
+  // Nothing left to simulate: frameLoop sees the empty set and stops
+  // rescheduling itself, and armFrames lays a fresh grid next time a match
+  // starts.
 }
 
 // Paddle intent. This arrives up to forty times a second per player, so it

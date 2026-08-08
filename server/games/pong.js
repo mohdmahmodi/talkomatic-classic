@@ -92,6 +92,12 @@ function create(players, opts) {
       dir: 0, // keyboard: -1, 0, 1
       targetY: null, // pointer: where they want the paddle
       lastInputAt: now,
+      // The highest intent number from this player that has actually been
+      // applied here. It goes back out on every snapshot, and it is the whole
+      // reason the browser can predict its own paddle without fighting this
+      // one: it can see exactly how far behind the server's copy is and
+      // rebuild the rest from intents it knows are still in the wire.
+      ack: 0,
       hits: 0,
       stirred: false, // paddle actually moved during this point
       still: 0, // points conceded in a row without it moving at all
@@ -112,6 +118,8 @@ function create(players, opts) {
     lastStepAt: now,
     simAt: now, // the clock time the simulated position actually belongs to
     acc: 0,
+    skew: 0, // wall time a stall swallowed and the simulation never ran
+
     since: 0, // steps since the last snapshot
     pushNow: true,
   };
@@ -129,6 +137,15 @@ function input(state, userId, inp) {
   const p = state.players[seatOf(state, userId)];
   if (!p) return false;
   p.lastInputAt = Date.now();
+  // Intents can only ever go forwards. A reordered or replayed one is dropped
+  // rather than applied late, because applying it would move the paddle back
+  // to somewhere the player has already left and the browser, which numbered
+  // it in the first place, would have no way to know that had happened.
+  if (inp && inp.n !== undefined) {
+    const n = Number(inp.n);
+    if (!Number.isFinite(n) || n <= p.ack) return false;
+    p.ack = n;
+  }
   if (inp && inp.d !== undefined) {
     const d = Number(inp.d);
     p.dir = d > 0 ? 1 : d < 0 ? -1 : 0;
@@ -378,7 +395,18 @@ function frame(state, now) {
   let elapsed = now - state.lastStepAt;
   state.lastStepAt = now;
   if (elapsed < 0) elapsed = 0;
-  if (elapsed > MAX_CATCHUP * STEP_MS) elapsed = MAX_CATCHUP * STEP_MS;
+  const budget = MAX_CATCHUP * STEP_MS;
+  if (elapsed > budget) {
+    // Time this simulation is never going to run. It has to be remembered
+    // rather than quietly forgotten: the snapshot carries a timestamp, and if
+    // that timestamp keeps pace with the wall clock while the ball does not,
+    // every browser is told the ball is somewhere it will not reach for
+    // another fifth of a second and dutifully draws it there. A host that
+    // hitches should cost a hitch, not a court that is permanently lying about
+    // where the ball is.
+    state.skew += elapsed - budget;
+    elapsed = budget;
+  }
   state.acc += elapsed;
 
   let steps = 0;
@@ -395,7 +423,7 @@ function frame(state, now) {
   // browser the ball was somewhere it will not be for another 16ms, and it
   // would faithfully reconstruct that error. This is the time the position on
   // the wire genuinely belongs to.
-  state.simAt = now - state.acc;
+  state.simAt = now - state.acc - state.skew;
 
   if (!state.over) {
     // Somebody who walked off would otherwise sit there conceding points until
@@ -442,6 +470,8 @@ function frameView(state) {
     t: state.simAt || Date.now(),
     b: [r2(state.ball.x), r2(state.ball.y), r2(state.ball.vx), r2(state.ball.vy)],
     p: [r2(a ? a.y : H / 2), r2(b ? b.y : H / 2)],
+    // How far through each player's intents this position accounts for.
+    k: [a ? a.ack : 0, b ? b.ack : 0],
     s: [a ? a.score : 0, b ? b.score : 0],
     ph: state.phase,
     sa: state.phase === "serve" ? state.serveAt : 0,

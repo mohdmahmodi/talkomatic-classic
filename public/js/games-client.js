@@ -1647,17 +1647,43 @@
   // what buys the ball its bounces: by the time the render clock reaches the
   // moment of a hit, the frame carrying it has already landed.
   //
-  // Your own paddle is the exception, and has to be. It is run locally against
-  // the same speed cap the server uses, so it answers the mouse in this frame
-  // instead of a round trip from now, and is eased back if the two ever drift
-  // far enough apart to matter.
+  // Your own paddle is the exception, and has to be. Waiting a round trip to
+  // find out where your own hand went is not worth playing with, so it is run
+  // here against the same speed cap the server uses. It is rebuilt from the
+  // server's own last word on it every time one arrives, by replaying the
+  // intents the server has not acknowledged yet - so it is predicted without
+  // ever being guessed at, and it cannot drift.
   const PG_CHEERS = ["👏", "🔥", "😱", "😂", "💪", "🎉"];
   const PG_BUF = 32; // snapshots kept, about a second of them
   // The whole court is drawn this far behind the clock, your own paddle
   // included, so this is input lag and is kept as small as the stream allows.
+  //
+  // The ceiling used to be 260ms. Nothing on a real network ever wanted a
+  // buffer that wide for long, but the way it was measured could ask for one
+  // off a single bad packet and then hold it there, and a quarter of a second
+  // of lag in the hand is not a playable game - it is worse than the occasional
+  // hitch that a tighter ceiling costs.
   const PG_MIN_DELAY = 45;
-  const PG_MAX_DELAY = 260;
+  const PG_MAX_DELAY = 165;
   const PG_SEND_MS = 20; // paddle intent sampled at fifty a second
+  // The clock estimate and the jitter estimate are both decaying high water
+  // marks, and these are how fast each gives ground per snapshot.
+  //
+  // The clock sags linearly and very slowly - about a third of a millisecond a
+  // snapshot, ten a second - because it is only ever correcting for two
+  // clocks running at fractionally different rates, and being wrong about that
+  // in a hurry is worse than being wrong about it slowly.
+  //
+  // The buffer gives ground geometrically instead, losing about three quarters
+  // of the way back to normal every second, because what it is unwinding is a
+  // one-off spike rather than a drift. Linearly, a single 200ms stall took
+  // nearly four seconds to walk off, which on a link that hiccups every few
+  // seconds means it never walks off at all - the buffer just lives at its
+  // ceiling and the game feels like it is played through treacle. This is the
+  // difference between a hiccup costing a moment and a hiccup costing the
+  // rest of the match.
+  const PG_OFF_DECAY = 0.35;
+  const PG_JIT_KEEP = 0.955;
 
   BOARDS.pong = function () {
     let root, canvas, ctx, courtBox, wrapEl, floatEl;
@@ -1674,8 +1700,9 @@
     let players = [];
 
     const buf = []; // snapshots, oldest first
-    const offSamples = [];
-    let offset = 0, haveOffset = false, delay = 110;
+    let offset = 0, bestOff = 0, haveOffset = false;
+    let jitter = 12, period = 34, delay = 90;
+    let renderT = 0, renderAt = 0; // the court's own clock, and when it last ran
     let firedT = 0;
 
     let myY = null, myWant = null, myDir = 0;
@@ -1683,9 +1710,14 @@
     // Where the local prediction had this paddle at each past instant, in
     // server time. Reconciliation compares like with like against it: a
     // snapshot is always a little old, so measuring it against where the
-    // paddle is NOW reads every bit of honest travel as an error and drags the
-    // paddle backwards the whole time the hand is moving.
+    // paddle is NOW reads every bit of honest travel as an error.
     const myHist = [];
+    // The newest intent the server has confirmed, followed by everything sent
+    // since that it has not. Each carries the number it went out under and the
+    // moment this browser started acting on it, which is what makes the gap
+    // between the two paddles a measurement rather than a guess.
+    let seq = 0;
+    const sent = [];
     let upHeld = false, downHeld = false;
 
     let prevBase = null, errX = 0, errY = 0;
@@ -1710,34 +1742,76 @@
 
     // ── Clock ──
     // The quickest snapshot to arrive is the one that spent least time in the
-    // wire, so it is the best guess at where the server's clock actually is.
-    // The spread between quickest and slowest is the jitter the render delay
-    // has to hide, which is why the delay is measured rather than picked.
+    // wire, so its offset is the closest thing to where the server's clock
+    // actually is. How far behind that mark the rest land is the jitter the
+    // render buffer has to cover, which is why the buffer is measured rather
+    // than picked.
+    //
+    // Both are decaying high water marks now, and that is the whole fix. They
+    // used to be a plain maximum and a plain minimum over a six second window,
+    // which makes each of them hostage to its single worst sample: one 150ms
+    // hiccup, of the kind a real link produces every few seconds and a
+    // loopback never produces at all, pinned the buffer at its ceiling for the
+    // entire six seconds it took to age out - and then the next one arrived.
+    // Letting the marks give ground on their own means a bad moment costs a
+    // wide buffer for a moment, and it walks back down without waiting for
+    // anything to expire.
     function noteClock(t, gap) {
       const local = Date.now();
-      offSamples.push({ at: local, off: t - local, gap });
-      while (offSamples.length && local - offSamples[0].at > 6000) offSamples.shift();
-      let best = -Infinity, worst = Infinity;
-      const gaps = [];
-      for (const s of offSamples) {
-        if (s.off > best) best = s.off;
-        if (s.off < worst) worst = s.off;
-        if (s.gap > 0) gaps.push(s.gap);
-      }
+      const off = t - local;
       if (!haveOffset) {
-        offset = best;
+        bestOff = off;
+        offset = off;
         haveOffset = true;
-      } else offset += (best - offset) * 0.15;
+      } else if (off > bestOff) bestOff = off;
+      else bestOff -= PG_OFF_DECAY;
 
-      // Everything is drawn at this much behind the clock, so it is now felt
-      // directly in the hand and is worth measuring rather than guessing. It
-      // has to cover one gap between snapshots plus however unevenly they are
-      // arriving, and nothing more. The gap is read off the server's own
-      // timestamps, so a slow link widens it honestly instead of hiding it.
-      gaps.sort((a, b) => a - b);
-      const period = gaps.length ? gaps[Math.floor(gaps.length * 0.75)] : 34;
-      const jitter = Math.max(0, best - worst);
+      const late = Math.max(0, bestOff - off);
+      jitter = Math.max(late, jitter * PG_JIT_KEEP);
+      // The gap is read off the server's own timestamps rather than off
+      // arrival times, so a stall on the link does not touch it: the snapshots
+      // still describe moments 33ms apart however late they turn up together.
+      // Only the jitter above has to absorb that.
+      if (gap > 0) period = Math.max(gap, period - 0.5);
+
+      // Slewed, never assigned. This is the number the whole court is drawn
+      // against, so a step in it is a step in everything on screen.
+      offset += clamp(bestOff - offset, -1.5, 1.5);
       delay = clamp(period + jitter + 8, PG_MIN_DELAY, PG_MAX_DELAY);
+    }
+
+    // The clock the court is actually drawn on. It runs at wall speed and is
+    // only ever nudged toward where the stream says it should be, a few
+    // percent at a time, so it can never step backwards.
+    //
+    // Recomputing it outright every frame was the other half of the paddle
+    // going the wrong way. Both of its terms move: the offset walks whenever a
+    // luckier packet arrives or an old one ages out, and the buffer widens and
+    // narrows underneath it. Subtracting one moving number from another and
+    // calling the result a clock meant that any wobble in either reversed
+    // time for the whole court - and a paddle stepping back up the screen
+    // while the hand is still going down is the most obvious kind of wrong
+    // there is.
+    function renderClock(nowMs) {
+      const want = Date.now() + offset - delay;
+      if (!renderT || Math.abs(want - renderT) > 400) {
+        // First frame, or back from a hidden tab where nothing has run for
+        // long enough that easing across would take all day.
+        renderT = want;
+        renderAt = nowMs;
+        return renderT;
+      }
+      let dt = nowMs - renderAt;
+      renderAt = nowMs;
+      if (dt < 0) dt = 0;
+      else if (dt > 250) dt = 250;
+      // Between three quarters and one and a half times real speed. Slow
+      // enough that nobody can see the court running off pace, quick enough to
+      // close a wobble inside a rally, and floored above zero so this is
+      // monotonic by construction.
+      const drift = want - renderT;
+      renderT += dt + clamp(drift * 0.08, -dt * 0.25, dt * 0.5);
+      return renderT;
     }
 
     // ── Snapshots ──
@@ -1771,6 +1845,16 @@
       // heartbeat actually needs. Only the plain ones are measured.
       noteClock(f.t, prev && !(f.ev && f.ev.length) ? f.t - prev.t : 0);
       if (!firedT) firedT = f.t;
+      // Everything the server has confirmed is history now, except the newest
+      // of them: that one is the intent its paddle is chasing right now, and
+      // how old it is decides how far behind this one it is entitled to be.
+      // Watching rather than playing means there is no paddle of ours to
+      // acknowledge, and a server old enough not to send this at all leaves
+      // the list untouched - which reconcile() reads as "no idea how far
+      // behind it is" and answers by leaving the paddle alone. Both degrade
+      // to the safe side.
+      const ack = mySide >= 0 && f.k ? f.k[mySide] || 0 : 0;
+      while (sent.length > 1 && sent[1].n <= ack) sent.shift();
       if (myY == null && mySide >= 0) myY = f.p[mySide];
       else reconcile(f);
     }
@@ -1788,10 +1872,28 @@
       return myHist[0].y;
     }
 
-    // Only ever corrects a genuine disagreement: what the server had at the
-    // snapshot's own moment against what we thought we had at that same
-    // moment. In steady play the two run the same sum off the same intent and
-    // this does nothing at all.
+    // The bug this game shipped with, and the reason it played on a loopback
+    // and fell apart on a real one.
+    //
+    // The server's paddle is meant to sit behind this one. It is chasing the
+    // newest intent it has received, and that intent left here one uplink ago,
+    // so for as long as the hand is moving the two are legitimately apart.
+    // That gap is not an error, it IS prediction: it is precisely what this
+    // browser is buying by not waiting for a round trip. The old check
+    // compared the two, saw anything over 0.8 units as a disagreement and
+    // split the difference - on every snapshot, thirty times a second, hauling
+    // the paddle back the way it had just come. Which is why the paddle jumped
+    // up the screen while the key being held was down.
+    //
+    // On localhost the uplink is half a millisecond, so the gap never once
+    // reached 0.8 and the correction never fired. Nothing about this could
+    // show up until it was on a real network.
+    //
+    // The fix is to know how big the gap is allowed to be, and the snapshot
+    // now says: it names the last intent the server actually applied, so the
+    // staleness of that intent is measurable rather than assumed, and a paddle
+    // can only move at one speed. Staleness times speed is the most the two
+    // can honestly differ by. Inside that, there is nothing to correct.
     function reconcile(f) {
       if (mySide < 0 || myY == null) return;
       const last = myHist.length ? myHist[myHist.length - 1] : null;
@@ -1807,8 +1909,20 @@
       const then = histAt(f.t);
       if (then == null) return;
       const err = f.p[mySide] - then;
-      if (Math.abs(err) < 0.8) return;
-      const fix = clamp(err, -14, 14) * 0.5;
+
+      const ack = f.k ? f.k[mySide] || 0 : 0;
+      const applied = sent.length && sent[0].n <= ack ? sent[0] : null;
+      // Nothing acknowledged yet means the server has not heard from us at
+      // all, and there is no telling how far behind it is. Sitting a whole
+      // paddle apart is the most that is ever worth tolerating anyway.
+      const stale = applied ? clamp(f.t - applied.t, 0, 600) : 600;
+      const slack = Math.min(C.paddleH, 1.2 + C.paddleSpeed * (stale / 1000));
+      if (Math.abs(err) <= slack) return;
+
+      // Past that and something has genuinely parted company: an intent lost
+      // on the way, the far wall, a seat changing hands. Eased across rather
+      // than snapped, because a real correction is rare enough to afford it.
+      const fix = clamp(err, -14, 14) * 0.35;
       myY = clamp(myY + fix, C.paddleH / 2, C.h - C.paddleH / 2);
       for (const h of myHist) h.y += fix; // or the next frame re-reports it
     }
@@ -1881,6 +1995,30 @@
     // Never a position. Where the paddle would like to be, capped at the far
     // end by the same speed everybody else gets.
 
+    // Number an intent as it goes out and keep a copy. The number comes back
+    // on the next snapshot as "this is how far through your intents I have
+    // got", and that acknowledgement is the entire basis for predicting this
+    // paddle without ever disagreeing with the server about it.
+    //
+    // The copy stores what actually went on the wire, rounded exactly as the
+    // server will see it, because a replay that used a slightly different
+    // number to the one the server is chasing would drift a hair per intent
+    // and eventually need correcting - which is the problem this replaces.
+    function note(it) {
+      seq++;
+      sent.push({
+        n: seq,
+        t: serverNow(),
+        d: it.d || 0,
+        y: it.y == null ? null : it.y,
+      });
+      // Two or three seconds of intents at the send rate. Everything the
+      // server has confirmed is dropped on arrival long before this bites; it
+      // is here so a dead connection cannot grow the list forever.
+      while (sent.length > 150) sent.shift();
+      return seq;
+    }
+
     function pump() {
       if (!canControl() || !detail) return;
       const now = performance.now();
@@ -1892,17 +2030,18 @@
         sentDir = myDir;
         sentY = null;
         lastSentAt = now;
-        S.emit("games input", { tableId: detail.id, input: { d: myDir } });
+        const it = { d: myDir };
+        it.n = note(it);
+        S.emit("games input", { tableId: detail.id, input: it });
         return;
       }
       if (myDir || myWant == null) return;
       if (!stale && sentY != null && Math.abs(myWant - sentY) < 0.2) return;
       sentY = myWant;
       lastSentAt = now;
-      S.emit("games input", {
-        tableId: detail.id,
-        input: { y: Math.round(myWant * 10) / 10 },
-      });
+      const it = { y: Math.round(myWant * 10) / 10 };
+      it.n = note(it);
+      S.emit("games input", { tableId: detail.id, input: it });
     }
 
     function aimAt(clientY) {
@@ -2096,13 +2235,8 @@
       // read as going straight through. Your paddle is predicted, so we know
       // where it was at the render moment as surely as where it is now, and
       // drawing it there costs nothing and puts the bounce back together.
-      const renderT = clamp(
-        serverNow() - delay,
-        buf[0].t,
-        newest.t + 250,
-      );
-      const padT = renderT;
-      const ballT = renderT;
+      const padT = clamp(renderClock(nowMs), buf[0].t, newest.t + 250);
+      const ballT = padT;
 
       // Anything that happened up to the render clock happens on screen now,
       // not when the packet arrived. That is what keeps a bounce and its
@@ -2147,6 +2281,8 @@
         if (!myHist.length || at > myHist[myHist.length - 1].t)
           myHist.push({ t: at, y: myY });
         while (myHist.length > 180) myHist.shift();
+        // Drawn on the same clock as the ball, which is what keeps the two of
+        // them in the same picture at the moment they touch.
         const drawn = histAt(padT);
         pads[mySide] = drawn == null ? myY : drawn;
       }
@@ -2448,7 +2584,7 @@
         ro = null;
         buf.length = 0;
         rings.length = 0;
-        offSamples.length = 0;
+        sent.length = 0;
       },
 
       relay(d) {
@@ -2478,6 +2614,20 @@
             firedT = 0;
             prevBase = null;
             errX = errY = 0;
+            // The intents in here belong to a game that no longer exists, and
+            // replaying them onto the new one would drag the paddle off to
+            // wherever the last rally left it.
+            //
+            // The numbering deliberately does NOT restart with them. A new
+            // match starts the server's acknowledgement back at zero, and an
+            // intent still in the wire from the old one lands on it and sets
+            // it to whatever that intent was numbered. If this browser had
+            // gone back to one, every input it sent afterwards would look
+            // older than that and be dropped as a stale reorder - a paddle
+            // that never moves again for the whole match. Counting on past it
+            // costs nothing and cannot collide.
+            sent.length = 0;
+            myHist.length = 0;
             myY = null;
             myWant = null;
             myDir = 0;
@@ -2493,6 +2643,8 @@
           players = t.seats.map((s) => ({ userId: s.userId, username: s.username }));
           mySide = -1;
           myY = null;
+          myHist.length = 0;
+          sent.length = 0;
         }
         paintScore(t);
         paintLineup(t);
