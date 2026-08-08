@@ -495,6 +495,16 @@ function view(state, userId) {
       baseSpeed: BASE_SPEED,
       maxSpeed: MAX_SPEED,
       paddleSpeed: PADDLE_SPEED,
+      // The browser runs this same bounce to predict the ball against its own
+      // paddle, so the numbers behind it go out with the geometry rather than
+      // being written down a second time over there. Two copies of a rule this
+      // fiddly would drift the first time one of them was tuned, and the
+      // symptom - a ball that leaves your paddle at a slightly different angle
+      // than the server thinks - is close to impossible to spot by eye.
+      speedStep: SPEED_STEP,
+      bounceMax: MAX_BOUNCE,
+      spin: SPIN,
+      minVy: MIN_VY_FRAC,
     },
     target: TARGET,
     players: state.players.map((p) => ({
