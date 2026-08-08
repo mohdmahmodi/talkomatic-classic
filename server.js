@@ -516,6 +516,9 @@ io.use((socket, next) => {
               // Same story for Draw & Guess strokes: batched, and capped by
               // its own per-second limit in server/games/socket.js.
               "games draw",
+              // And for a Pong paddle, which is a ~30/sec stream while a rally
+              // is on. Same file, same style of dedicated cap.
+              "games input",
               "get rooms",
               "get room state",
             ].includes(evt)

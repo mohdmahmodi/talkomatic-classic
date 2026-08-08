@@ -2708,3 +2708,339 @@ button.gm-side-fold:hover {
     height: 22px;
   }
 }
+
+/* ── Pong ─────────────────────────────────────────────────────────────────
+   The court is a fixed dark panel in every theme. It is a screen, not a
+   surface, and a cream court under a white ball would not read at all. */
+
+.gm-pg {
+  gap: 8px;
+}
+
+.gm-pg-scoreline {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+  padding: 0 2px;
+}
+
+.gm-pg-team {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.gm-pg-team-r {
+  justify-content: flex-end;
+}
+
+.gm-pg-name {
+  color: var(--tk-muted);
+  font-size: 13px;
+  font-weight: bold;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gm-pg-name.gm-pg-you {
+  color: var(--tk-accent);
+}
+
+.gm-pg-pts {
+  color: var(--tk-text);
+  font-size: 30px;
+  font-weight: bold;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.gm-pg-pts.gm-pg-lead {
+  color: var(--tk-accent);
+}
+
+.gm-pg-mid {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.gm-pg-to {
+  color: var(--tk-detail);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.gm-pg-to.gm-pg-mp {
+  color: var(--tk-error);
+}
+
+.gm-pg-rally {
+  color: var(--tk-muted);
+  font-size: 11px;
+  min-height: 13px;
+}
+
+.gm-pg-courtbox {
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.gm-pg-wrap {
+  position: relative;
+  border: 1px solid var(--tk-border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: #0b0b0e;
+  flex-shrink: 0;
+}
+
+.gm-pg-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* The whole court is the control surface, so the browser must not try to
+     scroll or zoom the page out from under a rally. */
+  touch-action: none;
+  cursor: none;
+}
+
+.gm-pg-float {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.gm-pg-cheer {
+  position: absolute;
+  bottom: 4%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  animation: gmPgFloat 2.4s ease-out forwards;
+}
+
+.gm-pg-cheer i {
+  font-style: normal;
+  font-size: 26px;
+  line-height: 1;
+}
+
+.gm-pg-cheer b {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 10px;
+  font-weight: normal;
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes gmPgFloat {
+  0% {
+    opacity: 0;
+    transform: translateY(10px) scale(0.7);
+  }
+  12% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-150px) scale(0.9);
+  }
+}
+
+.gm-pg-under {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.gm-pg-pads {
+  display: flex;
+  gap: 6px;
+}
+
+.gm-pg-pad {
+  width: 46px;
+  height: 34px;
+  background: var(--tk-tile);
+  border: 1px solid var(--tk-border);
+  border-radius: 5px;
+  color: var(--tk-text);
+  font-size: 18px;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.gm-pg-pad:active {
+  background: var(--tk-accent);
+  color: #000;
+}
+
+.gm-pg-cheers {
+  display: flex;
+  gap: 5px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+.gm-pg-cheer-btn {
+  width: 34px;
+  height: 34px;
+  background: var(--tk-tile);
+  border: 1px solid var(--tk-border);
+  border-radius: 5px;
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.gm-pg-cheer-btn:hover {
+  border-color: var(--tk-accent);
+  background: var(--tk-tile-hover);
+}
+
+.gm-pg-cheer-btn:active {
+  transform: scale(0.9);
+}
+
+/* Winner stays, so who is next is the question everybody in the room is
+   actually asking. It belongs under the court, not buried in the side list. */
+.gm-pg-lineup {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  min-height: 22px;
+}
+
+.gm-pg-champ {
+  color: var(--tk-accent);
+  font-size: 11px;
+  font-weight: bold;
+}
+
+.gm-pg-lbl {
+  color: var(--tk-detail);
+  font-size: 11px;
+}
+
+.gm-pg-queued {
+  background: var(--tk-tile);
+  border: 1px solid var(--tk-border);
+  border-radius: 4px;
+  padding: 2px 7px;
+  color: var(--tk-muted);
+  font-size: 11px;
+}
+
+.gm-pg-queued.gm-pg-you {
+  border-color: var(--tk-accent);
+  color: var(--tk-accent);
+}
+
+.gm-pg-hint {
+  color: var(--tk-detail);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+/* A finger is the pointer, so the court must not also be a thing you can
+   scroll, select or double tap to zoom. */
+.gm-pg-canvas {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+@media (max-width: 720px) {
+  .gm-pg {
+    gap: 6px;
+  }
+  .gm-pg-pts {
+    font-size: 22px;
+  }
+  .gm-pg-name {
+    font-size: 12px;
+  }
+  .gm-pg-hint {
+    display: none;
+  }
+  /* The court is short and wide and the screen is tall and narrow, so letting
+     the court box grow parked it in the middle of the panel with a band of
+     nothing above and below and the controls pushed off the thumb. It takes
+     the height it needs and the chat underneath gets the rest. */
+  .gm-pg-courtbox {
+    flex: 0 0 auto;
+  }
+  .gm-pg-under {
+    gap: 8px;
+  }
+  /* Thumb sized, and side by side across the bottom where a thumb already is.
+     Dragging on the court works too, but on a phone that puts a hand over the
+     half of the court you are trying to watch. */
+  .gm-pg-pads {
+    flex: 1;
+    gap: 8px;
+  }
+  .gm-pg-pad {
+    flex: 1;
+    height: 52px;
+    font-size: 22px;
+  }
+  .gm-pg-cheers {
+    gap: 4px;
+  }
+  .gm-pg-cheer-btn {
+    width: 38px;
+    height: 38px;
+  }
+  .gm-pg-lineup {
+    gap: 6px;
+  }
+  /* A drag on the court must never turn into a scroll of the panel behind it. */
+  .gm-split-fit {
+    overscroll-behavior: contain;
+  }
+  /* "You are playing" and the buttons were fighting over the same row and the
+     pill won, sitting on top of the help button. */
+  .gm-turnline {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+  .gm-youpill {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+@media (max-width: 420px) {
+  .gm-pg-cheer-btn {
+    width: 34px;
+    height: 34px;
+    font-size: 15px;
+  }
+  .gm-pg-under {
+    gap: 6px;
+  }
+}

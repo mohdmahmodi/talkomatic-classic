@@ -1586,7 +1586,7 @@ const APPS_DATA = {
   },
   minigames: {
     name: "Mini Games",
-    description: "Tic Tac Toe, Connect Four, Word Race, Draw & Guess",
+    description: "Pong, Draw & Guess, Tic Tac Toe, Connect Four and more",
     icon: "\uD83C\uDFAE",
     iconClass: "placeholder",
     status: "available",

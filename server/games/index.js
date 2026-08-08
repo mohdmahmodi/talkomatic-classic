@@ -15,9 +15,14 @@
 // Multiplayer game: write a rules module next to this file exposing
 //   id, name, icon, blurb, howTo[], minPlayers, maxPlayers, turnBased,
 //   create/move/turnOf/isOver/result/view  (+ optional tick, addPlayer,
-//   removePlayer, timeoutMove, openMs, joinInProgress)
+//   removePlayer, timeoutMove, openMs, joinInProgress, shout)
 // then require it and drop it in GAMES below. Nothing else needs touching:
 // queueing, chat, spectating, forfeits and clocks all come for free.
+//
+// A game that runs on a clock rather than on turns sets realtime: true and
+// adds input/frame/frameView. It then gets the 60 Hz lane further down instead
+// of the one second one, and its own snapshots on the wire rather than a full
+// table push per change. Pong is the worked example.
 //
 // Standalone game that runs on its own page: add an entry to EXTERNAL. It gets
 // a card in the picker and opens in a frame, with no server side at all.
@@ -31,9 +36,10 @@ const wordrace = require("./wordrace");
 const drawguess = require("./drawguess");
 const flagguess = require("./flagguess");
 const flagcdn = require("./flagcdn");
+const pong = require("./pong");
 
 // Order matters: this is the order the picker lists them in, most-played first.
-const GAMES = { drawguess, flagguess, tictactoe, connect4, wordrace };
+const GAMES = { pong, drawguess, flagguess, tictactoe, connect4, wordrace };
 
 // Games that live on their own page under public/games. No sockets, no seats,
 // no server state; the panel just frames them.
@@ -64,12 +70,12 @@ const EXTERNAL = [
 
 // Games worth telling the room about when one starts. The turn-based pair are
 // deliberately not here: two people playing tic tac toe is not news, and it
-// would fire every rotation.
-const SHOUT_TYPES = { wordrace: true, drawguess: true, flagguess: true };
+// would fire every rotation. Pong is, because it is the one people watch.
+const SHOUT_TYPES = { wordrace: true, drawguess: true, flagguess: true, pong: true };
 const SHOUT_GAP_MS = 4 * 60 * 1000; // per room, per game type
 
 // Winner keeps the seat in these; the timed group dissolves its table instead.
-const WINNER_STAYS = { tictactoe: true, connect4: true };
+const WINNER_STAYS = { tictactoe: true, connect4: true, pong: true };
 
 // Two clocks missed in a row and the seat goes to somebody who wants it.
 const MAX_MISSES = 2;
@@ -89,12 +95,21 @@ const CHAT_BURST_MS = 9000;
 const SAY_REPEAT_MS = 8000; // the same announcement will not repeat inside this
 const TYPING_MS = 4000;
 
+// Realtime lane. Only runs while a realtime game is actually being played, and
+// stops itself the moment the last one ends.
+const FRAME_MS = 16;
+const CHEERS = ["👏", "🔥", "😱", "😂", "💪", "🎉"];
+const CHEER_GAP_MS = 900;
+const AUDIENCE_CACHE_MS = 500;
+
 const floors = new Map(); // roomId -> floor
 const challenges = new Map(); // challengeId -> record
 const lastChallengeAt = new Map(); // userId -> ts
+const liveTables = new Set(); // tables currently being simulated at 60 Hz
 
 let deps = null;
 let timer = null;
+let frameTimer = null;
 let seq = 0;
 
 function init(d) {
@@ -332,6 +347,28 @@ function emitRelay(t, payload) {
   }
 }
 
+// Same thing for the 20 a second stream a realtime game puts out. Walking
+// every socket on the server that often to find the same handful of people is
+// the one part of this that would actually show up under load, so the list is
+// worked out twice a second and reused in between.
+function emitFrame(t, payload) {
+  if (!deps) return;
+  const now = Date.now();
+  const stamp = t.seats.length + ":" + t.spectators.size;
+  if (!t.audience || now - t.audienceAt > AUDIENCE_CACHE_MS || t.audienceStamp !== stamp) {
+    t.audienceAt = now;
+    t.audienceStamp = stamp;
+    t.audience = deps.socketsInRoom(t.roomId).filter((s) => {
+      const uid = deps.userIdOf(s);
+      return (
+        !!uid && (t.seats.some((x) => x.userId === uid) || t.spectators.has(uid))
+      );
+    });
+  }
+  const msg = { tableId: t.id, ...payload };
+  for (const s of t.audience) if (s.connected) s.emit("games relay", msg);
+}
+
 function toUser(roomId, userId, event, payload) {
   if (!deps) return;
   for (const s of deps.socketsInRoom(roomId)) {
@@ -390,6 +427,10 @@ function createTable(f, type, opts) {
     lastChatAt: new Map(),
     nextUp: [], // watchers who asked for a seat when this round ends
     chatBurst: new Map(), // userId -> recent send times, caps a flood
+    cheerAt: new Map(), // userId -> last cheer, one lane per person
+    audience: null, // cached socket list for the realtime stream
+    audienceAt: 0,
+    audienceStamp: "",
     lastSaid: new Map(), // userId -> their last line, kills copy-paste repeats
     saidAt: new Map(), // announcement -> when, stops narration looping
     typing: new Map(), // userId -> expiry, drives "someone is typing"
@@ -500,6 +541,7 @@ function audienceOf(t) {
 
 function dissolve(f, t, reason) {
   if (!f.tables.has(t.id)) return;
+  liveTables.delete(t);
   const had = t.seats.map((s) => s.userId);
   f.tables.delete(t.id);
   for (const uid of had) unseatPlayer(f, t, uid);
@@ -523,6 +565,10 @@ function startMatch(t) {
   t.rotateAt = null;
   t.matchNumber++;
   armTurn(t);
+  if (rules.realtime && rules.frame) {
+    liveTables.add(t);
+    armFrames();
+  }
   emitTable(t);
 
   // Tell the room, but only for the games that want a crowd, and only on the
@@ -531,9 +577,13 @@ function startMatch(t) {
     const who = t.seats.length === 1 ? t.seats[0].username : null;
     shoutRoom(
       t,
-      who
-        ? `${who} started ${rules.name}. There is room to join.`
-        : `${rules.name} just started with ${t.seats.length} players. You can still join.`,
+      // A game with nothing to offer a joiner says so itself, because the
+      // generic line below invites people into a seat that does not exist.
+      rules.shout
+        ? rules.shout(t.seats, rules.name)
+        : who
+          ? `${who} started ${rules.name}. There is room to join.`
+          : `${rules.name} just started with ${t.seats.length} players. You can still join.`,
     );
   }
 }
@@ -630,6 +680,7 @@ function pump(f, type) {
 
 function finishMatch(t) {
   const rules = rulesFor(t.type);
+  liveTables.delete(t);
   const res = rules.result(t.game);
   t.result = res;
   t.state = "finished";
@@ -1127,13 +1178,16 @@ function forfeit(f, t, userId) {
         t.game = null;
         t.state = "open";
         t.turnDeadline = null;
+        liveTables.delete(t);
         maybeStart(f, t);
         emitTable(t);
       }
       return;
     }
     if (t.seats.length < rules.minPlayers) {
-      // Two seater: the one still sitting there takes it.
+      // Two seater: the one still sitting there takes it. Ends the match
+      // without going through finishMatch, so the lane is released here.
+      liveTables.delete(t);
       const survivor = t.seats[0];
       t.result = {
         winnerId: survivor ? survivor.userId : null,
@@ -1297,7 +1351,9 @@ function spectate(roomId, userId, tableId, on) {
 function challenge(roomId, from, targetUserId, type) {
   const rules = rulesFor(type);
   if (!rules) return { err: "Unknown game." };
-  if (!rules.turnBased || rules.maxPlayers !== 2)
+  // Head to head is about the seat count, not about taking turns. Pong is two
+  // people and nothing else, so asking somebody by name has to work there too.
+  if (rules.maxPlayers !== 2 || rules.minPlayers !== 2)
     return { err: `${rules.name} is not a head to head game.` };
   if (targetUserId === from.userId) return { err: "Pick somebody else." };
 
@@ -1575,10 +1631,102 @@ function tick() {
   }
 }
 
+// ── Realtime lane ───────────────────────────────────────────────────────────
+// The one second clock above runs the whole floor. It is far too coarse for a
+// game with a ball in it, and far too expensive to run at sixty: it walks every
+// room, every table and every pool. So realtime games get their own timer that
+// only ever touches the handful of tables actually mid-match, and only exists
+// while at least one of them does.
+
+function armFrames() {
+  if (frameTimer || !liveTables.size) return;
+  frameTimer = setInterval(frameTick, FRAME_MS);
+  if (frameTimer.unref) frameTimer.unref();
+}
+
+function frameTick() {
+  if (!deps) return;
+  const now = Date.now();
+  for (const t of [...liveTables]) {
+    const f = floors.get(t.roomId);
+    // Self healing rather than a delete on every path a match can end by:
+    // rotate, forfeit and the room closing all leave the table in a state this
+    // spots on the next frame.
+    if (!f || f.tables.get(t.id) !== t || t.state !== "playing" || !t.game) {
+      liveTables.delete(t);
+      continue;
+    }
+    const rules = rulesFor(t.type);
+    if (!rules || !rules.frame) {
+      liveTables.delete(t);
+      continue;
+    }
+    const out = rules.frame(t.game, now) || {};
+    if (out.say) for (const line of out.say) say(t, line.text, line.tone || null);
+    if (rules.isOver(t.game)) {
+      liveTables.delete(t);
+      finishMatch(t);
+      emitFloor(t.roomId);
+      continue;
+    }
+    if (out.push) emitFrame(t, { kind: "frame", f: rules.frameView(t.game) });
+  }
+  if (!liveTables.size && frameTimer) {
+    clearInterval(frameTimer);
+    frameTimer = null;
+  }
+}
+
+// Paddle intent. This arrives up to forty times a second per player, so it
+// answers nothing and broadcasts nothing: the next frame carries the result.
+// A refusal here would mean a toast every twenty five milliseconds.
+function realtimeInput(roomId, userId, tableId, inp) {
+  const f = floors.get(roomId);
+  if (!f) return { ok: true };
+  const t = f.tables.get(tableId);
+  if (!t || t.state !== "playing" || !t.game) return { ok: true };
+  const rules = rulesFor(t.type);
+  if (!rules || !rules.input) return { ok: true };
+  if (!t.seats.some((s) => s.userId === userId)) return { ok: true };
+  rules.input(t.game, userId, inp || {});
+  return { ok: true };
+}
+
+// Watching a game and having nothing to do but type is a poor deal, so a
+// watcher can throw an emoji at the board. It goes nowhere near the chat feed:
+// cheering is meant to be spammable, and the feed is not.
+function cheer(roomId, userId, tableId, emoji) {
+  const f = floorFor(roomId);
+  const t = f.tables.get(tableId);
+  if (!t) return { err: "That game has finished." };
+  if (CHEERS.indexOf(emoji) < 0) return { ok: true };
+  if (!audienceOf(t).has(userId)) {
+    if (!deps.userInfo(roomId, userId)) return { err: "You are not in this room." };
+    t.spectators.add(userId);
+    emitFloor(roomId);
+  }
+  const now = Date.now();
+  // Dropped in silence rather than refused: being told off for cheering twice
+  // would be a strange thing to happen to somebody enjoying themselves.
+  if (now - (t.cheerAt.get(userId) || 0) < CHEER_GAP_MS) return { ok: true };
+  t.cheerAt.set(userId, now);
+  const u = deps.userInfo(roomId, userId) || {};
+  emitRelay(t, {
+    kind: "cheer",
+    userId,
+    username: u.username || "Someone",
+    emoji,
+  });
+  return { ok: true };
+}
+
 module.exports = {
   init,
   catalog,
   snapshot,
+  realtimeInput,
+  cheer,
+  CHEERS,
   queueJoin,
   queueLeave,
   playNext,
@@ -1606,5 +1754,7 @@ module.exports = {
   emitFloor,
   GAMES,
   _tick: tick,
+  _frameTick: frameTick,
+  _liveCount: () => liveTables.size,
   _floors: floors,
 };

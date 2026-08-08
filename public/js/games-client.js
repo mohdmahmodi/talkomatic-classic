@@ -690,7 +690,7 @@
       }),
     );
     foot.appendChild(tags);
-    if (g.turnBased && g.maxPlayers === 2 && !myGame)
+    if (g.maxPlayers === 2 && g.minPlayers === 2 && !myGame)
       foot.appendChild(
         el("button", {
           class: "gm-btn gm-btn-ghost gm-card-invite",
@@ -899,8 +899,9 @@
       bodyEl.appendChild(split);
 
       // Draw & Guess sizes itself to the space rather than scrolling, on a
-      // phone as well as a desktop.
-      const fits = t.type === "drawguess" || t.type === "flagguess";
+      // phone as well as a desktop. So does anything else on a canvas.
+      const fits =
+        t.type === "drawguess" || t.type === "flagguess" || t.type === "pong";
       main.classList.toggle("gm-main-fit", fits);
       split.classList.toggle("gm-split-fit", fits);
       board = BOARDS[t.type] ? BOARDS[t.type]() : null;
@@ -1188,7 +1189,7 @@
       }),
     );
     const acts = el("div", { class: "gm-waiting-acts" });
-    if (g && g.turnBased && g.maxPlayers === 2)
+    if (g && g.maxPlayers === 2 && g.minPlayers === 2)
       acts.appendChild(
         el("button", {
           class: "gm-btn gm-btn-primary",
@@ -1629,6 +1630,877 @@
   // ── Boards ────────────────────────────────────────────────────────────────
 
   const BOARDS = {};
+
+  // Pong --------------------------------------------------------------------
+  // This one does not simulate the match, it reconstructs it.
+  //
+  // The server sends a snapshot the instant anything happens - a bounce, a
+  // point - and a heartbeat twenty times a second in between. A ball only
+  // changes direction at one of those moments, so the path between two
+  // snapshots is arithmetic rather than a guess: walk it forward from the last
+  // one, reflecting off the top and bottom exactly as the server does, and you
+  // are on the server's ball, not near it. Nothing here slides between samples,
+  // which is the usual reason a networked ball looks like it is on elastic.
+  //
+  // Paddles do change direction whenever a hand does, so those are interpolated
+  // between snapshots at a fixed delay behind the clock. That delay is also
+  // what buys the ball its bounces: by the time the render clock reaches the
+  // moment of a hit, the frame carrying it has already landed.
+  //
+  // Your own paddle is the exception, and has to be. It is run locally against
+  // the same speed cap the server uses, so it answers the mouse in this frame
+  // instead of a round trip from now, and is eased back if the two ever drift
+  // far enough apart to matter.
+  const PG_CHEERS = ["👏", "🔥", "😱", "😂", "💪", "🎉"];
+  const PG_BUF = 32; // snapshots kept, about a second of them
+  // The whole court is drawn this far behind the clock, your own paddle
+  // included, so this is input lag and is kept as small as the stream allows.
+  const PG_MIN_DELAY = 45;
+  const PG_MAX_DELAY = 260;
+  const PG_SEND_MS = 20; // paddle intent sampled at fifty a second
+
+  BOARDS.pong = function () {
+    let root, canvas, ctx, courtBox, wrapEl, floatEl;
+    let nameL, nameR, ptsL, ptsR, midEl, rallyEl;
+    let matchKey = "";
+    let padsEl, cheerEl, lineupEl, hintEl;
+    let ro = null, raf = null, sendTimer = null;
+    let cssFont = "sans-serif";
+
+    // Court geometry comes off the wire so none of it is duplicated here.
+    let C = { w: 200, h: 120, wall: 4, paddleW: 2.4, paddleH: 22, ballR: 1.9, paddleSpeed: 110, maxSpeed: 175, baseSpeed: 70 };
+    let target = 7;
+    let mySide = -1;
+    let players = [];
+
+    const buf = []; // snapshots, oldest first
+    const offSamples = [];
+    let offset = 0, haveOffset = false, delay = 110;
+    let firedT = 0;
+
+    let myY = null, myWant = null, myDir = 0;
+    let sentY = null, sentDir = 0, lastSentAt = 0;
+    // Where the local prediction had this paddle at each past instant, in
+    // server time. Reconciliation compares like with like against it: a
+    // snapshot is always a little old, so measuring it against where the
+    // paddle is NOW reads every bit of honest travel as an error and drags the
+    // paddle backwards the whole time the hand is moving.
+    const myHist = [];
+    let upHeld = false, downHeld = false;
+
+    let prevBase = null, errX = 0, errY = 0;
+    let shake = 0, lastPaint = 0;
+    const rings = [];
+    let hitGlow = [0, 0], sideFlash = [0, 0];
+
+    const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
+
+    function serverNow() {
+      return Date.now() + offset;
+    }
+
+    function canControl() {
+      return !!(
+        detail &&
+        detail.state === "playing" &&
+        detail.seated &&
+        mySide >= 0
+      );
+    }
+
+    // ── Clock ──
+    // The quickest snapshot to arrive is the one that spent least time in the
+    // wire, so it is the best guess at where the server's clock actually is.
+    // The spread between quickest and slowest is the jitter the render delay
+    // has to hide, which is why the delay is measured rather than picked.
+    function noteClock(t, gap) {
+      const local = Date.now();
+      offSamples.push({ at: local, off: t - local, gap });
+      while (offSamples.length && local - offSamples[0].at > 6000) offSamples.shift();
+      let best = -Infinity, worst = Infinity;
+      const gaps = [];
+      for (const s of offSamples) {
+        if (s.off > best) best = s.off;
+        if (s.off < worst) worst = s.off;
+        if (s.gap > 0) gaps.push(s.gap);
+      }
+      if (!haveOffset) {
+        offset = best;
+        haveOffset = true;
+      } else offset += (best - offset) * 0.15;
+
+      // Everything is drawn at this much behind the clock, so it is now felt
+      // directly in the hand and is worth measuring rather than guessing. It
+      // has to cover one gap between snapshots plus however unevenly they are
+      // arriving, and nothing more. The gap is read off the server's own
+      // timestamps, so a slow link widens it honestly instead of hiding it.
+      gaps.sort((a, b) => a - b);
+      const period = gaps.length ? gaps[Math.floor(gaps.length * 0.75)] : 34;
+      const jitter = Math.max(0, best - worst);
+      delay = clamp(period + jitter + 8, PG_MIN_DELAY, PG_MAX_DELAY);
+    }
+
+    // ── Snapshots ──
+
+    function classify(prev, cur) {
+      const evs = [];
+      if (!prev) return evs;
+      if (cur.s[0] !== prev.s[0]) evs.push({ k: "point", side: 1 });
+      if (cur.s[1] !== prev.s[1]) evs.push({ k: "point", side: 0 });
+      const wasLive = prev.ph === "live" && cur.ph === "live";
+      const flipX =
+        wasLive && prev.b[2] && cur.b[2] && (prev.b[2] < 0) !== (cur.b[2] < 0);
+      const flipY =
+        wasLive && prev.b[3] && cur.b[3] && (prev.b[3] < 0) !== (cur.b[3] < 0);
+      if (flipX)
+        evs.push({ k: "hit", side: cur.b[2] > 0 ? 0 : 1, x: cur.b[0], y: cur.b[1] });
+      else if (flipY) evs.push({ k: "wall", x: cur.b[0], y: cur.b[1] });
+      return evs;
+    }
+
+    function takeFrame(f) {
+      if (!f || !Array.isArray(f.b) || !Array.isArray(f.p)) return;
+      const prev = buf[buf.length - 1];
+      // Out of order or a repeat of one we have: the newest wins, always.
+      if (prev && f.t <= prev.t) return;
+      f.ev = classify(prev, f);
+      buf.push(f);
+      while (buf.length > PG_BUF) buf.shift();
+      // An event snapshot lands off the heartbeat's beat, so it would read as
+      // an unusually short gap and talk the render delay down below what the
+      // heartbeat actually needs. Only the plain ones are measured.
+      noteClock(f.t, prev && !(f.ev && f.ev.length) ? f.t - prev.t : 0);
+      if (!firedT) firedT = f.t;
+      if (myY == null && mySide >= 0) myY = f.p[mySide];
+      else reconcile(f);
+    }
+
+    function histAt(tt) {
+      if (!myHist.length) return null;
+      if (tt <= myHist[0].t) return myHist[0].y;
+      for (let i = myHist.length - 1; i >= 0; i--) {
+        if (myHist[i].t > tt) continue;
+        const a = myHist[i], b = myHist[i + 1];
+        if (!b) return a.y;
+        const span = b.t - a.t;
+        return span > 0 ? a.y + (b.y - a.y) * clamp((tt - a.t) / span, 0, 1) : a.y;
+      }
+      return myHist[0].y;
+    }
+
+    // Only ever corrects a genuine disagreement: what the server had at the
+    // snapshot's own moment against what we thought we had at that same
+    // moment. In steady play the two run the same sum off the same intent and
+    // this does nothing at all.
+    function reconcile(f) {
+      if (mySide < 0 || myY == null) return;
+      const last = myHist.length ? myHist[myHist.length - 1] : null;
+      // Back from a hidden tab, where the browser stops the animation loop
+      // entirely. There is no history around this snapshot to compare against,
+      // so correcting would be correcting against nothing. Take the server's
+      // word for where the paddle is and start again from there.
+      if (!last || last.t < f.t - 400) {
+        myY = f.p[mySide];
+        myHist.length = 0;
+        return;
+      }
+      const then = histAt(f.t);
+      if (then == null) return;
+      const err = f.p[mySide] - then;
+      if (Math.abs(err) < 0.8) return;
+      const fix = clamp(err, -14, 14) * 0.5;
+      myY = clamp(myY + fix, C.paddleH / 2, C.h - C.paddleH / 2);
+      for (const h of myHist) h.y += fix; // or the next frame re-reports it
+    }
+
+    // Reconstructs the exact path the server took: straight until it meets a
+    // wall, reflected, straight again. No approximation anywhere in here.
+    //
+    // With one hard rule on top. Whether the ball bounces off a paddle or goes
+    // past it is not ours to decide, so it is never drawn beyond a paddle
+    // plane the server has not already shown it beyond. It waits on the face
+    // instead. Without that, any hitch in the stream draws the ball straight
+    // through a paddle and then snaps it back out - which is exactly what
+    // "the ball phased through" looks like.
+    function ballAt(base, ms) {
+      let x = base.b[0], y = base.b[1], vx = base.b[2], vy = base.b[3];
+      let left = ms / 1000;
+      const r = C.ballR;
+      const lp = C.wall + C.paddleW + r;
+      const rp = C.w - C.wall - C.paddleW - r;
+      // Already behind a paddle in the authoritative frame: that point is
+      // settled, so let it run on to the back of the court.
+      const freeL = base.b[0] < lp;
+      const freeR = base.b[0] > rp;
+      let guard = 0;
+      while (left > 1e-6 && guard++ < 12) {
+        let span = left, bounce = false, hold = false;
+        if (vy < 0) {
+          const t = (r - y) / vy;
+          if (t >= 0 && t < span) { span = t; bounce = true; }
+        } else if (vy > 0) {
+          const t = (C.h - r - y) / vy;
+          if (t >= 0 && t < span) { span = t; bounce = true; }
+        }
+        if (vx < 0 && !freeL) {
+          const t = (lp - x) / vx;
+          if (t >= 0 && t < span) { span = t; bounce = false; hold = true; }
+        } else if (vx > 0 && !freeR) {
+          const t = (rp - x) / vx;
+          if (t >= 0 && t < span) { span = t; bounce = false; hold = true; }
+        }
+        x += vx * span;
+        y += vy * span;
+        left -= span;
+        if (hold) break;
+        if (bounce) {
+          vy = -vy;
+          y = clamp(y, r, C.h - r);
+        }
+      }
+      return { x, y, vx, vy };
+    }
+
+    function baseFor(tt) {
+      let i = buf.length - 1;
+      while (i > 0 && buf[i].t > tt) i--;
+      return buf[i];
+    }
+
+    function paddlesAt(tt) {
+      let i = buf.length - 1;
+      while (i > 0 && buf[i].t > tt) i--;
+      const a = buf[i], b = buf[i + 1];
+      if (!b) return [a.p[0], a.p[1]];
+      const span = b.t - a.t;
+      const k = span > 0 ? clamp((tt - a.t) / span, 0, 1) : 1;
+      return [a.p[0] + (b.p[0] - a.p[0]) * k, a.p[1] + (b.p[1] - a.p[1]) * k];
+    }
+
+    // ── Input ──
+    // Never a position. Where the paddle would like to be, capped at the far
+    // end by the same speed everybody else gets.
+
+    function pump() {
+      if (!canControl() || !detail) return;
+      const now = performance.now();
+      // Somebody camping a corner sends nothing for as long as they hold it,
+      // and the server reads a long silence as an empty chair. A heartbeat
+      // twice a second costs nothing and keeps that honest.
+      const stale = now - lastSentAt > 2000;
+      if (myDir !== sentDir || (stale && myDir)) {
+        sentDir = myDir;
+        sentY = null;
+        lastSentAt = now;
+        S.emit("games input", { tableId: detail.id, input: { d: myDir } });
+        return;
+      }
+      if (myDir || myWant == null) return;
+      if (!stale && sentY != null && Math.abs(myWant - sentY) < 0.2) return;
+      sentY = myWant;
+      lastSentAt = now;
+      S.emit("games input", {
+        tableId: detail.id,
+        input: { y: Math.round(myWant * 10) / 10 },
+      });
+    }
+
+    function aimAt(clientY) {
+      if (!canControl() || !canvas) return;
+      const r = canvas.getBoundingClientRect();
+      if (!r.height) return;
+      myDir = 0;
+      upHeld = downHeld = false;
+      myWant = clamp(
+        ((clientY - r.top) / r.height) * C.h,
+        C.paddleH / 2,
+        C.h - C.paddleH / 2,
+      );
+    }
+
+    // A mouse reports far faster than the screen refreshes, and every one of
+    // those was going out as its own message. That blew straight through the
+    // server's input cap, and the messages it dropped were the newest ones, so
+    // the paddle simply stopped following the hand for the rest of the second.
+    //
+    // Gated on elapsed time rather than handed to a timer: this way the send
+    // still happens on the event that caused it, which is as early as it can
+    // possibly go out, and the rate is bounded all the same.
+    function onPointer(e) {
+      if (e.type === "pointerdown") {
+        if (canvas.setPointerCapture) {
+          try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+        }
+        if (e.pointerType !== "mouse") e.preventDefault();
+      }
+      aimAt(e.clientY);
+      if (performance.now() - lastSentAt >= PG_SEND_MS) pump();
+    }
+
+    function onKey(e) {
+      if (!canControl()) return;
+      const el0 = e.target;
+      const tag = (el0 && el0.tagName) || "";
+      if (tag === "INPUT" || tag === "TEXTAREA" || (el0 && el0.isContentEditable))
+        return;
+      const k = e.key;
+      const up = k === "ArrowUp" || k === "w" || k === "W";
+      const down = k === "ArrowDown" || k === "s" || k === "S";
+      if (!up && !down) return;
+      e.preventDefault();
+      const on = e.type === "keydown";
+      if (up) upHeld = on;
+      else downHeld = on;
+      myDir = upHeld && !downHeld ? -1 : downHeld && !upHeld ? 1 : 0;
+      if (myDir) myWant = null;
+      pump();
+    }
+
+    function nudge(d) {
+      if (!canControl()) return;
+      myDir = d;
+      myWant = null;
+      pump();
+    }
+
+    // ── Sizing ──
+
+    function fit() {
+      if (!courtBox || !wrapEl) return;
+      const box = courtBox.getBoundingClientRect();
+      if (!box.width) return;
+      // On a wide screen the court box is handed a height to fill and the
+      // court has to fit inside it. On a phone it is the court that gives the
+      // box its height, so measuring the box back would just lock in whatever
+      // it happened to be last time. Which of the two is decided in the
+      // stylesheet, so read it from there rather than guessing at a width.
+      const grows = getComputedStyle(courtBox).flexGrow !== "0";
+      let room = grows && box.height > 80 ? box.height : Infinity;
+      // And however the layout got here, the court never eats the whole phone:
+      // the chat and the controls under it have to stay reachable.
+      room = Math.min(room, Math.max(180, window.innerHeight * 0.62));
+      const scale = Math.min(box.width / C.w, room / C.h);
+      wrapEl.style.width = Math.max(240, Math.floor(C.w * scale)) + "px";
+      wrapEl.style.height = Math.max(144, Math.floor(C.h * scale)) + "px";
+    }
+
+    function resize() {
+      if (!canvas) return;
+      fit();
+      const rect = canvas.getBoundingClientRect();
+      if (!rect.width) return;
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const w = Math.round(rect.width * dpr);
+      const h = Math.round(rect.height * dpr);
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+      }
+    }
+
+    // ── Painting ──
+
+    function colors() {
+      const cs = root ? getComputedStyle(root) : null;
+      const v = (n, d) => {
+        const got = cs ? cs.getPropertyValue(n).trim() : "";
+        return got || d;
+      };
+      return {
+        mine: v("--tk-accent", "#ff9800"),
+        theirs: "#5ec8f2",
+        text: v("--tk-text", "#f0f0f0"),
+        muted: v("--tk-muted", "#8a8a8a"),
+      };
+    }
+    let COL = null;
+
+    function ring(x, y, big) {
+      rings.push({ x, y, at: performance.now(), big: !!big });
+      if (rings.length > 12) rings.shift();
+    }
+
+    function fire(ev) {
+      if (ev.k === "hit") {
+        hitGlow[ev.side] = 1;
+        ring(ev.x, ev.y, false);
+        shake = Math.max(shake, 0.7);
+      } else if (ev.k === "wall") {
+        ring(ev.x, ev.y, false);
+      } else if (ev.k === "point") {
+        sideFlash[ev.side] = 1;
+        shake = Math.max(shake, 2.2);
+        ring(ev.side === 0 ? C.w * 0.06 : C.w * 0.94, C.h / 2, true);
+      }
+    }
+
+    function paint(nowMs) {
+      if (!ctx || !canvas.width) return;
+      if (!COL) COL = colors();
+      const dt = Math.min(0.05, (nowMs - lastPaint) / 1000) || 0.016;
+      lastPaint = nowMs;
+
+      const cw = canvas.width, chh = canvas.height;
+      const sc = cw / C.w;
+      const newest = buf[buf.length - 1];
+
+      // Decay everything that is on its way out.
+      const fade = Math.pow(0.02, dt / 0.18);
+      hitGlow[0] *= fade;
+      hitGlow[1] *= fade;
+      sideFlash[0] *= fade;
+      sideFlash[1] *= fade;
+      shake *= Math.pow(0.02, dt / 0.12);
+      const bleed = Math.pow(0.002, dt / 0.12);
+      errX *= bleed;
+      errY *= bleed;
+
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.fillStyle = "#0b0b0e";
+      ctx.fillRect(0, 0, cw, chh);
+
+      if (shake > 0.02)
+        ctx.translate(
+          (Math.random() - 0.5) * shake * sc,
+          (Math.random() - 0.5) * shake * sc,
+        );
+
+      // The half that just conceded lights up, so a point is unmissable even
+      // if you were looking at the chat.
+      for (let i = 0; i < 2; i++) {
+        if (sideFlash[i] < 0.01) continue;
+        ctx.fillStyle = "rgba(255,255,255," + (sideFlash[i] * 0.09).toFixed(3) + ")";
+        ctx.fillRect(i === 0 ? 0 : cw / 2, 0, cw / 2, chh);
+      }
+
+      // Centre line.
+      ctx.strokeStyle = "rgba(255,255,255,0.14)";
+      ctx.lineWidth = Math.max(1, 0.7 * sc);
+      ctx.setLineDash([3 * sc, 3.6 * sc]);
+      ctx.beginPath();
+      ctx.moveTo(cw / 2, 0);
+      ctx.lineTo(cw / 2, chh);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      if (!newest) {
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        return;
+      }
+
+      // One render clock for the whole court, paddles and ball alike, and that
+      // is the point of it. Drawing your own paddle at this instant while the
+      // ball was drawn a tenth of a second in the past meant that at the
+      // moment of contact the two were simply not in the same picture: the
+      // ball reached the face after the paddle had already moved on, and it
+      // read as going straight through. Your paddle is predicted, so we know
+      // where it was at the render moment as surely as where it is now, and
+      // drawing it there costs nothing and puts the bounce back together.
+      const renderT = clamp(
+        serverNow() - delay,
+        buf[0].t,
+        newest.t + 250,
+      );
+      const padT = renderT;
+      const ballT = renderT;
+
+      // Anything that happened up to the render clock happens on screen now,
+      // not when the packet arrived. That is what keeps a bounce and its
+      // flash on the same frame.
+      for (const f of buf) {
+        if (f.t <= firedT || f.t > padT) continue;
+        firedT = f.t;
+        if (f.ev) for (const ev of f.ev) fire(ev);
+      }
+
+      const base = baseFor(ballT);
+      const exact = ballAt(base, ballT - base.t);
+      // The only discontinuity possible is a frame that landed after we had
+      // already run past the event it carries. Carry the difference and bleed
+      // it out rather than teleporting the ball.
+      if (prevBase && prevBase !== base && prevBase.t < base.t) {
+        const oldWay = ballAt(prevBase, ballT - prevBase.t);
+        errX = clamp(errX + (oldWay.x - exact.x), -16, 16);
+        errY = clamp(errY + (oldWay.y - exact.y), -16, 16);
+      }
+      prevBase = base;
+
+      const pads = paddlesAt(padT);
+      if (mySide >= 0) {
+        // Run the same sum the server runs, off the intent the hand has given
+        // us this frame rather than the one that has been to the server and
+        // back. Correcting it is reconcile()'s job, on arrival, against the
+        // matching moment in this history.
+        if (myY == null) myY = pads[mySide];
+        else {
+          let want = myY;
+          if (myDir) want = myY + myDir * C.h;
+          else if (myWant != null) want = myWant;
+          const room = C.paddleSpeed * dt;
+          myY = clamp(
+            myY + clamp(want - myY, -room, room),
+            C.paddleH / 2,
+            C.h - C.paddleH / 2,
+          );
+        }
+        const at = serverNow();
+        if (!myHist.length || at > myHist[myHist.length - 1].t)
+          myHist.push({ t: at, y: myY });
+        while (myHist.length > 180) myHist.shift();
+        const drawn = histAt(padT);
+        pads[mySide] = drawn == null ? myY : drawn;
+      }
+
+      // Paddles.
+      const pw = C.paddleW * sc;
+      const ph = C.paddleH * sc;
+      for (let i = 0; i < 2; i++) {
+        const x = (i === 0 ? C.wall : C.w - C.wall - C.paddleW) * sc;
+        const y = pads[i] * sc - ph / 2;
+        const mine = i === mySide;
+        ctx.fillStyle = mine ? COL.mine : COL.theirs;
+        if (hitGlow[i] > 0.02) {
+          ctx.shadowBlur = 18 * hitGlow[i];
+          ctx.shadowColor = mine ? COL.mine : COL.theirs;
+        }
+        roundRect(ctx, x, y, pw, ph, pw / 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+      }
+
+      const bx = (exact.x + errX) * sc;
+      const by = (exact.y + errY) * sc;
+      const br = C.ballR * sc;
+
+      if (newest.ph === "live") {
+        // A short trail behind the ball, so at full speed the eye has
+        // something to follow instead of a dot that teleports. Sampled back
+        // along the velocity in time, so a slow ball barely smears and a fast
+        // one leaves a proper streak.
+        for (let i = 1; i <= 4; i++) {
+          const back = i * 0.011;
+          ctx.fillStyle = "rgba(255,255,255," + (0.2 - i * 0.04).toFixed(3) + ")";
+          ctx.beginPath();
+          ctx.arc(
+            bx - exact.vx * back * sc,
+            by - exact.vy * back * sc,
+            br * (1 - i * 0.15),
+            0,
+            Math.PI * 2,
+          );
+          ctx.fill();
+        }
+      }
+
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(bx, by, br, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Impact rings.
+      for (let i = rings.length - 1; i >= 0; i--) {
+        const age = (nowMs - rings[i].at) / (rings[i].big ? 520 : 300);
+        if (age >= 1) {
+          rings.splice(i, 1);
+          continue;
+        }
+        ctx.strokeStyle = "rgba(255,255,255," + ((1 - age) * 0.5).toFixed(3) + ")";
+        ctx.lineWidth = Math.max(1, 0.6 * sc);
+        ctx.beginPath();
+        ctx.arc(
+          rings[i].x * sc,
+          rings[i].y * sc,
+          (C.ballR + age * (rings[i].big ? 22 : 8)) * sc,
+          0,
+          Math.PI * 2,
+        );
+        ctx.stroke();
+      }
+
+      // Serve countdown, on the court where the ball is about to be.
+      if (newest.ph === "serve" && newest.sa) {
+        const left = Math.max(0, newest.sa - serverNow());
+        const secs = Math.ceil(left / 1000);
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = "rgba(255,255,255,0.9)";
+        ctx.font = "bold " + Math.round(chh * 0.3) + "px " + cssFont;
+        ctx.fillText(secs > 0 ? String(secs) : "GO", cw / 2, chh / 2);
+        ctx.fillStyle = "rgba(255,255,255,0.45)";
+        ctx.font = "bold " + Math.round(chh * 0.075) + "px " + cssFont;
+        const to = players[newest.to];
+        ctx.fillText(
+          to ? "serving to " + to.username : "serving",
+          cw / 2,
+          chh / 2 + chh * 0.22,
+        );
+      }
+
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+    }
+
+    function roundRect(c, x, y, w, h, r) {
+      const rr = Math.min(r, w / 2, h / 2);
+      c.beginPath();
+      c.moveTo(x + rr, y);
+      c.arcTo(x + w, y, x + w, y + h, rr);
+      c.arcTo(x + w, y + h, x, y + h, rr);
+      c.arcTo(x, y + h, x, y, rr);
+      c.arcTo(x, y, x + w, y, rr);
+      c.closePath();
+    }
+
+    function loop(nowMs) {
+      raf = requestAnimationFrame(loop);
+      paint(nowMs);
+    }
+
+    // ── Cheers ──
+
+    function cheer(emoji) {
+      if (!detail) return;
+      S.emit("games cheer", { tableId: detail.id, emoji });
+    }
+
+    function floatCheer(c) {
+      if (!floatEl) return;
+      while (floatEl.childNodes.length > 16) floatEl.removeChild(floatEl.firstChild);
+      const node = el("span", { class: "gm-pg-cheer" }, [
+        el("i", { text: c.emoji }),
+        el("b", { text: c.username || "" }),
+      ]);
+      node.style.left = (8 + Math.random() * 78).toFixed(1) + "%";
+      floatEl.appendChild(node);
+      setTimeout(() => {
+        if (node.parentNode) node.parentNode.removeChild(node);
+      }, 2400);
+    }
+
+    // ── Chrome around the court ──
+
+    function paintScore(t) {
+      const g = t.game;
+      const s = (buf.length && buf[buf.length - 1].s) || (g ? g.frame.s : [0, 0]);
+      const left = players[0], right = players[1];
+      nameL.textContent = left ? left.username : "Waiting";
+      nameR.textContent = right ? right.username : "Waiting";
+      nameL.className = "gm-pg-name" + (mySide === 0 ? " gm-pg-you" : "");
+      nameR.className = "gm-pg-name" + (mySide === 1 ? " gm-pg-you" : "");
+      ptsL.textContent = String(s[0]);
+      ptsR.textContent = String(s[1]);
+      ptsL.classList.toggle("gm-pg-lead", s[0] > s[1]);
+      ptsR.classList.toggle("gm-pg-lead", s[1] > s[0]);
+
+      const matchPoint =
+        t.state === "playing" && (s[0] === target - 1 || s[1] === target - 1);
+      midEl.textContent = matchPoint ? "match point" : "first to " + target;
+      midEl.classList.toggle("gm-pg-mp", matchPoint);
+
+      const r = buf.length ? buf[buf.length - 1].r : 0;
+      rallyEl.textContent = r >= 4 ? r + " shot rally" : "";
+    }
+
+    // Winner stays, so the interesting question for everybody watching is who
+    // is next. The floor already tracks that; this puts it under the court
+    // where it is actually being asked.
+    function paintLineup(t) {
+      lineupEl.textContent = "";
+      const queued = (floor.pools && floor.pools.pong) || 0;
+      if (t.streak && t.streak.n > 1)
+        lineupEl.appendChild(
+          el("span", { class: "gm-pg-champ" }, [
+            el("i", { class: "fas fa-crown" }),
+            " " + t.streak.username + " on " + t.streak.n + " straight",
+          ]),
+        );
+      const next = t.nextUp || [];
+      if (next.length) {
+        lineupEl.appendChild(el("span", { class: "gm-pg-lbl", text: "Up next" }));
+        next.slice(0, 5).forEach((n, i) => {
+          lineupEl.appendChild(
+            el("span", {
+              class: "gm-pg-queued" + (n.userId === myId() ? " gm-pg-you" : ""),
+              text: (i + 1) + ". " + n.username,
+            }),
+          );
+        });
+        if (next.length > 5)
+          lineupEl.appendChild(
+            el("span", { class: "gm-pg-lbl", text: "+" + (next.length - 5) + " more" }),
+          );
+      } else if (t.state === "playing") {
+        lineupEl.appendChild(
+          el("span", {
+            class: "gm-pg-lbl",
+            text: "Nobody is waiting. The winner keeps the board.",
+          }),
+        );
+      }
+      if (queued)
+        lineupEl.appendChild(
+          el("span", {
+            class: "gm-pg-lbl",
+            text:
+              queued === 1
+                ? "1 more waiting in the room"
+                : queued + " more waiting in the room",
+          }),
+        );
+    }
+
+    function paintHint(t) {
+      if (t.seated)
+        hintEl.textContent =
+          "Move with the mouse, a finger on the court, or W and S. The edge of your paddle is the sharp angle.";
+      else
+        hintEl.textContent =
+          "Watching. Cheer them on, or take the next round from the bar above.";
+      padsEl.style.display = t.seated ? "" : "none";
+    }
+
+    return {
+      mount(stage) {
+        root = el("div", { class: "gm-board gm-pg" });
+        cssFont = getComputedStyle(document.body).fontFamily || "sans-serif";
+
+        nameL = el("span", { class: "gm-pg-name" });
+        nameR = el("span", { class: "gm-pg-name" });
+        ptsL = el("span", { class: "gm-pg-pts", text: "0" });
+        ptsR = el("span", { class: "gm-pg-pts", text: "0" });
+        midEl = el("span", { class: "gm-pg-to" });
+        rallyEl = el("span", { class: "gm-pg-rally" });
+        root.appendChild(
+          el("div", { class: "gm-pg-scoreline" }, [
+            el("div", { class: "gm-pg-team" }, [nameL, ptsL]),
+            el("div", { class: "gm-pg-mid" }, [midEl, rallyEl]),
+            el("div", { class: "gm-pg-team gm-pg-team-r" }, [ptsR, nameR]),
+          ]),
+        );
+
+        canvas = el("canvas", { class: "gm-pg-canvas" });
+        ctx = canvas.getContext("2d");
+        floatEl = el("div", { class: "gm-pg-float" });
+        wrapEl = el("div", { class: "gm-pg-wrap" }, [canvas, floatEl]);
+        courtBox = el("div", { class: "gm-pg-courtbox" }, wrapEl);
+        root.appendChild(courtBox);
+
+        canvas.addEventListener("pointerdown", onPointer);
+        canvas.addEventListener("pointermove", onPointer);
+
+        padsEl = el("div", { class: "gm-pg-pads" }, [
+          el("button", {
+            class: "gm-pg-pad",
+            "aria-label": "Move paddle up",
+            onpointerdown: () => nudge(-1),
+            onpointerup: () => nudge(0),
+            onpointerleave: () => nudge(0),
+          }, el("i", { class: "fas fa-caret-up" })),
+          el("button", {
+            class: "gm-pg-pad",
+            "aria-label": "Move paddle down",
+            onpointerdown: () => nudge(1),
+            onpointerup: () => nudge(0),
+            onpointerleave: () => nudge(0),
+          }, el("i", { class: "fas fa-caret-down" })),
+        ]);
+
+        cheerEl = el("div", { class: "gm-pg-cheers" });
+        PG_CHEERS.forEach((e) =>
+          cheerEl.appendChild(
+            el("button", {
+              class: "gm-pg-cheer-btn",
+              "aria-label": "Cheer " + e,
+              text: e,
+              onclick: () => cheer(e),
+            }),
+          ),
+        );
+        root.appendChild(el("div", { class: "gm-pg-under" }, [padsEl, cheerEl]));
+
+        lineupEl = el("div", { class: "gm-pg-lineup" });
+        root.appendChild(lineupEl);
+        hintEl = el("div", { class: "gm-pg-hint" });
+        root.appendChild(hintEl);
+
+        stage.appendChild(root);
+
+        document.addEventListener("keydown", onKey);
+        document.addEventListener("keyup", onKey);
+        sendTimer = setInterval(pump, PG_SEND_MS);
+        setTimeout(resize, 0);
+        window.addEventListener("resize", resize);
+        if (window.ResizeObserver) {
+          ro = new ResizeObserver(() => resize());
+          ro.observe(courtBox);
+        }
+        raf = requestAnimationFrame(loop);
+      },
+
+      destroy() {
+        if (raf) cancelAnimationFrame(raf);
+        raf = null;
+        if (sendTimer) clearInterval(sendTimer);
+        sendTimer = null;
+        document.removeEventListener("keydown", onKey);
+        document.removeEventListener("keyup", onKey);
+        window.removeEventListener("resize", resize);
+        if (ro) ro.disconnect();
+        ro = null;
+        buf.length = 0;
+        rings.length = 0;
+        offSamples.length = 0;
+      },
+
+      relay(d) {
+        if (d.kind === "frame") takeFrame(d.f);
+        else if (d.kind === "cheer") floatCheer(d);
+      },
+
+      update(t) {
+        const g = t.game;
+        if (g && g.court) {
+          const grew = C.w !== g.court.w || C.h !== g.court.h;
+          C = g.court;
+          target = g.target || 7;
+          players = g.players || [];
+          const was = mySide;
+          mySide = typeof g.mySide === "number" ? g.mySide : -1;
+
+          // Anything that makes the last match's snapshots meaningless: a new
+          // match at this board, or sitting down at one we were watching. Left
+          // alone, the old buffer would fly the previous ball across the new
+          // court for a fifth of a second.
+          const key = t.id + ":" + t.matchNumber;
+          if (key !== matchKey || was !== mySide) {
+            matchKey = key;
+            buf.length = 0;
+            rings.length = 0;
+            firedT = 0;
+            prevBase = null;
+            errX = errY = 0;
+            myY = null;
+            myWant = null;
+            myDir = 0;
+            sentY = null;
+            sentDir = 0;
+            upHeld = downHeld = false;
+          }
+          if (g.frame) takeFrame(g.frame);
+          if (grew) resize();
+        } else if (!g) {
+          buf.length = 0;
+          matchKey = "";
+          players = t.seats.map((s) => ({ userId: s.userId, username: s.username }));
+          mySide = -1;
+          myY = null;
+        }
+        paintScore(t);
+        paintLineup(t);
+        paintHint(t);
+        COL = null; // themes can change under us, so re-read on the next paint
+      },
+    };
+  };
 
   // Tic Tac Toe -------------------------------------------------------------
   BOARDS.tictactoe = function () {

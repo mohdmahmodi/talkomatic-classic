@@ -11,20 +11,35 @@ const floor = require("./index");
 const DRAW_MSGS_PER_SEC = 50;
 const DRAW_SEGMENTS_PER_MSG = 40;
 
+// Paddle intent for a realtime game. The browser samples its own pointer at
+// fifty a second; this is the ceiling that stops a patched page turning the
+// input channel into a flood. It has room above the browser's rate on purpose:
+// when this sat just under it, a burst clipped the cap and the dropped
+// messages were the newest ones, so the paddle simply stopped following the
+// hand for the rest of the second.
+const INPUT_MSGS_PER_SEC = 90;
+
 function who(socket) {
   const sess = socket.handshake.session || {};
   if (!socket.roomId || !sess.userId) return null;
   return { userId: sess.userId, username: sess.username || "Someone" };
 }
 
-function drawAllowed(socket) {
+// One counter per stream, so a drag and a paddle never eat each other's budget.
+function allowed(socket, key, perSec) {
   const now = Date.now();
-  if (!socket._gdWindow || now - socket._gdWindow > 1000) {
-    socket._gdWindow = now;
-    socket._gdCount = 0;
+  const w = "_w" + key;
+  const c = "_c" + key;
+  if (!socket[w] || now - socket[w] > 1000) {
+    socket[w] = now;
+    socket[c] = 0;
   }
-  socket._gdCount++;
-  return socket._gdCount <= DRAW_MSGS_PER_SEC;
+  socket[c]++;
+  return socket[c] <= perSec;
+}
+
+function drawAllowed(socket) {
+  return allowed(socket, "gd", DRAW_MSGS_PER_SEC);
 }
 
 function register(socket, safe) {
@@ -130,6 +145,32 @@ function register(socket, safe) {
         segs.slice(0, DRAW_SEGMENTS_PER_MSG),
       );
     }),
+  );
+
+  // Paddle intent, on its own event for the same reason strokes are: the
+  // generic limiter would chop a rally in half. Answers nothing, ever - the
+  // next frame off the realtime lane is the answer.
+  socket.on(
+    "games input",
+    safe(async (data) => {
+      const u = who(socket);
+      if (!u || socket.spectating) return;
+      if (!allowed(socket, "gi", INPUT_MSGS_PER_SEC)) return;
+      floor.realtimeInput(
+        socket.roomId,
+        u.userId,
+        String((data && data.tableId) || ""),
+        (data && data.input) || {},
+      );
+    }),
+  );
+
+  // Watchers throwing an emoji at the board. Players can too.
+  socket.on(
+    "games cheer",
+    act((u, d) =>
+      floor.cheer(socket.roomId, u.userId, String(d.tableId || ""), String(d.emoji || "")),
+    ),
   );
 
   socket.on(
