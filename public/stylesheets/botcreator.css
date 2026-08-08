@@ -1,0 +1,1273 @@
+/* Bot Creator, styled like the lobby itself: flat dark tiles (--tk-tile),
+   --tk-border borders, black cards, cream section strips, orange fills on
+   hover, cyan detail text. No gradients, no glows. talkoSS font. */
+
+:root {
+  --tk-accent: #ff9800;
+  --tk-accent-hover: #f57c00;
+  --tk-detail: #01ffff;
+  --tk-bg: #202020;
+  --tk-text: #ffffff;
+  --tk-muted: #cccccc;
+  --tk-border: #616161;
+  --tk-panel: #616161;
+  --tk-tile: #1b1b1b;
+  --tk-tile-hover: #242424;
+  --tk-card: #000000;
+  --tk-cream: #fdf5e6;
+  --tk-cream-text: #000000;
+  --tk-error: #ff5252;
+  --tk-ok: #66bb6a;
+}
+
+@font-face {
+  font-family: "talkoSS";
+  src: url("../fonts/Sansation_Light.ttf");
+}
+@font-face {
+  font-family: "talkoSS";
+  src: url("../fonts/Sansation_Bold.ttf");
+  font-weight: bold;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--tk-bg);
+  color: var(--tk-text);
+  font-family: talkoSS, Arial, sans-serif;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+}
+
+a {
+  color: var(--tk-detail);
+}
+
+/* ── Top bar ── */
+
+.bc-top {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 22px;
+  border-bottom: 2px solid var(--tk-border);
+  background: var(--tk-tile);
+  flex-shrink: 0;
+}
+
+.bc-top-title {
+  font-size: 24px;
+  font-weight: bold;
+  color: var(--tk-accent);
+  white-space: nowrap;
+}
+
+.bc-top-title i {
+  margin-right: 10px;
+  color: var(--tk-detail);
+}
+
+.bc-top-sub {
+  color: var(--tk-detail);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.bc-top-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.bc-user-chip {
+  font-size: 13px;
+  color: var(--tk-muted);
+  border: 1px solid var(--tk-border);
+  border-radius: 16px;
+  padding: 5px 12px;
+  background: var(--tk-card);
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bc-user-chip i {
+  color: var(--tk-accent);
+  margin-right: 6px;
+}
+
+.bc-lobby-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--tk-card);
+  color: var(--tk-text);
+  border: 1px solid var(--tk-accent);
+  border-radius: 4px;
+  padding: 9px 14px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: bold;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.bc-lobby-link:hover {
+  background: var(--tk-accent);
+  color: #000;
+}
+
+/* ── Shell: sidebar + main ── */
+
+.bc-shell {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  min-height: 0;
+}
+
+.bc-side {
+  border-right: 2px solid var(--tk-border);
+  background: var(--tk-bg);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.bc-main {
+  overflow-y: auto;
+  padding: 22px;
+  min-width: 0;
+}
+
+/* Cream strip headers, same as the lobby's section labels */
+
+.bc-strip {
+  background: var(--tk-cream);
+  color: var(--tk-cream-text);
+  font-weight: bold;
+  font-size: 13px;
+  letter-spacing: 0.5px;
+  padding: 8px 16px;
+}
+
+.bc-strip i {
+  margin-right: 8px;
+}
+
+/* ── Sidebar: bot list ── */
+
+.bc-botlist {
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bc-bot-card {
+  background: var(--tk-tile);
+  border: 1px solid var(--tk-border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.bc-bot-card:hover {
+  background: var(--tk-tile-hover);
+}
+
+.bc-bot-card.active {
+  border-color: var(--tk-accent);
+}
+
+.bc-bot-card-name {
+  font-weight: bold;
+  font-size: 15px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bc-bot-card-name .live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--tk-ok);
+  flex-shrink: 0;
+  animation: bcPulse 1.6s infinite;
+}
+
+@keyframes bcPulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.bc-bot-card-meta {
+  color: var(--tk-muted);
+  font-size: 12px;
+  margin-top: 3px;
+}
+
+.bc-empty-note {
+  color: var(--tk-muted);
+  font-size: 13px;
+  padding: 6px 8px;
+  line-height: 1.5;
+}
+
+.bc-new-bot {
+  margin: 2px 10px 14px;
+  background: var(--tk-card);
+  border: 1px solid var(--tk-accent);
+  color: var(--tk-accent);
+  border-radius: 6px;
+  font-family: inherit;
+  font-weight: bold;
+  font-size: 14px;
+  padding: 10px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.bc-new-bot:hover {
+  background: var(--tk-accent);
+  color: #000;
+}
+
+/* ── Sidebar: nav ── */
+
+.bc-nav {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 10px 16px;
+  gap: 4px;
+}
+
+.bc-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: var(--tk-muted);
+  font-family: inherit;
+  font-size: 14px;
+  text-align: left;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+
+.bc-nav-item i {
+  width: 18px;
+  text-align: center;
+  color: var(--tk-detail);
+}
+
+.bc-nav-item:hover {
+  background: var(--tk-tile-hover);
+  color: var(--tk-text);
+}
+
+.bc-nav-item.active {
+  background: var(--tk-tile);
+  color: var(--tk-accent);
+  font-weight: bold;
+}
+
+/* ── Sidebar: live status card ── */
+
+.bc-live {
+  margin: 0 10px 16px;
+  background: var(--tk-card);
+  border: 1px solid var(--tk-ok);
+  border-radius: 6px;
+  padding: 12px;
+  font-size: 13px;
+  display: none;
+}
+
+.bc-live.show {
+  display: block;
+}
+
+.bc-live-title {
+  color: var(--tk-ok);
+  font-weight: bold;
+  margin-bottom: 6px;
+}
+
+.bc-live-line {
+  color: var(--tk-muted);
+  margin: 3px 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bc-live-stop {
+  margin-top: 9px;
+  width: 100%;
+  background: none;
+  border: 1px solid var(--tk-error);
+  color: var(--tk-error);
+  border-radius: 4px;
+  font-family: inherit;
+  font-weight: bold;
+  font-size: 12px;
+  padding: 7px;
+  cursor: pointer;
+}
+
+.bc-live-stop:hover {
+  background: var(--tk-error);
+  color: #000;
+}
+
+/* ── Main: views + cards ── */
+
+.bc-view {
+  display: none;
+  max-width: 1050px;
+  margin: 0 auto;
+}
+
+.bc-view.active {
+  display: block;
+}
+
+.bc-card {
+  background: var(--tk-tile);
+  border: 1px solid var(--tk-border);
+  border-radius: 8px;
+  margin-bottom: 18px;
+  overflow: hidden;
+}
+
+.bc-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--tk-border);
+  font-weight: bold;
+  font-size: 15px;
+}
+
+.bc-card-head i {
+  color: var(--tk-accent);
+}
+
+.bc-card-head .hint {
+  font-weight: normal;
+  font-size: 12px;
+  color: var(--tk-muted);
+  margin-left: auto;
+  text-align: right;
+}
+
+.bc-card-body {
+  padding: 16px 18px;
+}
+
+/* ── Inputs (white boxes, like the lobby forms) ── */
+
+.bc-input,
+.bc-select {
+  background: var(--tk-card);
+  border: 1px solid var(--tk-border);
+  border-radius: 4px;
+  color: var(--tk-text);
+  font-family: inherit;
+  font-size: 14px;
+  padding: 8px 10px;
+  outline: none;
+}
+
+.bc-input:focus,
+.bc-select:focus {
+  border-color: var(--tk-accent);
+}
+
+.bc-input::placeholder {
+  color: #8a8a8a;
+}
+
+textarea.bc-input {
+  resize: vertical;
+  min-height: 38px;
+}
+
+.bc-label {
+  display: block;
+  font-size: 12px;
+  color: var(--tk-muted);
+  margin: 0 0 5px;
+  letter-spacing: 0.4px;
+}
+
+/* ── Buttons ── */
+
+.bc-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--tk-card);
+  color: var(--tk-text);
+  border: 1px solid var(--tk-border);
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: bold;
+  padding: 9px 14px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.bc-btn:hover {
+  border-color: var(--tk-accent);
+  color: var(--tk-accent);
+}
+
+.bc-btn.primary {
+  border-color: var(--tk-accent);
+  color: var(--tk-accent);
+}
+
+.bc-btn.primary:hover {
+  background: var(--tk-accent);
+  color: #000;
+}
+
+.bc-btn.danger {
+  border-color: var(--tk-error);
+  color: var(--tk-error);
+}
+
+.bc-btn.danger:hover {
+  background: var(--tk-error);
+  color: #000;
+}
+
+.bc-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ── Rule cards ── */
+
+.bc-rule {
+  background: var(--tk-card);
+  border: 1px solid var(--tk-border);
+  border-radius: 8px;
+  margin-bottom: 14px;
+  overflow: hidden;
+}
+
+.bc-rule-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--tk-tile);
+  border-bottom: 1px solid var(--tk-border);
+  flex-wrap: wrap;
+}
+
+.bc-rule-kicker {
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  color: var(--tk-detail);
+  width: 46px;
+  flex-shrink: 0;
+}
+
+.bc-rule-del {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--tk-muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 4px 6px;
+}
+
+.bc-rule-del:hover {
+  color: var(--tk-error);
+}
+
+.bc-rule-section {
+  padding: 10px 14px;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.bc-rule-section:last-child {
+  border-bottom: none;
+}
+
+.bc-cond-row,
+.bc-act-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+  flex-wrap: wrap;
+}
+
+.bc-act-row .drag-dots {
+  color: #555;
+  font-size: 12px;
+  cursor: grab;
+}
+
+.bc-mini-btn {
+  background: none;
+  border: 1px dashed var(--tk-border);
+  border-radius: 4px;
+  color: var(--tk-muted);
+  font-family: inherit;
+  font-size: 12px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.bc-mini-btn:hover {
+  color: var(--tk-accent);
+  border-color: var(--tk-accent);
+}
+
+.bc-row-del {
+  background: none;
+  border: none;
+  color: #777;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 2px 5px;
+}
+
+.bc-row-del:hover {
+  color: var(--tk-error);
+}
+
+.bc-add-rule {
+  width: 100%;
+  border-style: dashed;
+  justify-content: center;
+  padding: 12px;
+}
+
+/* ── Deploy area ── */
+
+.bc-deploy-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.bc-deploy-opt {
+  background: var(--tk-card);
+  border: 1px solid var(--tk-border);
+  border-radius: 8px;
+  padding: 14px;
+  cursor: pointer;
+}
+
+.bc-deploy-opt.sel {
+  border-color: var(--tk-accent);
+}
+
+.bc-deploy-opt h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.bc-deploy-opt h4 i {
+  color: var(--tk-detail);
+  margin-right: 8px;
+}
+
+.bc-deploy-note {
+  color: var(--tk-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  margin-top: 8px;
+}
+
+.bc-room-row {
+  display: flex;
+  gap: 8px;
+}
+
+.bc-room-row .bc-select {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── Variables table ── */
+
+.bc-vars {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.bc-vars th {
+  text-align: left;
+  color: var(--tk-detail);
+  font-size: 11px;
+  letter-spacing: 0.6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--tk-border);
+}
+
+.bc-vars td {
+  padding: 6px 8px;
+  border-bottom: 1px solid #2a2a2a;
+  color: var(--tk-muted);
+  word-break: break-all;
+}
+
+/* ── Learn / docs ── */
+
+.bc-doc {
+  line-height: 1.65;
+  font-size: 14px;
+  color: var(--tk-muted);
+}
+
+.bc-doc h4 {
+  color: var(--tk-text);
+  margin: 18px 0 6px;
+  font-size: 15px;
+}
+
+.bc-doc h4 i {
+  color: var(--tk-accent);
+  margin-right: 8px;
+}
+
+.bc-doc code,
+.bc-token {
+  background: var(--tk-card);
+  border: 1px solid var(--tk-border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-family: Consolas, Monaco, monospace;
+  font-size: 12.5px;
+  color: var(--tk-detail);
+}
+
+.bc-doc pre {
+  background: var(--tk-card);
+  border: 1px solid var(--tk-border);
+  border-radius: 6px;
+  padding: 14px;
+  overflow-x: auto;
+  font-family: Consolas, Monaco, monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #d8d8d8;
+}
+
+.bc-chip-table {
+  display: grid;
+  grid-template-columns: 170px 1fr;
+  gap: 6px 14px;
+  font-size: 13px;
+  margin: 8px 0;
+}
+
+.bc-chip-table code {
+  justify-self: start;
+}
+
+/* ── Template picker ── */
+
+.bc-tpl-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.bc-tpl {
+  background: var(--tk-card);
+  border: 1px solid var(--tk-border);
+  border-radius: 8px;
+  padding: 14px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.bc-tpl:hover {
+  border-color: var(--tk-accent);
+  background: var(--tk-tile-hover);
+}
+
+.bc-tpl i {
+  color: var(--tk-accent);
+  font-size: 20px;
+}
+
+.bc-tpl h4 {
+  margin: 8px 0 4px;
+  font-size: 14px;
+}
+
+.bc-tpl p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--tk-muted);
+  line-height: 1.45;
+}
+
+/* ── Staff table ── */
+
+.bc-staff-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.bc-staff-table th {
+  text-align: left;
+  color: var(--tk-detail);
+  font-size: 11px;
+  letter-spacing: 0.6px;
+  padding: 8px;
+  border-bottom: 1px solid var(--tk-border);
+}
+
+.bc-staff-table td {
+  padding: 8px;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.bc-tier-chip {
+  font-size: 10px;
+  font-weight: bold;
+  border-radius: 8px;
+  padding: 2px 7px;
+}
+
+.bc-tier-chip.t1 {
+  background: #01ffff;
+  color: #00292b;
+}
+
+.bc-tier-chip.t2 {
+  background: #c08bff;
+  color: #16002b;
+}
+
+/* ── Sign-in gate ── */
+
+.bc-gate {
+  text-align: center;
+  padding: 60px 20px;
+}
+
+.bc-gate i {
+  font-size: 44px;
+  color: var(--tk-accent);
+}
+
+.bc-gate h2 {
+  margin: 18px 0 8px;
+}
+
+.bc-gate p {
+  color: var(--tk-muted);
+  max-width: 460px;
+  margin: 0 auto 22px;
+  line-height: 1.6;
+}
+
+/* Badge preview used in the learn view */
+.bot-badge-demo {
+  display: inline-block;
+  background: #01ffff;
+  color: #00292b;
+  font-size: 9px;
+  font-weight: bold;
+  padding: 1px 5px;
+  border-radius: 8px;
+  letter-spacing: 0.5px;
+  vertical-align: middle;
+}
+
+/* ── Build workspace: editor on the left, test room on the right ── */
+
+#editorView.bc-view {
+  max-width: 1500px;
+}
+
+.bc-build-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 420px;
+  gap: 18px;
+  align-items: start;
+}
+
+.bc-build-right {
+  position: sticky;
+  top: 0;
+}
+
+.bc-side-note {
+  color: var(--tk-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 8px 16px 2px;
+}
+
+/* ── The test room ──
+   Styled after room.html itself: stacked member panels, each with a dark
+   header bar (name / location) and a black textbox with orange chat text in
+   the room font. No send button anywhere, same as a real room. */
+
+@font-face {
+  font-family: "talkoText";
+  src: url("../fonts/dited.otf");
+}
+
+.bc-test-card {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 60px);
+}
+
+.bc-test-room {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: var(--tk-bg);
+}
+
+.bc-tr-panel {
+  border: 1px solid var(--tk-border);
+  background: var(--tk-chat-bg, #000);
+  display: flex;
+  flex-direction: column;
+}
+
+.bc-tr-panel.me {
+  border-color: var(--tk-accent);
+}
+
+.bc-tr-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #333;
+  border-bottom: 1px solid var(--tk-border);
+  padding: 5px 10px;
+  font-size: 12px;
+  color: var(--tk-text);
+}
+
+.bc-tr-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bc-tr-typing {
+  margin-left: auto;
+  color: var(--tk-detail);
+  font-size: 10px;
+  animation: bcTyping 1s infinite;
+}
+
+@keyframes bcTyping {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.bc-tr-box {
+  height: 120px;
+  padding: 8px 10px;
+  background: transparent;
+  border: none;
+  outline: none;
+  resize: none;
+  overflow-y: auto;
+  color: var(--tk-chat-text, #ffa500);
+  font-family: talkoText, Consolas, monospace;
+  font-size: 15px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  width: 100%;
+}
+
+.bc-tr-box::placeholder {
+  color: #7a5b1e;
+  font-size: 12.5px;
+  font-family: talkoSS, Arial, sans-serif;
+}
+
+.bc-tr-status {
+  min-height: 18px;
+  padding: 2px 12px 8px;
+  color: var(--tk-muted);
+  font-size: 11.5px;
+  font-style: italic;
+}
+
+.bc-test-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 12px 10px;
+}
+
+.bc-test-mem {
+  border-top: 1px solid var(--tk-border);
+  padding: 10px 12px;
+}
+
+.bc-test-mem-title {
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 0.6px;
+  color: var(--tk-detail);
+  margin-bottom: 6px;
+}
+
+.bc-test-mem-body {
+  font-size: 12.5px;
+  color: var(--tk-muted);
+  line-height: 1.6;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.bc-test-mem-body b {
+  color: var(--tk-text);
+}
+
+/* ── Rule rows: one size for every control, so nothing looks bloated ──
+   Labels sit in a fixed column, every select and input is 32px tall, and
+   widths come from these classes instead of ad-hoc inline sizes. */
+
+.bc-rule .bc-select,
+.bc-rule .bc-input {
+  height: 32px;
+  font-size: 13px;
+  padding: 5px 8px;
+  box-sizing: border-box;
+}
+
+.bc-rule textarea.bc-input {
+  height: 32px;
+  min-height: 32px;
+  line-height: 20px;
+  resize: none;
+  overflow-y: auto;
+}
+
+.bc-rule-kicker {
+  width: 58px;
+  flex-shrink: 0;
+}
+
+.w-trig {
+  width: 218px;
+}
+
+.w-act {
+  width: 178px;
+}
+
+.w-word {
+  width: 110px;
+}
+
+.w-mem {
+  width: 104px;
+}
+
+.w-per {
+  width: 168px;
+}
+
+.w-val {
+  width: 140px;
+}
+
+.w-num {
+  width: 70px;
+}
+
+.w-grow {
+  flex: 1;
+  min-width: 160px;
+}
+
+.bc-cond-row,
+.bc-act-row {
+  margin: 5px 0;
+}
+
+.bc-row-btns {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 0;
+  flex-shrink: 0;
+}
+
+.bc-unit {
+  font-size: 12px;
+  color: var(--tk-muted);
+}
+
+/* Difficulty chips on the ready-made bots */
+
+.bc-diff {
+  font-size: 9px;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+  border-radius: 8px;
+  padding: 2px 7px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.bc-diff.easy {
+  background: #66bb6a;
+  color: #0b2310;
+}
+
+.bc-diff.medium {
+  background: var(--tk-accent);
+  color: #2b1a00;
+}
+
+.bc-diff.hard {
+  background: #ff5252;
+  color: #2b0000;
+}
+
+/* Rules light up when the test room runs them */
+
+.bc-rule.fired {
+  border-color: var(--tk-detail);
+  box-shadow: 0 0 0 1px var(--tk-detail);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.bc-rule.skipped {
+  border-color: #7a5c00;
+  transition: border-color 0.2s ease;
+}
+
+.bc-rule-tag {
+  font-size: 10px;
+  font-weight: bold;
+  border-radius: 8px;
+  padding: 2px 7px;
+  margin-left: 8px;
+}
+
+.bc-rule-tag.ran {
+  background: var(--tk-detail);
+  color: #00292b;
+}
+
+.bc-rule-tag.skip {
+  background: #7a5c00;
+  color: #fff2cc;
+}
+
+/* ── Magic word inserter ── */
+
+.bc-magic-wrap {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.bc-magic-btn {
+  background: none;
+  border: 1px solid var(--tk-border);
+  border-radius: 4px;
+  color: var(--tk-detail);
+  font-size: 13px;
+  padding: 7px 9px;
+  cursor: pointer;
+}
+
+.bc-magic-btn:hover {
+  border-color: var(--tk-detail);
+}
+
+.bc-magic-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 50;
+  background: var(--tk-bg);
+  border: 1px solid var(--tk-detail);
+  border-radius: 8px;
+  width: 300px;
+  max-height: 300px;
+  overflow-y: auto;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+}
+
+.bc-magic-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-bottom: 1px solid #2a2a2a;
+  color: var(--tk-text);
+  font-family: inherit;
+  font-size: 12.5px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.bc-magic-item:hover {
+  background: var(--tk-tile-hover);
+}
+
+.bc-magic-item code {
+  color: var(--tk-detail);
+  font-family: Consolas, Monaco, monospace;
+  font-size: 12px;
+  margin-right: 6px;
+}
+
+.bc-magic-item span {
+  color: var(--tk-muted);
+  font-size: 11.5px;
+}
+
+/* ── Bot Book extras ── */
+
+.bc-doc-lede {
+  font-size: 15px;
+  color: var(--tk-text);
+  border-left: 3px solid var(--tk-accent);
+  padding-left: 12px;
+}
+
+.bc-doc h3 {
+  color: var(--tk-accent);
+  margin: 26px 0 8px;
+  font-size: 17px;
+}
+
+.bc-doc h3 i {
+  background: var(--tk-accent);
+  color: #000;
+  border-radius: 50%;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  margin-right: 8px;
+}
+
+.bc-doc-diagram {
+  background: var(--tk-card);
+  border: 1px solid var(--tk-border);
+  border-radius: 8px;
+  padding: 12px 16px;
+  line-height: 2;
+  font-size: 13.5px;
+  margin: 10px 0;
+}
+
+.bc-doc-diagram .d-when,
+.bc-doc-diagram .d-if,
+.bc-doc-diagram .d-do {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: bold;
+  letter-spacing: 0.8px;
+  border-radius: 8px;
+  padding: 2px 8px;
+  margin-right: 6px;
+}
+
+.bc-doc-diagram .d-when {
+  background: var(--tk-accent);
+  color: #000;
+}
+
+.bc-doc-diagram .d-if {
+  background: #7a5c00;
+  color: #fff2cc;
+}
+
+.bc-doc-diagram .d-do {
+  background: var(--tk-detail);
+  color: #00292b;
+}
+
+.bc-doc ol {
+  line-height: 1.9;
+}
+
+/* ── Responsive ── */
+
+@media (max-width: 1150px) {
+  .bc-build-grid {
+    grid-template-columns: 1fr;
+  }
+  .bc-build-right {
+    position: static;
+    order: -1; /* on small screens the test room sits on top, still in reach */
+  }
+  .bc-test-chat {
+    min-height: 150px;
+    max-height: 220px;
+  }
+}
+
+@media (max-width: 900px) {
+  .bc-shell {
+    grid-template-columns: 1fr;
+    overflow-y: auto;
+  }
+  .bc-side {
+    border-right: none;
+    border-bottom: 2px solid var(--tk-border);
+    overflow-y: visible;
+  }
+  .bc-main {
+    overflow-y: visible;
+  }
+  .bc-deploy-grid {
+    grid-template-columns: 1fr;
+  }
+  .bc-top {
+    flex-wrap: wrap;
+  }
+  .bc-top-right {
+    width: 100%;
+    margin-left: 0;
+  }
+}

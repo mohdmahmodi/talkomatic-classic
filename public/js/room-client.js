@@ -2693,6 +2693,11 @@ function createUserRow(user, container) {
     info.appendChild(createModBadge(user.modLevel));
   }
 
+  if (user.isBotUser) {
+    row.classList.add("bot-user");
+    info.appendChild(createBotBadge(user.botOwner));
+  }
+
   // Dev-only marker telling the dev this staffer is hidden/vanished to others.
   if (devSeesConcealed && (user.isDev || user.isMod) && (user.isHidden || user.isVanished)) {
     info.appendChild(makeStaffConcealedMarker(user));
@@ -3946,6 +3951,16 @@ function createModBadge(level) {
   badge.textContent = lvl === 1 ? "JR MOD" : "MOD";
   badge.title = lvl === 1 ? "Junior Moderator (L1)" : "Moderator (L2)";
   badge.dataset.level = String(lvl);
+  return badge;
+}
+
+// Bots always wear this. The server sets isBotUser on every view of a bot
+// (hosted or API), so automation can never sit in a room passing as a person.
+function createBotBadge(owner) {
+  const badge = document.createElement("span");
+  badge.className = "bot-badge";
+  badge.textContent = "BOT";
+  badge.title = owner ? `Bot, run by ${owner}` : "Automated user";
   return badge;
 }
 
@@ -5217,6 +5232,8 @@ window.addEventListener("hashchange", () => {
     .dev-meta{flex:0 0 auto;max-width:42%;overflow:hidden;text-overflow:ellipsis;}
     .mod-badge{display:inline-block;background:#5aa9ff;color:#001229;font-size:9px;font-weight:bold;padding:1px 5px;border-radius:8px;margin:0 5px 0 0;letter-spacing:.5px;vertical-align:middle;flex:0 0 auto;}
     .mod-badge.mod-badge-jr{background:#c08bff;color:#16002b;}
+    .bot-badge{display:inline-block;background:#01ffff;color:#00292b;font-size:9px;font-weight:bold;padding:1px 5px;border-radius:8px;margin:0 5px 0 0;letter-spacing:.5px;vertical-align:middle;flex:0 0 auto;}
+    .bot-user .chat-input{border-left:2px solid rgba(1,255,255,.35);}
     .device-icon{color:#7f8794;font-size:11px;margin-right:6px;flex:0 0 auto;}
     .invite-trophy{height:15px;width:auto;margin-right:5px;flex:0 0 auto;vertical-align:middle;}
     .staff-action-button{background:none;border:none;cursor:pointer;font-size:13px;margin-left:4px;opacity:.75;}

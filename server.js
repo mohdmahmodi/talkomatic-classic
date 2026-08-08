@@ -104,6 +104,9 @@ function gracefulFlush() {
   try {
     require("./server/staffchat").flushSync(); // Desk chat survives restarts
   } catch (e) {}
+  try {
+    require("./server/bots").flushSync(); // saved bots + their variables
+  } catch (e) {}
 }
 let shuttingDown = false;
 function beginShutdown(signal) {
@@ -665,6 +668,7 @@ app.locals.buildId = () => BUILD_ID;
 const PAGES = [
   "about",
   "app-directory",
+  "botcreator",
   "browser",
   "contributors",
   "desk",

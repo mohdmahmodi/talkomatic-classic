@@ -50,6 +50,7 @@ const ipban = require("./ipban");
 const gamesFloor = require("./games");
 const gamesSocket = require("./games/socket");
 const staffchat = require("./staffchat");
+const bots = require("./bots");
 const crypto = require("crypto");
 
 // Room text stashed while someone is sat at a mini game, put back when they
@@ -1937,6 +1938,12 @@ function formatUserForSocket(user, recipientSocket) {
     location: user.location,
     deviceType: user.deviceType || "unknown",
   };
+  // Bots are always labeled. A bot passing as a person is the one thing the
+  // bot system must never allow, so the flag rides on every view of the user.
+  if (user.isBotUser) {
+    formatted.isBotUser = true;
+    if (user.botOwnerName) formatted.botOwner = user.botOwnerName;
+  }
   // Discord avatar: validated snowflake id + CDN hash only; clients rebuild
   // the cdn.discordapp.com URL themselves.
   if (user.avatar) formatted.avatar = user.avatar;
@@ -2130,6 +2137,11 @@ function emitRoomUserLeft(roomId, userId, leftUser) {
     if (!canRecipientSeeDevUser(recipient, leftUser)) continue;
     recipient.emit("user left", userId);
   }
+  try {
+    bots.onLeave(roomId, userId, leftUser);
+  } catch (e) {
+    console.error("bots onLeave error:", e);
+  }
 }
 
 function emitRoomUserJoined(room, joinedUser) {
@@ -2147,6 +2159,11 @@ function emitRoomUserJoined(room, joinedUser) {
       roomName: room.name,
       roomType: room.type,
     });
+  }
+  try {
+    bots.onJoin(room.id, joinedUser);
+  } catch (e) {
+    console.error("bots onJoin error:", e);
   }
 }
 
@@ -2656,6 +2673,14 @@ async function processPendingChatUpdates(userId, socket) {
       diff: { type: "full-replace", text: msg },
     });
 
+    // Bots seated in this room read the settled text for their triggers.
+    // Guarded: nothing in the bot runtime may ever break a person's chat.
+    try {
+      bots.onText(socket.roomId, userId, username, msg);
+    } catch (e) {
+      console.error("bots onText error:", e);
+    }
+
     setupAFKTimers(socket, userId);
 
     if (pending.diffs.length > 0) {
@@ -2889,6 +2914,17 @@ function joinRoom(socket, roomId, userId) {
         createErrorResponse(ERROR_CODES.ROOM_FULL, "Room is full."),
       );
 
+    // API (tier 2) bots take a normal seat but are capped per room, same
+    // budget the hosted bots share, so a room is never mostly machines.
+    if (socket.isBot && bots.botCountInRoom(room) >= bots.MAX_BOTS_PER_ROOM)
+      return socket.emit(
+        "error",
+        createErrorResponse(
+          ERROR_CODES.FORBIDDEN,
+          `This room already has ${bots.MAX_BOTS_PER_ROOM} bots (the limit).`,
+        ),
+      );
+
     clearAFKTimers(userId);
     room.users = room.users.filter((u) => u.id !== userId);
     socket.join(roomId);
@@ -2902,7 +2938,10 @@ function joinRoom(socket, roomId, userId) {
       modLevel: socket.isMod ? socket.modLevel || 2 : undefined,
       isHidden: !!socket.isHidden,
       isVanished: !!socket.isVanished,
-      deviceType: socket.deviceType || "unknown",
+      // A token-authenticated (tier 2) bot wears the bot badge like a hosted
+      // one; there is no way for automation to sit in a room unlabeled.
+      isBotUser: !!socket.isBot || undefined,
+      deviceType: socket.isBot ? "bot" : socket.deviceType || "unknown",
       deviceId: socket.deviceId || null,
       avatar: socket.handshake.session?.avatar || null,
     });
@@ -3018,6 +3057,14 @@ function emitJoinSuccess(socket, room, userId, username, location) {
     state.roomDeletionTimers.delete(room.id);
   }
   sendDevRoomContext(room.id);
+
+  // A "deploy to a new room" waits for its owner to arrive; this is the
+  // arrival. No-op for everyone without a pending deploy.
+  try {
+    bots.onOwnerJoined(socket, room);
+  } catch (e) {
+    console.error("bots onOwnerJoined error:", e);
+  }
 }
 
 function handleTyping(socket, userId, username, isTyping) {
@@ -3141,6 +3188,24 @@ function registerSocketHandlers(opts) {
         return text;
       }
     },
+  });
+
+  // The bot runtime drives room membership and textboxes through the same
+  // broadcast helpers real sockets use, injected here so every client renders
+  // a bot exactly like a person.
+  bots.init({
+    emitChat: emitRoomChatUpdate,
+    emitTyping: emitRoomTyping,
+    userJoined: emitRoomUserJoined,
+    userLeft: emitRoomUserLeft,
+    updateRoom,
+    updateLobby,
+    startRoomDeletionTimer,
+    roomCapacity,
+    newRoomCapacity,
+    roomNameExists,
+    calculateCurrentRoomLimit,
+    logStaff,
   });
 
   io().on("connection", (socket) => {
@@ -3560,6 +3625,9 @@ function registerSocketHandlers(opts) {
 
     // ── The Desk: staff chat, pings, presence, inspector ────────────────
     staffchat.register(socket, safe);
+
+    // ── Bot Creator: saved bots, deploys, staff bot controls ────────────
+    bots.register(socket, safe);
 
     // ── Talkoboard: stroke lifecycle + state sync ───────────────────────
 
@@ -4885,6 +4953,18 @@ function registerSocketHandlers(opts) {
             if (!room.bannedUserIds) room.bannedUserIds = new Set();
             room.bannedUserIds.add(data.targetUserId);
             await leaveRoom(target, data.targetUserId);
+          } else if (bots.isActiveBot(data.targetUserId)) {
+            // A hosted bot has no socket to kick; the room voted it out all
+            // the same. The room ban stops this exact bot being redeployed
+            // here, and noteEvicted shuts its runtime down.
+            if (!room.bannedUserIds) room.bannedUserIds = new Set();
+            room.bannedUserIds.add(data.targetUserId);
+            const botUser = room.users.find((u) => u.id === data.targetUserId);
+            room.users = room.users.filter((u) => u.id !== data.targetUserId);
+            emitRoomUserLeft(roomId, data.targetUserId, botUser);
+            bots.noteEvicted(data.targetUserId);
+            updateRoom(roomId);
+            updateLobby();
           }
         }
       }),
@@ -5273,6 +5353,9 @@ function registerSocketHandlers(opts) {
           await leaveRoom(targetSocket, targetUserId);
         } else {
           room.users = room.users.filter((u) => u.id !== targetUserId);
+          emitRoomUserLeft(roomId, targetUserId, targetUser);
+          // If that memberless entry was a hosted bot, stop its runtime too.
+          bots.noteEvicted(targetUserId);
           updateRoom(roomId);
           updateRoomSoloTracking(roomId);
           updateLobby();
@@ -9115,6 +9198,10 @@ function startCleanupIntervals() {
       if (!room.users || room.users.length === 0) continue;
       const before = room.users.length;
       room.users = room.users.filter((u) => {
+        // A hosted bot never has a socket; its liveness is the bot runtime.
+        // Without this exemption the sweep would evict every bot within a
+        // minute of deploying. Dead bot entries (runtime gone) still purge.
+        if (u.isBotUser && bots.isActiveBot(u.id)) return true;
         if (!activeIds.has(u.id)) {
           console.log(`Ghost removed: "${u.username}" from "${room.name}"`);
           state.userMessageBuffers.delete(u.id);
@@ -9207,6 +9294,7 @@ function purgeAllGhostUsers() {
     const before = room.users.length;
     room.users = room.users.filter((u) => {
       if (activeIds.has(u.id)) return true; // live socket -> a real user, keep
+      if (u.isBotUser && bots.isActiveBot(u.id)) return true; // live hosted bot
       state.userMessageBuffers.delete(u.id);
       clearAFKTimers(u.id);
       state.devUsers.delete(u.id);
