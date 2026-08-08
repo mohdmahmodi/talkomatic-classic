@@ -10,7 +10,9 @@
   z-index: 12000; /* above the suggestion board and every lobby modal */
   background: rgba(0, 0, 0, 0.86);
   padding: 24px;
-  overflow-y: auto;
+  /* The card scrolls inside itself; the overlay never scrolls. An overlay
+     that scrolls is what iOS grabs instead of the message. */
+  overflow: hidden;
 }
 
 .an-overlay.show {
@@ -90,6 +92,10 @@
 .an-body {
   flex: 1;
   overflow-y: auto;
+  /* Reaching the end of the message must not hand the gesture to whatever
+     is behind the card. */
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   padding: 20px 30px 24px;
   color: var(--tk-text, #fff);
   font-size: 15px;
@@ -209,6 +215,11 @@
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
+  /* A popular notice collects dozens of reactions; they must never eat the
+     message area. Three rows, then the pile scrolls within itself. */
+  max-height: 102px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .an-react {
@@ -328,12 +339,37 @@
   outline-offset: 2px;
 }
 
+/* Phones: the card takes the whole screen so the message gets all of it.
+   100dvh tracks the real visible height under Safari's collapsing URL bar;
+   plain 100vh overflows it, which is what made the outer layer scroll.
+   Reactions become ONE row that scrolls sideways under a thumb. */
 @media (max-width: 640px) {
-  .an-overlay { padding: 12px; }
-  .an-card { max-height: calc(100vh - 24px); }
-  .an-head { padding: 18px 18px 14px; }
-  .an-title { font-size: 22px; }
-  .an-body { padding: 16px 18px 20px; font-size: 14.5px; }
-  .an-foot { padding: 12px 18px 14px; gap: 10px; }
+  .an-overlay { padding: 0; }
+  .an-card {
+    max-width: none;
+    height: 100vh;
+    height: 100dvh;
+    max-height: none;
+    border: none;
+    border-radius: 0;
+  }
+  .an-head { padding: 14px 16px 12px; }
+  .an-title { font-size: 20px; margin: 10px 0 4px; }
+  .an-body { padding: 14px 16px 18px; font-size: 14.5px; }
+  .an-foot { padding: 10px 12px 12px; gap: 8px; }
+  .an-react-wrap { flex-wrap: nowrap; }
+  .an-reacts {
+    flex: 1;
+    min-width: 0;
+    flex-wrap: nowrap;
+    max-height: none;
+    overflow-y: hidden;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+  .an-reacts::-webkit-scrollbar { display: none; }
+  .an-react { flex: 0 0 auto; }
   .an-close-wrap { width: 100%; margin-left: 0; }
 }

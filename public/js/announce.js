@@ -390,13 +390,38 @@
     countTimer = null;
   }
 
+  // overflow:hidden on body does not stop touch scrolling in iOS Safari;
+  // pinning the body in place does. The scroll position is put back on
+  // close so the page does not jump to the top.
+  var lockedScrollY = 0;
+
+  function lockBody() {
+    lockedScrollY = window.scrollY || 0;
+    document.body.style.position = "fixed";
+    document.body.style.top = -lockedScrollY + "px";
+    document.body.style.left = "0";
+    document.body.style.right = "0";
+    document.body.style.width = "100%";
+    document.body.style.overflow = "hidden";
+  }
+
+  function unlockBody() {
+    document.body.style.position = "";
+    document.body.style.top = "";
+    document.body.style.left = "";
+    document.body.style.right = "";
+    document.body.style.width = "";
+    document.body.style.overflow = "";
+    window.scrollTo(0, lockedScrollY);
+  }
+
   function open() {
     if (!current) return;
     build();
     render();
     isOpen = true;
     overlay.classList.add("show");
-    document.body.style.overflow = "hidden";
+    lockBody();
     startCountdown();
   }
 
@@ -407,7 +432,7 @@
     isOpen = false;
     stopCountdown();
     overlay.classList.remove("show");
-    document.body.style.overflow = "";
+    unlockBody();
     if (current) markSeen(current.id);
   }
 
