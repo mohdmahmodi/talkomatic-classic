@@ -55,7 +55,7 @@ const MAX_Y = H - PADDLE_H / 2;
 // court takes about 210ms to cross, which is quick enough that a hand never
 // feels the cap during ordinary play, and still a cap - a patched client
 // cannot teleport onto the ball, and the server holds everyone to it.
-const PADDLE_SPEED = 900;
+const PADDLE_SPEED = 460;
 // Holding a key is a different thing from pointing at a spot. A pointer says
 // "be here", and the only honest answer is to be there; a key says "keep
 // going", and at 900 a tap would send the paddle across the whole court before
@@ -63,6 +63,11 @@ const PADDLE_SPEED = 900;
 // above the 152 u/s the ball manages vertically, so neither can be outrun by
 // the thing it is chasing - which was the whole complaint.
 const KEY_SPEED = 460;
+// The most one-way delay anybody is ever credited for, honest or otherwise.
+// 60ms of travel is about one paddle height, which is enough to cover a real
+// return that this end had not caught up with yet, and small enough that
+// claiming a worse connection than you have buys you very little.
+const COMP_CAP_MS = 60;
 // Spin is still computed off the OLD speed. It is "a moving paddle drags the
 // ball with it", and it was tuned against a paddle that moved at 175; feeding
 // it a number two and a half times bigger would not make the game feel more
@@ -125,6 +130,7 @@ function create(players, opts) {
       // one: it can see exactly how far behind the server's copy is and
       // rebuild the rest from intents it knows are still in the wire.
       ack: 0,
+      lagMs: 0, // measured round trip, for lag compensation
       hits: 0,
       stirred: false, // paddle actually moved during this point
       still: 0, // points conceded in a row without it moving at all
@@ -168,6 +174,15 @@ function input(state, userId, inp) {
   // rather than applied late, because applying it would move the paddle back
   // to somewhere the player has already left and the browser, which numbered
   // it in the first place, would have no way to know that had happened.
+  // The client echoes the timestamp of the newest frame it has seen. Both
+  // ends of that are numbers this server minted, so the round trip is measured
+  // here rather than reported by the browser: the only way to game it is to
+  // echo an older frame and claim to be further away, which the cap bounds.
+  if (inp && inp.r) {
+    const rtt = clamp(Date.now() - Number(inp.r), 0, 400);
+    if (Number.isFinite(rtt))
+      p.lagMs = p.lagMs ? p.lagMs + (rtt - p.lagMs) * 0.2 : rtt;
+  }
   if (inp && inp.n !== undefined) {
     const n = Number(inp.n);
     if (!Number.isFinite(n) || n <= p.ack) return false;
@@ -198,6 +213,19 @@ function move(state, userId, mv) {
 }
 
 // ── Physics ─────────────────────────────────────────────────────────────────
+
+// Where a paddle would already be if its owner's intent had reached us the
+// instant they gave it. Never further than the intent actually asks for, and
+// never more than the compensation ceiling allows.
+function leadOf(p, py, capMs) {
+  const comp = clamp((p.lagMs || 0) * 0.5, 0, capMs);
+  if (comp <= 0) return py;
+  let want = py;
+  if (p.dir) want = py + p.dir * H;
+  else if (p.targetY != null) want = p.targetY;
+  const room = (p.dir ? KEY_SPEED : PADDLE_SPEED) * (comp / 1000);
+  return clamp(py + clamp(want - py, -room, room), MIN_Y, MAX_Y);
+}
 
 function movePaddles(state, dt) {
   for (const p of state.players) {
@@ -398,9 +426,35 @@ function step(state, dt, now, evs, say) {
       // paddle had got to by then.
       const at = dt > 0 ? clamp((dt - left) / dt, 0, 1) : 1;
       const py = p ? p.yPrev + (p.y - p.yPrev) * at : 0;
-      if (p && Math.abs(b.y - py) <= PADDLE_H / 2 + BALL_R)
-        bounce(state, idx, p, py, evs);
-      else b.past = true; // missed it, so let it run through to the back wall
+      if (!p) {
+        b.past = true;
+        continue;
+      }
+      // Lag compensation.
+      //
+      // This paddle is chasing an intent that left the player's machine one
+      // uplink ago, so their screen has ALWAYS shown it further along than we
+      // have it here. The faster the paddle, the wider that gap: at 460 u/s
+      // and 60ms it is well over a paddle height. Judging the hit on our copy
+      // alone means telling somebody who watched themselves make a clean
+      // return that they missed it, which is the single most infuriating
+      // thing a game can do.
+      //
+      // So the paddle is credited the travel that intent would already have
+      // finished, and the ball counts as returned anywhere along that sweep.
+      // Bounded twice over: by how far it actually still has to go, and by a
+      // measured one-way delay with a hard ceiling. A player on a good line
+      // gets almost none of this; nobody gets more than the ceiling however
+      // bad, or however dishonest, their connection claims to be.
+      const lead = leadOf(p, py, COMP_CAP_MS);
+      const lo = Math.min(py, lead) - PADDLE_H / 2 - BALL_R;
+      const hi = Math.max(py, lead) + PADDLE_H / 2 + BALL_R;
+      if (b.y >= lo && b.y <= hi) {
+        // Bounce off the point along that sweep nearest the ball, so the angle
+        // is the one the player was actually aiming with.
+        const use = clamp(b.y, Math.min(py, lead), Math.max(py, lead));
+        bounce(state, idx, p, use, evs);
+      } else b.past = true; // missed it, so let it run through to the back wall
       continue;
     }
   }

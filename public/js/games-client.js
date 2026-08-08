@@ -1698,13 +1698,24 @@
   // not wrong; the numbers that would have settled it in one message are the
   // frame rate, whether the local paddle is being driven by the hand or by the
   // wire, and how often the ball is being corrected.
-  const PG_DEBUG = /pongdebug/.test(location.search + location.hash);
+  // Toggled by the button under the court, remembered between visits, and
+  // still settable from the URL. Public on purpose: it costs nothing and it
+  // means anybody reporting "it feels laggy" can report numbers instead.
+  let PG_DEBUG =
+    /pongdebug/.test(location.search + location.hash) ||
+    (function () {
+      try {
+        return localStorage.getItem("tk-pong-debug") === "1";
+      } catch (_) {
+        return false;
+      }
+    })();
 
   BOARDS.pong = function () {
     let root, canvas, ctx, courtBox, wrapEl, floatEl;
     let nameL, nameR, ptsL, ptsR, midEl, rallyEl;
     let matchKey = "";
-    let padsEl, cheerEl, lineupEl, hintEl;
+    let padsEl, cheerEl, lineupEl, hintEl, dbgBtn;
     let ro = null, raf = null, sendTimer = null;
     let cssFont = "sans-serif";
 
@@ -1712,7 +1723,7 @@
     // rules are written down twice.
     let C = {
       w: 200, h: 120, wall: 4, paddleW: 2.4, paddleH: 22, ballR: 1.9,
-      paddleSpeed: 900, keySpeed: 460, maxSpeed: 175, baseSpeed: 70,
+      paddleSpeed: 460, keySpeed: 460, maxSpeed: 175, baseSpeed: 70,
       speedStep: 1.05, bounceMax: Math.PI / 3, spin: 0.14, spinCap: 175, minVy: 0.06,
     };
     let target = 7;
@@ -1756,6 +1767,7 @@
 
     let shake = 0, lastPaint = 0;
     let dbgFrames = 0, dbgAt = 0, dbgFps = 0, dbgFix = 0, dbgRate = 0;
+    let dbgFixSum = 0, dbgHard = 0, dbgHardRate = 0, dbgErr = 0, dbgGap = 0;
     let needScore = false; // a frame changed the score; redraw the scoreline
     const rings = [];
     let hitGlow = [0, 0], sideFlash = [0, 0];
@@ -2109,7 +2121,7 @@
 
     // Take the server's word entirely and roll it forward to now.
     function hardSet(f) {
-      dbgFix++;
+      dbgHard++;
       sim.x = f.b[0];
       sim.y = f.b[1];
       sim.vx = f.b[2];
@@ -2217,6 +2229,7 @@
       // the offset so that the picture does not contain it. The ball is on the
       // server's path from now, and was never seen moving onto it.
       dbgFix++;
+      dbgFixSum += Math.hypot(ex, ey);
       sim.x += ex;
       sim.y += ey;
       offX = clamp(offX - ex, -40, 40);
@@ -2253,7 +2266,7 @@
         sentDir = myDir;
         sentY = null;
         lastSentAt = now;
-        const it = { d: myDir };
+        const it = { d: myDir, r: last ? last.t : 0 };
         it.n = note();
         S.emit("games input", { tableId: detail.id, input: it });
         return;
@@ -2262,7 +2275,7 @@
       if (!stale && sentY != null && Math.abs(myWant - sentY) < 0.2) return;
       sentY = myWant;
       lastSentAt = now;
-      const it = { y: Math.round(myWant * 10) / 10 };
+      const it = { y: Math.round(myWant * 10) / 10, r: last ? last.t : 0 };
       it.n = note();
       S.emit("games input", { tableId: detail.id, input: it });
     }
@@ -2583,24 +2596,40 @@
         if (nowMs - dbgAt > 500) {
           dbgFps = Math.round((dbgFrames * 1000) / (nowMs - dbgAt));
           dbgRate = Math.round((dbgFix * 1000) / (nowMs - dbgAt));
+          dbgHardRate = Math.round((dbgHard * 1000) / (nowMs - dbgAt));
+          dbgErr = dbgFix ? dbgFixSum / dbgFix : 0;
           dbgFrames = 0;
           dbgFix = 0;
+          dbgFixSum = 0;
+          dbgHard = 0;
           dbgAt = nowMs;
         }
-        ctx.font = "bold " + Math.round(chh * 0.045) + "px " + cssFont;
+        // The gap between your paddle and the server's copy of it. THIS is
+        // the number that matters: everything the other player sees, and every
+        // hit-or-miss ruling, is made against the server's copy. A gap of more
+        // than a paddle height is why a clean return can be scored against
+        // you. The old readout counted "corrections" instead, which fired on
+        // every snapshot no matter how healthy things were and said nothing.
+        const mine = mySide >= 0 && canControl();
+        if (mine && netY[mySide] != null && padY[mySide] != null)
+          dbgGap = Math.abs(netY[mySide] - padY[mySide]);
+        ctx.font = "bold " + Math.round(chh * 0.042) + "px " + cssFont;
         ctx.textAlign = "left";
         ctx.textBaseline = "top";
-        ctx.fillStyle = "rgba(0,0,0,0.55)";
-        ctx.fillRect(0, 0, cw * 0.42, chh * 0.24);
-        ctx.fillStyle = "#7CFC9B";
-        const mine = mySide >= 0 && canControl();
+        ctx.fillStyle = "rgba(0,0,0,0.6)";
+        ctx.fillRect(0, 0, cw * 0.46, chh * 0.28);
+        const bad = dbgGap > C.paddleH;
+        ctx.fillStyle = bad ? "#FF8A7A" : "#7CFC9B";
         [
-          dbgFps + " fps",
-          "paddle: " + (mine ? "HAND (local)" : "WIRE (network) <-- wrong if playing"),
-          "clock offset " + Math.round(offset) + "ms, far paddle drawn " + Math.round(netDelay) + "ms back",
-          "ball corrections " + dbgRate + "/s",
+          dbgFps + " fps    paddle: " + (mine ? "HAND (local)" : "WIRE (network)"),
+          "server's copy of your paddle is " +
+            dbgGap.toFixed(0) + "u behind (" + (dbgGap / C.paddleH).toFixed(1) +
+            " paddle-heights)" + (bad ? "  <-- TOO FAR" : ""),
+          "ball off the server by " + dbgErr.toFixed(1) + "u, rebuilt " + dbgHardRate + "/s",
+          "far paddle drawn " + Math.round(netDelay) +
+            "ms back, clock offset " + Math.round(offset) + "ms (normal)",
         ].forEach((line, i) => {
-          ctx.fillText(line, chh * 0.02, chh * 0.02 + i * chh * 0.052);
+          ctx.fillText(line, chh * 0.02, chh * 0.02 + i * chh * 0.06);
         });
       }
 
@@ -2783,6 +2812,25 @@
             }),
           ),
         );
+        // Connection readout, on a button rather than a URL flag: needing a
+        // reload to see it meant it was never on at the moment something
+        // actually went wrong.
+        dbgBtn = el("button", {
+          class: "gm-pg-cheer-btn gm-pg-stats",
+          title: "Show connection stats",
+          "aria-label": "Show or hide connection stats",
+          text: "📶",
+          onclick: () => {
+            PG_DEBUG = !PG_DEBUG;
+            try {
+              localStorage.setItem("tk-pong-debug", PG_DEBUG ? "1" : "0");
+            } catch (_) {}
+            dbgBtn.classList.toggle("gm-pg-on", PG_DEBUG);
+          },
+        });
+        if (PG_DEBUG) dbgBtn.classList.add("gm-pg-on");
+        cheerEl.appendChild(dbgBtn);
+
         root.appendChild(el("div", { class: "gm-pg-under" }, [padsEl, cheerEl]));
 
         lineupEl = el("div", { class: "gm-pg-lineup" });

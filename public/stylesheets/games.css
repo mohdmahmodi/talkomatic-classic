@@ -3044,3 +3044,10 @@ button.gm-side-fold:hover {
     gap: 6px;
   }
 }
+
+/* Pong connection readout toggle. Sits with the cheer buttons because that is
+   where a player's thumb already is, and lights up while it is on. */
+.gm-pg-stats.gm-pg-on {
+  outline: 2px solid var(--tk-accent);
+  outline-offset: -2px;
+}
