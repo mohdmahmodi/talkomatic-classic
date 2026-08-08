@@ -1693,6 +1693,12 @@
   // different rates, and being wrong about that in a hurry is worse than being
   // wrong about it slowly.
   const PG_OFF_DECAY = 0.35;
+  // ?pongdebug=1 turns on the ghost paddle and a corner readout. Chasing this
+  // by description alone cost several rounds of guessing at things that were
+  // not wrong; the numbers that would have settled it in one message are the
+  // frame rate, whether the local paddle is being driven by the hand or by the
+  // wire, and how often the ball is being corrected.
+  const PG_DEBUG = /pongdebug/.test(location.search + location.hash);
 
   BOARDS.pong = function () {
     let root, canvas, ctx, courtBox, wrapEl, floatEl;
@@ -1706,8 +1712,8 @@
     // rules are written down twice.
     let C = {
       w: 200, h: 120, wall: 4, paddleW: 2.4, paddleH: 22, ballR: 1.9,
-      paddleSpeed: 175, maxSpeed: 175, baseSpeed: 70,
-      speedStep: 1.05, bounceMax: Math.PI / 3, spin: 0.14, minVy: 0.06,
+      paddleSpeed: 900, keySpeed: 460, maxSpeed: 175, baseSpeed: 70,
+      speedStep: 1.05, bounceMax: Math.PI / 3, spin: 0.14, spinCap: 175, minVy: 0.06,
     };
     let target = 7;
     let mySide = -1;
@@ -1730,11 +1736,18 @@
     const padY = [null, null];
     const padPrev = [null, null];
     const padVy = [0, 0];
-    // The server's last word on each paddle, and how fast it was going, for
-    // dead reckoning the one that is not ours.
-    const netY = [null, null];
-    const netVy = [0, 0];
-    let netAt = 0;
+    // Every position the server has reported for each paddle, with the moment
+    // it belongs to. The one that is not ours is drawn from these by sitting
+    // between two of them - so it is only ever shown somewhere it has actually
+    // been, which is the whole reason it cannot fly about.
+    const netBuf = [[], []];
+    const netY = [null, null]; // newest reported, for the ghost
+    // How far in the past the far paddle is drawn: enough to keep a real
+    // sample on both sides of the drawing moment. Measured, because guessing
+    // low means holding still constantly and guessing high is needless lag on
+    // the one paddle that has any.
+    let netDelay = 70;
+    let gapMax = 34, lateMax = 12;
 
     let myWant = null, myDir = 0;
     let sentY = null, sentDir = 0, lastSentAt = 0;
@@ -1742,6 +1755,8 @@
     let upHeld = false, downHeld = false;
 
     let shake = 0, lastPaint = 0;
+    let dbgFrames = 0, dbgAt = 0, dbgFps = 0, dbgFix = 0, dbgRate = 0;
+    let needScore = false; // a frame changed the score; redraw the scoreline
     const rings = [];
     let hitGlow = [0, 0], sideFlash = [0, 0];
 
@@ -1784,8 +1799,8 @@
       padPrev[0] = padPrev[1] = null;
       padVy[0] = padVy[1] = 0;
       netY[0] = netY[1] = null;
-      netVy[0] = netVy[1] = 0;
-      netAt = 0;
+      netBuf[0].length = 0;
+      netBuf[1].length = 0;
       hitGlow[0] = hitGlow[1] = 0;
       myWant = null;
       myDir = 0;
@@ -1839,7 +1854,9 @@
       const away = idx === 0 ? 1 : -1;
 
       let vx = Math.cos(off * C.bounceMax) * speed * away;
-      let vy = Math.sin(off * C.bounceMax) * speed + padVy[idx] * C.spin;
+      let vy =
+        Math.sin(off * C.bounceMax) * speed +
+        clamp(padVy[idx], -C.spinCap, C.spinCap) * C.spin;
 
       const mag = Math.hypot(vx, vy) || speed;
       vx = (vx / mag) * speed;
@@ -1920,6 +1937,18 @@
           continue;
         }
         if (hit === 0 || hit === 1) {
+          // Both paddles are settled here, off the position each one is drawn
+          // at. That keeps the picture honest at both ends: the ball bounces
+          // off a paddle you can see, and goes past one you can see it miss.
+          //
+          // A version of this waited on the far face instead, on the grounds
+          // that the opponent's paddle is only known in the past and guessing
+          // its angle is a guess. True, but the cure was worse: the ball
+          // visibly stopped dead at their paddle for a downlink, then jumped,
+          // and when they had missed it stalled there and a point appeared out
+          // of nowhere. The far end is a whole court away from the person
+          // playing, the server corrects it within one snapshot, and a wrong
+          // angle out there is cheaper than the ball hitching every rally.
           // Where the paddle had got to when the ball crossed, not where it
           // ended the frame. A paddle covers more than its own thickness in a
           // frame, so testing the end position turns fair edge hits into
@@ -1941,9 +1970,14 @@
       const i = mySide;
       if (i < 0 || padY[i] == null) return;
       let want = padY[i];
-      if (myDir) want = padY[i] + myDir * C.h;
-      else if (myWant != null) want = myWant;
-      const room = C.paddleSpeed * dt;
+      // Same split the server makes: pointing at a spot means go there, and
+      // holding a key means travel at a speed you can steer.
+      let rate = C.paddleSpeed;
+      if (myDir) {
+        want = padY[i] + myDir * C.h;
+        rate = C.keySpeed || C.paddleSpeed;
+      } else if (myWant != null) want = myWant;
+      const room = rate * dt;
       const ny = clamp(
         padY[i] + clamp(want - padY[i], -room, room),
         C.paddleH / 2,
@@ -1953,27 +1987,48 @@
       padY[i] = ny;
     }
 
-    // Somebody else's paddle. This one genuinely cannot be predicted, so it is
-    // dead reckoned a little way past the last word we had on it and then
-    // chased at the speed a paddle actually moves. Chasing rather than
-    // assigning is what keeps a bad guess looking like a paddle changing its
-    // mind instead of a paddle teleporting.
+    // Somebody else's paddle. Drawn a little way in the past, BETWEEN two
+    // positions the server actually reported, and never one step beyond the
+    // newest one.
+    //
+    // The version this replaces dead reckoned it forward instead, off a
+    // velocity worked out from two snapshots 33ms apart. That velocity is
+    // almost pure noise: a hand that moves five units between two snapshots
+    // reads as 150 units a second, which threw the paddle sixteen units past
+    // where anybody had ever seen it, and then the next snapshot whipped it
+    // back. That is the opponent "flying around", and it was not the network -
+    // it was this function guessing.
+    //
+    // A hand cannot be predicted. There is no keypress to run forward and no
+    // model of what somebody is about to do. So this does not try: between two
+    // real samples it interpolates, past the newest one it holds still and
+    // waits. Holding is honest and looks like a paddle that stopped, which is
+    // usually exactly what happened.
+    function netAt2(i, tt) {
+      const b = netBuf[i];
+      if (!b.length) return null;
+      if (tt <= b[0].t) return b[0].y;
+      for (let k = b.length - 1; k > 0; k--) {
+        if (b[k - 1].t <= tt && tt <= b[k].t) {
+          const span = b[k].t - b[k - 1].t;
+          const q = span > 0 ? clamp((tt - b[k - 1].t) / span, 0, 1) : 1;
+          return b[k - 1].y + (b[k].y - b[k - 1].y) * q;
+        }
+      }
+      return b[b.length - 1].y; // past the newest sample: hold, do not guess
+    }
+
     function stepNet(i, dt) {
-      if (netY[i] == null) return;
-      const lead = clamp(serverNow() - netAt, 0, PG_OPP_LEAD) / 1000;
-      const want = clamp(
-        netY[i] + netVy[i] * lead,
-        C.paddleH / 2,
-        C.h - C.paddleH / 2,
-      );
+      const want = netAt2(i, serverNow() - netDelay);
+      if (want == null) return;
       if (padY[i] == null) {
         padY[i] = want;
         padVy[i] = 0;
         return;
       }
-      // A shade faster than a paddle can move, so a correction always closes
-      // rather than trailing forever behind a hand that keeps going.
-      const room = C.paddleSpeed * dt * 1.5;
+      // Interpolation between real samples is smooth already; this only takes
+      // the edge off the moment fresh data arrives after a hold.
+      const room = C.paddleSpeed * dt * 1.6;
       const ny = clamp(
         padY[i] + clamp(want - padY[i], -room, room),
         C.paddleH / 2,
@@ -2019,9 +2074,19 @@
       return { x, y: clamp(sim.y + offY, C.ballR, C.h - C.ballR) };
     }
 
+    // Null, not a guess, when the history does not reach back that far.
+    //
+    // This used to hand back the oldest entry it had for any moment before it,
+    // and that is a different ball at a different time being passed off as the
+    // right one. Every hardSet empties this history, so the very next snapshot
+    // - which describes a moment one downlink ago - got compared against the
+    // ball as it is NOW, and the several units the ball had travelled in
+    // between were read as an error and corrected. A wrong correction, on
+    // every rebuild. That is the ball jitter, and it is worse the further away
+    // the server is, because the gap it invents is exactly the downlink.
     function simAt(tt) {
-      if (!simHist.length) return null;
-      if (tt <= simHist[0].t) return simHist[0];
+      if (simHist.length < 2) return null;
+      if (tt < simHist[0].t) return null;
       for (let i = simHist.length - 1; i >= 0; i--) {
         if (simHist[i].t > tt) continue;
         const a = simHist[i], b = simHist[i + 1];
@@ -2044,6 +2109,7 @@
 
     // Take the server's word entirely and roll it forward to now.
     function hardSet(f) {
+      dbgFix++;
       sim.x = f.b[0];
       sim.y = f.b[1];
       sim.vx = f.b[2];
@@ -2065,21 +2131,41 @@
       const scored = last && (f.s[0] !== last.s[0] || f.s[1] !== last.s[1]);
       const turned = !last || f.ph !== last.ph;
 
-      // The opponent's paddle, and our own only until we are actually driving
-      // it. Velocity from the two most recent snapshots so it can be reckoned
-      // a little way forward.
+      // How far apart the snapshots are, and how unevenly they land. The far
+      // paddle has to be drawn far enough back that one gap plus that
+      // unevenness still leaves a real sample on the far side of the drawing
+      // moment, or it spends its time held still at the newest one.
+      //
+      // Both are decaying high water marks: a window maximum is hostage to its
+      // single worst sample and holds a stale answer until that ages out.
       const gap = last ? f.t - last.t : 0;
+      if (gap > 0) gapMax = Math.max(gap, gapMax * 0.99);
+      lateMax = Math.max(
+        clamp(serverNow() - f.t, 0, 300),
+        lateMax * 0.97,
+      );
+      netDelay = clamp(gapMax + lateMax * 0.5 + 8, 45, 150);
+
       for (let i = 0; i < 2; i++) {
-        netVy[i] = gap > 0 && netY[i] != null ? ((f.p[i] - netY[i]) / gap) * 1000 : 0;
         netY[i] = f.p[i];
-      }
-      netAt = f.t;
-      for (let i = 0; i < 2; i++) {
+        const b = netBuf[i];
+        if (!b.length || f.t > b[b.length - 1].t) b.push({ t: f.t, y: f.p[i] });
+        while (b.length > 48) b.shift();
         if (padY[i] == null || (i === mySide && !canControl())) padY[i] = f.p[i];
       }
 
       if (scored) {
         fire({ k: "point", side: f.s[0] !== (last ? last.s[0] : 0) ? 1 : 0 });
+        // Repaint the scoreline HERE, off the frame that carries the new score.
+        //
+        // It used to be repainted only from update(), which runs on a "games
+        // table" event - and scoring a point does not send one. It pushes a
+        // chat line and nothing else. So the number above the court sat on the
+        // old score until some unrelated event happened to refresh the table,
+        // which is why people said someone had scored and "didn't even get a
+        // point". The score was right on the server the whole time; this end
+        // was simply never told to redraw it.
+        needScore = true;
       }
       absorb(f, scored || turned);
       last = f;
@@ -2130,6 +2216,7 @@
       // Correct the simulation this instant, and hand the size of the step to
       // the offset so that the picture does not contain it. The ball is on the
       // server's path from now, and was never seen moving onto it.
+      dbgFix++;
       sim.x += ex;
       sim.y += ey;
       offX = clamp(offX - ex, -40, 40);
@@ -2314,6 +2401,10 @@
       if (!COL) COL = colors();
       const dt = Math.min(0.05, (nowMs - lastPaint) / 1000) || 0.016;
       lastPaint = nowMs;
+      if (needScore) {
+        needScore = false;
+        if (detail) paintScore(detail);
+      }
 
       const cw = canvas.width, chh = canvas.height;
       const sc = cw / C.w;
@@ -2373,15 +2464,16 @@
 
       // The ghost. Where the server has your paddle, which is always a little
       // behind where you have it, because your intent takes an uplink to get
-      // there. Drawn only when the two are far enough apart to be worth
-      // knowing about, so it is invisible in ordinary play and turns up when
-      // the connection is genuinely struggling.
+      // there.
       //
-      // This exists because the alternative - moving your paddle to meet the
-      // server's copy - is the thing that made it jitter. The disagreement is
-      // real and it is worth showing. It is not worth resolving by yanking the
-      // one part of the court that is supposed to answer only to your hand.
-      if (mySide >= 0 && canControl() && netY[mySide] != null && padY[mySide] != null) {
+      // Diagnostic only, behind ?pongdebug=1. It was briefly on for everyone,
+      // and that was a mistake: the gap it draws is proportional to paddle
+      // speed, so at 460 u/s an ordinary quick movement opens a gap of twenty
+      // units for a moment and a second translucent paddle flickers behind
+      // your real one every time you move. A player cannot act on that, and
+      // "there are two paddles and one of them is jumping about" is not a
+      // clearer story than the one it was meant to explain.
+      if (PG_DEBUG && mySide >= 0 && canControl() && netY[mySide] != null && padY[mySide] != null) {
         const drift = netY[mySide] - padY[mySide];
         if (Math.abs(drift) > 4) {
           ctx.globalAlpha = Math.min(0.5, (Math.abs(drift) - 4) / 16);
@@ -2411,8 +2503,7 @@
           ctx.shadowBlur = 18 * hitGlow[i];
           ctx.shadowColor = mine ? COL.mine : COL.theirs;
         }
-        roundRect(ctx, x, y, pw, ph, pw / 2);
-        ctx.fill();
+        ctx.fillRect(x, y, pw, ph);
         ctx.shadowBlur = 0;
       }
 
@@ -2484,6 +2575,33 @@
           cw / 2,
           chh / 2 + chh * 0.22,
         );
+      }
+
+      if (PG_DEBUG) {
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        dbgFrames++;
+        if (nowMs - dbgAt > 500) {
+          dbgFps = Math.round((dbgFrames * 1000) / (nowMs - dbgAt));
+          dbgRate = Math.round((dbgFix * 1000) / (nowMs - dbgAt));
+          dbgFrames = 0;
+          dbgFix = 0;
+          dbgAt = nowMs;
+        }
+        ctx.font = "bold " + Math.round(chh * 0.045) + "px " + cssFont;
+        ctx.textAlign = "left";
+        ctx.textBaseline = "top";
+        ctx.fillStyle = "rgba(0,0,0,0.55)";
+        ctx.fillRect(0, 0, cw * 0.42, chh * 0.24);
+        ctx.fillStyle = "#7CFC9B";
+        const mine = mySide >= 0 && canControl();
+        [
+          dbgFps + " fps",
+          "paddle: " + (mine ? "HAND (local)" : "WIRE (network) <-- wrong if playing"),
+          "clock offset " + Math.round(offset) + "ms, far paddle drawn " + Math.round(netDelay) + "ms back",
+          "ball corrections " + dbgRate + "/s",
+        ].forEach((line, i) => {
+          ctx.fillText(line, chh * 0.02, chh * 0.02 + i * chh * 0.052);
+        });
       }
 
       ctx.setTransform(1, 0, 0, 1, 0, 0);

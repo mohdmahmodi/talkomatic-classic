@@ -33,15 +33,42 @@ const RIGHT_FACE = W - WALL - PADDLE_W;
 const MIN_Y = PADDLE_H / 2;
 const MAX_Y = H - PADDLE_H / 2;
 
-// The ball crosses the court in 2.7s at serve speed and 1.07s flat out, and a
-// paddle crosses its whole run in 0.56s, so a rally can always be reached:
-// losing a point is a read, never a sprint you were never going to win.
+// The ball crosses the court in 2.7s at serve speed and 1.07s flat out, so a
+// rally can always be reached: losing a point is a read, never a sprint you
+// were never going to win. That was true at 110 and at 175 as well - reaching
+// was never the problem.
 //
-// It was 110, which was already fast enough to reach anything and so cost
-// nothing in balance, but it was slower than a hand. Anything quicker than a
-// gentle nudge outran the paddle and the whole thing felt like it was on
-// elastic. Reaching was never the problem, keeping up was.
-const PADDLE_SPEED = 175;
+// This is the number that decides whether the game feels connected to your
+// hand, and it was the answer to a long hunt through the netcode for a lag
+// that was never in the netcode.
+//
+// At 175 the paddle took 560ms to cross the court. Players described it,
+// exactly, as "I try to move up and it moves me up 600ms later". Worse, the
+// ball's vertical component reaches 152 u/s on a steep return, so a paddle at
+// 175 out-paced the ball it was trying to track by 1.15x - meaning that while
+// following a fast rally the paddle was permanently behind and never caught
+// up. That reads as lag no matter how good the network is, and it is why it
+// was reported as lag on a LAN too.
+//
+// The rule now is that the paddle must comfortably out-run the thing it is
+// asked to follow: roughly three times the ball's steepest vertical speed. The
+// court takes about 210ms to cross, which is quick enough that a hand never
+// feels the cap during ordinary play, and still a cap - a patched client
+// cannot teleport onto the ball, and the server holds everyone to it.
+const PADDLE_SPEED = 900;
+// Holding a key is a different thing from pointing at a spot. A pointer says
+// "be here", and the only honest answer is to be there; a key says "keep
+// going", and at 900 a tap would send the paddle across the whole court before
+// you let go. So the two inputs get their own ceilings. Both are still far
+// above the 152 u/s the ball manages vertically, so neither can be outrun by
+// the thing it is chasing - which was the whole complaint.
+const KEY_SPEED = 460;
+// Spin is still computed off the OLD speed. It is "a moving paddle drags the
+// ball with it", and it was tuned against a paddle that moved at 175; feeding
+// it a number two and a half times bigger would not make the game feel more
+// connected, it would just make every return off a moving paddle fly. The
+// bounce is deliberately unchanged by this.
+const SPIN_CAP = 175;
 const BASE_SPEED = 70;
 const SPEED_STEP = 1.05;
 const MAX_SPEED = 175;
@@ -178,7 +205,7 @@ function movePaddles(state, dt) {
     let want = p.y;
     if (p.dir) want = p.y + p.dir * H;
     else if (p.targetY != null) want = p.targetY;
-    const room = PADDLE_SPEED * dt;
+    const room = (p.dir ? KEY_SPEED : PADDLE_SPEED) * dt;
     p.y = clamp(p.y + clamp(want - p.y, -room, room), MIN_Y, MAX_Y);
     p.vy = (p.y - before) / dt;
     if (Math.abs(p.y - before) > 0.01) p.stirred = true;
@@ -196,7 +223,7 @@ function bounce(state, idx, p, py, evs) {
   const away = idx === 0 ? 1 : -1;
 
   let vx = Math.cos(off * MAX_BOUNCE) * speed * away;
-  let vy = Math.sin(off * MAX_BOUNCE) * speed + p.vy * SPIN;
+  let vy = Math.sin(off * MAX_BOUNCE) * speed + clamp(p.vy, -SPIN_CAP, SPIN_CAP) * SPIN;
 
   // Spin can push the total over the speed we just set, so renormalise.
   const mag = Math.hypot(vx, vy) || speed;
@@ -495,6 +522,7 @@ function view(state, userId) {
       baseSpeed: BASE_SPEED,
       maxSpeed: MAX_SPEED,
       paddleSpeed: PADDLE_SPEED,
+      keySpeed: KEY_SPEED,
       // The browser runs this same bounce to predict the ball against its own
       // paddle, so the numbers behind it go out with the geometry rather than
       // being written down a second time over there. Two copies of a rule this
@@ -504,6 +532,7 @@ function view(state, userId) {
       speedStep: SPEED_STEP,
       bounceMax: MAX_BOUNCE,
       spin: SPIN,
+      spinCap: SPIN_CAP,
       minVy: MIN_VY_FRAC,
     },
     target: TARGET,
@@ -553,6 +582,7 @@ module.exports = {
   icon: { emoji: "🏓" },
   blurb: "One on one, first to seven. Winner keeps the board.",
   howTo: [
+    "You score when the ball gets past the other player's paddle. First to seven takes the board.",
     "Move your paddle with the mouse, a finger on the court, or W and S.",
     "Where the ball hits your paddle decides the angle it leaves at. The middle sends it back flat, the ends send it away steep.",
     "A moving paddle drags the ball with it, and every return makes it faster.",

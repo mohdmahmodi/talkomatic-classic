@@ -111,6 +111,7 @@ let deps = null;
 let timer = null;
 let frameTimer = null;
 let frameDue = 0; // next slot on the fixed frame grid
+let frameRunning = false; // a frame is mid-flight, so no second timer
 let seq = 0;
 
 function init(d) {
@@ -1640,7 +1641,13 @@ function tick() {
 // while at least one of them does.
 
 function armFrames() {
-  if (frameTimer || !liveTables.size) return;
+  // frameRunning matters because frameLoop clears frameTimer before it runs
+  // the frame. Anything that starts a match from inside that window - nothing
+  // does today, but finishMatch is two calls away from startMatch and this is
+  // not a thing to leave to luck - would see no timer pending and arm a second
+  // one. Two loops means two of everything: twice the snapshots to every
+  // browser at the board, and it doubles again at the next match.
+  if (frameTimer || frameRunning || !liveTables.size) return;
   frameDue = Date.now() + FRAME_MS;
   frameTimer = setTimeout(frameLoop, FRAME_MS);
   if (frameTimer.unref) frameTimer.unref();
@@ -1659,7 +1666,12 @@ function armFrames() {
 // the physics faster than real time.
 function frameLoop() {
   frameTimer = null;
-  frameTick();
+  frameRunning = true;
+  try {
+    frameTick();
+  } finally {
+    frameRunning = false;
+  }
   if (!liveTables.size) return;
   const now = Date.now();
   frameDue += FRAME_MS;
