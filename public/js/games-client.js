@@ -1723,7 +1723,7 @@
     // rules are written down twice.
     let C = {
       w: 200, h: 120, wall: 4, paddleW: 2.4, paddleH: 22, ballR: 1.9,
-      paddleSpeed: 460, keySpeed: 460, maxSpeed: 175, baseSpeed: 70,
+      paddleSpeed: 320, keySpeed: 260, maxSpeed: 175, baseSpeed: 70,
       speedStep: 1.05, bounceMax: Math.PI / 3, spin: 0.14, spinCap: 175, minVy: 0.06,
     };
     let target = 7;
@@ -2148,7 +2148,10 @@
 
     // Take the server's word entirely and roll it forward to now.
     function hardSet(f) {
-      dbgHard++;
+      // Only a mid-rally rebuild is trouble worth counting. Between points the
+      // ball is deliberately reset from every snapshot, and counting those had
+      // the report shouting "rebuilt 60/s" on every serve of a healthy match.
+      if (f.ph === "live") dbgHard++;
       sim.x = f.b[0];
       sim.y = f.b[1];
       sim.vx = f.b[2];
@@ -2472,6 +2475,10 @@
           m: detail && detail.state === "playing" ? 1 : 0,
           q: detail && detail.seated ? 1 : 0,
           c: last ? last.s[0] + "-" + last.s[1] : "",
+          // Age of the newest snapshot. In a healthy stretch this sits at a
+          // frame or two; a stall shows up here directly instead of having to
+          // be inferred from the gap ramping while everything else flatlines.
+          a: last ? Math.max(0, Math.round(serverNow() - last.t)) : -1,
         });
         while (rec.length > 720) rec.shift();
       }
@@ -2647,6 +2654,28 @@
         );
       }
 
+      // A link stall, made visible. Real match logs show second-long
+      // stretches where no snapshot arrives at all; the opponent's paddle is
+      // honestly frozen for that whole time and whatever happens at their end
+      // of the court is decided without you watching. Silence reads as the
+      // game lying about a hit. A warning turns the same moment into "my
+      // connection blipped", which is the truth, and tells the player which
+      // points not to trust.
+      if (detail && detail.state === "playing") {
+        const stall = serverNow() - newest.t;
+        if (stall > 400) {
+          ctx.textAlign = "center";
+          ctx.textBaseline = "top";
+          ctx.font = "bold " + Math.round(chh * 0.055) + "px " + cssFont;
+          ctx.fillStyle = "rgba(255,138,122,0.9)";
+          ctx.fillText(
+            "⚠ connection " + (stall / 1000).toFixed(1) + "s",
+            cw / 2,
+            chh * 0.03,
+          );
+        }
+      }
+
       // Measured whether or not the readout is showing. The flight recorder
       // runs always, and it reads these; when this arithmetic lived inside the
       // readout every report sent with the readout off said fps 0 and the one
@@ -2801,7 +2830,7 @@
         }
       }
       L.push("");
-      L.push("PER-SECOND TRACE  sec score src fps gap farpad ballErr rebuilds phase");
+      L.push("PER-SECOND TRACE  sec score src fps gap farpad snapAge ballErr rebuilds phase");
       let lastSec = -1;
       for (const r of rec) {
         const sec = Math.floor(r.t / 1000);
@@ -2809,14 +2838,15 @@
         lastSec = sec;
         L.push("  " + sec + " " + (r.c || "-") + " " +
           (r.m && r.q ? r.s : "idle") + " " + r.f + " " + r.g + " " + r.d +
-          " " + r.e + " " + r.h + " " + r.p);
+          " " + (r.a == null ? "-" : r.a) + " " + r.e + " " + r.h + " " + r.p);
       }
       if (full) {
         L.push("");
-        L.push("RAW SAMPLES (250ms)  t fps src why gap farpad offset ballErr rebuilds phase match seated score");
+        L.push("RAW SAMPLES (250ms)  t fps src why gap farpad snapAge offset ballErr rebuilds phase match seated score");
         for (const r of rec)
           L.push("  " + (r.t / 1000).toFixed(2) + " " + r.f + " " + r.s + " " +
-            r.w + " " + r.g + " " + r.d + " " + r.o + " " + r.e + " " + r.h +
+            r.w + " " + r.g + " " + r.d + " " + (r.a == null ? "-" : r.a) +
+            " " + r.o + " " + r.e + " " + r.h +
             " " + r.p + " " + r.m + " " + r.q + " " + (r.c || "-"));
       }
       return L.join("\n");

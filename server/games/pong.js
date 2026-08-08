@@ -50,19 +50,22 @@ const MAX_Y = H - PADDLE_H / 2;
 // up. That reads as lag no matter how good the network is, and it is why it
 // was reported as lag on a LAN too.
 //
-// The rule now is that the paddle must comfortably out-run the thing it is
-// asked to follow: roughly three times the ball's steepest vertical speed. The
-// court takes about 210ms to cross, which is quick enough that a hand never
-// feels the cap during ordinary play, and still a cap - a patched client
-// cannot teleport onto the ball, and the server holds everyone to it.
-const PADDLE_SPEED = 460;
+// The rule is that the paddle must comfortably out-run the thing it is asked
+// to follow, and no more than that. 460 satisfied the rule but real matches
+// read it as twitchy: a flick crossed a third of the court, a key tap moved a
+// whole paddle height, and every unit of speed multiplies straight into
+// server disagreement (divergence = speed x latency, so a 160ms network burst
+// at 460 put the server's copy 75 units from the hand - mid-rally, measured).
+// 320 crosses the court in ~306ms and still doubles the ball's steepest
+// vertical, so a rally can always be tracked; it just can't be teleported at.
+const PADDLE_SPEED = 320;
 // Holding a key is a different thing from pointing at a spot. A pointer says
 // "be here", and the only honest answer is to be there; a key says "keep
-// going", and at 900 a tap would send the paddle across the whole court before
-// you let go. So the two inputs get their own ceilings. Both are still far
-// above the 152 u/s the ball manages vertically, so neither can be outrun by
-// the thing it is chasing - which was the whole complaint.
-const KEY_SPEED = 460;
+// going", so its ceiling is what a held key can steer with. At 460 a 50ms tap
+// jumped the paddle a full height, which made fine aim by keyboard a matter
+// of luck. 260 keeps a tap at about half a paddle and still clears the ball's
+// 152 u/s vertical with room to spare.
+const KEY_SPEED = 260;
 // The most one-way delay anybody is ever credited for, honest or otherwise.
 // 60ms of travel is about one paddle height, which is enough to cover a real
 // return that this end had not caught up with yet, and small enough that
