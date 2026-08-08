@@ -60,6 +60,12 @@ function redactForMod(entry) {
 }
 
 function broadcast(entry) {
+  // The Desk's #activity channel is the same feed as the dashboard's Activity
+  // tab. It applies its own per-reader level and address rules, so the raw
+  // entry goes over and it decides what each person sees.
+  try {
+    require("./staffchat").pushActivity(entry);
+  } catch (_) {}
   if (!io()) return;
   const masked = redactForMod(entry);
   for (const [, s] of io().sockets.sockets) {

@@ -3940,6 +3940,7 @@
         min-width: 130px;
         cursor: pointer;
       }
+      .an-from { width: 100%; box-sizing: border-box; margin-bottom: 10px; }
       .an-row .an-field {
         flex: 1;
         min-width: 200px;
@@ -4616,6 +4617,15 @@
                 placeholder="Title, e.g. “Version 5.6 is here”"
               />
             </div>
+            <!-- A notice usually speaks for the team rather than whoever typed
+                 it, so the byline is free text and falls back to your label. -->
+            <input
+              id="anFrom"
+              class="an-field an-from"
+              type="text"
+              maxlength="40"
+              placeholder="From (optional) - e.g. the Talkomatic team"
+            />
             <textarea
               id="anBody"
               class="an-field an-textarea"

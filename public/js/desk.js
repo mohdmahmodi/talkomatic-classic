@@ -1916,13 +1916,24 @@
       els.emoteBtn = null;
       els.composer = null;
       els.sizeTa = null;
-      main.appendChild(
-        el(
-          "div",
-          "dk-readonly",
-          "The server writes this channel. Nothing to add.",
-        ),
-      );
+      els.announceForm = null;
+      // #announce is the exception: it is read-only as a chat, but a dev
+      // writes NOTICES into it. Everything else here really is server-written.
+      if (viewKey() === "announce" && isDev()) {
+        main.appendChild(buildAnnounceComposer());
+      } else {
+        main.appendChild(
+          el(
+            "div",
+            "dk-readonly",
+            viewKey() === "activity"
+              ? "Every staff action, newest last. Nothing to add."
+              : viewKey() === "bans"
+                ? "Blocks placed and lifted, newest last. Nothing to add."
+                : "The server writes this channel. Nothing to add.",
+          ),
+        );
+      }
       renderMessages();
       return;
     }
@@ -2258,7 +2269,10 @@
     if (kind === "appeal")
       return (c.by || "A banned user") + " is appealing a ban";
     if (kind === "suggestion")
-      return (c.by || "A user") + " suggested something";
+      return (
+        (c.by || "A user") +
+        (c.category === "Bug" ? " reported a bug" : " posted an idea")
+      );
     if (kind === "abuse")
       return (c.target || "A moderator") + " is worth a look";
     return c.by || "";
@@ -2308,7 +2322,23 @@
     }
 
     if (kind === "suggestion") {
-      if (c.reason) b.appendChild(qField("The idea", c.reason, "quote"));
+      const chips = el("div", "dk-q-chips");
+      if (c.category)
+        chips.appendChild(
+          qChip(
+            c.category,
+            c.category === "Bug" ? "warn" : "cat",
+            c.category === "Bug" ? "fa-bug" : "fa-lightbulb",
+          ),
+        );
+      if (chips.childNodes.length) b.appendChild(chips);
+      // Newer posts carry a title AND a body; the oldest carry only a body,
+      // which is why the title field is skipped rather than left blank.
+      if (c.target) b.appendChild(qField("Title", c.target));
+      if (c.reason)
+        b.appendChild(
+          qField(c.target ? "What they wrote" : "The idea", c.reason, "quote"),
+        );
       return b;
     }
 
@@ -2489,17 +2519,28 @@
     }
 
     if (kind === "suggestion" && c.itemId) {
-      add("Approve", "fa-check", "primary", () =>
-        socket.emit("staff resolve suggestion", {
-          id: c.itemId,
-          decision: "approve",
-        }),
-      );
-      add("Decline", "fa-xmark", "", () =>
-        socket.emit("staff resolve suggestion", {
-          id: c.itemId,
-          decision: "decline",
-        }),
+      // The board's own events, not the old dashboard one, so a decision made
+      // here is the same decision made there: the tag on the post changes for
+      // everybody and the card gets stamped by the same hook.
+      const setStatus = (status) =>
+        socket.emit("board status", { id: c.itemId, status });
+      add("Approve", "fa-check", "primary", () => setStatus("approved"));
+      add("Built", "fa-rocket", "", () => setStatus("implemented"));
+      add("Not doing", "fa-xmark", "", () => setStatus("declined"));
+      add("Reply", "fa-reply", "", () =>
+        ask(
+          {
+            title: "Reply to " + (c.by || "them"),
+            label: "Your reply appears on the board under your name",
+            max: 300,
+            icon: '<i class="fas fa-reply"></i>',
+          },
+          (text) => {
+            const t = String(text || "").trim();
+            if (t.length >= 2)
+              socket.emit("board reply", { id: c.itemId, text: t });
+          },
+        ),
       );
       return bar;
     }
@@ -2636,7 +2677,457 @@
   }
 
   // One message row. `prev` decides whether the author header repeats.
+  // ── Virtual channel rows ──────────────────────────────────────────────────
+  // #activity, #bans and #announce are live views onto the audit log, the ban
+  // history and the announcements store. The server decides what each reader
+  // is allowed to see; this only draws it.
+
+  // Which family an action belongs to, for the colour down the left edge. The
+  // same grouping the dashboard uses, so the two read alike.
+  const ACT_HEAVY = /^(ban|kick\+ban|ip block|unblock ip|lift ban|nuke)/;
+  const ACT_USER = /^(kick|warn|wipe buffer|rename|freeze|unfreeze|reset location|turn pfp off|allow pfp|piano)/;
+
+  function activityTone(action) {
+    const a = String(action || "").toLowerCase();
+    if (ACT_HEAVY.test(a)) return "heavy";
+    if (ACT_USER.test(a)) return "user";
+    return "";
+  }
+
+  // "user:Name(id)" / "room:Name(id)" -> just the name, which is all a feed
+  // needs. Names contain brackets, so anchor on the LAST one.
+  function tagName(tag) {
+    const s = String(tag || "");
+    const body = /^(user|room):/.test(s) ? s.slice(s.indexOf(":") + 1) : s;
+    const open = body.lastIndexOf("(");
+    return open === -1 ? body : body.slice(0, open);
+  }
+
+  function activityRow(m) {
+    const e = m.entry || {};
+    const r = el("div", "dk-act" + (e.type === "action" ? " t-" + (activityTone(e.action) || "plain") : " t-" + e.type));
+    r.dataset.id = m.id;
+
+    const ico = el("span", "dk-act-ico");
+    ico.appendChild(
+      icon(
+        e.type === "identity"
+          ? "fa-id-badge"
+          : e.type === "notification"
+            ? "fa-bell"
+            : e.type === "security"
+              ? "fa-shield-halved"
+              : e.type === "comment"
+                ? "fa-comment"
+                : "fa-gavel",
+      ),
+    );
+    r.appendChild(ico);
+
+    const mid = el("div", "dk-act-mid");
+    const line = el("div", "dk-act-line");
+
+    if (e.type === "action") {
+      if (e.role)
+        line.appendChild(
+          el("span", "dk-act-role " + (e.role === "dev" ? "dev" : "mod"), e.role.toUpperCase()),
+        );
+      line.appendChild(el("span", "dk-act-who", e.label || "?"));
+      line.appendChild(el("span", "dk-act-verb", e.action || "?"));
+      if (e.target) line.appendChild(el("span", "dk-act-target", tagName(e.target)));
+      if (e.room) line.appendChild(el("span", "dk-act-room", "in " + tagName(e.room)));
+    } else if (e.type === "identity") {
+      line.appendChild(el("span", "dk-act-who", e.username || "?"));
+      line.appendChild(
+        el(
+          "span",
+          "dk-act-verb",
+          e.event === "rename"
+            ? "renamed from " + (e.prevUsername || "?")
+            : e.event === "forced-rename"
+              ? "was renamed by staff"
+              : "signed in",
+        ),
+      );
+      if (e.location) line.appendChild(el("span", "dk-act-room", "from " + e.location));
+    } else if (e.type === "comment") {
+      line.appendChild(el("span", "dk-act-who", e.label || "?"));
+      line.appendChild(el("span", "dk-act-verb", "commented"));
+    } else {
+      line.appendChild(el("span", "dk-act-who", e.label || e.role || "Server"));
+      line.appendChild(el("span", "dk-act-verb", e.kind || e.type || "notice"));
+    }
+    mid.appendChild(line);
+
+    const detail = e.details || e.text || e.detail || null;
+    if (detail) mid.appendChild(el("div", "dk-act-detail", detail));
+    r.appendChild(mid);
+
+    const t = el("span", "dk-q-t", clockTime(m.ts));
+    t.title = new Date(m.ts).toLocaleString();
+    r.appendChild(t);
+    return r;
+  }
+
+  function banRow(m) {
+    const b = m.ban || {};
+    const unban = b.action === "unban";
+    const r = el("div", "dk-act dk-ban" + (unban ? " t-unban" : " t-heavy"));
+    r.dataset.id = m.id;
+
+    const ico = el("span", "dk-act-ico");
+    ico.appendChild(icon(unban ? "fa-unlock" : "fa-ban"));
+    r.appendChild(ico);
+
+    const mid = el("div", "dk-act-mid");
+    const line = el("div", "dk-act-line");
+    line.appendChild(el("span", "dk-act-verb", unban ? "Unblocked" : "Blocked"));
+    line.appendChild(el("span", "dk-act-who", b.name || "a user"));
+    // The address is dev-only and simply absent otherwise; the kind still says
+    // what sort of block it was.
+    if (b.ip)
+      line.appendChild(el("span", "dk-act-target mono", String(b.ip).replace(/^id:/, "id ")));
+    else if (b.kind)
+      line.appendChild(el("span", "dk-act-target", b.kind === "id" ? "by identifier" : b.kind === "range" ? "whole network" : "by address"));
+    if (b.duration) line.appendChild(el("span", "dk-act-room", b.duration));
+    mid.appendChild(line);
+
+    const bits = [];
+    if (b.by) bits.push("by " + b.by);
+    if (b.reason) bits.push(b.reason);
+    if (bits.length) mid.appendChild(el("div", "dk-act-detail", bits.join(" - ")));
+    r.appendChild(mid);
+
+    const t = el("span", "dk-q-t", clockTime(m.ts));
+    t.title = new Date(m.ts).toLocaleString();
+    r.appendChild(t);
+    return r;
+  }
+
+  // The same block-level markdown the lobby card and the dashboard render, so
+  // what a dev previews here is what people are actually shown. Escaped first;
+  // the only HTML that appears is HTML this emits.
+  function dkEsc(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function dkInline(s) {
+    return s
+      .replace(/!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)/g, (m, alt, src) =>
+        '<img src="' + dkEsc(src) + '" alt="' + dkEsc(alt) + '" loading="lazy">')
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (m, txt, href) =>
+        '<a href="' + dkEsc(href) + '" target="_blank" rel="noopener noreferrer">' +
+        txt + "</a>")
+      .replace(/`([^`\n]+?)`/g, "<code>$1</code>")
+      .replace(/\*\*([^*\n][^*]*?)\*\*/g, "<strong>$1</strong>")
+      .replace(/(^|[^*])\*([^*\n]+?)\*/g, "$1<em>$2</em>")
+      .replace(/~~([^~\n][^~]*?)~~/g, "<s>$1</s>");
+  }
+
+  function deskMarkdown(src) {
+    const lines = dkEsc(String(src || "")).split("\n");
+    const out = [];
+    let list = null;
+    let inCode = false;
+    let code = [];
+    const closeList = () => {
+      if (list) {
+        out.push("</" + list + ">");
+        list = null;
+      }
+    };
+    for (const raw of lines) {
+      if (/^\s*```/.test(raw)) {
+        if (inCode) {
+          out.push("<pre><code>" + code.join("\n") + "</code></pre>");
+          code = [];
+          inCode = false;
+        } else {
+          closeList();
+          inCode = true;
+        }
+        continue;
+      }
+      if (inCode) {
+        code.push(raw);
+        continue;
+      }
+      const line = raw.trim();
+      if (!line) {
+        closeList();
+        continue;
+      }
+      if (/^(-{3,}|\*{3,}|_{3,})$/.test(line)) {
+        closeList();
+        out.push("<hr>");
+        continue;
+      }
+      const h = /^(#{1,4})\s+(.*)$/.exec(line);
+      if (h) {
+        closeList();
+        const lvl = Math.min(6, h[1].length + 2);
+        out.push("<h" + lvl + ">" + dkInline(h[2]) + "</h" + lvl + ">");
+        continue;
+      }
+      const q = /^&gt;\s?(.*)$/.exec(line);
+      if (q) {
+        closeList();
+        out.push("<blockquote>" + dkInline(q[1]) + "</blockquote>");
+        continue;
+      }
+      const ul = /^[-*+]\s+(.*)$/.exec(line);
+      if (ul) {
+        if (list !== "ul") {
+          closeList();
+          out.push("<ul>");
+          list = "ul";
+        }
+        out.push("<li>" + dkInline(ul[1]) + "</li>");
+        continue;
+      }
+      const ol = /^\d+[.)]\s+(.*)$/.exec(line);
+      if (ol) {
+        if (list !== "ol") {
+          closeList();
+          out.push("<ol>");
+          list = "ol";
+        }
+        out.push("<li>" + dkInline(ol[1]) + "</li>");
+        continue;
+      }
+      closeList();
+      out.push("<p>" + dkInline(line) + "</p>");
+    }
+    if (inCode && code.length)
+      out.push("<pre><code>" + code.join("\n") + "</code></pre>");
+    closeList();
+    return out.join("");
+  }
+
+  const AN_KIND = {
+    update: { label: "Update", cls: "update" },
+    notice: { label: "Notice", cls: "notice" },
+    alert: { label: "Important", cls: "alert" },
+  };
+
+  function buildAnnounceComposer() {
+    const wrap = el("div", "dk-an-form");
+    wrap.dataset.editing = "";
+
+    const rowTop = el("div", "dk-an-row");
+    const kind = document.createElement("select");
+    kind.className = "dk-an-kind";
+    [
+      ["update", "Update"],
+      ["notice", "Notice"],
+      ["alert", "Important"],
+    ].forEach(([v, t]) => {
+      const o = document.createElement("option");
+      o.value = v;
+      o.textContent = t;
+      if (v === "notice") o.selected = true;
+      kind.appendChild(o);
+    });
+    const title = document.createElement("input");
+    title.className = "dk-an-title-in";
+    title.type = "text";
+    title.maxLength = 120;
+    title.placeholder = "Title, e.g. “Version 5.6 is here”";
+    rowTop.appendChild(kind);
+    rowTop.appendChild(title);
+    wrap.appendChild(rowTop);
+
+    // Who it reads as being from. A notice usually speaks for the team rather
+    // than whoever typed it, so this is free text and defaults to your label.
+    const from = document.createElement("input");
+    from.className = "dk-an-from-in";
+    from.type = "text";
+    from.maxLength = 40;
+    from.placeholder =
+      "From (optional) - e.g. the Talkomatic team. Defaults to " +
+      ((me && me.label) || "you");
+    wrap.appendChild(from);
+
+    const body = document.createElement("textarea");
+    body.className = "dk-an-body-in";
+    body.maxLength = 4000;
+    body.rows = 5;
+    body.placeholder =
+      "What do you want to tell everyone?\n\n## What's new\n- Something good\n\n**Thanks for playing.**";
+    wrap.appendChild(body);
+
+    const prev = el("div", "dk-an-prev");
+    prev.style.display = "none";
+    wrap.appendChild(prev);
+
+    const acts = el("div", "dk-an-acts");
+    const count = el("span", "dk-an-count", "0 / 4000");
+    const previewBtn = btn("dk-minib", "Preview", "fa-eye");
+    const cancel = btn("dk-minib dk-an-cancel", "Cancel edit", "fa-xmark");
+    cancel.style.display = "none";
+    const submit = btn("dk-minib primary dk-an-submit", "Post notice", "fa-paper-plane");
+    acts.appendChild(count);
+    acts.appendChild(previewBtn);
+    acts.appendChild(cancel);
+    acts.appendChild(submit);
+    wrap.appendChild(acts);
+
+    body.addEventListener("input", () => {
+      count.textContent = body.value.length + " / 4000";
+    });
+    previewBtn.addEventListener("click", () => {
+      const show = prev.style.display === "none";
+      prev.style.display = show ? "block" : "none";
+      if (show) prev.innerHTML = deskMarkdown(body.value);
+    });
+    cancel.addEventListener("click", () => {
+      wrap.dataset.editing = "";
+      title.value = "";
+      from.value = "";
+      body.value = "";
+      kind.value = "notice";
+      prev.style.display = "none";
+      cancel.style.display = "none";
+      submit.textContent = "Post notice";
+      count.textContent = "0 / 4000";
+    });
+    submit.addEventListener("click", () => {
+      const payload = {
+        kind: kind.value,
+        title: title.value.trim(),
+        body: body.value.trim(),
+        by: from.value.trim(),
+      };
+      if (payload.title.length < 3) return toast("Give it a title first.");
+      if (payload.body.length < 3) return toast("Write something in the body.");
+      lastCommandAt = Date.now();
+      const editing = wrap.dataset.editing;
+      if (editing) {
+        payload.id = Number(editing);
+        socket.emit("announcement edit", payload);
+        cancel.click();
+        return;
+      }
+      const go = () => {
+        socket.emit("announcement post", payload);
+        cancel.click();
+      };
+      if (window.StaffUI && window.StaffUI.confirm)
+        window.StaffUI.confirm({
+          title: "Post this notice?",
+          message:
+            "Everyone in the lobby sees it full-screen, once, until they close it.",
+          confirmText: "Post it",
+        }).then((ok) => ok && go());
+      else go();
+    });
+
+    els.announceForm = wrap;
+    return wrap;
+  }
+
+  // Writing or editing a notice, from inside the Desk. Posts through the same
+  // dev-gated events the dashboard uses, so the permission check is literally
+  // the same code and cannot drift.
+  function openAnnounceComposer(existing) {
+    if (!isDev()) return;
+    const wrap = els.announceForm;
+    if (!wrap) return;
+    wrap.dataset.editing = existing ? String(existing.id) : "";
+    wrap.querySelector(".dk-an-kind").value = existing ? existing.kind : "notice";
+    wrap.querySelector(".dk-an-title-in").value = existing ? existing.title : "";
+    wrap.querySelector(".dk-an-from-in").value = existing ? existing.by || "" : "";
+    wrap.querySelector(".dk-an-body-in").value = existing ? existing.body : "";
+    wrap.querySelector(".dk-an-submit").textContent = existing
+      ? "Save changes"
+      : "Post notice";
+    wrap.querySelector(".dk-an-cancel").style.display = existing ? "" : "none";
+    wrap.querySelector(".dk-an-prev").style.display = "none";
+    wrap.style.display = "block";
+    wrap.querySelector(".dk-an-title-in").focus();
+  }
+
+  function announceRow(m) {
+    const a = m.item || {};
+    const r = el("div", "dk-an" + (a.live ? " live" : ""));
+    r.dataset.id = m.id;
+
+    const head = el("div", "dk-an-h");
+    const km = AN_KIND[a.kind] || AN_KIND.notice;
+    head.appendChild(el("span", "dk-an-tag " + km.cls, km.label));
+    head.appendChild(el("span", "dk-an-title", a.title || "(untitled)"));
+    head.appendChild(
+      el("span", "dk-an-state " + (a.live ? "on" : "off"), a.live ? "Showing" : "Hidden"),
+    );
+    const t = el("span", "dk-q-t", clockTime(m.ts));
+    t.title = new Date(m.ts).toLocaleString();
+    head.appendChild(t);
+    r.appendChild(head);
+
+    r.appendChild(
+      el(
+        "div",
+        "dk-an-meta",
+        (a.by || "?") + (a.editedAt ? " - edited" : ""),
+      ),
+    );
+
+    const body = el("div", "dk-an-body");
+    body.innerHTML = deskMarkdown(a.body || "");
+    r.appendChild(body);
+
+    if (a.reactions && a.reactions.length) {
+      const rr = el("div", "dk-an-reacts");
+      a.reactions.forEach((x) => {
+        const chip = el("span", "dk-an-react");
+        chip.appendChild(el("span", null, x.e));
+        chip.appendChild(el("b", null, String(x.n)));
+        rr.appendChild(chip);
+      });
+      r.appendChild(rr);
+    }
+
+    // Dev-only, and the server re-checks every one of these anyway.
+    if (isDev()) {
+      const acts = el("div", "dk-q-acts");
+      const add = (label, fa, cls, fn) => {
+        const b = btn("dk-minib" + (cls ? " " + cls : ""), label, fa);
+        b.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          lastCommandAt = Date.now();
+          fn();
+        });
+        acts.appendChild(b);
+      };
+      add("Edit", "fa-pen", "", () => openAnnounceComposer(a));
+      add(a.live ? "Hide" : "Show", a.live ? "fa-eye-slash" : "fa-eye", "", () =>
+        socket.emit("announcement live", { id: a.id, live: !a.live }),
+      );
+      add("Delete", "fa-trash", "danger", () => {
+        const go = () => socket.emit("announcement delete", { id: a.id });
+        if (window.StaffUI && window.StaffUI.confirm)
+          window.StaffUI.confirm({
+            title: "Delete notice",
+            message:
+              "Remove it from the history for good? Hiding it is usually enough.",
+            danger: true,
+            confirmText: "Delete",
+          }).then((ok) => ok && go());
+        else go();
+      });
+      r.appendChild(acts);
+    }
+    return r;
+  }
+
   function row(m, prev) {
+    if (m.kind === "activity") return activityRow(m);
+    if (m.kind === "ban") return banRow(m);
+    if (m.kind === "announce") return announceRow(m);
     if (m.kind === "ping") return pingCard(m);
     if (m.kind === "system") {
       if (m.stats) return statsCard(m);
@@ -5367,6 +5858,106 @@
 .dk-minib.armed{background: #ff5468;border-color: #ff5468;color: #fff;}
 .dk-readonly{flex:none;padding:12px 14px;border-top:1px solid #333;background: #1b1b1b;
   font-size:12px;color: #6f6f6f;text-align:center;}
+
+/* ── #activity and #bans ────────────────────────────────────────────────────
+   Dense rows, one line each, with a coloured edge for how heavy the action
+   was. Flat surfaces and the dashboard's palette, so the two feeds read as
+   the same tool. */
+.dk-act{display:flex;align-items:flex-start;gap:9px;padding:7px 12px 7px 10px;
+  border-left:3px solid #3a3a3a;background: #171717;border-radius:4px;margin:2px 0;}
+.dk-act.t-heavy{border-left-color: #c62828;}
+.dk-act.t-user{border-left-color: #ff9800;}
+.dk-act.t-unban{border-left-color: #2e7d32;}
+.dk-act.t-identity{border-left-color: #2b5e9e;}
+.dk-act.t-notification{border-left-color: #6a3fb5;}
+.dk-act.t-security{border-left-color: #c62828;}
+.dk-act.t-comment{border-left-color: #4a4a4a;}
+.dk-act-ico{flex:none;width:18px;text-align:center;color: #8a8a8a;font-size:12px;
+  padding-top:2px;}
+.dk-act-mid{flex:1;min-width:0;}
+.dk-act-line{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;
+  font-size:12.5px;line-height:1.5;}
+.dk-act-role{flex:none;font-size:9px;font-weight:bold;letter-spacing:.5px;
+  padding:1px 5px;border-radius:3px;background: #2b5e9e;color: #fff;}
+.dk-act-role.dev{background: #a3323f;}
+.dk-act-who{color: #fff;font-weight:bold;}
+.dk-act-verb{color: #cfcfcf;}
+.dk-act-target{color: #ffb74d;overflow-wrap:anywhere;}
+.dk-act-target.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px;}
+.dk-act-room{color: #7f7f7f;font-size:11.5px;}
+.dk-act-detail{margin-top:2px;color: #9a9a9a;font-size:11.5px;line-height:1.5;
+  overflow-wrap:anywhere;}
+.dk-ban .dk-act-ico{color: #e57373;}
+.dk-ban.t-unban .dk-act-ico{color: #81c784;}
+
+/* ── #announce ── */
+.dk-an{padding:11px 13px;background: #171717;border:1px solid #333;border-radius:6px;
+  margin:4px 0;}
+.dk-an.live{border-color: #ff9800;}
+.dk-an-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.dk-an-tag{flex:none;padding:2px 8px;border-radius:999px;font-size:10px;
+  font-weight:bold;text-transform:uppercase;letter-spacing:.5px;}
+.dk-an-tag.update{background: #6a3fb5;color: #fff;}
+.dk-an-tag.notice{background: #ff9800;color: #1a1a1a;}
+.dk-an-tag.alert{background: #c62828;color: #fff;}
+.dk-an-title{font-size:14px;font-weight:bold;color: #fff;overflow-wrap:anywhere;}
+.dk-an-state{flex:none;font-size:10px;font-weight:bold;padding:2px 7px;
+  border-radius:999px;}
+.dk-an-state.on{background: #2e7d32;color: #fff;}
+.dk-an-state.off{background: #3a3a3a;color: #bbb;}
+.dk-an-meta{color: #7f7f7f;font-size:11.5px;margin-top:3px;}
+.dk-an-body{margin-top:7px;color: #ddd;font-size:13px;line-height:1.6;
+  overflow-wrap:anywhere;}
+.dk-an-body>:first-child{margin-top:0;} .dk-an-body>:last-child{margin-bottom:0;}
+.dk-an-body p{margin:0 0 8px;}
+.dk-an-body h3,.dk-an-body h4,.dk-an-body h5,.dk-an-body h6{color: #ff9800;
+  margin:12px 0 6px;font-size:14px;}
+.dk-an-body ul,.dk-an-body ol{margin:0 0 8px;padding-left:20px;}
+.dk-an-body li{margin-bottom:3px;}
+.dk-an-body a{color: #01ffff;}
+.dk-an-body code{background:rgba(255,255,255,.08);padding:1px 4px;border-radius:3px;
+  font-size:.9em;}
+.dk-an-body pre{background:rgba(0,0,0,.45);border:1px solid #333;border-radius:5px;
+  padding:9px 11px;overflow-x:auto;margin:0 0 8px;}
+.dk-an-body pre code{background:none;padding:0;}
+.dk-an-body blockquote{margin:0 0 8px;padding-left:11px;border-left:3px solid #ff9800;
+  color: #9a9a9a;}
+.dk-an-body img{max-width:100%;border-radius:5px;}
+.dk-an-body hr{border:none;border-top:1px solid #333;margin:12px 0;}
+.dk-an-reacts{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px;}
+.dk-an-react{display:inline-flex;align-items:center;gap:4px;padding:2px 7px;
+  border:1px solid #333;border-radius:999px;font-size:12px;color: #ddd;}
+.dk-an-react b{font-size:10.5px;}
+
+/* The composer that replaces the read-only note in #announce for devs. */
+.dk-an-form{flex:none;padding:11px 13px;border-top:1px solid #333;background: #1b1b1b;}
+.dk-an-row{display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;}
+.dk-an-kind,.dk-an-title-in,.dk-an-from-in,.dk-an-body-in{background: #121212;border:1px solid #333;
+  border-radius:5px;color: #eee;font-family:inherit;font-size:13px;padding:7px 9px;}
+.dk-an-kind{flex:none;min-width:118px;cursor:pointer;}
+.dk-an-title-in{flex:1;min-width:170px;}
+.dk-an-body-in{width:100%;box-sizing:border-box;resize:vertical;line-height:1.5;
+  font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;}
+.dk-an-from-in{width:100%;box-sizing:border-box;margin-bottom:8px;}
+.dk-an-kind:focus,.dk-an-title-in:focus,.dk-an-from-in:focus,.dk-an-body-in:focus{outline:none;
+  border-color: #ff9800;}
+.dk-an-acts{display:flex;align-items:center;gap:7px;margin-top:8px;flex-wrap:wrap;}
+.dk-an-count{margin-right:auto;color: #7f7f7f;font-size:11.5px;}
+.dk-an-prev{margin-top:9px;padding:11px 13px;background: #121212;
+  border:1px dashed #ff9800;border-radius:6px;color: #ddd;font-size:13px;
+  line-height:1.6;max-height:240px;overflow-y:auto;overflow-wrap:anywhere;}
+.dk-an-prev>:first-child{margin-top:0;} .dk-an-prev>:last-child{margin-bottom:0;}
+.dk-an-prev p{margin:0 0 8px;}
+.dk-an-prev h3,.dk-an-prev h4,.dk-an-prev h5,.dk-an-prev h6{color: #ff9800;
+  margin:12px 0 6px;font-size:14px;}
+.dk-an-prev ul,.dk-an-prev ol{margin:0 0 8px;padding-left:20px;}
+.dk-an-prev a{color: #01ffff;}
+.dk-an-prev code{background:rgba(255,255,255,.08);padding:1px 4px;border-radius:3px;}
+.dk-an-prev pre{background:rgba(0,0,0,.45);border:1px solid #333;border-radius:5px;
+  padding:9px 11px;overflow-x:auto;}
+.dk-an-prev pre code{background:none;padding:0;}
+.dk-an-prev blockquote{margin:0 0 8px;padding-left:11px;border-left:3px solid #ff9800;
+  color: #9a9a9a;}
 .dk-sys.q-stats .fas{color: #ff9800;}
 .dk-sys.q-stats{font-size:13px;color: #fff;}
 

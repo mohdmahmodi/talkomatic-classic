@@ -244,10 +244,42 @@
     });
   }
 
+  // Reactions repaint from the local list FIRST and let the server confirm
+  // afterwards. Waiting for the round trip made every press feel stuck, and
+  // the confirmation used to re-render the whole card - re-parsing the entire
+  // markdown body - to change one number.
+  function applyLocalReaction(emoji) {
+    if (!current) return;
+    var list = current.reactions || (current.reactions = []);
+    var found = null;
+    for (var i = 0; i < list.length; i++)
+      if (list[i].e === emoji) {
+        found = list[i];
+        break;
+      }
+    if (found) {
+      if (found.me) {
+        found.n--;
+        found.me = false;
+        if (found.n <= 0) list.splice(list.indexOf(found), 1);
+      } else {
+        found.n++;
+        found.me = true;
+      }
+    } else {
+      list.push({ e: emoji, n: 1, me: true });
+    }
+    list.sort(function (a, b) {
+      return b.n - a.n || (a.e < b.e ? -1 : 1);
+    });
+  }
+
   function sendReaction(raw) {
     var v = String(raw || "").trim();
     if (!v || !current) return;
     pickerInput.value = "";
+    applyLocalReaction(v);
+    renderReactions();
     socket.emit("announcement react", { id: current.id, emoji: v });
   }
 
@@ -320,14 +352,24 @@
   }
 
   socket.on("announcement current", function (a) {
+    var prev = current;
     current = a || null;
     if (!current) {
       if (isOpen) close();
       return;
     }
     if (isOpen) {
-      // Already on screen: a live reaction or an edit just refreshes it.
-      render();
+      // Same notice, and only the counts moved: repaint the one row. Calling
+      // render() here re-parsed the whole markdown body on every reaction from
+      // anybody in the lobby, which is what made pressing one feel slow.
+      var sameNotice =
+        prev &&
+        prev.id === current.id &&
+        prev.title === current.title &&
+        prev.body === current.body &&
+        prev.kind === current.kind;
+      if (sameNotice) renderReactions();
+      else render();
       return;
     }
     if (current.id > seenId()) open();

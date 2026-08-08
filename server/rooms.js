@@ -1364,13 +1364,22 @@ function broadcastBoard() {
 // socket because the reaction counts carry "did I react", which differs per
 // reader. A notice going live this way reaches people already sitting in the
 // lobby, not just the next person to load the page.
-function broadcastAnnouncement() {
+function broadcastAnnouncement(changed) {
   if (!io()) return;
   const cur = announcements.current();
   for (const [, s] of io().sockets.sockets) {
     if (!s.connected || !s.announceSub) continue;
     s.emit("announcement current", announcements.publicOne(cur, s.deviceId || null));
   }
+  // The Desk's #announce channel shows the whole list, not just the current
+  // one, so it is told about whichever notice actually changed.
+  try {
+    const row = changed
+      ? announcements.publicOne(announcements.get(changed), null)
+      : null;
+    if (row) staffchat.pushAnnounce(row);
+    else staffchat.pushAnnounce(cur ? announcements.publicOne(cur, null) : null);
+  } catch (_) {}
 }
 
 // Called from the HTTP appeal route after an appeal is filed: drop a staff
@@ -1572,6 +1581,11 @@ function broadcastBanHistory() {
   for (const [, s] of io().sockets.sockets)
     if (s.isModLog && (s.isDev || (s.isMod && (s.modLevel || 2) >= 2)))
       s.emit("staff ban history", buildBanHistory(!!s.isDev));
+  // The Desk's #bans channel is the same feed, so it updates on the same beat
+  // rather than waiting for somebody to reopen it.
+  try {
+    staffchat.pushBans();
+  } catch (_) {}
 }
 
 // Name policy. Identities on the deployment list are settled through the same
@@ -3044,6 +3058,10 @@ function registerSocketHandlers(opts) {
     roomCapacity,
     roles,
     audit,
+    // The stores behind #bans and #announce. Passed as the same builders the
+    // dashboard uses, so the two views cannot drift apart.
+    banHistory: buildBanHistory,
+    announcements,
   });
   // The game floor resolves players through the room roster, so a spectator or
   // a stale socket can never hold a seat.
@@ -7674,11 +7692,21 @@ function registerSocketHandlers(opts) {
         // whole site, and the filter mangling their own notice is worse than
         // the risk it guards against.
         const body = typeof data?.body === "string" ? data.body : "";
+        // Who it reads as being from. A notice often speaks for the team
+        // rather than the person who happened to type it, so this is free
+        // text - but it falls back to the real staff label, and it is only
+        // ever settable by a dev, so it cannot be used to impersonate.
+        const by =
+          sanitizeMessage(typeof data?.by === "string" ? data.by : "")
+            .trim()
+            .slice(0, 40) ||
+          socket.staffLabel ||
+          "Talkomatic";
         const r = announcements.post({
           kind: data?.kind,
           title,
           body,
-          by: socket.staffLabel || "Talkomatic",
+          by,
           byRole: "dev",
         });
         if (!r.ok)
@@ -7707,6 +7735,9 @@ function registerSocketHandlers(opts) {
             typeof data?.title === "string" ? data.title : "",
           ),
           body: typeof data?.body === "string" ? data.body : "",
+          by: sanitizeMessage(typeof data?.by === "string" ? data.by : "")
+            .trim()
+            .slice(0, 40),
         });
         if (!r.ok)
           return socket.emit("announcement result", {
@@ -7795,11 +7826,24 @@ function registerSocketHandlers(opts) {
               : "Could not post that.",
           );
         socket._lastBoardPost = now;
+        const article = kind === "idea" ? "an idea" : "a bug";
         audit.recordNotification({
           kind: "suggestion",
-          text: `${name} posted a ${kind} on the board: ${title}`,
+          text: `${name} posted ${article} on the board: ${title}`,
           by: name,
           minLevel: 2,
+          // The structured version, so the Desk draws a real card with the same
+          // buttons the board has instead of a one-line sentence. itemId is
+          // what a status change stamps the card by.
+          card: {
+            itemId: r.id,
+            ids: [socket.handshake.session?.userId].filter(Boolean),
+            by: name,
+            byRole: boardRole(socket) === "user" ? null : boardRole(socket),
+            category: kind === "idea" ? "Idea" : "Bug",
+            target: title,
+            reason: text,
+          },
         });
         socket.emit("board result", {
           ok: true,
@@ -7908,6 +7952,9 @@ function registerSocketHandlers(opts) {
           { name: s.name || "?", id: s.userId || "-" },
           "-",
         );
+        // Stamp the Desk card for this post, so a decision made anywhere shows
+        // as handled in #queues rather than leaving two people to open it.
+        stampQueueItem(socket, "suggestion", s.id, s.status);
         broadcastBoard();
       }),
     );

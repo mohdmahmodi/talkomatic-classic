@@ -25,6 +25,17 @@ const FILE = path.join(DATA_DIR, "staff-chat.json");
 // appeals, applications, suggestions, abuse flags. The review queues are
 // full-mod work everywhere else on the site, so the channel is L2+ too, and
 // each card still carries its own audience level from the feed.
+// `virtual: true` means the channel has no stored messages of its own. It is a
+// live view onto a store that already exists somewhere else - the audit log,
+// the ban history, the announcements file - rendered as Desk rows on request.
+// Nothing is copied into staff-chat.json, so these channels cannot drift from
+// the dashboard and cannot bloat the file.
+//
+// `access` mirrors the dashboard tab that shows the same thing, so a mod who
+// can see something there can see it here and nowhere else changes:
+//   activity  -> Activity tab, every staff member
+//   bans      -> Ban list tab, data-min2 (full mods and devs)
+//   announce  -> Announcements tab, data-dev
 const CHANNELS = [
   { key: "floor", name: "floor", desc: "Day to day. The default." },
   { key: "help", name: "help", desc: "Live calls for backup from rooms." },
@@ -33,7 +44,35 @@ const CHANNELS = [
   { key: "devs", name: "devs", desc: "Keys, promotions, mod abuse.", access: "dev" },
   // Posted to by the server at the end of each day. Nobody types in here.
   { key: "stats", name: "stats", desc: "How yesterday went.", readonly: true },
+  {
+    key: "activity",
+    name: "activity",
+    desc: "Every staff action, as it happens.",
+    readonly: true,
+    virtual: true,
+  },
+  {
+    key: "bans",
+    name: "bans",
+    desc: "Blocks placed and lifted.",
+    access: "l2",
+    readonly: true,
+    virtual: true,
+  },
+  {
+    key: "announce",
+    name: "announce",
+    desc: "Notices sent to everyone.",
+    access: "dev",
+    readonly: true,
+    virtual: true,
+  },
 ];
+
+const isVirtual = (key) => {
+  const ch = CHANNELS.find((c) => c.key === key);
+  return !!(ch && ch.virtual);
+};
 
 const MSG_MAX = 1200;
 const CHANNEL_CAP = 1500; // messages kept per channel
@@ -231,8 +270,20 @@ function parseQueueCard(m) {
     return x ? { by: x[1] } : null;
   }
   if (m.qkind === "suggestion") {
-    const x = /^(.+?) suggested: ([\s\S]+)$/.exec(t);
-    return x ? { by: x[1], reason: x[2] } : null;
+    // Three sentence shapes have been posted here over time. All of them read
+    // back into a card, so a board post from months ago looks the same as one
+    // from this morning instead of staying a bare line forever.
+    let x = /^(.+?) posted (an idea|a bug) on the board: ([\s\S]+)$/.exec(t);
+    if (x)
+      return {
+        by: x[1],
+        category: x[2] === "an idea" ? "Idea" : "Bug",
+        target: x[3],
+      };
+    x = /^(.+?) posted on the board: ([\s\S]+)$/.exec(t);
+    if (x) return { by: x[1], category: "Idea", reason: x[2] };
+    x = /^(.+?) suggested: ([\s\S]+)$/.exec(t);
+    return x ? { by: x[1], category: "Idea", reason: x[2] } : null;
   }
   if (m.qkind === "abuse") {
     const x =
@@ -493,6 +544,10 @@ function targetList(key) {
     const t = desk.threads.find((x) => x.id === key);
     return t ? { list: t.messages, thread: t, cap: THREAD_MSG_CAP } : null;
   }
+  // A virtual channel has no list to append to. Returning null here is what
+  // stops anything - a send, a reaction, an edit - reaching it, because every
+  // one of those paths bails when this comes back empty.
+  if (isVirtual(key)) return null;
   return desk.channels[key] ? { list: desk.channels[key], cap: CHANNEL_CAP } : null;
 }
 
@@ -818,10 +873,16 @@ function unreadFor(socket) {
   const out = {};
   for (const c of CHANNELS) {
     if (!canRead(socket, c.key)) continue;
+    // A live view onto another store. Counting unread there would mean an
+    // ever-growing badge on a feed nobody is expected to read to the end.
+    if (c.virtual) {
+      out[c.key] = { n: 0, mentions: 0 };
+      continue;
+    }
     const since = read[c.key] || 0;
     let n = 0;
     let named = 0;
-    for (let i = desk.channels[c.key].length - 1; i >= 0; i--) {
+    for (let i = (desk.channels[c.key] || []).length - 1; i >= 0; i--) {
       const m = desk.channels[c.key][i];
       if (m.ts <= since) break;
       if (!canSeeMessage(socket, c.key, m)) continue;
@@ -1094,6 +1155,98 @@ function noteStaffAction(byLabel, action, targetStr, roomTag) {
   if (touched) scheduleSave();
 }
 
+// ── Virtual channels ────────────────────────────────────────────────────────
+// #activity, #bans and #announce are windows onto stores that already exist.
+// Nothing here is written to staff-chat.json: the rows are built on request
+// and pushed live, so they can never disagree with the dashboard.
+//
+// Every one of these builders is PER READER. The audit feed redacts addresses
+// by level, the ban list is dev-only for the address itself, and #announce is
+// dev-only outright - so what comes back depends on who asked.
+
+const VIRTUAL_LIMIT = 200;
+
+// One staff action or notification, as a Desk row.
+function activityRow(e) {
+  return { id: "a" + e.id, ts: e.ts || 0, kind: "activity", entry: e };
+}
+
+function banRow(b) {
+  return { id: "b" + (b.id || b.at), ts: b.at || 0, kind: "ban", ban: b };
+}
+
+function announceRow(a) {
+  return { id: "n" + a.id, ts: a.at || 0, kind: "announce", item: a };
+}
+
+function virtualHistory(key, socket) {
+  try {
+    if (key === "activity") {
+      if (!ctx || !ctx.audit) return [];
+      // recent() already drops dev-only entries and anything above this
+      // person's level, and masks addresses when includeIp is false.
+      const rows = ctx.audit.recent(
+        VIRTUAL_LIMIT,
+        !!socket.isDev,
+        socket.isDev ? 0 : socket.modLevel || 2,
+        0,
+      );
+      return rows.map(activityRow);
+    }
+    if (key === "bans") {
+      if (!ctx || !ctx.banHistory) return [];
+      return ctx.banHistory(!!socket.isDev).slice(0, VIRTUAL_LIMIT).map(banRow).reverse();
+    }
+    if (key === "announce") {
+      if (!ctx || !ctx.announcements) return [];
+      return ctx.announcements
+        .listFor(socket.deviceId || null, VIRTUAL_LIMIT)
+        .map(announceRow)
+        .reverse();
+    }
+  } catch (e) {
+    console.error("desk virtual history failed:", e.message);
+  }
+  return [];
+}
+
+// Live pushes. Each one re-derives per recipient rather than sending one shared
+// object, because what a reader may see differs by level.
+function pushActivity(entry) {
+  if (!io() || !entry) return;
+  for (const [, s] of io().sockets.sockets) {
+    if (!s.connected || !isStaff(s) || !canRead(s, "activity")) continue;
+    if (entry.devOnly && !s.isDev) continue;
+    if (entry.minLevel && !s.isDev && (s.modLevel || 2) < entry.minLevel)
+      continue;
+    const shown =
+      s.isDev || !ctx || !ctx.audit ? entry : ctx.audit.redactForMod(entry);
+    s.emit("desk message", { key: "activity", msg: activityRow(shown) });
+  }
+}
+
+function pushBans() {
+  if (!io() || !ctx || !ctx.banHistory) return;
+  for (const [, s] of io().sockets.sockets) {
+    if (!s.connected || !isStaff(s) || !canRead(s, "bans")) continue;
+    const list = ctx.banHistory(!!s.isDev);
+    if (!list.length) continue;
+    s.emit("desk message", { key: "bans", msg: banRow(list[0]) });
+  }
+}
+
+function pushAnnounce(item) {
+  if (!io() || !item) return;
+  for (const [, s] of io().sockets.sockets) {
+    if (!s.connected || !isStaff(s) || !canRead(s, "announce")) continue;
+    s.emit("desk message", {
+      key: "announce",
+      msg: announceRow(item),
+      updated: true,
+    });
+  }
+}
+
 // ── Socket wiring ───────────────────────────────────────────────────────────
 function init(context) {
   ctx = context;
@@ -1145,6 +1298,17 @@ function register(socket, safe) {
       if (!isStaff(socket)) return;
       const key = typeof data?.key === "string" ? data.key : "";
       if (!canRead(socket, key)) return;
+      // A live view onto another store, built per reader (the audit feed is
+      // already IP-redacted by level, and the ban list hides addresses from
+      // anyone but a dev).
+      if (isVirtual(key))
+        return socket.emit("desk history", {
+          key,
+          messages: virtualHistory(key, socket),
+          hasMore: false,
+          hasMoreNewer: false,
+          thread: null,
+        });
       const tgt = targetList(key);
       if (!tgt) return;
       const thread = key.startsWith("t")
@@ -1614,7 +1778,11 @@ function register(socket, safe) {
         }
       };
       for (const c of CHANNELS)
-        if (canRead(socket, c.key)) scan(c.key, desk.channels[c.key]);
+        // Virtual channels are not searched here: the dashboard already has a
+        // real search over the audit log and the ban list, and a half-search
+        // that only covers what is currently loaded would be worse than none.
+        if (!c.virtual && canRead(socket, c.key))
+          scan(c.key, desk.channels[c.key] || []);
       for (const t of desk.threads) scan(t.id, t.messages, t.title);
       hits.sort((a, b) => b.ts - a.ts);
       socket.emit("desk search", { q, hits: hits.slice(0, 60) });
@@ -1628,6 +1796,9 @@ module.exports = {
   onRoomText,
   noteStaffAction,
   systemQueues,
+  pushActivity,
+  pushBans,
+  pushAnnounce,
   noteEvent,
   presenceDirty,
   rosterDirty,

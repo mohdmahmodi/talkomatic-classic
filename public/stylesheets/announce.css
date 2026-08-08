@@ -32,8 +32,8 @@
   display: flex;
   flex-direction: column;
   background: var(--tk-bg, #202020);
-  border: 2px solid var(--tk-accent, #ff9800);
-  border-radius: 10px;
+  border: 1px solid var(--tk-border, #616161);
+  border-radius: 8px;
   overflow: hidden;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
   animation: anRise 0.24s cubic-bezier(0.2, 0.9, 0.3, 1);
@@ -46,15 +46,13 @@
 
 /* ── Header ── */
 
+/* Flat, like the dashboard strips. A gradient here read as a different
+   product to the rest of the staff tooling. */
 .an-head {
   flex-shrink: 0;
   padding: 24px 30px 18px;
   border-bottom: 1px solid var(--tk-border, #616161);
-  background: linear-gradient(
-    180deg,
-    rgba(255, 152, 0, 0.09),
-    rgba(255, 152, 0, 0)
-  );
+  background: var(--tk-tile, #1b1b1b);
 }
 
 .an-kind {
@@ -194,7 +192,7 @@
   flex-wrap: wrap;
   padding: 14px 30px 16px;
   border-top: 1px solid var(--tk-border, #616161);
-  background: rgba(0, 0, 0, 0.22);
+  background: var(--tk-tile, #1b1b1b);
 }
 
 .an-react-wrap {

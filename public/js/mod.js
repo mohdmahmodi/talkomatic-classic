@@ -5556,6 +5556,7 @@
   function anResetForm() {
     anEditingId = null;
     if ($("anTitle")) $("anTitle").value = "";
+    if ($("anFrom")) $("anFrom").value = "";
     if ($("anBody")) $("anBody").value = "";
     if ($("anKind")) $("anKind").value = "notice";
     if ($("anPreview")) $("anPreview").style.display = "none";
@@ -5654,6 +5655,7 @@
         anEditingId = a.id;
         $("anKind").value = a.kind;
         $("anTitle").value = a.title;
+        $("anFrom").value = a.by || "";
         $("anBody").value = a.body;
         $("anCancelEdit").style.display = "";
         $("anPost").innerHTML = '<i class="fas fa-check"></i> Save changes';
@@ -5718,6 +5720,7 @@
         kind: $("anKind").value,
         title: $("anTitle").value.trim(),
         body: $("anBody").value.trim(),
+        by: ($("anFrom") && $("anFrom").value.trim()) || "",
       };
       if (payload.title.length < 3)
         return StaffUI && StaffUI.toast("Give it a title first.", { type: "error" });

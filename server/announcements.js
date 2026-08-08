@@ -110,7 +110,7 @@ function post({ kind, title, body, by, byRole }) {
   return { ok: true, id: a.id };
 }
 
-function edit({ id, kind, title, body }) {
+function edit({ id, kind, title, body, by }) {
   const a = get(id);
   if (!a) return { ok: false, code: "not_found" };
   const t = String(title || "").trim().slice(0, MAX_TITLE);
@@ -119,6 +119,8 @@ function edit({ id, kind, title, body }) {
   if (b.length < 3) return { ok: false, code: "body" };
   a.title = t;
   a.body = b;
+  const who = String(by || "").trim().slice(0, 40);
+  if (who) a.by = who;
   if (KINDS.includes(kind)) a.kind = kind;
   a.editedAt = Date.now();
   saveSoon();
