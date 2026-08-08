@@ -171,6 +171,11 @@
   var QUICK = ["👍", "🎉", "❤️", "🔥", "😮", "😢"];
 
   var bodyEl, reactRow, titleEl, kindEl, metaEl, pickerInput;
+  var gotItBtn, countFill, countHint, countTimer = null;
+
+  // How long the way out stays shut. Long enough that the card cannot be
+  // clicked away on reflex, short enough that it never feels like a punishment.
+  var HOLD_SECONDS = 4;
 
   function build() {
     if (built) return;
@@ -224,11 +229,22 @@
     picker.appendChild(pickerInput);
     reactWrap.appendChild(picker);
 
-    var gotIt = el("button", "an-close-btn", "Got it");
-    gotIt.addEventListener("click", close);
+    // The way out, held shut for a few seconds. See startCountdown for why.
+    var closeWrap = el("div", "an-close-wrap");
+    gotItBtn = el("button", "an-close-btn");
+    gotItBtn.appendChild(el("span", "an-close-label", "Got it"));
+    countFill = el("span", "an-close-fill");
+    gotItBtn.appendChild(countFill);
+    gotItBtn.addEventListener("click", function () {
+      if (gotItBtn.disabled) return;
+      close();
+    });
+    closeWrap.appendChild(gotItBtn);
+    countHint = el("div", "an-close-hint", "");
+    closeWrap.appendChild(countHint);
 
     foot.appendChild(reactWrap);
-    foot.appendChild(gotIt);
+    foot.appendChild(closeWrap);
 
     card.appendChild(head);
     card.appendChild(bodyEl);
@@ -331,6 +347,49 @@
     renderReactions();
   }
 
+  // The dismiss button is held shut for a few seconds, and SAYS SO. A notice
+  // everybody is shown is also a notice everybody learns to click away without
+  // reading; a short wait is enough to break that reflex. The bar fills so the
+  // wait is visibly finite rather than a button that mysteriously ignores you,
+  // and the line underneath gives the reason instead of leaving people to
+  // guess they have hit a bug.
+  function startCountdown() {
+    if (!gotItBtn) return;
+    stopCountdown();
+    var left = HOLD_SECONDS;
+    gotItBtn.disabled = true;
+    gotItBtn.setAttribute("aria-disabled", "true");
+    var paint = function () {
+      var done = HOLD_SECONDS - left;
+      countFill.style.width = Math.round((done / HOLD_SECONDS) * 100) + "%";
+      gotItBtn.querySelector(".an-close-label").textContent =
+        left > 0 ? "Got it (" + left + ")" : "Got it";
+      countHint.textContent =
+        left > 0 ? "Have a read first - one moment." : "You are all caught up.";
+    };
+    paint();
+    countTimer = setInterval(function () {
+      left--;
+      paint();
+      if (left <= 0) {
+        stopCountdown();
+        gotItBtn.disabled = false;
+        gotItBtn.removeAttribute("aria-disabled");
+        countFill.style.width = "100%";
+        // Focus only once it can actually be used, so a keyboard user is not
+        // sitting on a dead button.
+        try {
+          gotItBtn.focus();
+        } catch (e) {}
+      }
+    }, 1000);
+  }
+
+  function stopCountdown() {
+    if (countTimer) clearInterval(countTimer);
+    countTimer = null;
+  }
+
   function open() {
     if (!current) return;
     build();
@@ -338,14 +397,15 @@
     isOpen = true;
     overlay.classList.add("show");
     document.body.style.overflow = "hidden";
-    // Focus the dismiss button so a keyboard user is not stranded behind it.
-    var btn = overlay.querySelector(".an-close-btn");
-    if (btn) setTimeout(function () { btn.focus(); }, 60);
+    startCountdown();
   }
 
   function close() {
     if (!isOpen) return;
+    // The hold applies to Escape too, or it would be the way round it.
+    if (gotItBtn && gotItBtn.disabled) return;
     isOpen = false;
+    stopCountdown();
     overlay.classList.remove("show");
     document.body.style.overflow = "";
     if (current) markSeen(current.id);

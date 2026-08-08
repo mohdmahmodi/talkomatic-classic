@@ -260,9 +260,22 @@
   border-color: var(--tk-accent, #ff9800);
 }
 
-.an-close-btn {
+/* ── The way out, held shut for a few seconds ──────────────────────────────
+   Disabled buttons normally read as broken, so this one does the opposite of
+   hiding it: the label counts down, a bar fills the button left to right so
+   the wait is visibly finite, and a line underneath says why. */
+.an-close-wrap {
   flex: none;
   margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+}
+
+.an-close-btn {
+  position: relative;
+  overflow: hidden;
   padding: 11px 26px;
   border: none;
   border-radius: 6px;
@@ -274,7 +287,41 @@
   transition: filter 0.15s ease;
 }
 
-.an-close-btn:hover { filter: brightness(1.08); }
+.an-close-btn:hover:not(:disabled) { filter: brightness(1.08); }
+
+.an-close-btn:disabled {
+  /* Dimmed, but never grey-and-dead: it is about to work. */
+  background: #6b4a12;
+  color: #d8c9ae;
+  cursor: default;
+}
+
+.an-close-label {
+  position: relative;
+  z-index: 1; /* above the fill */
+}
+
+/* Fills left to right across the four seconds. */
+.an-close-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  background: var(--tk-accent, #ff9800);
+  opacity: 0.55;
+  transition: width 1s linear;
+  pointer-events: none;
+}
+
+.an-close-btn:not(:disabled) .an-close-fill { display: none; }
+
+.an-close-hint {
+  color: var(--tk-muted, #ccc);
+  font-size: 11.5px;
+  text-align: center;
+  opacity: 0.85;
+}
 
 .an-close-btn:focus-visible {
   outline: 3px solid #fff;
@@ -288,5 +335,5 @@
   .an-title { font-size: 22px; }
   .an-body { padding: 16px 18px 20px; font-size: 14.5px; }
   .an-foot { padding: 12px 18px 14px; gap: 10px; }
-  .an-close-btn { width: 100%; margin-left: 0; }
+  .an-close-wrap { width: 100%; margin-left: 0; }
 }
