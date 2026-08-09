@@ -4565,6 +4565,15 @@
       ),
     );
     acts.appendChild(decline);
+    if (isDev()) {
+      const del = btn("dk-minib danger", "Delete", "fa-trash");
+      del.title = "Remove this appeal and its whole conversation";
+      armTwice(del, "Delete it for good?", () => {
+        socket.emit("staff appeal delete", { id: a.id });
+        backToChat();
+      });
+      acts.appendChild(del);
+    }
     main.appendChild(acts);
   }
 

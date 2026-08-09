@@ -3919,6 +3919,32 @@
         actions.appendChild(dismiss);
         foot.appendChild(actions);
       }
+      if (isDev) {
+        const del = document.createElement("button");
+        del.className = "btn sm danger";
+        del.appendChild(icon("fa-trash"));
+        del.appendChild(document.createTextNode(" Delete"));
+        del.title = "Remove this appeal and its whole conversation";
+        del.addEventListener("click", async () => {
+          if (window.StaffUI) {
+            const ok = await StaffUI.confirm({
+              title: "Delete this appeal",
+              message:
+                "The appeal and its whole conversation are removed for good. They can file a fresh one afterwards.",
+              confirmText: "Delete",
+              danger: true,
+            });
+            if (!ok) return;
+          }
+          socket.emit("staff appeal delete", { id: a.id });
+        });
+        let host = foot.querySelector(".ap-actions");
+        if (!host) {
+          host = divc("ap-actions");
+          foot.appendChild(host);
+        }
+        host.appendChild(del);
+      }
       card.appendChild(foot);
       wrap.appendChild(card);
     });

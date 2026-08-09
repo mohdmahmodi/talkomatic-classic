@@ -7612,6 +7612,31 @@ function registerSocketHandlers(opts) {
       }),
     );
 
+    // Remove an appeal outright (dev). The record and its conversation go
+    // together; the person can file a fresh one afterwards.
+    socket.on(
+      "staff appeal delete",
+      safe(async (data) => {
+        if (!requireDev(socket)) return;
+        const id = Number(data?.id);
+        const r = appeals.remove(id);
+        if (!r.ok)
+          return socket.emit(
+            "error",
+            createErrorResponse(ERROR_CODES.BAD_REQUEST, "No such appeal."),
+          );
+        try {
+          staffchat.stampQueue(
+            (m) => m.qkind === "appeal" && m.card && m.card.itemId === id,
+            { by: socket.staffLabel || "dev", action: "handled" },
+            true,
+          );
+        } catch (_) {}
+        broadcastAppealsList();
+        socket.emit("staff appeals", buildAppealsList(!!socket.isDev));
+      }),
+    );
+
     // ── Suggestions: any lobby user files a feature idea; full mods + devs
     // review them in the dashboard. ──
     socket.on(

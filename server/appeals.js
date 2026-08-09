@@ -404,6 +404,15 @@ function resolveOpenForDevice(deviceId, resolution, reviewedBy) {
   return n;
 }
 
+// Take an appeal out of the store entirely, conversation included.
+function remove(id) {
+  const i = appeals.findIndex((a) => a.id === Number(id));
+  if (i === -1) return { ok: false, code: "no_appeal" };
+  const [a] = appeals.splice(i, 1);
+  saveSoon();
+  return { ok: true, appeal: a };
+}
+
 function openCount() {
   return appeals.reduce((n, a) => n + (a.status === "open" ? 1 : 0), 0);
 }
@@ -428,6 +437,7 @@ module.exports = {
   resolve,
   resolveOpenForIp,
   resolveOpenForDevice,
+  remove,
   openForIp,
   openCount,
   list,
