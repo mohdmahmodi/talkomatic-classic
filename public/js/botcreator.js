@@ -504,6 +504,11 @@
       label: "pick something random",
       desc: "Choices or a number range, into a memory",
     },
+    {
+      v: "repeat",
+      label: "repeat everything above",
+      desc: "Runs the blocks above it again, up to 5 times",
+    },
     { v: "clear", label: "erase the bot's box", desc: "Wipe what it wrote" },
     { v: "leave", label: "leave the room", desc: "The bot goes home" },
   ];
@@ -533,6 +538,7 @@
     { tok: "{rand:1-6}", desc: "random number, new every time" },
     { tok: "{pick:red|green|blue}", desc: "random choice, new every time" },
     { tok: "{newline}", desc: "start a new line mid-message" },
+    { tok: "{runtime}", desc: "how long the bot has been in the room" },
     { tok: "{bot}", desc: "the bot's name" },
     { tok: "{room}", desc: "the room's name" },
     { tok: "{humans}", desc: "how many people are here" },
@@ -757,6 +763,7 @@
       Object.assign(fresh, { var: "points", per: "user", amount: "1", op: "add" });
     if (v === "random")
       Object.assign(fresh, { var: "prize", per: "bot", from: "a, b, c" });
+    if (v === "repeat") fresh.times = 2;
     return fresh;
   }
 
@@ -1025,6 +1032,23 @@
         (b.location || "Bot");
       card.appendChild(name);
       card.appendChild(meta);
+      // Why the last run ended, so "my bot vanished" answers itself. Live
+      // bots show the green dot instead.
+      if (b.lastStop && deployedInfo()?.botId !== b.id) {
+        const mins = Math.round((Date.now() - b.lastStop.at) / 60000);
+        if (mins < 48 * 60) {
+          const ago =
+            mins < 1
+              ? "just now"
+              : mins < 60
+                ? mins + " min ago"
+                : Math.round(mins / 60) + "h ago";
+          const stop = document.createElement("div");
+          stop.className = "bc-bot-card-meta";
+          stop.textContent = "came home " + ago + ": " + b.lastStop.why;
+          card.appendChild(stop);
+        }
+      }
       card.addEventListener("click", () =>
         loadBot({
           id: b.id,
@@ -1152,6 +1176,13 @@
     clearTimeout(draftTimer);
     draftTimer = setTimeout(saveDraftNow, 600);
   }
+
+  // The debounce loses the last keystrokes if the tab closes right after
+  // them; flush on the way out so a misclick or a closed tab costs nothing.
+  window.addEventListener("beforeunload", saveDraftNow);
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "hidden") saveDraftNow();
+  });
 
   function readDraft() {
     try {
@@ -1329,6 +1360,15 @@
         if (a.type === "random" && !String(a.from || "").trim())
           return { ok: false, ri, msg: n + ": the random block needs choices (a, b, c) or a range like 1-100." };
       }
+      const repeats = r.do.filter((a) => a.type === "repeat");
+      if (repeats.length > 1)
+        return { ok: false, ri, msg: n + ": one repeat block per rule." };
+      if (r.do[0] && r.do[0].type === "repeat")
+        return {
+          ok: false,
+          ri,
+          msg: n + ": put the blocks to repeat ABOVE the repeat block.",
+        };
     }
     return { ok: true };
   }
@@ -1457,6 +1497,17 @@
         title: "Random, into a memory",
         text: "Give it choices or a number range. The pick lands in a memory so later blocks and checks can read it.",
         ex: "pick m from rock, paper, scissors",
+      },
+    },
+    {
+      kind: "pal-act",
+      av: "repeat",
+      cls: "p-do",
+      label: "repeat everything above",
+      help: {
+        title: "Run the blocks above again",
+        text: "Everything above this block runs 2-5 times in total. One per rule, and it cannot be the first block.",
+        ex: 'say "hip hip hooray!" / repeat 3 times in total',
       },
     },
     {
@@ -2423,6 +2474,25 @@
           "w-grow",
         ),
       );
+    } else if (act.type === "repeat") {
+      row.appendChild(
+        mkSelect(
+          [
+            { v: "2", label: "2 times" },
+            { v: "3", label: "3 times" },
+            { v: "4", label: "4 times" },
+            { v: "5", label: "5 times" },
+          ],
+          String(act.times || 2),
+          (v) => (act.times = Number(v)),
+          "w-math",
+          "How many times the blocks above run in total",
+        ),
+      );
+      const lbl = document.createElement("span");
+      lbl.className = "bc-unit";
+      lbl.textContent = "in total";
+      row.appendChild(lbl);
     }
 
     row.appendChild(
@@ -3157,13 +3227,13 @@
   // and the card says so. Someone with no saved bots skips the card: it is
   // all new to them anyway.
 
-  const NEWS_VERSION = 4;
+  const NEWS_VERSION = 5;
   const NEWS = [
-    "Commands work anywhere in your line now: hello !roll fires too. No need to press Enter first.",
-    "Words after a command become {word1}, {word2}, up to {word8}: !guess 50 fast gives you two of them.",
-    "Memories are visual: make one in the palette, click into a text box, click the chip. No curly brackets to type.",
-    "If Talkomatic updates while your bot is out, the page now reconnects by itself and shows your bot's true status.",
-    "Blocks and whole rules can be dragged by their grip dots, saving points at exactly what is missing, and Start from an idea builds a bot from three questions.",
+    "New repeat block: runs everything above it again, up to 5 times in total.",
+    "New magic word {runtime}: how long your bot has been in its room. Made for !info commands.",
+    "Your bot list now says why a bot came home, like its owner leaving Talkomatic. That was most \"timers don't work\" reports: bots go home about a minute after you leave, so long timers never got to ring.",
+    "Rooms have a bot button next to Apps: anyone can hide bots from their own view (the bot still runs).",
+    "Commands work anywhere in your line, memories are clickable chips in the palette, and drafts now survive closing the tab mid-edit.",
   ];
 
   let newsChecked = false;

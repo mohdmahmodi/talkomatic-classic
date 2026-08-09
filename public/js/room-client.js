@@ -3832,6 +3832,28 @@ window.addEventListener("load", () => {
   const filterBtn = document.getElementById("filterToggle");
   if (filterBtn) filterBtn.addEventListener("click", toggleWordFilter);
 
+  // Hide-bots toggle: a viewer preference, nothing more. The bot stays in
+  // the room and keeps running; this viewer just stops seeing its panel.
+  const hideBotsBtn = document.getElementById("hideBotsToggle");
+  if (hideBotsBtn) {
+    const paintHideBots = () => {
+      const off = localStorage.getItem("tkHideBots") === "1";
+      document.body.classList.toggle("tk-hide-bots", off);
+      hideBotsBtn.classList.toggle("off", off);
+      hideBotsBtn.title = off
+        ? "Bots are hidden from your view (click to show)"
+        : "Hide bots from your view";
+    };
+    paintHideBots();
+    hideBotsBtn.addEventListener("click", () => {
+      const off = localStorage.getItem("tkHideBots") === "1";
+      try {
+        localStorage.setItem("tkHideBots", off ? "0" : "1");
+      } catch (e) {}
+      paintHideBots();
+    });
+  }
+
   // Layout toggle (desktop, client-side view preference). Shown only at <=5
   // users; refreshLayoutToggle() handles when it appears/disappears.
   const layoutBtn = document.getElementById("layoutToggle");
@@ -5234,6 +5256,10 @@ window.addEventListener("hashchange", () => {
     .mod-badge.mod-badge-jr{background:#c08bff;color:#16002b;}
     .bot-badge{display:inline-block;background:var(--bot-flair,#9aa3ae);color:#16191d;font-size:9px;font-weight:bold;padding:1px 5px;border-radius:8px;margin:0 5px 0 0;letter-spacing:.5px;vertical-align:middle;flex:0 0 auto;}
     .bot-user .chat-input{border-left:2px solid rgba(154,163,174,.4);}
+    body.tk-hide-bots .bot-user{display:none !important;}
+    .hide-bots-toggle{position:relative;}
+    .hide-bots-toggle.off i{opacity:.55;}
+    .hide-bots-toggle.off::after{content:"";position:absolute;left:5px;right:5px;top:50%;height:2px;background:currentColor;transform:rotate(-38deg);border-radius:2px;pointer-events:none;}
     .device-icon{color:#7f8794;font-size:11px;margin-right:6px;flex:0 0 auto;}
     .invite-trophy{height:15px;width:auto;margin-right:5px;flex:0 0 auto;vertical-align:middle;}
     .staff-action-button{background:none;border:none;cursor:pointer;font-size:13px;margin-left:4px;opacity:.75;}

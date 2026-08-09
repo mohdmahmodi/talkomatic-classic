@@ -142,7 +142,7 @@ function ownerRecord(ownerKey, create) {
 // store or the interpreter.
 
 const TRIGGERS = ["command", "says", "mention", "join", "leave", "timer"];
-const ACTIONS = ["say", "wait", "set", "add", "random", "clear", "leave"];
+const ACTIONS = ["say", "wait", "set", "add", "random", "repeat", "clear", "leave"];
 const OPS = ["is", "not", "gt", "lt", "has"];
 const MATH_OPS = ["add", "sub", "mul", "div"];
 
@@ -275,9 +275,21 @@ function validateConfig(input, existingId) {
               error: "A random action needs options (a, b, c) or a range (1-100).",
             };
         }
+      } else if (a.type === "repeat") {
+        const t = Math.round(Number(a.times));
+        if (!Number.isFinite(t) || t < 2 || t > 5)
+          return { ok: false, error: "Repeat runs the blocks above 2-5 times." };
+        act.times = t;
       }
       actions.push(act);
     }
+    if (actions.filter((a) => a.type === "repeat").length > 1)
+      return { ok: false, error: "One repeat block per rule." };
+    if (actions[0] && actions[0].type === "repeat")
+      return {
+        ok: false,
+        error: "Put the blocks to repeat ABOVE the repeat block.",
+      };
 
     rules.push({ on: trig, if: conds, do: actions });
   }
@@ -390,6 +402,9 @@ function expand(rt, template, ctx) {
     if (low === "bot") return rt.name;
     // A line break mid-say, for people who miss that Enter works in the box.
     if (low === "newline") return "\n";
+    // How long the bot has been in its room, for !info style commands.
+    if (low === "runtime")
+      return fmtRuntime(Date.now() - (rt.deployedAt || Date.now()));
     if (low === "room") return rt.roomName || "";
     if (low === "humans") {
       const room = state.rooms.get(rt.roomId);
@@ -426,6 +441,15 @@ function expand(rt, template, ctx) {
     }
     return whole; // unknown token: left visible so the creator can see the typo
   });
+}
+
+function fmtRuntime(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (h) return h + "h " + m + "m";
+  if (m) return m + "m " + (s % 60) + "s";
+  return s + "s";
 }
 
 function evalConds(rt, conds, ctx) {
@@ -505,6 +529,25 @@ function applyMath(cur, op, amt) {
 //     the result - earlier rules' variable writes are visible to later ones
 //   - the action token is charged at the same moment, so a rule whose
 //     conditions turn out false costs nothing
+// A repeat block runs everything above it again, 2-5 times in total. It is
+// unrolled into a flat list the moment the rule fires, so the interpreter
+// itself never loops. Hard cap keeps a 5x repeat of 5 blocks bounded.
+function unrollActions(acts) {
+  if (!acts.some((a) => a.type === "repeat")) return acts;
+  const out = [];
+  for (const a of acts) {
+    if (a.type === "repeat") {
+      const base = out.slice();
+      for (let k = 1; k < a.times; k++)
+        for (const b of base) {
+          if (out.length >= 25) break;
+          out.push(b);
+        }
+    } else if (out.length < 25) out.push(a);
+  }
+  return out;
+}
+
 function fireRule(rt, rule, ctx, ri) {
   if (rt.queue.length >= LIMITS.MAX_QUEUE) {
     rt.dropped++;
@@ -512,7 +555,7 @@ function fireRule(rt, rule, ctx, ri) {
   }
   rt.queue.push({
     conds: rule.if,
-    acts: rule.do,
+    acts: unrollActions(rule.do),
     ctx,
     i: 0,
     checked: false,
@@ -708,6 +751,17 @@ function deploy(socket, bot, room, ownerKey) {
   return rt;
 }
 
+// Why the last run ended, written onto the saved config so the owner can see
+// it on their bot list later. "Timers don't work" reports were mostly bots
+// that had quietly gone home when the owner left; now the card says so.
+function stampStop(rt, why) {
+  const rec = store.owners[rt.ownerKey];
+  const cfg = rec?.bots.find((b) => b.id === rt.bot.id);
+  if (!cfg) return;
+  cfg.lastStop = { why: String(why || "stopped").slice(0, 80), at: Date.now() };
+  saveSoon();
+}
+
 // Takes the bot out of its room and out of the runtime, through the same
 // leave path a person takes so every client and the lobby stay consistent.
 function retire(rt, why) {
@@ -731,6 +785,7 @@ function retire(rt, why) {
   }
   state.userMessageBuffers.delete(rt.userId);
   if (rt.varsDirty) saveSoon();
+  stampStop(rt, why);
   notifyOwner(rt, "bot stopped", { botId: rt.bot.id, why: why || "stopped" });
 }
 
@@ -881,6 +936,7 @@ function sweep() {
       active.delete(rt.userId);
       state.userMessageBuffers.delete(rt.userId);
       if (rt.varsDirty) saveSoon();
+      stampStop(rt, "removed from the room");
       notifyOwner(rt, "bot stopped", { botId: rt.bot.id, why: "removed from the room" });
       continue;
     }
@@ -969,6 +1025,7 @@ function noteEvicted(botUserId) {
   active.delete(botUserId);
   state.userMessageBuffers.delete(botUserId);
   if (rt.varsDirty) saveSoon();
+  stampStop(rt, "removed from the room");
   notifyOwner(rt, "bot stopped", { botId: rt.bot.id, why: "removed from the room" });
 }
 
@@ -999,6 +1056,7 @@ function ownerStatus(ownerKey) {
       rules: b.rules,
       updatedAt: b.updatedAt,
       vars: b.vars || {},
+      lastStop: b.lastStop || null,
     })),
     deployed: rt
       ? {
@@ -1413,6 +1471,7 @@ function makeSandbox(bot, username) {
     roomName: "the test room",
     queue: [],
     dropped: 0,
+    deployedAt: Date.now(), // so {runtime} has something to say here too
     tester: username || "You",
   };
 }

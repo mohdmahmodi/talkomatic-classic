@@ -375,7 +375,9 @@
               <code>every X minutes</code>
               <span>
                 A clock, no person needed. Shortest is 2 minutes. In the Test
-                room, press "Ring the timers" instead of waiting.
+                room, press "Ring the timers" instead of waiting. Remember:
+                the bot goes home about a minute after YOU leave Talkomatic,
+                and its timers go with it.
               </span>
             </div>
 
@@ -417,6 +419,12 @@
                 Put a random pick into a memory. Give it choices (<code
                   >rock, paper, scissors</code
                 >) or a number range (<code>1-100</code>).
+              </span>
+              <code>repeat</code>
+              <span>
+                Runs everything above it again, up to 5 times in total. One
+                per rule. A say above a repeat becomes a chant; a random +
+                say above one becomes three different rolls.
               </span>
               <code>erase the box</code>
               <span>The bot wipes its own textbox clean.</span>
@@ -482,6 +490,11 @@
               <span
                 >Starts a new line in the middle of a message. (Pressing
                 Enter inside a say box does the same thing.)</span
+              >
+              <code>{runtime}</code>
+              <span
+                >How long the bot has been in its room, like "2h 14m". Made
+                for !info commands.</span
               >
               <code>{bot}</code>
               <span>Your bot's own name.</span>
