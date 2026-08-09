@@ -877,6 +877,7 @@
     status = st;
     renderHome();
     renderEditorChrome();
+    renderNewsTab(); // the numbers panel reads live limits
     maybeShowNews();
   });
 
@@ -3275,6 +3276,138 @@
     "Rooms have a bot button next to Apps: anyone can hide bots from their own view (the bot still runs).",
   ];
 
+  // The full changelog behind the What's new tab. The dismissible card on
+  // home shows the short list once; this tab keeps everything findable,
+  // with the current numbers up top so nobody has to discover a limit by
+  // hitting it.
+  const CHANGELOG = [
+    {
+      title: "The limits, out of the way",
+      icon: "fa-unlock",
+      items: [
+        "Rules per bot: was 20, now 200.",
+        "Blocks per rule: was 6, now 20.",
+        "Letters per say: was 300, now 1000.",
+        "Checks per rule: was 3, now 10.",
+        "Saved bots: was 8, now 20.",
+      ],
+    },
+    {
+      title: "New blocks and magic words",
+      icon: "fa-cubes",
+      items: [
+        '"add a line below" says WITHOUT erasing: stack greetings, keep a game board up.',
+        "repeat runs everything above it again, up to 5 times in total.",
+        '"change a memory" can add, take away, multiply and divide.',
+        "{commands} lists every !command one per line, {runtime} says how long the bot has been in its room, {newline} breaks a line mid-say.",
+      ],
+    },
+    {
+      title: "In rooms",
+      icon: "fa-door-open",
+      items: [
+        "Commands fire anywhere in your line: please !roll works too. No pressing Enter first.",
+        "Automod is each viewer's own choice for bot text, exactly like for people. No stars baked in for everyone.",
+        "Rooms fit more bots as they grow: 1 bot seat per 5 people, up to 5.",
+        "The robot button next to Apps hides bots from your own view; the bot keeps running.",
+        "Bots wear a gray BOT tag in the room and the lobby, and can have their own location: FishBot / the lake.",
+      ],
+    },
+    {
+      title: "The editor",
+      icon: "fa-hammer",
+      items: [
+        "Drag blocks and whole rules by their grip dots, even between rules.",
+        "Memories are chips in the palette: make one, click it into a box. No curly brackets to type.",
+        "Start from an idea builds a working bot from three questions.",
+        "Saving points at exactly what is missing. Drafts survive closing the tab.",
+      ],
+    },
+    {
+      title: "Fixes",
+      icon: "fa-wrench",
+      items: [
+        "Typing the same command twice in a row works, in rooms and in the test room.",
+        "The page survives Talkomatic updates: it reconnects, signs back in, and shows your bot's true status.",
+        "Your bot list says why a bot came home. Timers work; bots go home about a minute after their owner leaves Talkomatic.",
+      ],
+    },
+  ];
+
+  function renderNewsTab() {
+    const host = $("newsTabHost");
+    if (!host) return;
+    host.innerHTML = "";
+
+    const numbers = document.createElement("div");
+    numbers.className = "bc-card";
+    const nh = document.createElement("div");
+    nh.className = "bc-card-head";
+    nh.innerHTML = '<i class="fas fa-ruler"></i>The numbers today';
+    const nb = document.createElement("div");
+    nb.className = "bc-card-body";
+    const grid = document.createElement("div");
+    grid.className = "bc-limits";
+    const row = (label, oldVal, nowVal) => {
+      const l = document.createElement("span");
+      l.textContent = label;
+      const v = document.createElement("span");
+      if (oldVal != null) {
+        const o = document.createElement("span");
+        o.className = "old";
+        o.textContent = String(oldVal);
+        v.appendChild(o);
+      }
+      const b = document.createElement("b");
+      b.textContent = String(nowVal);
+      v.appendChild(b);
+      grid.appendChild(l);
+      grid.appendChild(v);
+    };
+    row("Rules per bot", 20, maxRules());
+    row("Blocks per rule", 6, maxActs());
+    row("Checks per rule", 3, maxConds());
+    row("Letters per say", 300, sayLen());
+    row("Bots you can keep saved", 8, status?.limits?.maxSaved || 20);
+    row("Bots running per person", null, 1);
+    row("Bot seats in a room", null, "1 per 5 people, up to 5");
+    row("Timers", null, "every 2-120 minutes");
+    row("Message pace", null, "about one per 1.5 seconds");
+    const note = document.createElement("p");
+    note.className = "bc-sec-note";
+    note.style.marginTop = "12px";
+    note.textContent =
+      "The pace is the only ceiling that protects rooms from spam; everything else is there to build with.";
+    nb.appendChild(grid);
+    nb.appendChild(note);
+    numbers.appendChild(nh);
+    numbers.appendChild(nb);
+    host.appendChild(numbers);
+
+    for (const group of CHANGELOG) {
+      const card = document.createElement("div");
+      card.className = "bc-card";
+      const h = document.createElement("div");
+      h.className = "bc-card-head";
+      h.innerHTML = '<i class="fas ' + group.icon + '"></i>';
+      h.appendChild(document.createTextNode(group.title));
+      const b = document.createElement("div");
+      b.className = "bc-card-body";
+      const ul = document.createElement("ul");
+      ul.className = "bc-news-list";
+      for (const it of group.items) {
+        const li = document.createElement("li");
+        li.textContent = it;
+        ul.appendChild(li);
+      }
+      b.appendChild(ul);
+      card.appendChild(h);
+      card.appendChild(b);
+      host.appendChild(card);
+    }
+  }
+  renderNewsTab();
+
   let newsChecked = false;
 
   function maybeShowNews() {
@@ -3304,7 +3437,8 @@
     }
     const note = document.createElement("p");
     note.className = "bc-news-note";
-    note.textContent = "Bots you already saved keep working exactly as before.";
+    note.textContent =
+      "Bots you already saved keep working exactly as before. The full list, with all the numbers, lives in the What's new tab up top.";
     const got = document.createElement("button");
     got.className = "bc-btn primary";
     got.innerHTML = '<i class="fas fa-check"></i>Got it';

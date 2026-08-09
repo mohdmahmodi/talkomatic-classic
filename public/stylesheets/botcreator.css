@@ -1472,10 +1472,29 @@ body.bc-dragging {
   min-width: 0;
 }
 
-/* ── What's new card ── */
+/* ── What's new card + tab ── */
 
 .bc-news {
   border-color: var(--tk-accent);
+}
+
+/* The numbers panel: label left, value right, old value struck through */
+.bc-limits {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 9px 16px;
+  font-size: 14px;
+  max-width: 460px;
+}
+
+.bc-limits b {
+  color: var(--tk-accent);
+}
+
+.bc-limits .old {
+  color: var(--tk-muted);
+  text-decoration: line-through;
+  margin-right: 9px;
 }
 
 .bc-news-list {
