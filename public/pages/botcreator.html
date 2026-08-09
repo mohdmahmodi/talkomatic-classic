@@ -392,9 +392,16 @@
             <div class="bc-chip-table">
               <code>say</code>
               <span>
-                The bot types a message into its box, letter by letter. This
-                is where you use magic words (next section). Up to 300
-                letters.
+                The bot types a message into its box, letter by letter,
+                replacing what was there. This is where you use magic words
+                (next section). Up to 1000 letters.
+              </span>
+              <code>add a line below</code>
+              <span>
+                Like say, but UNDER what the bot already said instead of
+                erasing it. A greeter can stack "mohd arrived" and "xyerv
+                left"; a tic tac toe bot can keep its board on screen. When
+                the box fills up, the oldest lines scroll away.
               </span>
               <code>wait</code>
               <span>
@@ -490,6 +497,11 @@
               <span
                 >Starts a new line in the middle of a message. (Pressing
                 Enter inside a say box does the same thing.)</span
+              >
+              <code>{commands}</code>
+              <span
+                >Every !command this bot answers to, one per line. Put it in
+                a !help say and the list never goes stale.</span
               >
               <code>{runtime}</code>
               <span
@@ -709,10 +721,11 @@
           </div>
           <div class="bc-card-body bc-doc">
             <p>
-              Bots follow the same rules people do. Everything they say goes
-              through the same filter. A room can vote a bot out. Rooms have
-              bot seats by size (1 for every 5 people they can hold, up to
-              5), you can run one bot at a time, and
+              Bots follow the same rules people do. What they say is filtered
+              by each viewer's own automod setting, exactly like what people
+              type. A room can vote a bot out. Rooms have bot seats by size
+              (1 for every 5 people they can hold, up to 5), you can run one
+              bot at a time, and
               <b>whatever your bot does counts as YOU doing it</b> - so make
               things people will like having around. Moderators can see every
               bot and its owner, and can turn any bot off.

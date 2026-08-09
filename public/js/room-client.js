@@ -5257,7 +5257,8 @@ window.addEventListener("hashchange", () => {
     .bot-badge{display:inline-block;background:var(--bot-flair,#9aa3ae);color:#16191d;font-size:9px;font-weight:bold;padding:1px 5px;border-radius:8px;margin:0 5px 0 0;letter-spacing:.5px;vertical-align:middle;flex:0 0 auto;}
     .bot-user .chat-input{border-left:2px solid rgba(154,163,174,.4);}
     body.tk-hide-bots .bot-user{display:none !important;}
-    .hide-bots-toggle{position:relative;}
+    .hide-bots-toggle{position:relative;color:#fff;}
+    .hide-bots-toggle i{color:#fff;font-size:16px;}
     .hide-bots-toggle.off i{opacity:.55;}
     .hide-bots-toggle.off::after{content:"";position:absolute;left:5px;right:5px;top:50%;height:2px;background:currentColor;transform:rotate(-38deg);border-radius:2px;pointer-events:none;}
     .device-icon{color:#7f8794;font-size:11px;margin-right:6px;flex:0 0 auto;}

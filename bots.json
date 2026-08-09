@@ -62,15 +62,11 @@
             }
           ],
           "createdAt": 1786220672911,
-          "updatedAt": 1786220672911,
+          "updatedAt": 1786235548731,
           "vars": {
             "n": "16"
           },
-          "uvars": {},
-          "lastStop": {
-            "why": "the room emptied",
-            "at": 1786234446191
-          }
+          "uvars": {}
         }
       ]
     }

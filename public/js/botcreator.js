@@ -492,6 +492,11 @@
   // add-a-block menu show, so picking one never means guessing.
   const ACTION_OPTIONS = [
     { v: "say", label: "say something", desc: "The bot types into its box" },
+    {
+      v: "append",
+      label: "add a line below",
+      desc: "Keeps what it said, writes underneath",
+    },
     { v: "wait", label: "wait a moment", desc: "Pause before the next thing" },
     { v: "set", label: "remember something", desc: "Write a value into a memory" },
     {
@@ -538,6 +543,7 @@
     { tok: "{rand:1-6}", desc: "random number, new every time" },
     { tok: "{pick:red|green|blue}", desc: "random choice, new every time" },
     { tok: "{newline}", desc: "start a new line mid-message" },
+    { tok: "{commands}", desc: "every !command this bot has, one per line" },
     { tok: "{runtime}", desc: "how long the bot has been in the room" },
     { tok: "{bot}", desc: "the bot's name" },
     { tok: "{room}", desc: "the room's name" },
@@ -741,8 +747,22 @@
     host.appendChild(add);
   }
 
+  // Creative caps come from the server and are roomy on purpose; the
+  // fallbacks only matter before the first status arrives.
   function maxRules() {
-    return status?.limits?.maxRules || 20;
+    return status?.limits?.maxRules || 200;
+  }
+
+  function maxActs() {
+    return status?.limits?.maxActions || 20;
+  }
+
+  function maxConds() {
+    return status?.limits?.maxConditions || 10;
+  }
+
+  function sayLen() {
+    return status?.limits?.sayLength || 1000;
   }
 
   function freshRule() {
@@ -755,7 +775,7 @@
 
   function freshAction(v) {
     const fresh = { type: v };
-    if (v === "say") fresh.text = "";
+    if (v === "say" || v === "append") fresh.text = "";
     if (v === "wait") fresh.seconds = 2;
     if (v === "set")
       Object.assign(fresh, { var: "prize", per: "bot", value: "" });
@@ -1350,7 +1370,7 @@
       if (!(r.do || []).length)
         return { ok: false, ri, msg: n + " has nothing to do. Add a block from the palette." };
       for (const a of r.do) {
-        if (a.type === "say" && !String(a.text || "").trim())
+        if ((a.type === "say" || a.type === "append") && !String(a.text || "").trim())
           return { ok: false, ri, msg: n + ": a say block is empty. Write the message, or remove the block." };
         if (
           (a.type === "set" || a.type === "add" || a.type === "random") &&
@@ -1453,6 +1473,17 @@
         title: "The bot types a message",
         text: "It replaces what was in its box, letter by letter. Magic words get swapped in (the ✨ button lists them). Enter makes a new line.",
         ex: 'say "Hi {name}!"',
+      },
+    },
+    {
+      kind: "pal-act",
+      av: "append",
+      cls: "p-do",
+      label: "add a line below",
+      help: {
+        title: "Say without erasing",
+        text: "Writes on a new line UNDER what the bot already said, instead of replacing its box. A greeter can stack arrivals; a game can keep its board up.",
+        ex: "hello mohd welcome!\nxyerv just left!",
       },
     },
     {
@@ -1644,8 +1675,8 @@
         clickAdd: () => {
           const rule = lastRuleOrComplain();
           if (!rule) return;
-          if ((rule.if || []).length >= 3)
-            return toastr.error("At most 3 checks per rule.");
+          if ((rule.if || []).length >= maxConds())
+            return toastr.error("At most " + maxConds() + " checks per rule.");
           if (!rule.if) rule.if = [];
           rule.if.push({ a: "{word1}", op: "is", b: "" });
           touch();
@@ -1662,8 +1693,8 @@
         clickAdd: () => {
           const rule = lastRuleOrComplain();
           if (!rule) return;
-          if (rule.do.length + item.actions.length > 6)
-            return toastr.error("At most 6 actions per rule.");
+          if (rule.do.length + item.actions.length > maxActs())
+            return toastr.error("At most " + maxActs() + " actions per rule.");
           rule.do.push(...JSON.parse(JSON.stringify(item.actions)));
           touch();
           renderRules();
@@ -1678,8 +1709,8 @@
       clickAdd: () => {
         const rule = lastRuleOrComplain();
         if (!rule) return;
-        if (rule.do.length >= 6)
-          return toastr.error("At most 6 actions per rule.");
+        if (rule.do.length >= maxActs())
+          return toastr.error("At most " + maxActs() + " actions per rule.");
         rule.do.push(freshAction(item.av));
         touch();
         renderRules();
@@ -1903,14 +1934,14 @@
     let valid = true;
     if (wantDo) {
       if (drag.kind === "pal-combo") {
-        if (rule.do.length + drag.actions.length > 6) valid = false;
+        if (rule.do.length + drag.actions.length > maxActs()) valid = false;
       } else {
         const adding = drag.kind === "pal-act" || drag.ri !== ri;
-        if (adding && rule.do.length >= 6) valid = false;
+        if (adding && rule.do.length >= maxActs()) valid = false;
       }
     } else {
       const adding = drag.kind === "pal-cond" || drag.ri !== ri;
-      if (adding && (rule.if || []).length >= 3) valid = false;
+      if (adding && (rule.if || []).length >= maxConds()) valid = false;
     }
     return {
       scope: wantDo ? "do" : "if",
@@ -2315,7 +2346,7 @@
 
     const adders = document.createElement("div");
     adders.className = "bc-blk-adders";
-    if ((rule.if || []).length < 3) {
+    if ((rule.if || []).length < maxConds()) {
       const addIf = document.createElement("button");
       addIf.className = "bc-mini-btn";
       addIf.innerHTML =
@@ -2329,7 +2360,7 @@
       });
       adders.appendChild(addIf);
     }
-    if ((rule.do || []).length < 6) {
+    if ((rule.do || []).length < maxActs()) {
       const wrap = document.createElement("span");
       wrap.className = "bc-magic-wrap";
       const addDo = document.createElement("button");
@@ -2386,12 +2417,15 @@
         "One box for the whole room, or one box per person",
       );
 
-    if (act.type === "say") {
+    if (act.type === "say" || act.type === "append") {
       const t = document.createElement("textarea");
       t.className = "bc-input w-grow w-say";
       t.rows = 2;
-      t.maxLength = 300;
-      t.placeholder = "Hi {name}! (press Enter for a new line)";
+      t.maxLength = sayLen();
+      t.placeholder =
+        act.type === "append"
+          ? "Also, {name} arrived! (written under what it already said)"
+          : "Hi {name}! (press Enter for a new line)";
       t.value = act.text || "";
       // Two visible lines from the start, growing with the message, so
       // nobody has to guess that a say can have more than one line.
@@ -2856,17 +2890,21 @@
 
   // The bot's box works like the real one: a new message replaces what was
   // there, typed out letter by letter.
-  function typeIntoBotBox(text, delayMs) {
+  function typeIntoBotBox(text, delayMs, append) {
     botTimers.push(
       setTimeout(() => {
         const box = $("trBotBox");
         $("trBotTyping").style.display = "";
-        let i = 0;
+        // An append keeps the box and carries on underneath; a say starts
+        // the box over, both exactly as in a real room.
+        const base = append && box.textContent ? box.textContent + "\n" : "";
+        const full = base + text;
+        let i = base.length;
         const iv = setInterval(() => {
-          i = Math.min(text.length, i + 2);
-          box.textContent = text.slice(0, i);
+          i = Math.min(full.length, i + 2);
+          box.textContent = full.slice(0, i);
           box.scrollTop = box.scrollHeight;
-          if (i >= text.length) {
+          if (i >= full.length) {
             clearInterval(iv);
             $("trBotTyping").style.display = "none";
           }
@@ -2905,7 +2943,7 @@
         botTimers.push(
           setTimeout(() => ($("trBotBox").textContent = ""), s.delayMs),
         );
-      else typeIntoBotBox(s.text, s.delayMs);
+      else typeIntoBotBox(s.text, s.delayMs, s.append);
     }
 
     if (d.left)
@@ -3229,11 +3267,12 @@
 
   const NEWS_VERSION = 5;
   const NEWS = [
-    "New repeat block: runs everything above it again, up to 5 times in total.",
-    "New magic word {runtime}: how long your bot has been in its room. Made for !info commands.",
+    "Automod no longer stars out what bots say for everyone: it is each viewer's own choice now, exactly like for people. Turn your filter off, see the real text.",
+    "The small limits are gone: up to 200 rules, 20 blocks per rule, 1000-letter says, 20 saved bots. Build the whole game.",
+    'New "add a line below" block: says WITHOUT erasing, so a greeter can stack arrivals and a game can keep its board up.',
+    "New repeat block (runs everything above it again, up to 5 times) and magic words {commands} (your command list, one per line) and {runtime}.",
     "Your bot list now says why a bot came home, like its owner leaving Talkomatic. That was most \"timers don't work\" reports: bots go home about a minute after you leave, so long timers never got to ring.",
     "Rooms have a bot button next to Apps: anyone can hide bots from their own view (the bot still runs).",
-    "Commands work anywhere in your line, memories are clickable chips in the palette, and drafts now survive closing the tab mid-edit.",
   ];
 
   let newsChecked = false;

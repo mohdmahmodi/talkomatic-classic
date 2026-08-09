@@ -21,7 +21,8 @@
 //     the sweep retires it (grace period) when the owner is gone
 //   - a bot alone in a room leaves, so bots never keep empty rooms alive
 //   - every action drains a token bucket; an empty bucket drops the action
-//   - everything a bot says passes sanitizeMessage + the word filter
+//   - everything a bot says passes sanitizeMessage + IP redaction; automod
+//     is each viewer's client-side choice, same as for human keystrokes
 //   - a global kill switch (staff), plus per-bot kill and room vote-kick
 //
 // Wired from rooms.js: init(deps) hands over the room broadcast helpers,
@@ -52,26 +53,29 @@ const STORE_PATH = path.join(DATA_DIR, "bots.json");
 
 // ── Limits (the whole abuse posture in one place) ───────────────────────────
 
+// Creative room (rules, actions, say length) is deliberately roomy: people
+// build whole games. The abuse posture lives in the RATE limits underneath
+// (queue, tokens, say gap), which is what actually protects a room.
 const LIMITS = {
   MAX_BOTS_PER_ROOM: 5, // the hard ceiling; rooms earn 1 bot per 5 seats
-  MAX_SAVED: 8, // saved configs per owner
+  MAX_SAVED: 20, // saved configs per owner
   MAX_DEPLOYED_PER_OWNER: 1,
   MAX_ACTIVE_TOTAL: 20, // hosted bots server-wide, a hard load ceiling
-  MAX_RULES: 20,
-  MAX_ACTIONS_PER_RULE: 6,
-  MAX_CONDITIONS_PER_RULE: 3,
-  MAX_SAY_LENGTH: 300,
+  MAX_RULES: 200,
+  MAX_ACTIONS_PER_RULE: 20,
+  MAX_CONDITIONS_PER_RULE: 10,
+  MAX_SAY_LENGTH: 1000,
   MAX_QUEUE: 12, // pending actions; a full queue drops the whole new group
   ACTION_TOKENS: 20, // token bucket: actions per minute
   SAY_MIN_GAP_MS: 1500,
   TIMER_MIN_MINUTES: 2,
-  MAX_VARS: 64, // global variables per bot
+  MAX_VARS: 256, // global variables per bot
   MAX_USER_VARS: 200, // per-user variable rows per bot (oldest evicted)
-  VAR_VALUE_LENGTH: 200,
+  VAR_VALUE_LENGTH: 500,
   UTTERANCE_IDLE_MS: 1500, // text unchanged this long = the person finished
   TYPE_CHARS_PER_TICK: 4, // ~33 chars/sec at the 120ms tick
   OWNER_GRACE_MS: 60000, // owner may drop briefly (reload) without killing bots
-  MAX_CONFIG_BYTES: 25000,
+  MAX_CONFIG_BYTES: 200000,
 };
 
 const TICK_MS = 120;
@@ -142,7 +146,7 @@ function ownerRecord(ownerKey, create) {
 // store or the interpreter.
 
 const TRIGGERS = ["command", "says", "mention", "join", "leave", "timer"];
-const ACTIONS = ["say", "wait", "set", "add", "random", "repeat", "clear", "leave"];
+const ACTIONS = ["say", "append", "wait", "set", "add", "random", "repeat", "clear", "leave"];
 const OPS = ["is", "not", "gt", "lt", "has"];
 const MATH_OPS = ["add", "sub", "mul", "div"];
 
@@ -244,7 +248,7 @@ function validateConfig(input, existingId) {
       if (!a || typeof a !== "object" || !ACTIONS.includes(a.type))
         return { ok: false, error: "A rule has an unknown action." };
       const act = { type: a.type };
-      if (a.type === "say") {
+      if (a.type === "say" || a.type === "append") {
         act.text = cleanTemplate(a.text, LIMITS.MAX_SAY_LENGTH);
         if (!act.text.trim())
           return { ok: false, error: "A say action has no text." };
@@ -262,13 +266,13 @@ function validateConfig(input, existingId) {
           };
         act.var = name0.toLowerCase();
         act.per = a.per === "user" ? "user" : "bot";
-        if (a.type === "set") act.value = cleanTemplate(a.value, 120);
+        if (a.type === "set") act.value = cleanTemplate(a.value, 500);
         else if (a.type === "add") {
           act.amount = cleanTemplate(a.amount, 40) || "1";
           // Older saved bots have no op; they keep plain adding forever.
           act.op = MATH_OPS.includes(a.op) ? a.op : "add";
         } else {
-          act.from = cleanTemplate(a.from, 400);
+          act.from = cleanTemplate(a.from, 1000);
           if (!act.from.trim())
             return {
               ok: false,
@@ -402,6 +406,15 @@ function expand(rt, template, ctx) {
     if (low === "bot") return rt.name;
     // A line break mid-say, for people who miss that Enter works in the box.
     if (low === "newline") return "\n";
+    // Every !command this bot answers to, one per line: a !help say that
+    // never goes stale.
+    if (low === "commands") {
+      const seen = [];
+      for (const r of rt.bot.rules)
+        if (r.on.type === "command" && seen.indexOf("!" + r.on.word) === -1)
+          seen.push("!" + r.on.word);
+      return seen.join("\n");
+    }
     // How long the bot has been in its room, for !info style commands.
     if (low === "runtime")
       return fmtRuntime(Date.now() - (rt.deployedAt || Date.now()));
@@ -487,7 +500,7 @@ function setVar(rt, act, ctx, value) {
       u[ctx.userId] = {};
     }
     const row = u[ctx.userId];
-    if (Object.keys(row).length >= 16 && row[act.var] == null) return;
+    if (Object.keys(row).length >= 64 && row[act.var] == null) return;
     row[act.var] = v;
   } else {
     if (Object.keys(rt.bot.vars).length >= LIMITS.MAX_VARS && rt.bot.vars[act.var] == null)
@@ -613,6 +626,17 @@ function onUtterance(rt, userId, username, line, fullText) {
   }
 }
 
+// What a bot is about to say, made safe the same way for every path:
+// expanded, sanitized, length-capped, IPs redacted. Deliberately NOT run
+// through the word filter: automod is a per-viewer choice made client-side,
+// for bot text exactly as for human keystrokes.
+function polishSay(rt, act, ctx) {
+  let text = expand(rt, act.text, ctx);
+  text = sanitizeMessage(text).slice(0, LIMITS.MAX_SAY_LENGTH);
+  if (ipredact.looksLikeIp(text)) text = ipredact.redact(text);
+  return text;
+}
+
 // Runs one action of the current group. Returns true when the action is done
 // and the group may advance; false means "try this same action again next
 // tick" (a say pacing itself behind the minimum gap).
@@ -624,15 +648,37 @@ function runAction(rt, act, ctx) {
         rt.waitUntil = Date.now() + (LIMITS.SAY_MIN_GAP_MS - sinceLast);
         return false;
       }
-      // Sanitized, filtered, and length-capped AFTER expansion, so variables
-      // cannot carry anything into the room that a person could not type.
-      let text = expand(rt, act.text, ctx);
-      text = sanitizeMessage(text).slice(0, LIMITS.MAX_SAY_LENGTH);
-      if (CONFIG.FEATURES.ENABLE_WORD_FILTER) text = wordFilter.filterText(text);
-      if (ipredact.looksLikeIp(text)) text = ipredact.redact(text);
+      const text = polishSay(rt, act, ctx);
       if (!text.trim()) return true;
       rt.lastSayAt = Date.now();
       rt.typing = { text, at: 0 };
+      deps.emitTyping(rt.fake, rt.userId, rt.name, true);
+      return true;
+    }
+    // Like say, but under what the bot already wrote instead of replacing
+    // it: a greeter can stack arrivals, a game can keep its board on screen.
+    case "append": {
+      const sinceLast = Date.now() - rt.lastSayAt;
+      if (sinceLast < LIMITS.SAY_MIN_GAP_MS) {
+        rt.waitUntil = Date.now() + (LIMITS.SAY_MIN_GAP_MS - sinceLast);
+        return false;
+      }
+      const text = polishSay(rt, act, ctx);
+      if (!text.trim()) return true;
+      const cur = state.userMessageBuffers.get(rt.userId) || "";
+      let combined = cur ? cur + "\n" + text : text;
+      // The box is capped like anyone's; oldest lines scroll away first.
+      while (combined.length > CONFIG.LIMITS.MAX_MESSAGE_LENGTH) {
+        const nl = combined.indexOf("\n");
+        if (nl === -1) {
+          combined = combined.slice(-CONFIG.LIMITS.MAX_MESSAGE_LENGTH);
+          break;
+        }
+        combined = combined.slice(nl + 1);
+      }
+      rt.lastSayAt = Date.now();
+      // Typing picks up from the end of what is already there.
+      rt.typing = { text: combined, at: Math.min(cur.length, combined.length) };
       deps.emitTyping(rt.fake, rt.userId, rt.name, true);
       return true;
     }
@@ -1483,7 +1529,7 @@ function drainTest(rt) {
   const out = { fired: [], skipped: [], says: [], left: false };
   let delay = 0;
   let guard = 0;
-  while (rt.queue.length && guard++ < 40) {
+  while (rt.queue.length && guard++ < 80) {
     const group = rt.queue.shift();
     if (!evalConds(rt, group.conds, group.ctx)) {
       out.skipped.push(group.ri);
@@ -1491,18 +1537,22 @@ function drainTest(rt) {
     }
     out.fired.push(group.ri);
     for (const act of group.acts) {
-      if (out.says.length >= 10) break; // a runaway test stays readable
+      if (out.says.length >= 20) break; // a runaway test stays readable
       switch (act.type) {
         case "say": {
-          let text = expand(rt, act.text, group.ctx);
-          text = sanitizeMessage(text).slice(0, LIMITS.MAX_SAY_LENGTH);
-          if (CONFIG.FEATURES.ENABLE_WORD_FILTER)
-            text = wordFilter.filterText(text);
-          if (ipredact.looksLikeIp(text)) text = ipredact.redact(text);
+          const text = polishSay(rt, act, group.ctx);
           if (!text.trim()) break;
           delay += LIMITS.SAY_MIN_GAP_MS / 2;
           out.says.push({ text, delayMs: delay });
           delay += Math.min(4000, text.length * 30); // the typing time
+          break;
+        }
+        case "append": {
+          const text = polishSay(rt, act, group.ctx);
+          if (!text.trim()) break;
+          delay += LIMITS.SAY_MIN_GAP_MS / 2;
+          out.says.push({ text, delayMs: delay, append: true });
+          delay += Math.min(4000, text.length * 30);
           break;
         }
         case "wait":
