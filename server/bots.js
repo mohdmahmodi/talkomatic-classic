@@ -1227,6 +1227,8 @@ function register(socket, safe) {
         if (!room) return fail(socket, "That room is gone.", "room_gone");
         if (room.type !== "public")
           return fail(socket, "Bots can only join public rooms.", "room_private");
+        if (room.allowBots === false)
+          return fail(socket, "That room does not allow bots.", "room_no_bots");
         if (room.locked)
           return fail(socket, "That room is locked.", "room_locked");
         if (room.bannedUserIds?.has?.(bot.id))
@@ -1280,6 +1282,7 @@ function register(socket, safe) {
           type: "public",
           layout: "vertical",
           maxSize: deps.newRoomCapacity(5, socket),
+          allowBots: true,
           users: [],
           accessCode: null,
           votes: {},
@@ -1621,6 +1624,7 @@ function onOwnerJoined(socket, room) {
   const rec = ownerRecord(pend.ownerKey, false);
   const bot = rec?.bots.find((b) => b.id === pend.botId);
   if (!bot) return;
+  if (room.allowBots === false) return;
   if (activeBotOfOwner(pend.ownerKey)) return;
   if (botCountInRoom(room) >= maxBotsForRoom(room)) return;
   const seats = (room.users || []).filter((u) => !(u.isDev && u.isVanished)).length;

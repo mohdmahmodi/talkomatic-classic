@@ -1624,6 +1624,8 @@ goChatButton.addEventListener("click", () => {
     Math.min(roomSizeCeiling(), Number(sizeEl?.value) || ROOM_SIZE_MIN),
   );
   const accessCode = accessCodeInput.querySelector("input").value;
+  const allowBots =
+    document.querySelector('input[name="allowBots"]:checked')?.value !== "no";
 
   if (roomName && roomType) {
     if (roomType === "semi-private") {
@@ -1645,6 +1647,7 @@ goChatButton.addEventListener("click", () => {
       type: roomType,
       maxSize,
       accessCode,
+      allowBots,
     });
   } else {
     window.showErrorModal("Please fill in all room details.");

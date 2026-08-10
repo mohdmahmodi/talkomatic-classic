@@ -174,9 +174,8 @@ async function getCurrentTheme() {
 }
 
 /**
- * One community invite toast (Discord, Reddit). Sticky until dismissed, and
- * dismissing it remembers that choice for 14 days under its own cookie so the
- * two are independent.
+ * One community invite toast. Sticky until dismissed, and dismissing it
+ * remembers that choice for 14 days under its own cookie.
  */
 function showCommunityInvite({ cookie, title, blurb, cta, color, url }) {
   if (getCookie(cookie) === "true") return null;
@@ -247,10 +246,6 @@ function showCommunityInvite({ cookie, title, blurb, cta, color, url }) {
   return $toast;
 }
 
-/**
- * The two community invites. Discord is shown first so that, with newestOnTop,
- * Reddit lands above it.
- */
 function showCommunityInvites() {
   showCommunityInvite({
     cookie: "dismissedDiscordInvite",
@@ -260,14 +255,6 @@ function showCommunityInvites() {
     cta: "Join Discord",
     color: "#5865F2",
     url: "https://discord.gg/N7tJznESrE",
-  });
-  showCommunityInvite({
-    cookie: "dismissedRedditInvite",
-    title: "Join Our Subreddit!",
-    blurb: "Share ideas, read announcements, and see what others are making.",
-    cta: "Join Reddit",
-    color: "#FF4500",
-    url: "https://www.reddit.com/r/talkomatic/",
   });
 }
 

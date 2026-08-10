@@ -563,6 +563,16 @@ html {
   margin-bottom: 15px;
 }
 
+/* Yes/No groups sit on one line instead of stacking */
+#lobbyForm .radio-group.inline {
+  flex-direction: row;
+  gap: 20px;
+}
+
+#lobbyForm .radio-group.inline label {
+  width: auto;
+}
+
 /* Individual radio button labels */
 #lobbyForm .radio-group label {
   margin-bottom: 10px;

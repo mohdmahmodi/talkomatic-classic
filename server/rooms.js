@@ -2066,6 +2066,7 @@ function formatRoomForSocket(room, recipientSocket) {
     spotlight: !!room.spotlight,
     locked: !!room.locked,
     capacity: roomCapacity(room),
+    allowBots: room.allowBots !== false,
     users,
   };
 }
@@ -2912,6 +2913,16 @@ function joinRoom(socket, roomId, userId) {
       return socket.emit(
         "room full",
         createErrorResponse(ERROR_CODES.ROOM_FULL, "Room is full."),
+      );
+
+    // Rooms opened with "allow bots: no" take no automation at all.
+    if (socket.isBot && room.allowBots === false)
+      return socket.emit(
+        "error",
+        createErrorResponse(
+          ERROR_CODES.FORBIDDEN,
+          "This room does not allow bots.",
+        ),
       );
 
     // API (tier 2) bots take a normal seat but are capped per room, same
@@ -4783,6 +4794,8 @@ function registerSocketHandlers(opts) {
           type: data.type,
           layout: "vertical",
           maxSize,
+          // Rooms allow bots unless the creator said no in the lobby form.
+          allowBots: data.allowBots !== false,
           users: [],
           accessCode: data.type === "semi-private" ? data.accessCode : null,
           votes: {},

@@ -1181,6 +1181,7 @@ app.get(`${API}/rooms`, apiAuth, (req, res) => {
         isFull:
           (r.users || []).filter((u) => !u.isDev || !u.isVanished).length >=
           rooms.roomCapacity(r),
+        allowBots: r.allowBots !== false,
       }));
     state.apiCache.set("public_rooms", { timestamp: Date.now(), data });
     res.json(data);
@@ -1207,6 +1208,7 @@ app.get(`${API}/rooms/:id`, apiAuth, (req, res) => {
     isFull:
       (room.users || []).filter((u) => !u.isDev || !u.isVanished).length >=
       rooms.roomCapacity(room),
+    allowBots: room.allowBots !== false,
   });
 });
 
@@ -1287,6 +1289,7 @@ app.post(`${API}/rooms`, apiAuth, async (req, res) => {
       type: data.type,
       layout: "vertical",
       maxSize: rooms.newRoomCapacity(data.maxSize),
+      allowBots: data.allowBots !== false,
       users: [],
       accessCode: data.type === "semi-private" ? data.accessCode : null,
       votes: {},
@@ -1385,6 +1388,13 @@ app.post(`${API}/rooms/:id/join`, apiAuth, async (req, res) => {
   const room = state.rooms.get(req.params.id);
   if (!room)
     return sendErrorResponse(res, ERROR_CODES.NOT_FOUND, "Room not found", 404);
+  if (req.isBot && room.allowBots === false)
+    return sendErrorResponse(
+      res,
+      ERROR_CODES.FORBIDDEN,
+      "This room does not allow bots",
+      403,
+    );
   if (
     (room.users || []).filter((u) => !u.isDev || !u.isVanished).length >=
     rooms.roomCapacity(room)

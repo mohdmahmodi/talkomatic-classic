@@ -3172,7 +3172,8 @@
       const cap = r.capacity || 5;
       const seats = botSeats(cap);
       let why = "";
-      if (r.locked) why = "locked";
+      if (r.allowBots === false) why = "no bots allowed";
+      else if (r.locked) why = "locked";
       else if (!humans) why = "empty";
       else if (r.isFull) why = "full";
       else if (bots >= seats) why = "no bot seats left";
