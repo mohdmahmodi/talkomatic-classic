@@ -24,6 +24,10 @@ staff-chat.json.tmp
 flag-reviews.json
 flag-reviews.json.tmp
 
+# User bot configs - runtime store, never commit
+bots.json
+bots.json.tmp
+
 # Runtime counters
 anniversary.json
 
@@ -134,6 +138,7 @@ typings/
 .Trashes
 ehthumbs.db
 Thumbs.db
+*.lnk
 	
 test.py
 test/
