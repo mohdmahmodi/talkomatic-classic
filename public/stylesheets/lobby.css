@@ -283,6 +283,13 @@ html {
   color: var(--lobby-label-color);
 }
 
+/* The lobby form has always toggled this class on sign in and sign out, but the
+   rule behind it was missing, so the create-room box showed to everyone. It
+   matters now that a name is required: no name, no room form. */
+.hidden {
+  display: none !important;
+}
+
 .external-links {
   display: grid;
   /* minmax(0, 1fr), NOT 1fr. A bare 1fr is minmax(auto, 1fr), and that `auto`

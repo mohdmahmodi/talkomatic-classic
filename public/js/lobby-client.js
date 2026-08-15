@@ -464,6 +464,18 @@ const MAX_RETRIES = 3;
 const MAX_USERNAME_LENGTH = 15;
 const MAX_LOCATION_LENGTH = 20;
 const MAX_ROOM_NAME_LENGTH = 25;
+
+// Mirrors isGuestName in server/state.js - keep the two in step. The server is
+// the one that decides; this copy only saves a round trip and clears out a
+// guest name left in localStorage from before names were required.
+function isGuestUsername(name) {
+  if (typeof name !== "string") return true;
+  const n = name.trim();
+  if (!n) return true;
+  return (
+    /^guest[\s._-]*[0-9a-f]*$/i.test(n) || /^(anonymous|someone|unknown)$/i.test(n)
+  );
+}
 // How many people a room can hold, picked on the slider. The ceiling depends on
 // what the person holds and lives in roomSizeCeiling() below; the server clamps
 // to the same numbers, so a hand-sent value cannot open a 50-seat room.
@@ -1452,7 +1464,19 @@ logForm.addEventListener("submit", async (e) => {
   const newLocation =
     locationInput.value.trim().slice(0, MAX_LOCATION_LENGTH) || "On The Web";
 
-  if (newUsername) {
+  if (!newUsername) {
+    window.showErrorModal("Please enter a username.");
+    return;
+  }
+  // Same rule the server enforces, checked here so the answer is immediate.
+  if (isGuestUsername(newUsername)) {
+    window.showErrorModal(
+      "Guest names are not allowed. Please choose a username.",
+    );
+    return;
+  }
+
+  {
     localStorage.setItem("talkomaticUsername", newUsername);
     localStorage.setItem("talkomaticLocation", newLocation);
 
@@ -1505,8 +1529,6 @@ logForm.addEventListener("submit", async (e) => {
     emitJoinLobby(currentUsername, currentLocation);
 
     showRoomList();
-  } else {
-    window.showErrorModal("Please enter a username.");
   }
 });
 
@@ -2130,7 +2152,9 @@ function initLobby() {
     const savedUsername = localStorage.getItem("talkomaticUsername");
     const savedLocation = localStorage.getItem("talkomaticLocation");
 
-    if (savedUsername) {
+    // A saved guest name is treated as no name at all: the lobby used to hand
+    // one out on the first visit, and those browsers must pick a real one now.
+    if (savedUsername && !isGuestUsername(savedUsername)) {
       currentUsername = savedUsername;
       currentLocation = savedLocation || "On The Web";
       isSignedIn = true;
@@ -2144,25 +2168,14 @@ function initLobby() {
       emitJoinLobby(savedUsername, savedLocation || "On The Web");
       showRoomList();
     } else {
-      const guestDigits = Math.floor(10000 + Math.random() * 90000);
-      const guestUsername = `Guest${guestDigits}`;
-      const guestLocation = "Earth";
-
-      usernameInput.value = guestUsername;
-      locationInput.value = guestLocation;
-
-      localStorage.setItem("talkomaticUsername", guestUsername);
-      localStorage.setItem("talkomaticLocation", guestLocation);
-
-      currentUsername = guestUsername;
-      currentLocation = guestLocation;
-      isSignedIn = true;
-
-      setSignedInButtonState();
-      createRoomForm.classList.remove("hidden");
-
-      emitJoinLobby(guestUsername, guestLocation);
-      showRoomList();
+      if (savedUsername) localStorage.removeItem("talkomaticUsername");
+      // No name yet, so the create-room box stays shut and the prompt above the
+      // room list asks for one. Picking a name runs the normal sign-in path.
+      usernameInput.value = "";
+      locationInput.value = savedLocation || "";
+      isSignedIn = false;
+      createRoomForm.classList.add("hidden");
+      signInMessage.style.display = "block";
     }
   }, 500);
 

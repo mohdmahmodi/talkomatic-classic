@@ -21,6 +21,7 @@ const {
   enforceLocationLimit,
   enforceRoomNameLimit,
   isReservedName,
+  isGuestName,
   isListedName,
 } = require("./state");
 const {
@@ -2718,10 +2719,20 @@ function joinRoom(socket, roomId, userId) {
       );
 
     let { username, location } = socket.handshake.session || {};
-    if (!username || !location) {
-      username = "Anonymous";
-      location = "On The Web";
-    }
+    // The one caller already refuses a guest or missing name, so this is a
+    // backstop rather than a branch anybody reaches: it must never quietly
+    // invent a name the way it used to.
+    if (isGuestName(username))
+      return socket.emit(
+        "error",
+        createErrorResponse(
+          ERROR_CODES.UNAUTHORIZED,
+          "Choose a username in the lobby before joining a room.",
+          { needsUsername: true },
+          true,
+        ),
+      );
+    if (!location) location = "On The Web";
 
     const clientIp = socket.clientIp || socket.handshake.address;
     if (CONFIG.FEATURES.ENABLE_BOT_PROTECTION) {
@@ -2743,8 +2754,7 @@ function joinRoom(socket, roomId, userId) {
     // Staff sit in as many rooms at once as they have tabs open: watching three
     // rooms is the job, and being bounced out of one to look at another was the
     // main reason moderators spectated instead of joining.
-    const isAnon = username === "Anonymous" && location === "On The Web";
-    if (!isAnon && !isStaff) {
+    if (!isStaff) {
       const curRoom = getUserCurrentRoom(userId);
       if (curRoom && curRoom !== roomId) {
         const name = state.rooms.get(curRoom)?.name || "Unknown";
@@ -3269,27 +3279,12 @@ function registerSocketHandlers(opts) {
       safe(async () => {
         let { username, location, userId, isIPBased } =
           socket.handshake.session || {};
-        if (
-          !username &&
-          CONFIG.FEATURES.ENABLE_IP_BASED_USERS &&
-          socket.browserDetection?.isBrowser
-        ) {
-          const ipUser = createIPBasedUser(socket.clientIp);
-          username = ipUser.username;
-          location = ipUser.location;
-          userId = ipUser.userId;
-          isIPBased = true;
-          if (socket.handshake.session) {
-            Object.assign(socket.handshake.session, {
-              username,
-              location,
-              userId,
-              isIPBased: true,
-            });
-            await promisifySessionSave(socket.handshake.session).catch(
-              () => { },
-            );
-          }
+        // A session carrying a name from before guest names were dropped (or a
+        // minted IP-based one) reads as signed out, so the lobby asks for a
+        // real name instead of letting the old one through.
+        if (isGuestName(username)) {
+          username = null;
+          isIPBased = false;
         }
         if (username && location && userId) {
           if (socket.isDev) {
@@ -3414,6 +3409,19 @@ function registerSocketHandlers(opts) {
               "Names and locations cannot contain an IP address.",
             ),
           );
+
+        // Nobody chats as a guest. The lobby no longer hands out a name, so
+        // this catches a stale one from an old session and anyone typing the
+        // pattern in by hand. The client refuses it too, for a faster answer.
+        if (isGuestName(username)) {
+          return socket.emit(
+            "error",
+            createErrorResponse(
+              ERROR_CODES.VALIDATION_ERROR,
+              "Please choose a username - guest names are not allowed.",
+            ),
+          );
+        }
 
         // Reserved staff names only validate for connections carrying a
         // dev or mod key, so trolls cannot impersonate staff.
@@ -4675,26 +4683,35 @@ function registerSocketHandlers(opts) {
           );
 
         let { username, location, userId } = socket.handshake.session || {};
+        if (!socket.handshake.session)
+          return socket.emit(
+            "error",
+            createErrorResponse(ERROR_CODES.SERVER_ERROR, "Session error."),
+          );
+        // A room used to invent "Anonymous" for anyone arriving without a
+        // session name - a direct link, an embed, a lost session. That was the
+        // last way into a room without picking a name, so it is refused and
+        // the room page sends them to the lobby instead.
+        if (isGuestName(username))
+          return socket.emit(
+            "error",
+            createErrorResponse(
+              ERROR_CODES.UNAUTHORIZED,
+              "Choose a username in the lobby before joining a room.",
+              { needsUsername: true },
+              true,
+            ),
+          );
         if (!userId) {
           userId = socket.handshake.sessionID;
-          if (socket.handshake.session) {
-            socket.handshake.session.userId = userId;
-            if (!username) socket.handshake.session.username = "Anonymous";
-            if (!location) socket.handshake.session.location = "On The Web";
-          } else
-            return socket.emit(
-              "error",
-              createErrorResponse(ERROR_CODES.SERVER_ERROR, "Session error."),
-            );
+          socket.handshake.session.userId = userId;
         }
-        username = username || "Anonymous";
         location = location || "On The Web";
 
         // Early copy of the one-room-at-a-time rule, so a normal user is turned
         // away before any of the join work happens. Staff are exempt here for
         // the same reason as in joinRoom: watching several rooms is the job.
-        const isAnon = username === "Anonymous" && location === "On The Web";
-        if (!isAnon && !socket.isDev && !socket.isMod) {
+        if (!socket.isDev && !socket.isMod) {
           const cur = getUserCurrentRoom(userId);
           if (cur && cur !== data.roomId) {
             const n = state.rooms.get(cur)?.name || "Unknown";

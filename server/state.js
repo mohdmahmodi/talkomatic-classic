@@ -355,6 +355,21 @@ function isReservedName(name) {
   return CONFIG.RESERVED_NAMES.includes(name.trim().toLowerCase());
 }
 
+// True for a name the app handed out rather than one a person chose: the
+// lobby's old "Guest12345", the IP fallback's "Guest-A1B2C3D4", a bare
+// "Guest", or the placeholders used when a name was missing. Everyone picks a
+// name in the lobby now, so these are refused wherever a name is accepted.
+// Matched on the trimmed form; the trailing group is hex so both the digit and
+// the hash variants are covered by the one test.
+function isGuestName(name) {
+  if (typeof name !== "string") return true;
+  const n = name.trim();
+  if (!n) return true;
+  if (/^guest[\s._-]*[0-9a-f]*$/i.test(n)) return true;
+  if (/^(anonymous|someone|unknown)$/i.test(n)) return true;
+  return false;
+}
+
 // Deployment name list, comma separated in the environment. Kept out of CONFIG
 // so it is never part of anything the app serializes outward.
 function nameKey(val) {
@@ -393,5 +408,6 @@ module.exports = {
   enforceRoomNameLimit,
   promisifySessionSave,
   isReservedName,
+  isGuestName,
   isListedName,
 };

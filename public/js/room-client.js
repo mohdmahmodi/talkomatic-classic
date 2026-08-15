@@ -30,6 +30,17 @@ let currentUsername = "";
 let currentLocation = "";
 let currentRoomId = "";
 let currentUserId = "";
+
+// Mirrors isGuestName in server/state.js - keep the two in step. Names are
+// picked in the lobby now, so a room never invents one for an arrival.
+function isGuestUsername(name) {
+  if (typeof name !== "string") return true;
+  const n = name.trim();
+  if (!n) return true;
+  return (
+    /^guest[\s._-]*[0-9a-f]*$/i.test(n) || /^(anonymous|someone|unknown)$/i.test(n)
+  );
+}
 // New rooms are made vertical (side-by-side columns), so that is what to
 // assume before the server has said anything. Rooms made before the lobby
 // stopped asking still carry their own layout, and it arrives with the room
@@ -3559,10 +3570,14 @@ function joinRoom(roomId, accessCode = null) {
     localStorage.getItem("talkomaticLocation") ||
     "On The Web";
 
-  if (!uname) {
-    // No saved identity (first visit via a direct/invite link); join as-is and
-    // let the server apply its normal handling.
-    socket.emit("join room", { roomId, accessCode });
+  // No saved identity (first visit via a direct link), or one left over from
+  // when the lobby handed out guest names. The server refuses either, so send
+  // them to the lobby to pick a name rather than let the join fail there.
+  if (!uname || isGuestUsername(uname)) {
+    if (uname) localStorage.removeItem("talkomaticUsername");
+    showInfoModal("Choose a username in the lobby first.", () => {
+      window.location.href = "/index.html";
+    });
     return;
   }
 
@@ -3616,9 +3631,12 @@ socket.io.on("reconnect", () => {
     localStorage.getItem("talkomaticLocation") ||
     "On The Web";
 
-  if (!uname) {
-    // No identity to restore (shouldn't happen on an established room page);
-    // fall back to the bare rejoin.
+  // No identity to restore (shouldn't happen on an established room page), or a
+  // guest name left from before names were required - announcing that would
+  // just be refused. Fall back to the bare rejoin and let the still-live
+  // server session answer.
+  if (!uname || isGuestUsername(uname)) {
+    if (uname) localStorage.removeItem("talkomaticUsername");
     socket.emit("join room", { roomId: currentRoomId });
     return;
   }
