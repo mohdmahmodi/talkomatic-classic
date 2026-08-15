@@ -121,33 +121,6 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-/**
- * Helper: setCookie
- * Sets a cookie with given name, value, and expiration in days
- */
-function setCookie(name, value, days) {
-  const d = new Date();
-  d.setTime(d.getTime() + days * 24 * 60 * 60 * 1000);
-  const expires = "expires=" + d.toUTCString();
-  document.cookie = name + "=" + value + ";" + expires + ";path=/";
-}
-
-/**
- * Helper: getCookie
- * Returns the cookie value or an empty string if not found
- */
-function getCookie(name) {
-  const nameEQ = name + "=";
-  const ca = document.cookie.split(";");
-  for (let i = 0; i < ca.length; i++) {
-    let c = ca[i].trim();
-    if (c.indexOf(nameEQ) === 0) {
-      return c.substring(nameEQ.length, c.length);
-    }
-  }
-  return "";
-}
-
 let dbPromise;
 async function initDB() {
   dbPromise = idb.openDB("talkomatic-themes", 2, {
@@ -173,91 +146,6 @@ async function getCurrentTheme() {
   return db.get("settings", "currentTheme");
 }
 
-/**
- * One community invite toast. Sticky until dismissed, and dismissing it
- * remembers that choice for 14 days under its own cookie.
- */
-function showCommunityInvite({ cookie, title, blurb, cta, color, url }) {
-  if (getCookie(cookie) === "true") return null;
-
-  // Sticky until closed. newestOnTop is set explicitly rather than inherited:
-  // assigning to toastr.options replaces the whole object, so anything left
-  // out here falls back to the library default instead of what the page set.
-  toastr.options = {
-    closeButton: true,
-    newestOnTop: true,
-    positionClass: "toast-top-right",
-    timeOut: 0,
-    extendedTimeOut: 0,
-    tapToDismiss: false,
-    preventDuplicates: false,
-    showDuration: 300,
-    hideDuration: 300,
-    showEasing: "swing",
-    hideEasing: "linear",
-    showMethod: "fadeIn",
-    hideMethod: "fadeOut",
-  };
-
-  const container = document.createElement("div");
-  container.style.display = "flex";
-  container.style.flexDirection = "column";
-  container.style.gap = "8px";
-
-  const desc = document.createElement("div");
-  desc.textContent = blurb;
-  container.appendChild(desc);
-
-  const button = document.createElement("button");
-  button.className = "toast-cta";
-  button.textContent = cta;
-  button.style.backgroundColor = color;
-  button.style.color = "#FFF";
-  button.style.border = "none";
-  button.style.padding = "6px 12px";
-  button.style.borderRadius = "4px";
-  button.style.cursor = "pointer";
-  button.style.fontWeight = "bold";
-  container.appendChild(button);
-
-  // Listeners do NOT survive the trip through Toastr as HTML, so they are
-  // attached to the LIVE toast below instead.
-  const $toast = toastr.info(container.outerHTML, title);
-  if (!$toast) return null;
-
-  // ".toast-cta", not "button": find("button") also matched the X, so closing
-  // the toast opened the link as well and it read as un-closable.
-  $toast.find(".toast-cta").on("click", function (e) {
-    e.stopPropagation();
-    window.open(url, "_blank", "noopener");
-  });
-
-  // Clicking the body opens the link too; the X and the CTA are excluded so
-  // they keep their own behaviour.
-  $toast.on("click", function (e) {
-    if ($(e.target).closest(".toast-close-button, .toast-cta").length) return;
-    window.open(url, "_blank", "noopener");
-  });
-
-  $toast.find(".toast-close-button").on("click", function () {
-    setCookie(cookie, "true", 14);
-  });
-
-  return $toast;
-}
-
-function showCommunityInvites() {
-  showCommunityInvite({
-    cookie: "dismissedDiscordInvite",
-    title: "Join Our Discord!",
-    blurb:
-      "For community help, support, bug reports, or just to meet others!",
-    cta: "Join Discord",
-    color: "#5865F2",
-    url: "https://discord.gg/N7tJznESrE",
-  });
-}
-
 // Run after DOM is fully loaded
 document.addEventListener("DOMContentLoaded", async () => {
   // Basic Toastr options (some overridden above)
@@ -276,11 +164,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     showMethod: "fadeIn",
     hideMethod: "fadeOut",
   };
-
-  // Show the community invites after a brief delay
-  setTimeout(() => {
-    showCommunityInvites();
-  }, 2000);
 
   await initDB();
   const saved = await getCurrentTheme();

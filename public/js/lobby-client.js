@@ -438,6 +438,13 @@ if (window.TalkoDesk) window.TalkoDesk.init(socket);
 // DOM elements
 const logForm = document.getElementById("logform");
 const createRoomForm = document.getElementById("lobbyForm");
+// The "Create A Room..." heading is a sibling of the form, not part of it, so
+// hiding the form on its own leaves a heading with nothing underneath.
+const createRoomHeading = document.querySelector(".createRoom");
+function setCreateRoomVisible(show) {
+  createRoomForm.classList.toggle("hidden", !show);
+  if (createRoomHeading) createRoomHeading.classList.toggle("hidden", !show);
+}
 const roomListContainer = document.querySelector(".roomList");
 const dynamicRoomList = document.getElementById("dynamicRoomList");
 const usernameInput = logForm.querySelector('input[placeholder="Your Name"]');
@@ -521,7 +528,7 @@ function setSignInState(username, location, shouldPersist = true) {
   usernameInput.value = currentUsername;
   locationInput.value = currentLocation;
   setSignedInButtonState();
-  createRoomForm.classList.remove("hidden");
+  setCreateRoomVisible(true);
 
   if (shouldPersist) {
     localStorage.setItem("talkomaticUsername", currentUsername);
@@ -1519,7 +1526,7 @@ logForm.addEventListener("submit", async (e) => {
       }, 2000);
     } else {
       setSignedInButtonState();
-      createRoomForm.classList.remove("hidden");
+      setCreateRoomVisible(true);
     }
 
     currentUsername = newUsername;
@@ -1754,7 +1761,7 @@ socket.on("signin status", (data) => {
     localStorage.setItem("talkomaticLocation", currentLocation);
 
     setSignedInButtonState();
-    createRoomForm.classList.remove("hidden");
+    setCreateRoomVisible(true);
 
     showRoomList();
   } else {
@@ -1779,7 +1786,7 @@ function signOut() {
   }
   signInButton.appendChild(document.createTextNode("Sign In"));
 
-  createRoomForm.classList.add("hidden");
+  setCreateRoomVisible(false);
   signInMessage.style.display = "block";
   roomListContainer.style.display = "none";
 
@@ -2163,7 +2170,7 @@ function initLobby() {
       locationInput.value = currentLocation;
 
       setSignedInButtonState();
-      createRoomForm.classList.remove("hidden");
+      setCreateRoomVisible(true);
 
       emitJoinLobby(savedUsername, savedLocation || "On The Web");
       showRoomList();
@@ -2174,7 +2181,7 @@ function initLobby() {
       usernameInput.value = "";
       locationInput.value = savedLocation || "";
       isSignedIn = false;
-      createRoomForm.classList.add("hidden");
+      setCreateRoomVisible(false);
       signInMessage.style.display = "block";
     }
   }, 500);
