@@ -286,11 +286,10 @@ html {
 .external-links {
   display: grid;
   /* minmax(0, 1fr), NOT 1fr. A bare 1fr is minmax(auto, 1fr), and that `auto`
-     floor stops a column shrinking below its widest label's min-content width -
-     so "Documentation" widened column one to 159px, the two columns stopped
-     being equal, and the whole grid pushed past the 320px panel and got
-     clipped. A zero floor lets the tracks actually split the space. */
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+     floor stops a column shrinking below its widest label's min-content width,
+     which pushes the grid past the 320px panel and clips it. A zero floor lets
+     the tracks actually split the space. */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   margin-bottom: 10px;
   width: 100%;
@@ -344,14 +343,22 @@ html {
   background-color: var(--visited-external-links-background-color);
 }
 
-/* if there's an odd number of links, the last one spans both columns */
-.external-links > a:nth-last-child(1):nth-child(odd) {
-  grid-column: 1 / -1;
-}
-
 /* Long-labelled links get their own full-width row so words do not wrap. */
 .external-links a.wide {
   grid-column: 1 / -1;
+}
+
+/* Icon-only tiles: the glyph is the whole control, so it centres and drops the
+   label gutter. The name lives in title + aria-label instead. A taller pad
+   keeps the tap target honest now that there is no text setting the height. */
+.external-links a.icon-only {
+  justify-content: center;
+  padding: 13px 8px;
+}
+
+.external-links a.icon-only > i {
+  margin-right: 0;
+  font-size: 17px;
 }
 
 /* ── Ideas & Bugs card ──────────────────────────────────────────────────────

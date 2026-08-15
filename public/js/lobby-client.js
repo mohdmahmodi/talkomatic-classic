@@ -2969,7 +2969,7 @@ const APP_STATUS_META = {
 };
 
 // Restyle the lobby link: a colored status dot + "Check status" once an
-// application exists, otherwise the plain "Become a moderator". Staff never see
+// application exists, otherwise the plain "Apply to be a mod". Staff never see
 // this link (updateStaffLink hides it), so only restyle it for non-staff.
 function updateModApplyLink() {
   const link = document.getElementById("modApplyLink");
@@ -2981,7 +2981,7 @@ function updateModApplyLink() {
       m.color +
       '"></i> Check status';
   } else {
-    link.innerHTML = '<i class="fas fa-user-pen"></i> Become a moderator';
+    link.innerHTML = '<i class="fas fa-user-pen"></i> Apply to be a mod';
   }
 }
 
@@ -3084,7 +3084,7 @@ async function openModApply() {
     list.appendChild(line("Chat activity", have.acts, need.acts));
     body.appendChild(list);
     StaffUI.modal({
-      title: "Become a moderator",
+      title: "Apply to be a mod",
       icon: '<i class="fas fa-user-clock"></i>',
       body: body,
       actions: [{ label: "Got it", kind: "primary", onClick: () => {} }],
@@ -3226,14 +3226,19 @@ socket.on("mod application status", (d) => {
 
 // Reflect the server-proven staff role in the menu link: "Staff Access" becomes
 // "Mod Dashboard" for mods and "Dev Dashboard" for devs once a key validates.
+// The tile is icon-only, so the role reads from the glyph and the tooltip.
 function updateStaffLink() {
   const link = document.getElementById("staffLoginLink");
   if (link) {
-    if (currentUserIsDev)
-      link.innerHTML = '<i class="fas fa-gauge-high"></i> Dev Dashboard';
-    else if (currentUserIsMod)
-      link.innerHTML = '<i class="fas fa-gauge-high"></i> Mod Dashboard';
-    else link.innerHTML = '<i class="fas fa-key"></i> Staff Access';
+    const icon = currentUserIsDev || currentUserIsMod ? "fa-gauge-high" : "fa-key";
+    const label = currentUserIsDev
+      ? "Dev Dashboard"
+      : currentUserIsMod
+        ? "Mod Dashboard"
+        : "Staff Access";
+    link.innerHTML = '<i class="fas ' + icon + '"></i>';
+    link.title = label;
+    link.setAttribute("aria-label", label);
   }
   // Staff do not apply to be a mod, so hide the apply link for them.
   const applyLink = document.getElementById("modApplyLink");

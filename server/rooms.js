@@ -3189,7 +3189,7 @@ function registerSocketHandlers(opts) {
 
     // Tell this browser the status of its latest mod application (if any), so
     // the lobby menu can offer "Check status" with the reviewer's note instead
-    // of "Become a moderator". Staff never see this (their link is hidden).
+    // of "Apply to be a mod". Staff never see this (their link is hidden).
     if (socket.deviceId && !socket.isDev && !socket.isMod) {
       const st = appStatusPayload(socket.deviceId, false);
       if (st.has) socket.emit("mod application status", st);
