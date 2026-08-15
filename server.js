@@ -360,9 +360,9 @@ const io = socketIo(server, {
   // out uncompressed anyway - but it is not free just because it rarely fires.
   // ws compresses on the thread pool, and it holds back everything else queued
   // on that connection until the compressor comes back, so one oversized room
-  // state broadcast would sit in front of a rally's worth of Pong frames. Real
-  // time traffic being stuck behind bulk traffic is exactly what this is for
-  // avoiding, and the bandwidth it saved was never the constraint.
+  // state broadcast would sit in front of a burst of piano notes or draw
+  // strokes. Real time traffic being stuck behind bulk traffic is exactly what
+  // this is for avoiding, and the bandwidth it saved was never the constraint.
   perMessageDeflate: false,
   // Whole-page and asset responses still compress. That path is bulk by
   // nature and nothing latency sensitive is waiting behind it.
@@ -517,9 +517,6 @@ io.use((socket, next) => {
               // Same story for Draw & Guess strokes: batched, and capped by
               // its own per-second limit in server/games/socket.js.
               "games draw",
-              // And for a Pong paddle, which is a ~30/sec stream while a rally
-              // is on. Same file, same style of dedicated cap.
-              "games input",
               "get rooms",
               "get room state",
             ].includes(evt)
