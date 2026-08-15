@@ -5,7 +5,7 @@
 //
 // Two rules are load-bearing and must survive any edit:
 //  - Nothing in this file calls logStaff or feeds the audit action log. Chat
-//    is not moderation work, and the leaderboard was just made hard to pad.
+//    is not moderation work, and a record must not be paddable with it.
 //  - Identity at the Desk is the staff key label. Hiding a flair or vanishing
 //    conceals someone from USERS, never from other staff in here.
 
@@ -912,10 +912,9 @@ function rosterFor(socket) {
   const online = new Map(live.map((s) => [s.role + ":" + s.label, s]));
 
   // Last time each staff label did anything, from the action log.
-  const lastBy = new Map();
+  let lastBy = new Map();
   try {
-    for (const s of ctx.audit.leaderboard())
-      lastBy.set((s.role || "mod") + ":" + s.label, s.last || null);
+    lastBy = ctx.audit.lastActiveByLabel();
   } catch (_) {}
 
   const out = [...live];

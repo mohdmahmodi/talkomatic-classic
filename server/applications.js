@@ -71,7 +71,7 @@ function submit({ deviceId, ip, username, answers, discordId, discord }, opts = 
   if (pendingForDevice(deviceId))
     return { ok: false, error: "You already have an application pending." };
   // Spam guard: 3 submissions in 24h locks further tries until the oldest of
-  // those ages out. The invite-milestone auto-file bypasses it.
+  // those ages out. A system-filed application bypasses it.
   if (!opts.system && recentCountForDevice(deviceId, DAY_MS) >= DAILY_LIMIT)
     return {
       ok: false,

@@ -2229,7 +2229,6 @@
     appeal: "fa-scale-balanced",
     application: "fa-file-signature",
     suggestion: "fa-lightbulb",
-    invite: "fa-user-plus",
     abuse: "fa-triangle-exclamation",
     stats: "fa-chart-simple",
   };
@@ -2239,7 +2238,6 @@
     application: "Mod application",
     suggestion: "Suggestion",
     abuse: "Worth a look",
-    invite: "Invites",
     stats: "Daily summary",
   };
 
@@ -4778,7 +4776,7 @@
       p: [
         "Developers can read every channel and thread, including edits and deleted messages. That is deliberate, and it is said out loud here rather than hidden.",
         "Hiding your flair hides you from users, never from the team. Your Desk name is always your staff name.",
-        "Nothing you say here counts as moderation work. The leaderboard only counts what you do to actual users, and it only lists people who currently hold a key.",
+        "Nothing you say here counts as moderation work. Your record only counts what you do to actual users.",
       ],
     },
   ];

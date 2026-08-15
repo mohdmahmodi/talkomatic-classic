@@ -123,7 +123,6 @@
   --info-circle-icon-color: #64b5f6;
   --youtube-play-circle-icon-color: #f44336;
   --app-directory-icon-color: #ab47bc;
-  --documentation-icon-color: #66bb6a;
   --donate-icon-color: #ec407a;
   --themes-icon-gradient-left-color: #f44336;
   --themes-icon-gradient-middle-color: #66bb6a;
@@ -1192,12 +1191,6 @@ html {
 .fa-th-large {
   margin-right: 10px;
   color: var(--app-directory-icon-color); /* Purple for apps/directory */
-}
-.fa-book {
-  margin-right: 10px;
-  color: var(
-    --documentation-icon-color
-  ); /* Green for documentation/knowledge */
 }
 .fa-gift {
   margin-right: 10px;

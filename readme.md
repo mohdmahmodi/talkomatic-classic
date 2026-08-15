@@ -12,7 +12,7 @@
 [![Docker Ready](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white)](Dockerfile)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-ff9800)](contributing.md)
 
-[**Try it live**](https://classic.talkomatic.co/) · [API docs](docs/api.md) · [Report a bug](https://github.com/mohdmahmodi/talkomatic-classic/issues) · [Discord](https://discord.gg/N7tJznESrE)
+[**Try it live**](https://classic.talkomatic.co/) · [Report a bug](https://github.com/mohdmahmodi/talkomatic-classic/issues) · [Discord](https://discord.gg/N7tJznESrE)
 
 </div>
 
@@ -31,7 +31,7 @@ Talkomatic was created in 1973 on the PLATO system at the University of Illinois
 - **Built-in apps**: collaborative jigsaw puzzle (with server-side image safety scanning), a shared piano, and a collaborative whiteboard
 - **Themes**: swappable full-page themes, plus community themes
 - **Moderation**: staff dashboard with audit log, reports, appeals, IP bans, and a word filter
-- **Bot API**: token-based access for bots, with REST and Socket.IO ([docs](docs/api.md))
+- **Bot API**: token-based access for bots, with REST and Socket.IO
 
 ## Tech
 
@@ -91,8 +91,6 @@ Three public endpoints are made for uptime monitors like Uptime Kuma:
 | `/healthz` | Liveness | HTTP 200 |
 | `/api/v1/health` | Detailed health with subsystems | keyword `"status":"ok"` |
 | `/api/v1/status` | Public stats for a status page | keyword `"status":"online"` |
-
-See the [API docs](docs/api.md) for response shapes and the bot API.
 
 ## Contributing
 

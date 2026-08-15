@@ -60,14 +60,11 @@ process.on("uncaughtException", (error) => {
 });
 
 // On a clean shutdown, flush every store to disk so nothing is lost in the
-// debounce window. Invites, identity, applications, reports, mod keys, the audit
-// log, and the IP ban list all persist across restarts and version updates -
+// debounce window. Identity, applications, reports, mod keys, the audit log,
+// and the IP ban list all persist across restarts and version updates -
 // each store's load() tolerates old/missing fields so data migrates forward
 // instead of disappearing.
 function gracefulFlush() {
-  try {
-    require("./server/invites").flushSync();
-  } catch (e) {}
   try {
     require("./server/identity").flushSync();
   } catch (e) {}
@@ -672,7 +669,6 @@ const PAGES = [
   "browser",
   "contributors",
   "desk",
-  "documentation",
   "index",
   "mod",
   "puzzle",

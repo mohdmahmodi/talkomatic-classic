@@ -61,10 +61,6 @@
   let reportsList = [];
   let appealsList = []; // ban appeals (Appeals tab)
   let suggestionsList = []; // feature suggestions (Suggestions tab)
-  let invitesList = []; // flagged inviters (Invites tab)
-  let invitesPage = 0;
-  const INV_PAGE = 12;
-  const inviteDetails = new Map(); // deviceId -> last forensic detail
 
   // The feed covers one Pacific day, 12:00am to 11:59pm, so every staff member
   // sees the same window whatever timezone they are in, and it empties at
@@ -419,11 +415,9 @@
             ? "possible mod abuse"
             : e.kind === "application"
               ? "mod application"
-              : e.kind === "invite"
-                ? "invite milestone"
-                : e.kind === "suggestion"
-                  ? "feature suggestion"
-                  : "user report",
+              : e.kind === "suggestion"
+                ? "feature suggestion"
+                : "user report",
         ),
       );
     } else {
@@ -1458,8 +1452,8 @@
   // ── Moderators tab (dev only) ──
   let modKeys = [];
   // People whose key has been pulled. They are not staff any more, so they are
-  // kept out of the roster and off the leaderboard, and shown in their own
-  // list with the reason they stopped.
+  // kept out of the roster, and shown in their own list with the reason they
+  // stopped.
   let formerMods = [];
   let modsFilter = "all"; // all | dev | l2 | l1 | active | inactive | former
   // Turn a last-connected timestamp into a label + freshness colour, so a stale
@@ -1654,7 +1648,7 @@
           message:
             'Their key stops working at once and "' +
             (k.label || "mod") +
-            '" drops off the roster and the leaderboard. They stay in the ' +
+            '" drops off the roster. They stay in the ' +
             "list below as a former moderator, with this reason attached.",
           fields: [
             {
@@ -2215,11 +2209,10 @@
     // and the response landed after). Rebuild enough of it to render rather
     // than dropping the record on the floor.
     if (!recordCtx) {
-      const known = leaderboard.find((s) => s.label === h.label);
       recordCtx = {
         label: h.label,
         role: h.role || "mod",
-        modLevel: h.role === "dev" ? 0 : known ? known.modLevel || 2 : 2,
+        modLevel: h.role === "dev" ? 0 : 2,
         offset: h.offset || 0,
         group: null,
         targetUid: null,
@@ -2453,187 +2446,6 @@
     if (recordCtx) recordCtx.host = wrap;
   }
 
-  // ── Team workload ────────────────────────────────────────────────────────
-  // Who is actually carrying the load, and which juniors have earned a look at
-  // promotion. Passive actions (spectating, unlocking the panel) are excluded
-  // by the server, so watching a room all day does not read as work.
-  let leaderboard = [];
-
-  function renderLeaderboard() {
-    const wrap = $("modBoard");
-    if (!wrap) return;
-    wrap.textContent = "";
-    if (!leaderboard.length) {
-      wrap.appendChild(
-        emptyBox("fa-ranking-star", "No staff actions recorded yet."),
-      );
-      return;
-    }
-
-    // Juniors past the bar, surfaced before the table so they are not missed.
-    const ready = leaderboard.filter(
-      (s) => s.role !== "dev" && s.modLevel === 1 && s.onUsers >= PROMOTION_AT,
-    );
-    if (ready.length) {
-      const banner = divc("promo-banner");
-      banner.appendChild(icon("fa-arrow-up"));
-      const tx = divc("promo-text");
-      tx.appendChild(
-        span(
-          "promo-title",
-          ready.length === 1
-            ? ready[0].label + " has earned a look at full mod"
-            : ready.length + " junior mods have earned a look at full mod",
-        ),
-      );
-      tx.appendChild(
-        span(
-          "promo-body",
-          ready
-            .map((s) => s.label + " (" + s.onUsers + " on users)")
-            .join(", ") +
-            ". Open their record and read what that work actually was before deciding - the record flags padding and grudges. Promoting is a developer decision.",
-        ),
-      );
-      banner.appendChild(tx);
-      wrap.appendChild(banner);
-    }
-
-    // One number decides the order: actions that landed on a person. It is
-    // said in words under the podium so nobody has to guess what is being
-    // ranked, and it is the same number the promotion bar uses.
-    const rankOf = (s) =>
-      s.role === "dev" ? "dev" : s.modLevel === 1 ? "l1" : "l2";
-    const rankName = (r) => (r === "dev" ? "DEV" : r === "l1" ? "MOD L1" : "MOD L2");
-    const rankColor = (r) =>
-      r === "dev" ? "var(--red)" : r === "l1" ? "var(--purple)" : "var(--blue)";
-    const countTitle = (s) =>
-      s.useful +
-      " actions that were not passive, " +
-      s.total +
-      " logged in total. Only work that landed on a person is ranked here.";
-    const recentLine = (s) =>
-      s.recentOnUsers
-        ? s.recentOnUsers + " in the last 30 days"
-        : s.recentUseful
-          ? "Nothing on users in 30 days"
-          : "Quiet for 30 days";
-
-    const board = divc("lb");
-
-    // ── Podium: the top three, tallest in the middle ──
-    const top3 = leaderboard.slice(0, 3);
-    if (top3.length) {
-      const podium = divc("lb-podium n" + top3.length);
-      // Gold, silver, bronze - the medal is the whole point of a podium, so
-      // it is the thing that carries the colour: the ring around the picture,
-      // the medal disc, the number on the step. Rank colour stays on the chip
-      // where it belongs, and never competes with the metal.
-      const METAL = ["gold", "silver", "bronze"];
-      // Second, first, third - the shape a podium actually has.
-      const order = top3.length >= 3 ? [1, 0, 2] : top3.length === 2 ? [1, 0] : [0];
-      order.forEach((idx) => {
-        const s = top3[idx];
-        if (!s) return;
-        const place = idx + 1;
-        const rank = rankOf(s);
-        const col = divc("pod p" + place + " m-" + METAL[idx]);
-
-        const card = document.createElement("button");
-        card.type = "button";
-        card.className = "pod-card";
-        card.title = countTitle(s);
-
-        // The picture, ringed in its metal, with the medal disc on the corner.
-        const face = divc("pod-face");
-        const av = divc("avatar pod-av");
-        av.style.background = rankColor(rank);
-        av.textContent = initialOf(s.label);
-        face.appendChild(av);
-        const medal = divc("pod-medal");
-        if (place === 1) medal.appendChild(icon("fa-crown"));
-        else medal.appendChild(span("pod-medal-n", String(place)));
-        face.appendChild(medal);
-        card.appendChild(face);
-
-        const nm = span("pod-name", s.label);
-        nm.title = s.label;
-        card.appendChild(nm);
-        card.appendChild(span("chip " + rank, rankName(rank)));
-
-        const n = divc("pod-n");
-        n.appendChild(span("pod-num", String(s.onUsers || 0)));
-        n.appendChild(span("pod-unit", "actions on users"));
-        card.appendChild(n);
-        card.appendChild(span("pod-recent", recentLine(s)));
-
-        card.addEventListener("click", () =>
-          openModHistory({ label: s.label, rank }),
-        );
-        col.appendChild(card);
-
-        // The step under the card: tallest for first, and it carries the place.
-        const base = divc("pod-base");
-        base.appendChild(span("pod-place", String(place)));
-        base.appendChild(
-          span("pod-metal", place === 1 ? "GOLD" : place === 2 ? "SILVER" : "BRONZE"),
-        );
-        col.appendChild(base);
-        podium.appendChild(col);
-      });
-      board.appendChild(podium);
-    }
-
-    const note = divc("lb-note");
-    note.textContent =
-      "Ranked by actions that landed on a person - kicks, warns, bans, " +
-      "unbans. Tidying rooms, reading queues and writing notes are counted " +
-      "separately and never move anybody up. Click anyone to read their record.";
-    board.appendChild(note);
-
-    // ── Fourth place down: a plain list, biggest number on the right ──
-    const rest = leaderboard.slice(3, 20);
-    if (rest.length) {
-      const list = divc("lb-list");
-      rest.forEach((s, i) => {
-        const place = i + 4;
-        const rank = rankOf(s);
-        const row = document.createElement("button");
-        row.type = "button";
-        row.className = "lb-row rank-" + rank;
-        row.title = countTitle(s);
-
-        row.appendChild(span("lb-place", String(place)));
-
-        const av = divc("avatar lb-av");
-        av.style.background = rankColor(rank);
-        av.textContent = initialOf(s.label);
-        row.appendChild(av);
-
-        const who = divc("lb-who");
-        const line = divc("lb-line");
-        line.appendChild(span("lb-name", s.label));
-        line.appendChild(span("chip " + rank, rankName(rank)));
-        who.appendChild(line);
-        who.appendChild(span("lb-recent", recentLine(s)));
-        row.appendChild(who);
-
-        const n = divc("lb-n");
-        n.appendChild(span("lb-num", String(s.onUsers || 0)));
-        n.appendChild(span("lb-unit", "on users"));
-        row.appendChild(n);
-
-        row.addEventListener("click", () =>
-          openModHistory({ label: s.label, rank }),
-        );
-        list.appendChild(row);
-      });
-      board.appendChild(list);
-    }
-
-    wrap.appendChild(board);
-  }
-
   // A former moderator's card. Their record is the point, and a dev can hand
   // the key back from here.
   function buildFormerCard(f) {
@@ -2816,7 +2628,7 @@
       div.appendChild(
         span(
           "md-s",
-          "Off the roster and off the leaderboard. Their record stays readable.",
+          "Off the roster. Their record stays readable.",
         ),
       );
       wrap.appendChild(div);
@@ -4074,259 +3886,6 @@
     });
   }
 
-  // ── Invites tab (full mods + devs): flag and clean farmed invites ──
-  function verdictMeta(level) {
-    if (level === "likely_farmed")
-      return { cls: "farmed", label: "Likely farmed", icon: "fa-robot" };
-    if (level === "suspicious")
-      return {
-        cls: "suspicious",
-        label: "Suspicious",
-        icon: "fa-circle-question",
-      };
-    return { cls: "clean", label: "Looks clean", icon: "fa-circle-check" };
-  }
-
-  // Confirm, then ask the server to soft-delete a flagged cluster (or all
-  // flagged invites) for one inviter. The server re-checks the flag and logs it.
-  async function confirmPurge(it, cohort, count) {
-    if (!window.StaffUI) return;
-    const go = await StaffUI.confirm({
-      title: "Remove farmed invites",
-      danger: true,
-      confirmText: "Remove " + count,
-      message:
-        "Remove " +
-        count +
-        " pending invite" +
-        (count === 1 ? "" : "s") +
-        " from " +
-        (it.name || "this inviter") +
-        "? Active invites are never touched. This is logged, and a developer can undo it.",
-    });
-    if (!go) return;
-    socket.emit("staff purge invites", { deviceId: it.deviceId, cohort });
-  }
-
-  // The expanded forensic detail for one inviter: a cadence + conversion
-  // summary, each same-address cluster with its own Remove button, and (for
-  // devs) an undo of the last removal.
-  function buildInviteDetail(it, d, isDev) {
-    const box = document.createElement("div");
-    box.className = "inv-detail";
-
-    const sum = document.createElement("div");
-    sum.className = "sumline";
-    const parts = [];
-    if (d.medianGapMs != null)
-      parts.push("~" + (d.medianGapMs / 1000).toFixed(1) + "s between invites");
-    parts.push((d.activePct || 0) + "% became active");
-    parts.push((d.namedPct || 0) + "% ever named");
-    sum.textContent = parts.join("   ·   ");
-    box.appendChild(sum);
-
-    if (!d.cohorts || !d.cohorts.length) {
-      const none = document.createElement("div");
-      none.className = "inv-none";
-      none.textContent =
-        "No same-address cluster large enough to remove as a group.";
-      box.appendChild(none);
-    } else {
-      const head = document.createElement("div");
-      head.className = "report-log-head";
-      head.style.padding = "0 0 6px";
-      head.textContent = "Same-address clusters";
-      box.appendChild(head);
-      d.cohorts.forEach((c) => {
-        const row = document.createElement("div");
-        row.className = "cohort-row";
-        const info = span("cinfo");
-        const b = document.createElement("b");
-        b.textContent = c.count + " invite" + (c.count === 1 ? "" : "s");
-        info.appendChild(b);
-        info.appendChild(document.createTextNode(" from one address"));
-        if (isDev && c.ip) {
-          info.appendChild(document.createTextNode(" "));
-          info.appendChild(span("ip", c.ip));
-        }
-        row.appendChild(info);
-        if (viewerIsFullMod()) {
-          const rm = document.createElement("button");
-          rm.className = "btn sm danger";
-          rm.appendChild(icon("fa-trash"));
-          rm.appendChild(document.createTextNode(" Remove " + c.count));
-          rm.addEventListener("click", () => confirmPurge(it, c.index, c.count));
-          row.appendChild(rm);
-        }
-        box.appendChild(row);
-      });
-    }
-
-    if (isDev && d.lastBatch) {
-      const undo = document.createElement("button");
-      undo.className = "btn sm";
-      undo.style.marginTop = "10px";
-      undo.appendChild(icon("fa-rotate-left"));
-      undo.appendChild(document.createTextNode(" Undo last removal"));
-      undo.addEventListener("click", () =>
-        socket.emit("staff undo invite purge", {
-          deviceId: it.deviceId,
-          batch: d.lastBatch,
-        }),
-      );
-      box.appendChild(undo);
-    }
-    return box;
-  }
-
-  function renderInvites() {
-    const wrap = $("invitesList");
-    if (!wrap) return;
-    wrap.textContent = "";
-    const badge = $("invitesBadge");
-    if (badge) badge.textContent = String(invitesList.length);
-    const sub = $("invitesSub");
-    if (sub)
-      sub.textContent = invitesList.length
-        ? invitesList.length +
-          " flagged inviter" +
-          (invitesList.length === 1 ? "" : "s")
-        : "No flagged inviters";
-    if (!invitesList.length) {
-      const empty = document.createElement("div");
-      empty.className = "empty";
-      empty.appendChild(icon("fa-trophy"));
-      empty.appendChild(
-        document.createTextNode(
-          "No farmed invites detected. The board is clean.",
-        ),
-      );
-      wrap.appendChild(empty);
-      return;
-    }
-    const isDev = me && me.role === "dev";
-    const pages = Math.max(1, Math.ceil(invitesList.length / INV_PAGE));
-    if (invitesPage >= pages) invitesPage = pages - 1;
-    if (invitesPage < 0) invitesPage = 0;
-    const start = invitesPage * INV_PAGE;
-    invitesList.slice(start, start + INV_PAGE).forEach((it) => {
-      const vm = verdictMeta(it.verdict && it.verdict.level);
-      const card = document.createElement("div");
-      card.className = "report-card" + (vm.cls === "farmed" ? " hot" : "");
-
-      const head = document.createElement("div");
-      head.className = "rc-head";
-      const av = document.createElement("div");
-      av.className = "avatar";
-      av.style.background =
-        vm.cls === "farmed" ? "var(--red)" : "var(--orange)";
-      av.textContent = initialOf(it.name);
-      head.appendChild(av);
-      const idCol = document.createElement("div");
-      idCol.className = "rc-id";
-      idCol.appendChild(span("rc-kicker", "Inviter"));
-      idCol.appendChild(span("nm", it.name || "Anonymous"));
-      const meta = document.createElement("div");
-      meta.className = "rc-meta";
-      const v = span("verdict " + vm.cls);
-      v.appendChild(icon(vm.icon));
-      v.appendChild(document.createTextNode(" " + vm.label));
-      meta.appendChild(v);
-      if (it.location) meta.appendChild(span(null, it.location));
-      idCol.appendChild(meta);
-      head.appendChild(idCol);
-      card.appendChild(head);
-
-      const stats = document.createElement("div");
-      stats.className = "inv-stats";
-      const chip = (label, val) => {
-        const s = span("st");
-        s.appendChild(document.createTextNode(label + " "));
-        const b = document.createElement("b");
-        b.textContent = String(val);
-        s.appendChild(b);
-        return s;
-      };
-      stats.appendChild(chip("pending", it.pending));
-      stats.appendChild(chip("active", it.active));
-      stats.appendChild(chip("distinct IPs", it.distinctIps));
-      stats.appendChild(chip("top address", (it.topIpPct || 0) + "%"));
-      stats.appendChild(chip("named", (it.namedPct || 0) + "%"));
-      card.appendChild(stats);
-
-      if (it.verdict && it.verdict.reasons && it.verdict.reasons.length) {
-        const ul = document.createElement("ul");
-        ul.className = "inv-reasons";
-        it.verdict.reasons.forEach((r) => {
-          const li = document.createElement("li");
-          li.textContent = r;
-          ul.appendChild(li);
-        });
-        card.appendChild(ul);
-      }
-
-      const detail = inviteDetails.get(it.deviceId);
-      const foot = document.createElement("div");
-      foot.className = "rc-foot";
-      if (!detail) {
-        const investigate = document.createElement("button");
-        investigate.className = "btn sm";
-        investigate.appendChild(icon("fa-magnifying-glass"));
-        investigate.appendChild(document.createTextNode(" Investigate"));
-        investigate.addEventListener("click", () =>
-          socket.emit("staff get invite report", { deviceId: it.deviceId }),
-        );
-        foot.appendChild(investigate);
-      }
-      if (it.pending > 0 && viewerIsFullMod()) {
-        const purgeAll = document.createElement("button");
-        purgeAll.className = "btn sm danger";
-        purgeAll.appendChild(icon("fa-broom"));
-        purgeAll.appendChild(
-          document.createTextNode(" Remove all flagged (" + it.pending + ")"),
-        );
-        purgeAll.addEventListener("click", () =>
-          confirmPurge(it, "all", it.pending),
-        );
-        foot.appendChild(purgeAll);
-      }
-      card.appendChild(foot);
-
-      if (detail) card.appendChild(buildInviteDetail(it, detail, isDev));
-
-      wrap.appendChild(card);
-    });
-
-    if (pages > 1) {
-      const pager = document.createElement("div");
-      pager.className = "inv-pager";
-      const nav = (label, faIcon, atEnd, disabled, delta) => {
-        const b = document.createElement("button");
-        b.className = "btn sm";
-        b.disabled = disabled;
-        if (!atEnd) b.appendChild(icon(faIcon));
-        b.appendChild(document.createTextNode(label));
-        if (atEnd) b.appendChild(icon(faIcon));
-        if (!disabled)
-          b.addEventListener("click", () => {
-            invitesPage += delta;
-            renderInvites();
-          });
-        return b;
-      };
-      pager.appendChild(
-        nav(" Prev", "fa-chevron-left", false, invitesPage === 0, -1),
-      );
-      pager.appendChild(
-        span(null, "Page " + (invitesPage + 1) + " of " + pages),
-      );
-      pager.appendChild(
-        nav("Next ", "fa-chevron-right", true, invitesPage >= pages - 1, 1),
-      );
-      wrap.appendChild(pager);
-    }
-  }
-
   // ── Applications tab (full mods + devs) ──
   // Status colour, badge tone, header icon, and avatar tint for one application.
   function appStatusMeta(status) {
@@ -4884,7 +4443,6 @@
       // The roster also shows devs and online state, both derived from the
       // sessions data, so refresh that too.
       socket.emit("dev get sessions");
-      socket.emit("staff get mod leaderboard");
     }
     if (name === "sessions") socket.emit("dev get sessions");
     if (name === "announce") socket.emit("announcement list");
@@ -4892,7 +4450,6 @@
     if (name === "reports") socket.emit("staff get reports");
     if (name === "appeals") socket.emit("staff get appeals");
     if (name === "suggestions") socket.emit("staff get suggestions");
-    if (name === "invites") socket.emit("staff get invite report");
     if (window.innerWidth <= 860) document.body.classList.add("nav-closed");
   }
   function updateNotifBadge() {
@@ -4971,10 +4528,6 @@
       "Read-only for junior mods. Dismissing an appeal is a full-mod action, and lifting a ban is dev-only.",
     );
     readOnlyNote(
-      "tab-invites",
-      "Read-only for junior mods. Removing farmed invites is a full-mod action.",
-    );
-    readOnlyNote(
       "tab-bans",
       "Read-only for junior mods. Placing and lifting blocks are full-mod actions. Addresses are only ever shown to developers.",
     );
@@ -5010,7 +4563,6 @@
       "mod applications list",
       "staff get reports",
       "staff get appeals",
-      "staff get invite report",
       "dev list mod keys",
       "dev get sessions",
     ].forEach((ev) => socket.emit(ev));
@@ -5107,9 +4659,6 @@
   socket.on("dev former mods", (list) => {
     formerMods = Array.isArray(list) ? list : [];
     renderMods();
-    // Somebody coming off staff comes off the board too; ask for it again so
-    // the two panels cannot disagree.
-    socket.emit("staff get mod leaderboard");
   });
 
   socket.on("mod applications", (list) => {
@@ -5141,45 +4690,7 @@
     renderSuggestions();
   });
 
-  socket.on("staff invite report", (list) => {
-    invitesList = Array.isArray(list) ? list : [];
-    invitesPage = 0;
-    renderInvites();
-  });
-
-  socket.on("staff invite detail", (d) => {
-    if (!d || !d.deviceId) return;
-    inviteDetails.set(d.deviceId, d);
-    // Reflect the post-action state on the list card (counts + verdict change
-    // after a purge or undo) without waiting for a full list refresh.
-    const idx = invitesList.findIndex((x) => x.deviceId === d.deviceId);
-    if (idx >= 0) {
-      const c = d.counts || {};
-      invitesList[idx] = Object.assign({}, invitesList[idx], {
-        pending: c.pending != null ? c.pending : invitesList[idx].pending,
-        active: c.active != null ? c.active : invitesList[idx].active,
-        distinctIps: d.distinctIps,
-        topIpPct: d.topIpPct,
-        namedPct: d.namedPct,
-        verdict: d.verdict || invitesList[idx].verdict,
-      });
-    }
-    renderInvites();
-  });
-
   socket.on("staff mod history", (h) => renderModHistory(h));
-
-  socket.on("staff mod leaderboard", (data) => {
-    // Older payloads were a bare array; the current one carries the promotion
-    // threshold alongside the board so client and server cannot disagree.
-    if (Array.isArray(data)) {
-      leaderboard = data;
-    } else {
-      leaderboard = Array.isArray(data?.board) ? data.board : [];
-      if (data?.promotionAt) PROMOTION_AT = data.promotionAt;
-    }
-    renderLeaderboard();
-  });
 
   socket.on("dev sessions", (data) => {
     sessionData = data || { sessions: [], history: [] };
@@ -5384,7 +4895,6 @@
   $("modsRefresh").addEventListener("click", () => {
     socket.emit("dev list mod keys");
     socket.emit("dev get sessions");
-    socket.emit("staff get mod leaderboard");
   });
   $("sessionsRefresh") &&
     $("sessionsRefresh").addEventListener("click", () =>
@@ -5411,12 +4921,6 @@
     $("suggestionsRefresh").addEventListener("click", () =>
       socket.emit("staff get suggestions"),
     );
-  $("invitesRefresh") &&
-    $("invitesRefresh").addEventListener("click", () => {
-      inviteDetails.clear();
-      socket.emit("staff get invite report");
-    });
-
   // Applications: status segment + live search (own debounce, own page reset).
   document.querySelectorAll("#appsSeg button").forEach((btn) => {
     btn.addEventListener("click", () => {

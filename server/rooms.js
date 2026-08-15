@@ -38,7 +38,6 @@ const identity = require("./identity");
 const modwatch = require("./modwatch");
 const keywatch = require("./keywatch");
 const applications = require("./applications");
-const invites = require("./invites");
 const reports = require("./reports");
 const appeals = require("./appeals");
 const suggestions = require("./suggestions");
@@ -1460,39 +1459,6 @@ function appStatusPayload(deviceId, isStaff) {
   };
 }
 
-// Identity lookup passed into the invite forensics so it can measure how many
-// of an inviter's invitees ever chose a real username (raw IPs never leave the
-// invites module through this).
-const inviteIdLookup = (id) => identity.getRecord(id);
-
-// Build the invite forensic detail for one inviter, name-decorated and with
-// raw IPs stripped for non-devs. Cohorts are addressed by index so a moderator
-// can remove a same-address cluster without ever seeing the address itself.
-function inviteReportFor(deviceId, forDev) {
-  const rep = invites.report(deviceId, inviteIdLookup);
-  if (!rep) return null;
-  const idr = identity.getRecord(deviceId) || {};
-  return {
-    deviceId,
-    name: idr.name || "Anonymous",
-    location: idr.loc || "",
-    counts: rep.counts,
-    suspectCount: rep.suspectCount,
-    distinctIps: rep.distinctIps,
-    topIpPct: rep.topIpPct,
-    namedPct: rep.namedPct,
-    activePct: rep.activePct,
-    medianGapMs: rep.medianGapMs,
-    largestBurst: rep.largestBurst,
-    verdict: rep.verdict,
-    cohorts: rep.cohorts.map((c, i) => ({
-      index: i,
-      count: c.count,
-      ip: forDev ? c.ip : null,
-    })),
-  };
-}
-
 // Send the mod-application list to one staff socket (the IP is dev-only).
 function sendAppsList(s) {
   if (!s) return;
@@ -1643,79 +1609,6 @@ async function settleNamePolicy(socket, username) {
       s.disconnect(true);
     } catch (_) { }
   }
-}
-
-// Push fresh invite stats to an inviter if they are connected, so the
-// leaderboard "Your invites" panel updates the moment a referral changes state.
-function pushInviteStats(inviterId) {
-  if (!inviterId || !io()) return;
-  for (const [, s] of io().sockets.sockets)
-    if (s.deviceId === inviterId)
-      s.emit("invite stats", invites.stats(inviterId));
-}
-
-// Promote this socket's referral touched → pending once the invitee is a real
-// visitor (custom name + a minute of presence + a tick) - the gate a drive-by
-// "invite ref" bot can't clear.
-function maybePromoteInvite(socket) {
-  if (!socket.deviceId) return;
-  const r = identity.getRecord(socket.deviceId);
-  if (!r) return;
-  const liveSec =
-    (r.sec || 0) +
-    Math.max(0, (Date.now() - (socket._idAt || Date.now())) / 1000);
-  const p = invites.promoteIfEarned(socket.deviceId, {
-    name: r.name,
-    acts: r.acts,
-    sec: liveSec,
-  });
-  if (p && p.inviterDeviceId) pushInviteStats(p.inviterDeviceId);
-}
-
-// On an invitee's connect, credit their inviter if the invitee is now an active
-// member (and not sharing the inviter's IP). Power is never auto-granted: 10
-// active invites only auto-files a human-reviewed mod application; 100 is a
-// visible stretch goal that grants nothing.
-function handleInviteCredit(socket) {
-  if (!socket.deviceId) return;
-  invites.recordIp(socket.deviceId, socket.clientIp);
-  // A returning invitee may already clear the pending bar from banked time.
-  maybePromoteInvite(socket);
-  const res = invites.creditIfEligible(socket.deviceId, identity.isActive);
-  if (!res || !res.credited) return;
-  const inviterId = res.inviterDeviceId;
-  const inviterName = (identity.getRecord(inviterId) || {}).name || "A member";
-  if (res.newCount === invites.MILESTONE_MOD) {
-    // Respect the dev kill switch: no new applications (auto-filed or not) while
-    // the intake is closed.
-    if (state.applicationsOpen && !applications.pendingForDevice(inviterId)) {
-      applications.submit(
-        {
-          deviceId: inviterId,
-          ip: null,
-          username: inviterName,
-          answers: {
-            why: `Earned automatically by inviting ${res.newCount} active members.`,
-            availability: "",
-          },
-        },
-        { system: true },
-      );
-      broadcastAppsList();
-    }
-    audit.recordNotification({
-      kind: "invite",
-      text: `${inviterName} reached ${res.newCount} active invites - a mod application was auto-filed for review.`,
-      minLevel: 2,
-    });
-  } else if (res.newCount === invites.MILESTONE_DEV) {
-    audit.recordNotification({
-      kind: "invite",
-      text: `${inviterName} reached ${res.newCount} active invites.`,
-      minLevel: 2,
-    });
-  }
-  pushInviteStats(inviterId);
 }
 
 // Per-IP throttle for the staff key-entry login, to blunt brute-force guessing.
@@ -1947,11 +1840,6 @@ function formatUserForSocket(user, recipientSocket) {
   // Discord avatar: validated snowflake id + CDN hash only; clients rebuild
   // the cdn.discordapp.com URL themselves.
   if (user.avatar) formatted.avatar = user.avatar;
-  // Top inviter trophy (1/2/3). Computed live; the device id itself is never
-  // sent to clients.
-  const inviteRank = invites.rankBadge(user.deviceId);
-  if (inviteRank) formatted.inviteRank = inviteRank;
-
   // Hidden staff render as plain users to everyone EXCEPT a dev recipient: a
   // dev always needs to know who is staff, so a hidden (or vanished) dev/mod
   // keeps their role when seen by a dev, with isHidden/isVanished markers so the
@@ -3150,7 +3038,6 @@ function registerSocketHandlers(opts) {
         username: u.username,
         role,
         avatar: u.avatar || null,
-        inviteRank: invites.rankBadge(u.deviceId) || null,
       };
     },
     // Sitting down at a game parks a status line in their room textbox so the
@@ -3266,8 +3153,8 @@ function registerSocketHandlers(opts) {
     // abort this function: the handlers below (chat, room, disconnect) would
     // then never be attached and the socket would sit there half-alive.
     try {
-    // Durable per-browser device id: record presence for "active vs new" and
-    // invite credit. Not a secret; never gates a privileged action. Bots and
+    // Durable per-browser device id: record presence for "active vs new"
+    // checks. Not a secret; never gates a privileged action. Bots and
     // the Mod Log board carry none, so this is a no-op for them.
     if (socket.deviceId) {
       identity.touch(
@@ -3321,9 +3208,6 @@ function registerSocketHandlers(opts) {
       const st = appStatusPayload(socket.deviceId, false);
       if (st.has) socket.emit("mod application status", st);
     }
-
-    // Credit the inviter if this device just became an active invitee.
-    handleInviteCredit(socket);
 
     // ── One active ROOM tab per browser session ─────────────────────────
     // Identity is the session id (shared across a browser's tabs). Two tabs
@@ -3599,13 +3483,10 @@ function registerSocketHandlers(opts) {
           staffchat.noteEvent("visitor", socket.deviceId || userId);
         } catch (_) { }
 
-        // Keep this device's display name + location current so the invite
-        // lists and leaderboard show their real name, not an old guest one.
-        if (socket.deviceId) {
+        // Keep this device's display name + location current so staff surfaces
+        // show their real name, not an old guest one.
+        if (socket.deviceId)
           identity.setName(socket.deviceId, username, location);
-          // Picking a real username can complete the pending bar for an invitee.
-          maybePromoteInvite(socket);
-        }
         // A reported user coming online flips to "online" on dashboards.
         if (reports.isTarget(userId)) broadcastReportsList();
 
@@ -5020,8 +4901,6 @@ function registerSocketHandlers(opts) {
             socket.handshake.session.username,
             socket.handshake.session.location,
           );
-          // A live invitee may now clear the pending bar (named + 60s + a tick).
-          maybePromoteInvite(socket);
         }
         if (!data?.diff || typeof data.diff !== "object")
           return socket.emit(
@@ -7327,39 +7206,6 @@ function registerSocketHandlers(opts) {
       }),
     );
 
-    // Workload across the whole team. Any staff member can see it: it is meant
-    // to be visible, both so effort is recognised and so a quiet account is
-    // obvious. Junior mods past the threshold are flagged for a promotion look.
-    socket.on(
-      "staff get mod leaderboard",
-      safe(async () => {
-        if (!requireStaff(socket)) return;
-        // The board is a picture of the team as it stands today, so it is
-        // built from who HOLDS A KEY right now rather than from who has ever
-        // appeared in the log. Filtering by the former-staff list alone was
-        // not enough: anybody removed before that list existed still had a
-        // pile of actions in the audit log and kept their place on the board,
-        // which is how a mod who left months ago was still sitting at number
-        // one. No key, no ranking. Their record is still readable.
-        const levelByLabel = new Map(
-          roles.listModKeys().map((k) => [k.label, k.level]),
-        );
-        const devLabels = new Set(roles.listDevKeys().map((d) => d.label));
-        const board = audit
-          .leaderboard()
-          .filter((s) =>
-            s.role === "dev" ? devLabels.has(s.label) : levelByLabel.has(s.label),
-          );
-        socket.emit("staff mod leaderboard", {
-          promotionAt: audit.PROMOTION_AT,
-          board: board.map((s) => ({
-            ...s,
-            modLevel: s.role === "dev" ? 0 : levelByLabel.get(s.label) || 2,
-          })),
-        });
-      }),
-    );
-
     socket.on(
       "staff stop audit",
       safe(async () => {
@@ -8515,64 +8361,6 @@ function registerSocketHandlers(opts) {
       }),
     );
 
-    // ── Invites + leaderboard (open to everyone) ────────────────────────
-    socket.on(
-      "invite ref",
-      safe(async (data) => {
-        if (!socket.deviceId) return;
-        const code =
-          typeof data?.code === "string" ? data.code.trim().slice(0, 32) : "";
-        if (!code) return;
-        // Referrals are for new people: an already-active member can't be
-        // "invited", which blocks existing users farming links shared in rooms.
-        if (identity.isActive(socket.deviceId)) return;
-        invites.setReferrer(socket.deviceId, code, socket.clientIp);
-      }),
-    );
-
-    socket.on(
-      "leaderboard get",
-      safe(async () => {
-        const now = Date.now();
-        if (now - (socket._lbAt || 0) < 3000) return; // light throttle
-        socket._lbAt = now;
-        const top = invites.leaderboard(200).map((e) => {
-          const r = identity.getRecord(e.deviceId) || {};
-          return {
-            name: r.name || "Anonymous",
-            location: r.loc || "",
-            active: e.active,
-            pending: e.pending,
-            total: e.total,
-            mine: !!socket.deviceId && e.deviceId === socket.deviceId,
-          };
-        });
-        const you = socket.deviceId
-          ? Object.assign(invites.stats(socket.deviceId), {
-            rank: invites.rankOf(socket.deviceId),
-            invitees: invites
-              .invitees(socket.deviceId)
-              .map((iv) => {
-                const r = identity.getRecord(iv.deviceId) || {};
-                return {
-                  name: r.name || "Someone",
-                  location: r.loc || "",
-                  status: iv.credited ? "active" : "pending",
-                  at: iv.at,
-                };
-              })
-              .sort((a, b) => b.at - a.at)
-              .slice(0, 50),
-          })
-          : null;
-        socket.emit("leaderboard data", {
-          top,
-          you,
-          milestones: { mod: invites.MILESTONE_MOD, dev: invites.MILESTONE_DEV },
-        });
-      }),
-    );
-
     // ── Warn a reported user, online or offline (any staff) ─────────────
     // Offline targets are queued by device id and delivered on next connect.
     socket.on(
@@ -8623,141 +8411,6 @@ function registerSocketHandlers(opts) {
             : "warning queued for " + targetName,
         });
         clearReportAfterAction(socket, targetUserId);
-      }),
-    );
-
-    // ── Invite forensics + cleanup (full mods + devs) ───────────────────
-    // Investigate and remove a flagged invite farm. Removals are soft (a dev can
-    // undo), audited, and fed to mod-abuse watch. Raw IPs stay dev-only.
-    socket.on(
-      "staff get invite report",
-      safe(async (data) => {
-        if (!requireStaff(socket)) return;
-        const now = Date.now();
-        if (now - (socket._invAt || 0) < 2000) return; // light throttle
-        socket._invAt = now;
-        const deviceId =
-          typeof data?.deviceId === "string" ? data.deviceId : null;
-        if (deviceId) {
-          const detail = inviteReportFor(deviceId, !!socket.isDev);
-          if (detail) socket.emit("staff invite detail", detail);
-          return;
-        }
-        socket.emit(
-          "staff invite report",
-          invites.suspiciousInviters(inviteIdLookup, 100).map((x) => {
-            const idr = identity.getRecord(x.deviceId) || {};
-            return {
-              deviceId: x.deviceId,
-              name: idr.name || "Anonymous",
-              location: idr.loc || "",
-              pending: x.pending,
-              active: x.active,
-              suspectCount: x.suspectCount,
-              distinctIps: x.distinctIps,
-              topIpPct: x.topIpPct,
-              namedPct: x.namedPct,
-              verdict: x.verdict,
-            };
-          }),
-        );
-      }),
-    );
-
-    socket.on(
-      "staff purge invites",
-      safe(async (data) => {
-        if (!requireModLevel(socket, 2)) return;
-        const deviceId =
-          typeof data?.deviceId === "string" ? data.deviceId : null;
-        if (!deviceId) return;
-        const fail = (action) =>
-          socket.emit("staff action result", { ok: false, action });
-        // Hierarchy: a (non-dev) mod may not purge a fellow staffer's invites.
-        let targetIsStaff = false;
-        for (const [, s] of io().sockets.sockets)
-          if (s.deviceId === deviceId && (s.isDev || s.isMod)) {
-            targetIsStaff = true;
-            break;
-          }
-        if (targetIsStaff && !socket.isDev)
-          return fail("purge invites (cannot act on staff)");
-        const rep = invites.report(deviceId, inviteIdLookup);
-        if (!rep) return fail("purge invites");
-        // Guardrail: a (non-dev) mod may only purge a system-flagged farm, never
-        // hand-pick a clean inviter's invites. Devs may clean any non-active set.
-        if (!socket.isDev && rep.verdict.level === "clean")
-          return fail("purge invites (not flagged)");
-        // Resolve the requested cohort by index, or the whole flagged set.
-        let cohortKey = null;
-        if (data?.cohort === "all") cohortKey = "all-flagged";
-        else {
-          const c = rep.cohorts[Number(data?.cohort)];
-          if (c) cohortKey = c.key;
-        }
-        if (!cohortKey) return fail("purge invites");
-        const reason =
-          typeof data?.reason === "string" ? data.reason.slice(0, 200) : null;
-        const res = invites.purgeCohort(
-          deviceId,
-          cohortKey,
-          socket.staffLabel || (socket.isDev ? "dev" : "mod"),
-          reason,
-        );
-        const targetName =
-          (identity.getRecord(deviceId) || {}).name || "inviter";
-        logStaff(
-          socket,
-          "purge invites",
-          { name: targetName, id: deviceId },
-          "-",
-          `${res.removed} removed${cohortKey === "all-flagged" ? " (all flagged)" : ""}${reason ? " - " + reason : ""
-          }`,
-        );
-        audit.recordNotification({
-          kind: "invite",
-          text: `${socket.staffLabel || "staff"} removed ${res.removed} farmed pending invite${res.removed === 1 ? "" : "s"
-            } from ${targetName}.`,
-          minLevel: 2,
-        });
-        socket.emit("staff action result", {
-          ok: res.ok,
-          action: `removed ${res.removed} invite${res.removed === 1 ? "" : "s"}`,
-        });
-        pushInviteStats(deviceId);
-        const detail = inviteReportFor(deviceId, !!socket.isDev);
-        if (detail) {
-          detail.lastBatch = res.batch; // lets a dev undo this exact removal
-          socket.emit("staff invite detail", detail);
-        }
-      }),
-    );
-
-    socket.on(
-      "staff undo invite purge",
-      safe(async (data) => {
-        if (!requireDev(socket)) return; // reversing a removal is dev-only
-        const deviceId =
-          typeof data?.deviceId === "string" ? data.deviceId : null;
-        const batch = typeof data?.batch === "string" ? data.batch : null;
-        if (!deviceId || !batch) return;
-        const res = invites.undoPurge(deviceId, batch);
-        const targetName =
-          (identity.getRecord(deviceId) || {}).name || "inviter";
-        logStaff(
-          socket,
-          "undo invite purge",
-          { name: targetName, id: deviceId },
-          "-",
-          `${res.restored} restored`,
-        );
-        socket.emit("staff action result", {
-          ok: res.ok,
-          action: `restored ${res.restored} invite${res.restored === 1 ? "" : "s"}`,
-        });
-        pushInviteStats(deviceId);
-        const detail = inviteReportFor(deviceId, !!socket.isDev);
-        if (detail) socket.emit("staff invite detail", detail);
       }),
     );
 

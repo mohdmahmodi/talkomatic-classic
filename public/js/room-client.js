@@ -1251,35 +1251,7 @@ function insertEmote(emoteCode, emoteInfo, options = {}) {
   }, 10);
 }
 
-// Invite links only credit referrers for people NEW to Talkomatic, so sharing
-// them between users already in a room is pointless and farmable. Detect one in
-// the input, strip the ref code, and warn the sender.
-function hasRefLink(text) {
-  return /[?&]ref=[A-Za-z0-9_-]+/i.test(text);
-}
-function stripRefLinks(text) {
-  return text
-    .replace(/\?ref=[A-Za-z0-9_-]+(?:&([^\s]*))?/gi, (_m, rest) =>
-      rest ? "?" + rest : "",
-    )
-    .replace(/&ref=[A-Za-z0-9_-]+/gi, "");
-}
-let lastRefWarnAt = 0;
-function warnRefLink() {
-  const now = Date.now();
-  if (now - lastRefWarnAt < 8000) return;
-  lastRefWarnAt = now;
-  notify(
-    "Invite links only count for people new to Talkomatic. Everyone here is already on it, so the referral code was removed.",
-    "warning",
-    {
-      title: "Invite links don't work in rooms",
-      fullWidth: true,
-      timeout: 9000,
-    },
-  );
-}
-// Re-render the chat box from selfRawText, e.g. after stripping a ref code.
+// Re-render the chat box from selfRawText.
 function renderChatInputFromRaw() {
   if (!chatInput) return;
   const display =
@@ -1308,13 +1280,6 @@ function updateSentMessage() {
       );
     } else {
       selfRawText = currentDisplay;
-    }
-
-    // Neutralize any invite link before it is sent or shown to others.
-    if (hasRefLink(selfRawText)) {
-      selfRawText = stripRefLinks(selfRawText);
-      renderChatInputFromRaw();
-      warnRefLink();
     }
 
     const diff = getDiff(lastSentMessage, selfRawText);
@@ -2616,31 +2581,6 @@ function deviceIconFor(type) {
   return i;
 }
 
-// Top-3 inviter trophy images (gold/silver/bronze) shown left of the username.
-const TROPHY_SRC = {
-  1: "images/icons/trophy-gold.png",
-  2: "images/icons/trophy-silver.png",
-  3: "images/icons/trophy-bronze.png",
-};
-function trophyImgFor(rank) {
-  const src = TROPHY_SRC[rank];
-  if (!src) return null;
-  const img = document.createElement("img");
-  img.src = src;
-  img.alt = "";
-  img.className = "invite-trophy";
-  img.title =
-    rank === 1
-      ? "Top inviter"
-      : rank === 2
-        ? "2nd most invites"
-        : "3rd most invites";
-  img.onerror = function () {
-    this.style.display = "none";
-  };
-  return img;
-}
-
 function syncUserRowNote(row, user) {
   if (!row || !user) return;
   const note = typeof user.note === "string" ? user.note : "";
@@ -2677,9 +2617,6 @@ function createUserRow(user, container) {
   info.className = "user-info";
 
   info.appendChild(deviceIconFor(user.deviceType));
-
-  const rowTrophy = trophyImgFor(user.inviteRank);
-  if (rowTrophy) info.appendChild(rowTrophy);
 
   if (user.isDev && (!user.isHidden || devSeesConcealed)) {
     const crown = document.createElement("img");
@@ -5262,7 +5199,6 @@ window.addEventListener("hashchange", () => {
     .hide-bots-toggle.off i{opacity:.55;}
     .hide-bots-toggle.off::after{content:"";position:absolute;left:5px;right:5px;top:50%;height:2px;background:currentColor;transform:rotate(-38deg);border-radius:2px;pointer-events:none;}
     .device-icon{color:#7f8794;font-size:11px;margin-right:6px;flex:0 0 auto;}
-    .invite-trophy{height:15px;width:auto;margin-right:5px;flex:0 0 auto;vertical-align:middle;}
     .staff-action-button{background:none;border:none;cursor:pointer;font-size:13px;margin-left:4px;opacity:.75;}
     .staff-action-button:hover{opacity:1;}
     .report-button{background:none;border:none;cursor:pointer;font-size:12px;margin-left:4px;opacity:.5;color:inherit;}

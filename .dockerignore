@@ -27,7 +27,6 @@ audit-log.jsonl
 key-activity.json
 anniversary.json
 identity.json
-invites.json
 mod-applications.json
 reports.json
 blocklist.json

@@ -204,7 +204,6 @@ function tableSummary(t) {
       username: s.username,
       role: s.role || null,
       avatar: s.avatar || null,
-      inviteRank: s.inviteRank || null,
     })),
     reservedFor: t.reservedFor
       ? { userId: t.reservedFor.userId, username: t.reservedFor.username }
@@ -451,7 +450,6 @@ function seatPlayer(f, t, user) {
     username: user.username,
     role: user.role || null,
     avatar: user.avatar || null,
-    inviteRank: user.inviteRank || null,
   });
   t.spectators.delete(user.userId);
   const rules = rulesFor(t.type);

@@ -33,7 +33,6 @@ anniversary.json
 
 # Staff v5 runtime data (identity, invites, applications, reports, bans) - never commit
 identity.json
-invites.json
 mod-applications.json
 reports.json
 blocklist.json

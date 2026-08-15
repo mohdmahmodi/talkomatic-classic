@@ -550,12 +550,6 @@
   vertical-align: -3px;
   margin-right: 5px;
 }
-.gm-trophy {
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-}
-
 /* Solo games in a frame */
 
 .gm-body-solo {

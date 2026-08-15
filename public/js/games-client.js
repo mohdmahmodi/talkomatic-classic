@@ -115,16 +115,6 @@
     return box;
   }
 
-  function trophyNode(rank) {
-    if (!rank || rank < 1 || rank > 3) return null;
-    const img = el("img", { class: "gm-trophy", alt: "" });
-    img.src =
-      "images/icons/trophy-" +
-      (rank === 1 ? "gold" : rank === 2 ? "silver" : "bronze") + ".png";
-    img.onerror = () => img.remove();
-    return img;
-  }
-
   let overlay = null;
   let bodyEl = null;
   let stripEl = null;
@@ -1498,8 +1488,6 @@
           row.appendChild(el("span", { class: "gm-player-name", text: p.username }));
           const badge = badgeFor(seat && seat.role);
           if (badge) row.appendChild(badge);
-          const trophy = trophyNode(seat && seat.inviteRank);
-          if (trophy) row.appendChild(trophy);
           // Who has already asked for another game, so nobody is left guessing
           // whether the other side is still there.
           if (t.state === "finished" && (t.rematch || []).indexOf(p.userId) >= 0)

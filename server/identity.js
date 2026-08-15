@@ -3,7 +3,7 @@
 //
 // The client keeps a random device id (localStorage + cookie + IndexedDB) and
 // sends it on connect. This is NOT a secret and never gates a privileged
-// action - it only powers "active vs new" checks and invite credit, where the
+// action - it only powers "active vs new" checks, where the
 // real defense is that faking an *active* identity takes real elapsed calendar
 // time and sustained presence, not just minting a new id. Stored compactly,
 // pruned, and capped so it never clutters the server.
@@ -148,7 +148,7 @@ function tick(id, name, loc) {
 }
 
 // Update just the display name + location (on sign-in or rename) so anything
-// that shows this device (leaderboard, invite lists) stays current.
+// that shows this device (staff surfaces, records) stays current.
 function setName(id, name, loc) {
   if (!validId(id) || !store[id]) return;
   const r = store[id];

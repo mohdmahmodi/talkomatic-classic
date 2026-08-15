@@ -430,7 +430,6 @@ const ACTION_GROUPS = [
       "approve suggestion", "decline suggestion",
       "suggestion approved", "suggestion declined", "suggestion done",
       "delete board post", "delete board reply",
-      "purge invites", "undo invite purge",
       "open applications", "close applications",
     ],
   },
@@ -1330,42 +1329,15 @@ function buildFlags(acts, who) {
   return signals.map((s) => applyReview(s, who));
 }
 
-// Every staff member's workload in one pass, for the leaderboard and for
-// spotting a junior who has earned a look at promotion. The ranking is by work
-// done on users, so a record padded with room tidying does not climb it.
-function leaderboard() {
-  const by = new Map(); // "role:label" -> stats
-  const cutoff = Date.now() - HISTORY_WINDOW_MS;
+// When each staff label was last seen acting, keyed "role:label". The Desk
+// roster uses it to show a last-active time against an offline key holder.
+function lastActiveByLabel() {
+  const by = new Map();
   for (const e of entries) {
     if (e.type !== "action" || !e.label) continue;
-    const key = (e.role || "mod") + ":" + e.label;
-    let s = by.get(key);
-    if (!s) {
-      s = {
-        label: e.label, role: e.role || "mod",
-        total: 0, useful: 0, recentUseful: 0, onUsers: 0, recentOnUsers: 0,
-        queues: 0, rooms: 0, records: 0, passive: 0, last: null,
-      };
-      by.set(key, s);
-    }
-    s.total++;
-    s.last = e.ts;
-    const g = groupOf(e.action);
-    if (g !== "passive") {
-      s.useful++;
-      if ((e.ts || 0) >= cutoff) s.recentUseful++;
-    }
-    if (g === "users") {
-      s.onUsers++;
-      if ((e.ts || 0) >= cutoff) s.recentOnUsers++;
-    } else if (g === "queues") s.queues++;
-    else if (g === "rooms") s.rooms++;
-    else if (g === "records") s.records++;
-    else if (g === "passive") s.passive++;
+    by.set((e.role || "mod") + ":" + e.label, e.ts || null);
   }
-  return [...by.values()].sort(
-    (a, b) => b.onUsers - a.onUsers || b.useful - a.useful,
-  );
+  return by;
 }
 
 function setAuditSub(socket, on) {
@@ -1414,7 +1386,7 @@ module.exports = {
   redactForMod,
   maskIps,
   historyFor,
-  leaderboard,
+  lastActiveByLabel,
   isUsefulAction,
   PROMOTION_AT,
   reviewFlag,

@@ -23,8 +23,8 @@ const FORMER_MODS_PATH = path.join(DATA_DIR, "former-mods.json");
 let modKeys = [];
 
 // Everyone whose key has been revoked, newest last. A removed moderator drops
-// out of the roster and off the leaderboard, but the fact that they were one -
-// and why they stopped being one - is kept.
+// out of the roster, but the fact that they were one - and why they stopped
+// being one - is kept.
 let formerMods = [];
 const FORMER_CAP = 300;
 
@@ -278,8 +278,8 @@ function listFormerMods() {
     }));
 }
 
-// Labels that belong to nobody on staff any more. The leaderboard is a picture
-// of the current team, so these come off it - the work stays in the audit log
+// Labels that belong to nobody on staff any more. Team views are a picture of
+// the current team, so these come off them - the work stays in the audit log
 // and in that person's record, which is what accountability needs.
 function formerLabels() {
   const active = new Set(modKeys.map((k) => k.label));
