@@ -349,16 +349,23 @@ html {
 }
 
 /* Icon-only tiles: the glyph is the whole control, so it centres and drops the
-   label gutter. The name lives in title + aria-label instead. A taller pad
-   keeps the tap target honest now that there is no text setting the height. */
+   label gutter. The name lives in title + aria-label instead. The column is
+   already ~89px wide, so the tile stays short and the glyph carries it -
+   otherwise it reads as a big empty box with something small in the middle.
+   The padding is set so these come out exactly as tall as a labelled row
+   (8 + 20 + 8 + 2px border = 38px, matching 10 + 16.25 + 10 + 2). Change one
+   and the icon rows stop lining up with "Apply to be a mod" underneath. */
 .external-links a.icon-only {
   justify-content: center;
-  padding: 13px 8px;
+  padding: 8px;
 }
 
 .external-links a.icon-only > i {
   margin-right: 0;
-  font-size: 17px;
+  /* The shared 18px icon column would clip a 20px glyph like the Discord mark. */
+  width: auto;
+  font-size: 20px;
+  line-height: 1;
 }
 
 /* ── Ideas & Bugs card ──────────────────────────────────────────────────────
