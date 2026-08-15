@@ -2798,17 +2798,6 @@ socket.on("dev flags", (flags) => {
             },
           },
           {
-            icon: flags.puzzleEnabled
-              ? '<i class="fas fa-puzzle-piece"></i>'
-              : '<i class="fas fa-ban"></i>',
-            label: `Puzzle app: ${flags.puzzleEnabled ? "ON" : "OFF"}`,
-            desc: "Show or hide the in-room jigsaw puzzle",
-            onClick: () =>
-              socket.emit("dev set flags", {
-                puzzleEnabled: !flags.puzzleEnabled,
-              }),
-          },
-          {
             icon: flags.maintenance
               ? '<i class="fas fa-screwdriver-wrench"></i>'
               : '<i class="fas fa-circle-check"></i>',

@@ -209,7 +209,6 @@ const state = {
   maintenance: false, // blocks new room creation and joins for non-staff
   lobbyTicker: "", // editable banner shown at the top of the lobby
   applicationsOpen: true, // when false, new mod applications are not accepted
-  puzzleEnabled: true, // when false, the in-room puzzle app is hidden + blocked for non-staff
 
   // Caches
   normalizeCache: new Map(),

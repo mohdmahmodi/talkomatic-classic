@@ -472,7 +472,7 @@ class TalkomaticPopupManager {
                         <div class="talkomatic-update-section">
                             <div class="talkomatic-highlight-box">
                                 <h4>The community update</h4>
-                                <p>This is one of the biggest Talkomatic updates ever. There is now a public Suggestion Board where your ideas get voted on and you can watch them ship. You can repaint the entire site, lobby and rooms, with a visual theme editor and share your themes with everyone. Your Discord picture can ride along next to your name. And the Puzzle got a full redesign with much stronger image safety.</p>
+                                <p>This is one of the biggest Talkomatic updates ever. There is now a public Suggestion Board where your ideas get voted on and you can watch them ship. You can repaint the entire site, lobby and rooms, with a visual theme editor and share your themes with everyone. Your Discord picture can ride along next to your name.</p>
                             </div>
                         </div>
 
@@ -519,13 +519,6 @@ class TalkomaticPopupManager {
                             </ul>
                         </div>
 
-                        <div class="talkomatic-update-section">
-                            <h3><i class="fas fa-gamepad"></i> Games</h3>
-                            <ul class="talkomatic-feature-list tk-iconed">
-                                <li><i class="fas fa-puzzle-piece tk-lic"></i> The Puzzle got a full redesign in the Talkomatic look, with a docked chat, simple 25 or 100 piece choices, and a proper finish screen where anyone can start the next picture <span class="talkomatic-badge improved">IMPROVED</span></li>
-                                <li><i class="fas fa-shield-halved tk-lic"></i> Puzzle image safety now runs on the server itself and blocks far more unsafe uploads than before <span class="talkomatic-badge fixed">FIXED</span></li>
-                            </ul>
-                        </div>
 
                         <div class="talkomatic-update-section">
                             <h3><i class="fas fa-gears"></i> Under the Hood</h3>

@@ -46,8 +46,6 @@ const rooms = require("./server/rooms");
 const roles = require("./server/roles");
 const appeals = require("./server/appeals");
 const ipban = require("./server/ipban");
-const puzzle = require("./server/puzzle");
-const nsfw = require("./server/nsfw");
 const communityThemes = require("./server/themes");
 
 // ── Global Error Handlers ───────────────────────────────────────────────────
@@ -223,7 +221,7 @@ const helmetMiddleware = helmet({
       ],
       mediaSrc: ["'self'", "data:"],
       frameAncestors: ["'self'", "*"],
-      frameSrc: ["'self'"], // same-origin only (the in-room puzzle iframe)
+      frameSrc: ["'self'"], // same-origin only (the in-room game iframes)
       objectSrc: ["'none'"],
     },
   },
@@ -271,13 +269,7 @@ app.use(
 );
 
 app.use((req, res, next) => {
-  // TalkoBrowser is a self-contained page that needs inline JS,
-  // external icon images, and iframes - exempt it from the strict CSP
-  if (req.path === "/browser.html") return next();
-  // The puzzle page is self-contained too (Tailwind/FontAwesome/TF.js from CDNs,
-  // its own canvas + inline module) and runs sandboxed in a room iframe.
-  if (req.path === "/puzzle.html") return next();
-  // Same for the standalone games under /games: they are whole pages with their
+  // The standalone games under /games are whole pages with their
   // own inline scripts, framed by the mini games panel. They cannot carry our
   // per-request nonce, so the strict policy would just break them.
   if (req.path.startsWith("/games/")) return next();
@@ -379,7 +371,6 @@ const io = socketIo(server, {
 
 // Store io reference in shared state
 state.io = io;
-puzzle.init(() => io);
 
 io.use(sharedsession(sessionMiddleware, { autoSave: true }));
 
@@ -666,12 +657,10 @@ const PAGES = [
   "about",
   "app-directory",
   "botcreator",
-  "browser",
   "contributors",
   "desk",
   "index",
   "mod",
-  "puzzle",
   "room",
   "sponsors",
   "themes",
@@ -751,9 +740,8 @@ app.get("/healthz", (req, res) => {
 app.get(`${API}/health`, (req, res) => {
   const stats = rooms.getRoomStatistics();
   const mem = process.memoryUsage();
-  const nsfwReady = nsfw.isReady();
   res.json({
-    status: nsfwReady ? "ok" : "degraded",
+    status: "ok",
     timestamp: Date.now(),
     uptimeSeconds: Math.floor(process.uptime()),
     version: {
@@ -770,7 +758,6 @@ app.get(`${API}/health`, (req, res) => {
     users: { inRooms: stats.totalUsers, sockets: io.engine.clientsCount },
     subsystems: {
       socketio: "ok",
-      imageSafetyScanner: nsfwReady ? "ok" : "loading",
     },
   });
 });
@@ -1034,105 +1021,6 @@ app.get(`${API}/ban-status`, (req, res) => {
     permanent: banned && expiry >= Number.MAX_SAFE_INTEGER,
     expiry: banned ? expiry : 0,
   });
-});
-
-// ── Collaborative puzzle: one shared board per room ─────────────────────────
-// The image is uploaded as a raw JPEG body (no multipart). The uploader must be
-// a member of the room. Two safety gates: the browser runs a fast nsfwjs
-// pre-check (attested in x-nsfw-scan), and the server then classifies the
-// ACTUAL uploaded bytes itself (server/nsfw.js) - the attestation alone is
-// self-reported and forgeable, so the server scan is the one that counts.
-app.post(
-  `${API}/puzzle/:roomId/image`,
-  express.raw({ type: () => true, limit: "6mb" }),
-  async (req, res) => {
-    try {
-      const roomId = req.params.roomId;
-      const userId = req.session?.userId;
-      const room = state.rooms.get(roomId);
-      const member = room && room.users?.find((u) => u.id === userId);
-      if (!userId || !member)
-        return sendErrorResponse(res, ERROR_CODES.FORBIDDEN, "You are not in this room.", 403);
-
-      const isStaff = !!(member.isDev || member.isMod);
-      if (!state.puzzleEnabled && !isStaff)
-        return sendErrorResponse(res, ERROR_CODES.FORBIDDEN, "Puzzles are currently turned off.", 403);
-
-      // Client-side nsfwjs must have run and passed. Enforcement is client-side
-      // by design; the server re-checks the reported scores. Thresholds mirror
-      // the browser scan in public/pages/puzzle.html - keep the two in sync.
-      let att = null;
-      try { att = JSON.parse(req.get("x-nsfw-scan") || "null"); } catch { att = null; }
-      const sc = (att && att.scores) || {};
-      const porn = +sc.Porn || 0, hentai = +sc.Hentai || 0, sexy = +sc.Sexy || 0;
-      if (!att || att.safe !== true || porn > 0.3 || hentai > 0.3 || sexy > 0.5 || porn + hentai + sexy > 0.6)
-        return sendErrorResponse(res, ERROR_CODES.FORBIDDEN, "That image did not pass the safety check.", 403);
-
-      const iw = parseInt(req.query.w, 10) | 0;
-      const ih = parseInt(req.query.h, 10) | 0;
-      let target = parseInt(req.query.n, 10) | 0;
-      if (!iw || !ih) return sendErrorResponse(res, ERROR_CODES.BAD_REQUEST, "need w & h", 400);
-      if (!puzzle.VALID_COUNTS.includes(target)) target = 100;
-
-      const image = req.body;
-      if (!Buffer.isBuffer(image) || image.length < 64)
-        return sendErrorResponse(res, ERROR_CODES.BAD_REQUEST, "no image", 400);
-
-      // Server-side classification of the actual bytes. Fails closed: a scan
-      // error rejects the upload rather than letting it through unchecked.
-      let verdict;
-      try {
-        verdict = await nsfw.scanJpeg(image);
-      } catch (e) {
-        console.error("puzzle nsfw scan failed:", e.message);
-        return sendErrorResponse(
-          res,
-          ERROR_CODES.SERVER_ERROR,
-          "The safety check is unavailable right now. Try again in a minute.",
-          503,
-        );
-      }
-      if (!verdict.safe) {
-        console.log(
-          `[NSFW] Blocked puzzle upload in room ${roomId} by ${req.session?.username || "?"} ` +
-            `(Porn ${verdict.scores.Porn.toFixed(2)}, Hentai ${verdict.scores.Hentai.toFixed(2)}, Sexy ${verdict.scores.Sexy.toFixed(2)})`,
-        );
-        return sendErrorResponse(
-          res,
-          ERROR_CODES.FORBIDDEN,
-          "That image did not pass the safety check.",
-          403,
-        );
-      }
-
-      const started = puzzle.start(
-        roomId, userId, req.session?.username, image, { iw, ih }, target, isStaff,
-      );
-      if (!started.ok)
-        return sendErrorResponse(
-          res,
-          ERROR_CODES.FORBIDDEN,
-          "Someone just started a puzzle - join that one, or ask them to end it first.",
-          403,
-        );
-      io.to(roomId).emit("puzzle active", { by: req.session?.username || "Someone" });
-      res.json({ ok: true });
-    } catch (e) {
-      console.error("puzzle upload error:", e);
-      sendErrorResponse(res, ERROR_CODES.SERVER_ERROR, "upload failed", 500);
-    }
-  },
-);
-
-app.get(`${API}/puzzle/:roomId/image`, (req, res) => {
-  const img = puzzle.imageFor(req.params.roomId);
-  if (!img) return sendErrorResponse(res, ERROR_CODES.NOT_FOUND, "no puzzle", 404);
-  res.writeHead(200, {
-    "content-type": "image/jpeg",
-    "cache-control": "public, max-age=31536000",
-    "content-length": img.length,
-  });
-  res.end(img);
 });
 
 // Emoji list, cached in memory for an hour
@@ -1428,7 +1316,6 @@ async function start() {
   rooms.loadBoard(); // restore saved Talkoboard strokes for the loaded rooms
   rooms.registerSocketHandlers({ buildId: () => BUILD_ID });
   rooms.startCleanupIntervals();
-  nsfw.warmup(); // preload the puzzle image classifier
 
   setTimeout(() => {
     rooms.purgeAllGhostUsers();
