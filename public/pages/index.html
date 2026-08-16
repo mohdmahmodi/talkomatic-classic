@@ -567,25 +567,14 @@
         <div class="panel-header">
           <span class="talkomatic">Talkomatic™</span>
           <span class="lobby">Lobby</span>
+          <a class="panel-header-about" href="about.html"
+            >About Talkomatic</a
+          >
+          <a class="panel-header-about" href="#" id="rulesLink"
+            >Talkomatic Rules</a
+          >
         </div>
 
-
-        <!-- Ideas & Bugs gets its own card rather than a line in the list
-             above: it is the one link people are asked to actually use, and a
-             sentence of explanation is what makes them use it correctly. -->
-        <div class="ideas-card">
-          <div class="ideas-card-head">
-            <i class="fas fa-lightbulb"></i>
-            <span>Ideas &amp; Bugs</span>
-          </div>
-          <p class="ideas-card-sub">
-            Got an idea for Talkomatic, or found something broken? Post it here
-            and everyone can vote on it.
-          </p>
-          <a href="#" id="suggestBoxLink" class="ideas-card-btn">
-            Open the board
-          </a>
-        </div>
 
         <!-- Section where users can provide a name to be known as in the chat -->
         <div class="known-as-section">
@@ -762,6 +751,22 @@
             <button type="button" class="go-chat-button">Go Chat...</button>
           </div>
         </div>
+        <!-- Sits just above the icon strip at the foot of the panel: it is a
+             thing to go and do, so it reads after the room form, not before it. -->
+        <div class="ideas-card">
+          <div class="ideas-card-head">
+            <i class="fas fa-lightbulb"></i>
+            <span>Ideas &amp; Bugs</span>
+          </div>
+          <p class="ideas-card-sub">
+            Got an idea for Talkomatic, or found something broken? Post it here
+            and everyone can vote on it.
+          </p>
+          <a href="#" id="suggestBoxLink" class="ideas-card-btn">
+            Open the board
+          </a>
+        </div>
+
         <!-- Sits at the foot of the panel: these are side errands, not the
              thing anybody came to do. -->
         <div class="external-links">
@@ -838,14 +843,13 @@
              This is the first thing a new visitor has to act on, so it is a
              callout rather than a line of text. -->
         <div id="signInMessage" style="display: block">
-          <i class="fas fa-user-pen" aria-hidden="true"></i>
-          <div class="sim-text">
+          <div class="sim-head">
+            <i class="fas fa-user-pen" aria-hidden="true"></i>
             <strong>Pick a username to get started</strong>
-            <span
-              >Enter a name under "Be Known As..." in the menu, then you can see
-              and join rooms.</span
-            >
           </div>
+          <span class="sim-sub"
+            >Enter a name under "Be Known As..." to see and join rooms.</span
+          >
         </div>
         <!-- Section where the list of rooms will be dynamically added -->
         <div class="roomList" style="display: none">
@@ -1112,6 +1116,7 @@
     ></script>
     <script nonce="<%= nonce %>" src="js/lobby-client.js?v=2.19.0"></script>
     <script nonce="<%= nonce %>" src="js/suggest-board.js?v=1.3.0"></script>
+    <script nonce="<%= nonce %>" src="js/rules-modal.js?v=1.0.0"></script>
     <script nonce="<%= nonce %>" src="js/announce.js?v=1.0.0"></script>
     <script nonce="<%= nonce %>" src="js/theme-editor.js?v=2.2.0"></script>
     <!-- POPUP SYSTEM: Add this script tag to enable update popups -->

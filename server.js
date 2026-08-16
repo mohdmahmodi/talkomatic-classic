@@ -67,6 +67,9 @@ function gracefulFlush() {
     require("./server/identity").flushSync();
   } catch (e) {}
   try {
+    require("./server/rules").flushSync();
+  } catch (e) {}
+  try {
     require("./server/applications").flushSync();
   } catch (e) {}
   try {

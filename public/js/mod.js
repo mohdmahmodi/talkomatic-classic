@@ -4446,6 +4446,7 @@
     }
     if (name === "sessions") socket.emit("dev get sessions");
     if (name === "announce") socket.emit("announcement list");
+    if (name === "rules") socket.emit("rules get");
     if (name === "applications") socket.emit("mod applications list");
     if (name === "reports") socket.emit("staff get reports");
     if (name === "appeals") socket.emit("staff get appeals");
@@ -4969,6 +4970,237 @@
 
   // Open the sidebar by default on wider screens.
   if (window.innerWidth > 860) document.body.classList.remove("nav-closed");
+
+  // ── Rules (dev only) ──────────────────────────────────────────────────────
+  // Edits live in `rulesDraft` until Save, so a half-written rule is never on
+  // the lobby. Saving replaces the whole section, which makes a reorder, an
+  // edit and a delete the same write and removes any chance of the list on
+  // screen disagreeing with the list on disk.
+  let rulesData = { community: [], mod: [] };
+  let rulesDraft = null; // array being edited, or null before first load
+  let rulesSection = "community";
+  let rulesDirty = false;
+
+  function rulesMarkDirty() {
+    rulesDirty = true;
+    const btn = $("rulesSave");
+    if (btn) btn.classList.add("primary");
+  }
+
+  function renderRules() {
+    const wrap = $("rulesList");
+    if (!wrap) return;
+    wrap.textContent = "";
+    if (!rulesDraft) {
+      wrap.appendChild(emptyBox("fa-scale-balanced", "Loading rules..."));
+      return;
+    }
+    if (!rulesDraft.length) {
+      wrap.appendChild(
+        emptyBox("fa-scale-balanced", "No rules in this section yet."),
+      );
+      return;
+    }
+
+    rulesDraft.forEach((rule, i) => {
+      const card = divc("rl-card");
+
+      const head = divc("rl-head");
+      head.appendChild(span("rl-num", String(i + 1)));
+
+      if (rulesSection === "mod") {
+        const sel = document.createElement("select");
+        sel.className = "rl-lvl";
+        [
+          ["all", "All moderators"],
+          ["jr", "Junior only"],
+          ["full", "Full mods only"],
+        ].forEach(([v, label]) => {
+          const o = document.createElement("option");
+          o.value = v;
+          o.textContent = label;
+          if ((rule.level || "all") === v) o.selected = true;
+          sel.appendChild(o);
+        });
+        sel.addEventListener("change", () => {
+          rule.level = sel.value;
+          rulesMarkDirty();
+        });
+        head.appendChild(sel);
+      }
+
+      const acts = divc("rl-actions");
+      const mkBtn = (faClass, title, onClick, extraCls) => {
+        const b = document.createElement("button");
+        b.className = "btn sm" + (extraCls ? " " + extraCls : "");
+        b.title = title;
+        b.setAttribute("aria-label", title);
+        b.appendChild(icon(faClass));
+        b.addEventListener("click", onClick);
+        return b;
+      };
+      acts.appendChild(
+        mkBtn("fa-arrow-up", "Move up", () => {
+          if (i === 0) return;
+          [rulesDraft[i - 1], rulesDraft[i]] = [rulesDraft[i], rulesDraft[i - 1]];
+          rulesMarkDirty();
+          renderRules();
+        }),
+      );
+      acts.appendChild(
+        mkBtn("fa-arrow-down", "Move down", () => {
+          if (i >= rulesDraft.length - 1) return;
+          [rulesDraft[i + 1], rulesDraft[i]] = [rulesDraft[i], rulesDraft[i + 1]];
+          rulesMarkDirty();
+          renderRules();
+        }),
+      );
+      acts.appendChild(
+        mkBtn(
+          "fa-trash",
+          "Delete this rule",
+          async () => {
+            if (window.StaffUI) {
+              const go = await StaffUI.confirm({
+                title: "Delete rule",
+                danger: true,
+                confirmText: "Delete",
+                message:
+                  'Remove "' +
+                  (rule.title || "this rule") +
+                  '"? It disappears from the lobby when you save.',
+              });
+              if (!go) return;
+            }
+            rulesDraft.splice(i, 1);
+            rulesMarkDirty();
+            renderRules();
+          },
+          "danger",
+        ),
+      );
+      head.appendChild(acts);
+      card.appendChild(head);
+
+      const field = (labelText, key, rows, placeholder) => {
+        card.appendChild(
+          Object.assign(document.createElement("label"), {
+            className: "rl-lbl",
+            textContent: labelText,
+          }),
+        );
+        const input = document.createElement(rows ? "textarea" : "input");
+        input.className = "rl-field";
+        if (rows) input.rows = rows;
+        else input.type = "text";
+        input.value = rule[key] || "";
+        input.placeholder = placeholder || "";
+        input.addEventListener("input", () => {
+          rule[key] = input.value;
+          input.classList.add("rl-dirty");
+          rulesMarkDirty();
+        });
+        card.appendChild(input);
+      };
+
+      field("Rule", "title", 0, "One line, said plainly");
+      field("What it means", "body", 3, "What somebody may and may not do");
+      field(
+        "Why",
+        "why",
+        2,
+        "The reason behind it, so it can be applied to cases nobody wrote down",
+      );
+
+      wrap.appendChild(card);
+    });
+  }
+
+  function loadRulesSection() {
+    // Deep copy: the draft must not alias rulesData, or discarding an edit by
+    // reloading would have nothing to fall back to.
+    rulesDraft = (rulesData[rulesSection] || []).map((r) => ({ ...r }));
+    rulesDirty = false;
+    renderRules();
+  }
+
+  socket.on("rules data", (d) => {
+    if (!d) return;
+    rulesData.community = Array.isArray(d.community) ? d.community : [];
+    rulesData.mod = Array.isArray(d.mod) ? d.mod : [];
+    loadRulesSection();
+  });
+
+  document.querySelectorAll("#rulesSeg button").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const sec = btn.dataset.sec;
+      if (sec === rulesSection) return;
+      if (rulesDirty && window.StaffUI) {
+        const go = await StaffUI.confirm({
+          title: "Unsaved changes",
+          danger: true,
+          confirmText: "Discard",
+          message:
+            "You have edits in this section that have not been saved. Switching discards them.",
+        });
+        if (!go) return;
+      }
+      document
+        .querySelectorAll("#rulesSeg button")
+        .forEach((b) => b.classList.toggle("active", b === btn));
+      rulesSection = sec;
+      loadRulesSection();
+    });
+  });
+
+  $("rulesAdd") &&
+    $("rulesAdd").addEventListener("click", () => {
+      if (!rulesDraft) return;
+      const blank = { title: "", body: "", why: "" };
+      if (rulesSection === "mod") blank.level = "all";
+      rulesDraft.push(blank);
+      rulesMarkDirty();
+      renderRules();
+      const wrap = $("rulesList");
+      const last = wrap && wrap.lastElementChild;
+      if (last) {
+        last.scrollIntoView({ behavior: "smooth", block: "center" });
+        const first = last.querySelector(".rl-field");
+        if (first) first.focus();
+      }
+    });
+
+  $("rulesSave") &&
+    $("rulesSave").addEventListener("click", () => {
+      if (!rulesDraft) return;
+      // A rule with no text at all is dropped rather than refused: it is
+      // almost always an "Add rule" somebody changed their mind about.
+      const list = rulesDraft.filter(
+        (r) => (r.title || "").trim() || (r.body || "").trim(),
+      );
+      socket.emit("dev set rules", { section: rulesSection, list });
+      rulesDirty = false;
+    });
+
+  $("rulesReload") &&
+    $("rulesReload").addEventListener("click", () => socket.emit("rules get"));
+
+  $("rulesReset") &&
+    $("rulesReset").addEventListener("click", async () => {
+      if (window.StaffUI) {
+        const go = await StaffUI.confirm({
+          title: "Restore the default rules",
+          danger: true,
+          confirmText: "Restore",
+          message:
+            "This replaces every rule in the " +
+            rulesSection +
+            " section with the set the server ships with. Anything written here is lost.",
+        });
+        if (!go) return;
+      }
+      socket.emit("dev reset rules", { section: rulesSection });
+    });
 
   // ── Announcements ─────────────────────────────────────────────────────────
   // Writing the one thing every person on the site is shown. The markdown

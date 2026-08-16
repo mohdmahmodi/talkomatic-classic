@@ -149,7 +149,7 @@
   --focus-creator-link-outline-color: #c7c7c7;
 
   /* Discord's current blurple. #7289da is their pre-2021 one and reads dull. */
-  --discord-icon-color: #5865f2;
+  --discord-icon-color: #3a63fa;
   --community-icon-color: #ff6b35;
   --info-circle-icon-color: #17a2b8;
   --youtube-play-circle-icon-color: red;
@@ -284,6 +284,30 @@ html {
   color: var(--lobby-label-color);
 }
 
+/* A quiet second line under the wordmark, for people who land here with no
+   idea what Talkomatic is. Deliberately not one of the icon buttons: those
+   are errands, this is the explanation of the place. */
+.panel-header-about {
+  display: block;
+  margin-top: 12px;
+  margin-bottom: 12px;
+  color: var(--lobby-label-color);
+  opacity: 1;
+  font-size: 16px;
+  text-decoration: none;
+  text-decoration: underline;
+}
+
+.panel-header-about:hover,
+.panel-header-about:visited {
+  color: var(--lobby-label-color);
+}
+
+.panel-header-about:hover {
+  opacity: 1;
+  text-decoration: none;
+}
+
 /* The lobby form has always toggled this class on sign in and sign out, but the
    rule behind it was missing, so the create-room box showed to everyone. It
    matters now that a name is required: no name, no room form. */
@@ -301,7 +325,7 @@ html {
   justify-content: center;
   align-items: center;
   gap: 4px;
-  margin-top: 4px;
+  margin-top: 12px;
   margin-bottom: 14px;
   width: 100%;
 }
@@ -387,7 +411,7 @@ html {
   flex: 0 0 100%;
   justify-content: center;
   padding: 9px 11px;
-  margin-top: 2px;
+  margin-top: 8px;
   background-color: var(--external-links-background-color);
 }
 
@@ -411,8 +435,13 @@ html {
      one thing in this panel worth acting on. */
   border: 1px solid rgba(255, 167, 38, 0.28);
   border-radius: 7px;
-  padding: 13px 14px 14px;
-  margin-bottom: 12px;
+  /* Its own padding replaced the 18px inset .left-panel > * gives every child
+     (same specificity, later rule), so the card sat flush against both panel
+     edges while everything around it was inset. width:auto lets the margin
+     put it back in line; box-sizing comes from that same parent rule. */
+  width: auto;
+  margin: 10px 14px 0px 14px;
+  padding: 14px 16px 15px;
 }
 
 .ideas-card-head {
@@ -444,7 +473,7 @@ html {
   margin: 9px 0 12px;
   color: var(--external-links-color);
   opacity: 0.72;
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.5;
 }
 
@@ -778,47 +807,45 @@ html {
 /* Message to prompt sign-in.
    This used to inherit --right-panel-color, which is the same #202020 as the
    panel it sits on, so the one instruction a new visitor needs was invisible.
-   Every colour here is declared outright rather than inherited, and they are
-   mixed from --primary so each theme tints it with its own accent. */
+   Two rows: the icon sits on the heading line, the explanation runs under it.
+   The fill is a solid colour, not a tint of the accent - a translucent panel
+   over a near-black background just read as a smudge. */
 #signInMessage {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
+  display: block;
+  max-width: 100%;
   margin: 0 20px 20px;
-  padding: 14px 16px;
-  border-radius: 6px;
-  color: var(--primary);
-  background: rgba(255, 152, 0, 0.12);
-  background: color-mix(in srgb, var(--primary) 12%, transparent);
-  border: 1px solid rgba(255, 152, 0, 0.45);
-  border: 1px solid color-mix(in srgb, var(--primary) 45%, transparent);
+  padding: 13px 16px 14px;
+  border-radius: 7px;
+  background-color: #2b2b2b;
 }
 
-#signInMessage > i {
-  flex: none;
-  font-size: 17px;
-  line-height: 1.35;
-}
-
-#signInMessage .sim-text {
+/* Row one: icon and heading together on a single line. */
+#signInMessage .sim-head {
   display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
+  align-items: center;
+  gap: 9px;
+  color: var(--primary);
+}
+
+#signInMessage .sim-head > i {
+  flex: none;
+  font-size: 15px;
 }
 
 #signInMessage strong {
-  font-size: 15px;
-  line-height: 1.35;
+  font-size: 14.5px;
+  line-height: 1.3;
 }
 
-/* The supporting line is the readable body colour, not the accent: two lines
-   of orange reads as a warning rather than a prompt. */
-#signInMessage span {
+/* Row two: the supporting line, in body colour. Two lines of orange reads as
+   a warning rather than a prompt. */
+#signInMessage .sim-sub {
+  display: block;
+  margin-top: 5px;
   color: var(--tk-text, #fff);
-  font-size: 13px;
+  opacity: 0.8;
+  font-size: 12.5px;
   line-height: 1.45;
-  opacity: 0.85;
 }
 
 /* Message shown when there are no rooms */

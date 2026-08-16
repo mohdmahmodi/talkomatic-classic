@@ -561,3 +561,58 @@ body, html {
     width: 100%;
   }
 }
+/* ── Role cards ──
+   The page lists the kinds of contribution the project runs on rather than
+   named people, so the circle that used to hold a profile photo holds an icon
+   instead. Same size and border as before, so the grid is unchanged. */
+.role-icon-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #1b1b1b;
+  border-color: #444;
+}
+
+.role-icon-container i {
+  font-size: 40px;
+  color: #ff9800;
+}
+
+/* The opening note spans the grid and carries the message, so it is the one
+   thing on the page that is not a card. */
+.community-note {
+  grid-column: 1 / -1;
+  background-color: #000000;
+  border: 1px solid #ff9800;
+  border-radius: 8px;
+  padding: 26px 28px;
+  text-align: center;
+}
+
+.community-note h2 {
+  color: #ff9800;
+  font-size: 22px;
+  font-weight: normal;
+  margin: 0 0 12px 0;
+}
+
+.community-note p {
+  color: #f0f0f0;
+  font-size: 15px;
+  line-height: 1.7;
+  margin: 0 auto 12px;
+  max-width: 70ch;
+}
+
+.community-note p:last-child {
+  margin-bottom: 0;
+}
+
+@media (max-width: 600px) {
+  .community-note {
+    padding: 20px 18px;
+  }
+  .community-note h2 {
+    font-size: 19px;
+  }
+}

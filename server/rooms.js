@@ -42,6 +42,7 @@ const applications = require("./applications");
 const reports = require("./reports");
 const appeals = require("./appeals");
 const suggestions = require("./suggestions");
+const rules = require("./rules");
 const announcements = require("./announcements");
 const banhistory = require("./banhistory");
 const blocklist = require("./blocklist");
@@ -3323,6 +3324,57 @@ function registerSocketHandlers(opts) {
             modLevel: socket.isMod ? socket.modLevel || 2 : 0,
           });
         }
+      }),
+    );
+
+    // ── Rules ───────────────────────────────────────────────────────────
+    // Open to everyone, signed in or not, and that includes the moderator
+    // set: rules staff are held to are worth nothing if only staff can read
+    // them. Devs write them from the dashboard.
+    socket.on(
+      "rules get",
+      safe(async () => {
+        socket.emit("rules data", rules.publicRules());
+      }),
+    );
+
+    socket.on(
+      "dev set rules",
+      safe(async (data) => {
+        if (!requireDev(socket)) return;
+        const section = data?.section === "mod" ? "mod" : "community";
+        const res = rules.setSection(
+          section,
+          data?.list,
+          socket.staffLabel || "dev",
+        );
+        if (!res.ok)
+          return socket.emit(
+            "error",
+            createErrorResponse(ERROR_CODES.BAD_REQUEST, "Could not save rules."),
+          );
+        logStaff(socket, "set rules", section, "-", `${res.count} rules`);
+        socket.emit("rules data", rules.publicRules());
+        socket.emit("staff action result", {
+          ok: true,
+          action: `saved ${res.count} ${section} rule${res.count === 1 ? "" : "s"}`,
+        });
+      }),
+    );
+
+    socket.on(
+      "dev reset rules",
+      safe(async (data) => {
+        if (!requireDev(socket)) return;
+        const section = data?.section === "mod" ? "mod" : "community";
+        const res = rules.resetSection(section, socket.staffLabel || "dev");
+        if (!res.ok) return;
+        logStaff(socket, "reset rules", section, "-", "restored defaults");
+        socket.emit("rules data", rules.publicRules());
+        socket.emit("staff action result", {
+          ok: true,
+          action: `restored the default ${section} rules`,
+        });
       }),
     );
 

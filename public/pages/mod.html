@@ -3424,6 +3424,83 @@
       /* ── Announcements: composing one ────────────────────────────────────
          The preview matters more than usual here: a notice goes to everybody
          at once, and there is no taking it back after they have read it. */
+      /* ── Rules editor ──
+         One card per rule, in the order the lobby shows them. Reordering is
+         the up/down buttons rather than drag: this list is edited rarely and
+         a drag target is one more thing to get wrong on a touch screen. */
+      .rl-card {
+        background: var(--panel, #1b1b1b);
+        border: 1px solid var(--border, #333);
+        border-radius: 8px;
+        padding: 12px 14px 14px;
+      }
+      .rl-head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 9px;
+      }
+      .rl-num {
+        flex: none;
+        width: 26px;
+        height: 26px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 50%;
+        background: var(--tile, #222);
+        color: var(--orange, #ff9800);
+        font-size: 12px;
+        font-weight: bold;
+      }
+      .rl-actions {
+        margin-left: auto;
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      .rl-field {
+        width: 100%;
+        box-sizing: border-box;
+        background: var(--bg, #141414);
+        border: 1px solid var(--border, #333);
+        border-radius: 6px;
+        color: var(--text, #eee);
+        font-family: inherit;
+        font-size: 13.5px;
+        padding: 9px 11px;
+        margin-bottom: 8px;
+        resize: vertical;
+        line-height: 1.55;
+      }
+      .rl-field:focus {
+        outline: none;
+        border-color: var(--orange, #ff9800);
+      }
+      .rl-lbl {
+        display: block;
+        font-size: 11px;
+        font-weight: bold;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: var(--dim, #8a8a8a);
+        margin: 2px 0 4px;
+      }
+      .rl-lvl {
+        flex: none;
+        background: var(--bg, #141414);
+        border: 1px solid var(--border, #333);
+        border-radius: 6px;
+        color: var(--text, #eee);
+        font-family: inherit;
+        font-size: 12px;
+        padding: 5px 8px;
+        cursor: pointer;
+      }
+      .rl-dirty {
+        border-color: var(--orange, #ff9800);
+      }
+
       .an-compose {
         padding: 14px 16px 16px;
         background: var(--panel, #1b1b1b);
@@ -3734,6 +3811,9 @@
           <button class="nav-item" data-tab="announce" data-dev>
             <i class="fas fa-bullhorn"></i> Announcements
             <span class="ni-badge" id="announceBadge">0</span>
+          </button>
+          <button class="nav-item" data-tab="rules" data-dev>
+            <i class="fas fa-scale-balanced"></i> Rules
           </button>
           <button class="nav-item" data-tab="guide">
             <i class="fas fa-circle-question"></i> Guide
@@ -4049,6 +4129,51 @@
         </section>
 
         <!-- Announcements -->
+        <!-- Rules (dev only). Both sets are shown publicly in the lobby, so
+             this is the one editor whose output every user reads. -->
+        <section id="tab-rules" class="panel">
+          <div class="strip">
+            <i class="fas fa-scale-balanced lead ic-orange"></i> Rules
+            <span class="sub">What users agree to, and what staff are held to</span>
+            <div class="ph-actions">
+              <button id="rulesReload" class="btn sm">
+                <i class="fas fa-arrows-rotate"></i> Reload
+              </button>
+              <button id="rulesSave" class="btn sm primary">
+                <i class="fas fa-floppy-disk"></i> Save changes
+              </button>
+            </div>
+          </div>
+          <p class="note-box">
+            <i class="fas fa-circle-info"></i>
+            <span>
+              Both sets are public: anyone can open <b>Talkomatic Rules</b> from
+              the lobby and read them, moderator rules included. That is
+              deliberate - a rule nobody outside staff can read is not one
+              anybody can hold staff to. Write each rule as one plain
+              instruction plus a short <b>why</b>; the why is what lets someone
+              apply the rule to a situation you did not write down. Changes go
+              live the moment you save.
+            </span>
+          </p>
+
+          <div class="toolbar">
+            <div class="seg" id="rulesSeg">
+              <button class="active" data-sec="community">Community</button>
+              <button data-sec="mod">Moderator</button>
+            </div>
+            <div class="ph-actions">
+              <button id="rulesAdd" class="btn sm">
+                <i class="fas fa-plus"></i> Add rule
+              </button>
+              <button id="rulesReset" class="btn sm danger">
+                <i class="fas fa-rotate-left"></i> Restore defaults
+              </button>
+            </div>
+          </div>
+          <div id="rulesList" class="cards"></div>
+        </section>
+
         <section id="tab-announce" class="panel">
           <div class="strip">
             <i class="fas fa-bullhorn lead ic-orange"></i> Announcements
