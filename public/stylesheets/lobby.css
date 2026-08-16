@@ -290,28 +290,29 @@ html {
   display: none !important;
 }
 
-/* A row of small square buttons, not a grid of stretched tiles. Stretching to
-   equal columns is what made these wide slabs with a lost glyph in the middle;
-   a fixed square sized to its icon is the whole point. All six fit one line in
-   the 320px panel, and wrap rather than squash if a theme narrows it. */
+/* Footer strip of plain icon buttons. No tile behind them: six dark slabs
+   stacked under the room form read as a second toolbar competing with the
+   panel, and the panel is meant to be the room form. The glyph alone, muted
+   until you reach for it, is enough for links nobody came here to click. */
 .external-links {
   display: flex;
   flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 6px;
-  margin-bottom: 10px;
+  justify-content: center;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  margin-bottom: 14px;
   width: 100%;
 }
 
 .external-links a {
+  /* content-box plus flex-basis:100% is what pushed the full-width link 24px
+     wider than the panel's content area and 6px off its right edge. */
+  box-sizing: border-box;
   display: flex;
   align-items: center;
-  /* The panel is narrow, so a flex child that refuses to shrink is what pushes
-     a label out of its tile. */
   min-width: 0;
-  background-color: var(--external-links-background-color);
   border: 1px solid transparent;
-  padding: 10px 11px;
   border-radius: 5px;
   color: var(--external-links-color);
   text-decoration: none;
@@ -319,58 +320,67 @@ html {
   font-weight: bold;
   letter-spacing: 0.2px;
   line-height: 1.25;
-  /* Wrap rather than clip. A label that runs long takes a second line and the
-     row grows to match; truncating to "Docum…" would be worse than a wrap. */
   white-space: normal;
   overflow-wrap: break-word;
   transition:
     background-color 0.15s ease,
-    border-color 0.15s ease;
+    border-color 0.15s ease,
+    color 0.15s ease,
+    opacity 0.15s ease;
 }
 
-/* One uniform icon column so every label starts at the same x-position,
-   regardless of how wide the individual Font Awesome glyph is. */
 .external-links a > i,
 .external-links a > svg {
   flex: none;
-  width: 18px;
-  margin-right: 9px;
   text-align: center;
-  font-size: 15px;
 }
 
-.external-links a:hover {
-  background-color: var(--hover-external-links-background-color);
-  border-color: rgba(255, 152, 0, 0.55);
-}
-
-.external-links a:visited {
-  background-color: var(--visited-external-links-background-color);
-}
-
-/* Long-labelled links take a whole row of their own so words do not wrap. */
-.external-links a.wide {
-  flex: 0 0 100%;
-}
-
-/* Icon-only buttons: a square, sized once, with the glyph centred in it. The
-   square is what gives the even padding on all four sides - set a width and a
-   height and let the flex centring do the rest, rather than padding a box that
-   is being stretched to some other width. */
+/* Icon buttons: a bare square holding a glyph, no fill and no outline. Hover
+   is the only time anything is drawn behind one. */
 .external-links a.icon-only {
   flex: 0 0 auto;
-  width: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
   padding: 0;
   justify-content: center;
+  background: none;
+  color: var(--external-links-color);
+  opacity: 0.62;
 }
 
 .external-links a.icon-only > i {
   margin-right: 0;
-  /* The shared 18px icon column would clip a wider glyph like the Discord mark. */
+  /* A shared fixed width would clip a wider glyph like the Discord mark. */
   width: auto;
-  font-size: 17px;
+  font-size: 16px;
   line-height: 1;
+}
+
+.external-links a.icon-only:hover {
+  opacity: 1;
+  color: var(--primary);
+  background: rgba(255, 152, 0, 0.1);
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  border-color: transparent;
+}
+
+/* "Apply to be a mod" keeps a label, so it keeps a button's shape and takes a
+   row of its own under the icons. */
+.external-links a.wide {
+  flex: 0 0 100%;
+  justify-content: center;
+  padding: 9px 11px;
+  margin-top: 2px;
+  background-color: var(--external-links-background-color);
+}
+
+.external-links a.wide > i {
+  margin-right: 8px;
+}
+
+.external-links a.wide:hover {
+  background-color: var(--hover-external-links-background-color);
+  border-color: rgba(255, 152, 0, 0.55);
 }
 
 /* ── Ideas & Bugs card ──────────────────────────────────────────────────────
@@ -730,9 +740,50 @@ html {
   padding-left: 8px;
 }
 
-/* Message to prompt sign-in */
+/* Message to prompt sign-in.
+   This used to inherit --right-panel-color, which is the same #202020 as the
+   panel it sits on, so the one instruction a new visitor needs was invisible.
+   Every colour here is declared outright rather than inherited, and they are
+   mixed from --primary so each theme tints it with its own accent. */
 #signInMessage {
-  padding-left: 20px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 0 20px 20px;
+  padding: 14px 16px;
+  border-radius: 6px;
+  color: var(--primary);
+  background: rgba(255, 152, 0, 0.12);
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  border: 1px solid rgba(255, 152, 0, 0.45);
+  border: 1px solid color-mix(in srgb, var(--primary) 45%, transparent);
+}
+
+#signInMessage > i {
+  flex: none;
+  font-size: 17px;
+  line-height: 1.35;
+}
+
+#signInMessage .sim-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+#signInMessage strong {
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+/* The supporting line is the readable body colour, not the accent: two lines
+   of orange reads as a warning rather than a prompt. */
+#signInMessage span {
+  color: var(--tk-text, #fff);
+  font-size: 13px;
+  line-height: 1.45;
+  opacity: 0.85;
 }
 
 /* Message shown when there are no rooms */

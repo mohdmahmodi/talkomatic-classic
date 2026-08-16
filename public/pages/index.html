@@ -569,73 +569,6 @@
           <span class="lobby">Lobby</span>
         </div>
 
-        <!-- Two rows of three icon-only tiles, then the apply link full width.
-             The icon tiles carry their name in title + aria-label, since the
-             glyph is the only thing on screen. -->
-        <div class="external-links">
-          <a
-            href="https://discord.gg/N7tJznESrE"
-            class="icon-only"
-            title="Discord"
-            aria-label="Discord"
-            rel="noopener noreferrer"
-          >
-            <i class="fab fa-discord"></i>
-          </a>
-          <a
-            href="themes.html"
-            id="themesButton"
-            class="icon-only"
-            title="Themes"
-            aria-label="Themes"
-            rel="noopener noreferrer"
-          >
-            <i class="fas fa-paintbrush"></i>
-          </a>
-          <a
-            href="#"
-            id="themeEditorLink"
-            class="icon-only"
-            title="Customize"
-            aria-label="Customize"
-            rel="noopener noreferrer"
-          >
-            <i class="fas fa-palette"></i>
-          </a>
-          <a
-            href="#"
-            id="updateNotesButton"
-            class="icon-only"
-            title="Update Notes"
-            aria-label="Update Notes"
-            rel="noopener noreferrer"
-          >
-            <i class="fas fa-bullhorn"></i>
-          </a>
-          <a
-            href="#"
-            id="staffLoginLink"
-            class="icon-only"
-            title="Staff Access"
-            aria-label="Staff Access"
-            rel="noopener noreferrer"
-          >
-            <i class="fas fa-key"></i>
-          </a>
-          <a
-            href="botcreator.html"
-            id="botCreatorLink"
-            class="icon-only"
-            title="Bot Creator"
-            aria-label="Bot Creator"
-            rel="noopener noreferrer"
-          >
-            <i class="fas fa-robot"></i>
-          </a>
-          <a href="#" id="modApplyLink" class="wide" rel="noopener noreferrer">
-            <i class="fas fa-user-pen"></i> Apply to be a mod
-          </a>
-        </div>
 
         <!-- Ideas & Bugs gets its own card rather than a line in the list
              above: it is the one link people are asked to actually use, and a
@@ -829,14 +762,90 @@
             <button type="button" class="go-chat-button">Go Chat...</button>
           </div>
         </div>
+        <!-- Sits at the foot of the panel: these are side errands, not the
+             thing anybody came to do. -->
+        <div class="external-links">
+          <a
+            href="https://discord.gg/N7tJznESrE"
+            class="icon-only"
+            title="Discord"
+            aria-label="Discord"
+            rel="noopener noreferrer"
+          >
+            <i class="fab fa-discord"></i>
+          </a>
+          <a
+            href="themes.html"
+            id="themesButton"
+            class="icon-only"
+            title="Themes"
+            aria-label="Themes"
+            rel="noopener noreferrer"
+          >
+            <i class="fas fa-paintbrush"></i>
+          </a>
+          <a
+            href="#"
+            id="themeEditorLink"
+            class="icon-only"
+            title="Customize"
+            aria-label="Customize"
+            rel="noopener noreferrer"
+          >
+            <i class="fas fa-palette"></i>
+          </a>
+          <a
+            href="#"
+            id="updateNotesButton"
+            class="icon-only"
+            title="Update Notes"
+            aria-label="Update Notes"
+            rel="noopener noreferrer"
+          >
+            <i class="fas fa-bullhorn"></i>
+          </a>
+          <a
+            href="#"
+            id="staffLoginLink"
+            class="icon-only"
+            title="Staff Access"
+            aria-label="Staff Access"
+            rel="noopener noreferrer"
+          >
+            <i class="fas fa-key"></i>
+          </a>
+          <a
+            href="botcreator.html"
+            id="botCreatorLink"
+            class="icon-only"
+            title="Bot Creator"
+            aria-label="Bot Creator"
+            rel="noopener noreferrer"
+          >
+            <i class="fas fa-robot"></i>
+          </a>
+          <a href="#" id="modApplyLink" class="wide" rel="noopener noreferrer">
+            <i class="fas fa-user-pen"></i> Apply to be a mod
+          </a>
+        </div>
+
       </div>
       <!-- Right panel where available rooms and sign-in messages are displayed -->
       <div class="right-panel">
         <!-- Header inviting the user to join a room -->
         <h2>Join A Room ...</h2>
-        <!-- Message prompting the user to sign in before viewing chat rooms -->
+        <!-- Message prompting the user to sign in before viewing chat rooms.
+             This is the first thing a new visitor has to act on, so it is a
+             callout rather than a line of text. -->
         <div id="signInMessage" style="display: block">
-          <p>Please sign in to see available chatrooms.</p>
+          <i class="fas fa-user-pen" aria-hidden="true"></i>
+          <div class="sim-text">
+            <strong>Pick a username to get started</strong>
+            <span
+              >Enter a name under "Be Known As..." in the menu, then you can see
+              and join rooms.</span
+            >
+          </div>
         </div>
         <!-- Section where the list of rooms will be dynamically added -->
         <div class="roomList" style="display: none">

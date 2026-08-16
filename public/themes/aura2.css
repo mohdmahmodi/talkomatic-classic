@@ -501,10 +501,8 @@ html {
   margin-bottom: 40px;
   padding-left: 8px;
 }
-/* Message to prompt sign-in */
-#signInMessage {
-  padding-left: 20px;
-}
+/* Message to prompt sign-in. Laid out in lobby.css and tinted from --primary,
+   so this theme needs no rule of its own - one here would only fight it. */
 /* Message shown when there are no rooms */
 #noRoomsMessage {
   padding-left: 20px;
