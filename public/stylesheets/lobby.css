@@ -148,7 +148,8 @@
 
   --focus-creator-link-outline-color: #c7c7c7;
 
-  --discord-icon-color: #7289da;
+  /* Discord's current blurple. #7289da is their pre-2021 one and reads dull. */
+  --discord-icon-color: #5865f2;
   --community-icon-color: #ff6b35;
   --info-circle-icon-color: #17a2b8;
   --youtube-play-circle-icon-color: red;
@@ -335,8 +336,10 @@ html {
   text-align: center;
 }
 
-/* Icon buttons: a bare square holding a glyph, no fill and no outline. Hover
-   is the only time anything is drawn behind one. */
+/* Icon buttons: a bare square holding a glyph, no fill and no outline. Each
+   glyph carries its own colour, which is the only thing telling them apart
+   with the labels gone - so no opacity fade here, that was what made the
+   Discord mark look washed out. Hover just lifts a tile in behind it. */
 .external-links a.icon-only {
   flex: 0 0 auto;
   width: 34px;
@@ -344,24 +347,38 @@ html {
   padding: 0;
   justify-content: center;
   background: none;
-  color: var(--external-links-color);
-  opacity: 0.62;
 }
 
 .external-links a.icon-only > i {
   margin-right: 0;
   /* A shared fixed width would clip a wider glyph like the Discord mark. */
   width: auto;
-  font-size: 16px;
+  font-size: 17px;
   line-height: 1;
 }
 
 .external-links a.icon-only:hover {
-  opacity: 1;
-  color: var(--primary);
-  background: rgba(255, 152, 0, 0.1);
-  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  background: rgba(255, 255, 255, 0.09);
   border-color: transparent;
+}
+
+/* Scoped to this strip on purpose: .fa-bullhorn and friends are used in other
+   menus too, and those should keep whatever they already look like. */
+.external-links a.icon-only .fa-discord {
+  color: var(--discord-icon-color);
+}
+.external-links a.icon-only .fa-palette {
+  color: #e91e63;
+}
+.external-links a.icon-only .fa-bullhorn {
+  color: #ffa726;
+}
+.external-links a.icon-only .fa-key,
+.external-links a.icon-only .fa-gauge-high {
+  color: #5aa9ff;
+}
+.external-links a.icon-only .fa-robot {
+  color: #26c6da;
 }
 
 /* "Apply to be a mod" keeps a label, so it keeps a button's shape and takes a
@@ -389,8 +406,13 @@ html {
    makes them post the right thing in the right place instead of guessing. */
 .ideas-card {
   background-color: var(--external-links-background-color);
-  padding: 12px 13px;
-  margin-bottom: 10px;
+  /* Square-cornered and borderless, it read as a slab of background rather
+     than a card. The amber edge ties it to the lightbulb and marks it as the
+     one thing in this panel worth acting on. */
+  border: 1px solid rgba(255, 167, 38, 0.28);
+  border-radius: 7px;
+  padding: 13px 14px 14px;
+  margin-bottom: 12px;
 }
 
 .ideas-card-head {
@@ -402,26 +424,33 @@ html {
   letter-spacing: 0.2px;
 }
 
+/* The lightbulb sits in its own tinted disc so the card has one clear anchor
+   instead of a glyph floating next to text. */
 .ideas-card-head > i {
   flex: none;
-  width: 20px;
-  margin-right: 11px;
-  text-align: center;
-  font-size: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  margin-right: 10px;
+  border-radius: 50%;
+  background: rgba(255, 167, 38, 0.16);
+  font-size: 13px;
   color: #ffa726;
 }
 
 .ideas-card-sub {
-  margin: 7px 0 10px;
+  margin: 9px 0 12px;
   color: var(--external-links-color);
-  opacity: 0.75;
+  opacity: 0.72;
   font-size: 12px;
-  line-height: 1.45;
+  line-height: 1.5;
 }
 
 .ideas-card-btn {
   display: block;
-  padding: 9px 12px;
+  padding: 10px 12px;
   border: none;
   border-radius: 5px;
   background-color: #ff9800;
@@ -430,7 +459,9 @@ html {
   font-weight: bold;
   text-align: center;
   text-decoration: none;
-  transition: background-color 0.15s ease;
+  transition:
+    background-color 0.15s ease,
+    transform 0.15s ease;
 }
 
 .ideas-card-btn:hover,
@@ -440,6 +471,10 @@ html {
 
 .ideas-card-btn:hover {
   background-color: #ffa726;
+}
+
+.ideas-card-btn:active {
+  transform: translateY(1px);
 }
 
 /* Known-as section with a light background */
