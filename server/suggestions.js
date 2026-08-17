@@ -19,6 +19,7 @@ const fsp = require("fs").promises;
 const crypto = require("crypto");
 
 const { DATA_DIR } = require("./datadir");
+const roles = require("./roles");
 
 const STORE_PATH = path.join(DATA_DIR, "suggestions.json");
 const MAX = 2000;
@@ -224,12 +225,17 @@ function voteCounts(s) {
   return { up, down };
 }
 
-function setStatus(id, status, byLabel) {
+function setStatus(id, status, byLabel, byRole) {
   if (!STATUSES.includes(status)) return null;
   const s = get(id);
   if (!s) return null;
   s.status = status;
   s.statusBy = byLabel || null;
+  // Kept so the public board can say which half of the team set it without
+  // naming anybody. Left alone when the caller does not know, rather than
+  // defaulted: writing "mod" over an unknown role would beat the roster
+  // fallback and file a developer under the wrong half.
+  if (byRole) s.statusRole = byRole === "dev" ? "dev" : "mod";
   s.statusAt = Date.now();
   saveSoon();
   return s;
@@ -290,7 +296,7 @@ function get(id) {
 // and sorted there. At a couple of thousand posts that is a few hundred KB
 // once, against a round trip for every keystroke in the search box - and the
 // board is opened far less often than it is scrolled.
-function publicList({ deviceId, isDev, limit = MAX } = {}) {
+function publicList({ deviceId, isDev, isStaff, limit = MAX } = {}) {
   const out = suggestions
     .slice()
     .sort((a, b) => (b.at || 0) - (a.at || 0))
@@ -308,7 +314,12 @@ function publicList({ deviceId, isDev, limit = MAX } = {}) {
         at: s.at,
         editedAt: s.editedAt || null,
         status: s.status,
-        statusBy: s.statusBy,
+        // The board is public, so a declined idea would otherwise hand its
+        // author the name of whoever declined it. Staff triaging the queue
+        // still see who set what.
+        statusBy: isStaff
+          ? s.statusBy
+          : roles.publicStaffName(s.statusBy, s.statusRole),
         statusAt: s.statusAt,
         up,
         down,
@@ -367,8 +378,13 @@ function submit({ deviceId, userId, name, text }) {
   return post({ deviceId, ip: null, userId, name, role: "user", text });
 }
 
-function resolve(id, resolution, reviewedBy) {
-  return setStatus(id, resolution === "approved" ? "approved" : "declined", reviewedBy);
+function resolve(id, resolution, reviewedBy, reviewerRole) {
+  return setStatus(
+    id,
+    resolution === "approved" ? "approved" : "declined",
+    reviewedBy,
+    reviewerRole,
+  );
 }
 
 function openCount() {

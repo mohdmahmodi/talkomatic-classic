@@ -1329,6 +1329,7 @@ function boardPayloadFor(socket) {
     posts: suggestions.publicList({
       deviceId: socket.deviceId || null,
       isDev: !!socket.isDev,
+      isStaff: !!socket.isDev || !!socket.isMod,
     }),
     remaining: suggestions.remainingPosts(
       socket.deviceId || null,
@@ -8010,6 +8011,7 @@ function registerSocketHandlers(opts) {
           Number(data?.id),
           String(data?.status || ""),
           socket.staffLabel || (socket.isDev ? "dev" : "mod"),
+          socket.isDev ? "dev" : "mod",
         );
         if (!s)
           return socket.emit(

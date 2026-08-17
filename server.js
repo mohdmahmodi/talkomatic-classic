@@ -46,6 +46,7 @@ const rooms = require("./server/rooms");
 const roles = require("./server/roles");
 const appeals = require("./server/appeals");
 const ipban = require("./server/ipban");
+const ipredact = require("./server/ipredact");
 const communityThemes = require("./server/themes");
 
 // ── Global Error Handlers ───────────────────────────────────────────────────
@@ -423,7 +424,10 @@ io.use((socket, next) => {
         banned: true,
         permanent: expiry >= Number.MAX_SAFE_INTEGER,
         expiry,
-        reason: (block && block.reason) || null,
+        // Staff wrote this to be read by the person they blocked, and
+        // "evading from x.x.x.x" is a natural thing to write. It gets the
+        // same treatment on the way out as anything else somebody typed.
+        reason: ipredact.redact((block && block.reason) || null),
         // When it was placed, and who it came from as the user is told it:
         // the team rather than the person, so nobody can be gone after for a
         // decision the team made.
@@ -974,9 +978,12 @@ function appealPayload(a, ctx) {
       role: m.from === "staff" ? m.role || "mod" : null,
       level: m.from === "staff" ? (m.level == null ? 2 : m.level) : null,
       avatar: null,
-      text: m.text || "",
-      // A quoted staff line carries the author it was written under, so it
-      // gets the same treatment as the line itself.
+      // What staff wrote gets the address treatment; what the appellant wrote
+      // comes back exactly as they wrote it, the same rule their own textbox
+      // follows. Rewriting somebody's own words back at them helps nobody.
+      text: (m.from === "staff" ? ipredact.redact(m.text) : m.text) || "",
+      // A quoted staff line carries the author and the words it was written
+      // under, so it gets the same treatment as the line itself.
       reply: m.reply
         ? {
             ...m.reply,
@@ -984,6 +991,10 @@ function appealPayload(a, ctx) {
               m.reply.from === "staff"
                 ? roles.publicStaffName(m.reply.by || "staff")
                 : null,
+            text:
+              m.reply.from === "staff"
+                ? ipredact.redact(m.reply.text)
+                : m.reply.text,
           }
         : null,
     })),

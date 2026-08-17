@@ -8,6 +8,7 @@ const path = require("path");
 const fs = require("fs");
 const fsp = require("fs").promises;
 const { state } = require("./state");
+const ipban = require("./ipban");
 
 const { DATA_DIR } = require("./datadir");
 
@@ -28,12 +29,24 @@ function load() {
         const expiry = b && typeof b === "object" ? b.expiry : b;
         if (expiry && expiry !== Number.MAX_SAFE_INTEGER && now >= expiry)
           continue;
-        state.blockedIPs.set(ip, b);
+        // A v6 ban written as one address was banning nothing: the client
+        // rotates inside its own /64 and walks straight back in. New ones
+        // cover the range; these are brought up to the same rule on the way
+        // in, keeping whichever entry runs longest if both are on file.
+        const key = ipban.autoRangeCidr(ip) || ip;
+        const held = state.blockedIPs.get(key);
+        if (held !== undefined && longerOf(held) >= longerOf(b)) continue;
+        state.blockedIPs.set(key, b);
       }
   } catch (err) {
     if (err.code !== "ENOENT")
       console.error("Error loading blocklist.json:", err);
   }
+}
+
+function longerOf(b) {
+  const e = b && typeof b === "object" ? b.expiry : b;
+  return e || 0;
 }
 
 // Atomic write (tmp + rename), debounced, mirrors the other JSON stores.
