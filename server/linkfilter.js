@@ -46,13 +46,39 @@ function scan(value) {
   return { text, map };
 }
 
+// Rejoins runs of three or more single-character tokens and leaves the rest of
+// the spacing alone. Closing every gap instead would make "go to example.com"
+// one token and take the words either side of it down with the address.
 function tighten(scanned) {
+  const toks = [];
+  const re = /\S+/g;
+  let m;
+  while ((m = re.exec(scanned.text)) !== null)
+    toks.push({ s: m.index, e: m.index + m[0].length, solo: m[0].length === 1 });
+
+  const join = new Array(toks.length).fill(false);
+  for (let i = 0; i < toks.length; ) {
+    if (!toks[i].solo) {
+      i++;
+      continue;
+    }
+    let j = i;
+    while (j < toks.length && toks[j].solo) j++;
+    if (j - i >= 3) for (let k = i; k < j; k++) join[k] = true;
+    i = j;
+  }
+
   let text = "";
   const map = [];
-  for (let i = 0; i < scanned.text.length; i++) {
-    if (SPACE.test(scanned.text[i])) continue;
-    text += scanned.text[i];
-    map.push(scanned.map[i]);
+  for (let n = 0; n < toks.length; n++) {
+    if (n > 0 && !(join[n] && join[n - 1])) {
+      text += " ";
+      map.push(scanned.map[toks[n - 1].e]);
+    }
+    for (let p = toks[n].s; p < toks[n].e; p++) {
+      text += scanned.text[p];
+      map.push(scanned.map[p]);
+    }
   }
   map.push(scanned.map[scanned.map.length - 1]);
   return { text, map };

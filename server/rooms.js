@@ -34,6 +34,7 @@ const roles = require("./roles");
 const audit = require("./audit");
 const ipredact = require("./ipredact");
 const linkfilter = require("./linkfilter");
+const chatguard = require("./chatguard");
 const nameguard = require("./nameguard");
 const identity = require("./identity");
 const modwatch = require("./modwatch");
@@ -3662,7 +3663,8 @@ function registerSocketHandlers(opts) {
         if (!socket.roomId || !socket.handshake.session?.userId) return;
         if (socket.spectating) return;
         if (!data?.text || typeof data.text !== "string") return;
-        const text = linkfilter.redact(data.text.slice(0, 200));
+        const text = chatguard.clean(data.text, 200);
+        if (!text) return;
         emitSubAppEvent(
           socket,
           "board chat",
