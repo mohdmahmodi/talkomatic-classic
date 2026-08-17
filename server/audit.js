@@ -47,10 +47,11 @@ function maskIps(value) {
   return ipredact.redact(value, HIDDEN);
 }
 
-// IP addresses are dev-only. Mods get every field except the raw addresses.
+// Raw addresses are served to site-operations sockets only. Every other
+// reader, staff or not, gets every field except them.
 const MASKED_FIELDS = ["target", "details", "text"];
 
-function redactForMod(entry) {
+function redactEntry(entry) {
   const copy = Object.assign({}, entry);
   delete copy.ip;
   delete copy.targetIp;
@@ -67,11 +68,11 @@ function broadcast(entry) {
     require("./staffchat").pushActivity(entry);
   } catch (_) {}
   if (!io()) return;
-  const masked = redactForMod(entry);
+  const masked = redactEntry(entry);
   for (const [, s] of io().sockets.sockets) {
     if (!s.auditSub) continue;
     if (s.isDev) {
-      s.emit("audit entry", entry);
+      s.emit("audit entry", s.isMainDev ? entry : masked);
       continue;
     }
     if (!s.isMod) continue;
@@ -81,6 +82,42 @@ function broadcast(entry) {
     if (entry.minLevel && (s.modLevel || 2) < entry.minLevel) continue;
     s.emit("audit entry", masked);
   }
+}
+
+// Drops entries from the feed for good: the ring buffer, the file behind it,
+// and every open board. Returns the ids that were actually there. The removal
+// itself is deliberately not an event - a cleared row leaves no stub.
+function remove(ids) {
+  const want = new Set(
+    (Array.isArray(ids) ? ids : [ids]).map((n) => Number(n)).filter(Boolean),
+  );
+  if (!want.size) return [];
+  const gone = [];
+  entries = entries.filter((e) => {
+    if (!want.has(e.id)) return true;
+    gone.push(e.id);
+    return false;
+  });
+  if (!gone.length) return [];
+  // Rewritten whole rather than appended to: the file IS the history, so a
+  // deleted row must not survive the next restart.
+  enqueueWrite(async () => {
+    const tmp = AUDIT_PATH + ".tmp";
+    await fsp.writeFile(
+      tmp,
+      entries.map((e) => JSON.stringify(e)).join("\n") +
+        (entries.length ? "\n" : ""),
+    );
+    await fsp.rename(tmp, AUDIT_PATH);
+  });
+  if (io())
+    for (const [, s] of io().sockets.sockets)
+      if (s.auditSub) s.emit("audit removed", { ids: gone });
+  // The Desk reads the same rows, so it drops them on the same beat.
+  try {
+    require("./staffchat").dropActivity(gone);
+  } catch (_) {}
+  return gone;
 }
 
 let writeChain = Promise.resolve();
@@ -200,8 +237,8 @@ function recordKeyAlert({ role, label, ip, kind, detail }) {
 // the dashboard feed AND pushed as a live toast to qualifying staff so it isn't
 // missed. Default visibility is full (level 2) mods + devs; never junior mods.
 // `ip` is whoever raised it, `targetIp` whoever it is about. Both are stripped
-// for mods by redactForMod, same as anywhere else, but recording them means a
-// dev reading a report in the feed does not have to go and look them up.
+// by redactEntry on the way out, same as anywhere else, but recording them
+// means the feed is still the place the addresses can be resolved from.
 function recordNotification({
   kind, label, role, text, target, room, by, minLevel,
   ip, targetIp, targetUserId, byUserId, reports, byRole, targetRole,
@@ -255,7 +292,7 @@ function notifyStaffToast(text, minLevel) {
   const masked = maskIps(text);
   for (const [, s] of io().sockets.sockets) {
     if (s.isDev) {
-      s.emit("staff notice", { text });
+      s.emit("staff notice", { text: s.isMainDev ? text : masked });
       continue;
     }
     if (s.isMod && (s.modLevel || 2) >= (minLevel || 2))
@@ -347,7 +384,14 @@ function pacificDayStarts(n = 7, now = Date.now()) {
   return out;
 }
 
-function recent(limit = 500, includeIp = true, modLevel = 2, since = 0) {
+// `showIp` and `isDev` are asked separately on purpose: what a reader is
+// allowed to open (dev-only entries, anything above their level) is a
+// different question from whether the raw addresses come with it.
+function recent(limit = 500, opts = {}) {
+  const showIp = !!opts.showIp;
+  const isDev = !!opts.isDev;
+  const modLevel = opts.modLevel == null ? 2 : opts.modLevel;
+  const since = opts.since || 0;
   const n = Math.max(1, Number(limit) || 500);
   let slice;
   if (since > 0) {
@@ -372,12 +416,14 @@ function recent(limit = 500, includeIp = true, modLevel = 2, since = 0) {
         baseAction(e.action) === "spectate"
       ),
   );
-  // Devs see everything; mods get IP-redacted entries with dev-only ones and
-  // anything above their level removed.
-  if (includeIp) return slice;
-  return slice
-    .filter((e) => !e.devOnly && (!e.minLevel || modLevel >= e.minLevel))
-    .map(redactForMod);
+  // Devs see every entry; mods lose the dev-only ones and anything above
+  // their level. Addresses come off for everyone but site operations.
+  const visible = isDev
+    ? slice
+    : slice.filter(
+        (e) => !e.devOnly && (!e.minLevel || modLevel >= e.minLevel),
+      );
+  return showIp ? visible : visible.map(redactEntry);
 }
 
 // Action strings carry their parameters ("ip block 24h", "rename (was Bob)",
@@ -1383,7 +1429,8 @@ module.exports = {
   recordNotification,
   recordComment,
   recent,
-  redactForMod,
+  remove,
+  redactEntry,
   maskIps,
   historyFor,
   lastActiveByLabel,

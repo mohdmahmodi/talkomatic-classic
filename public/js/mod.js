@@ -437,6 +437,20 @@
     when.title = fmtTime(e.ts);
     head.appendChild(when);
     top.appendChild(head);
+    // Clearing a row is a developer act, and it is final: the entry goes from
+    // the board, from the Desk, and from the file behind both.
+    if (me && me.role === "dev" && e.id) {
+      const del = document.createElement("button");
+      del.className = "e-del";
+      del.type = "button";
+      del.title = "Delete this entry";
+      del.appendChild(icon("fa-trash"));
+      del.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        deleteActivity([e]);
+      });
+      top.appendChild(del);
+    }
     card.appendChild(top);
 
     // Every field the entry carries goes on the card. Cards are no longer a
@@ -554,6 +568,45 @@
     card.appendChild(box);
 
     return card;
+  }
+
+  // Confirm, then clear entries off the board for good. Nothing is written
+  // in their place - a cleared row that leaves a "cleared a row" behind has
+  // not been cleared.
+  async function deleteActivity(list) {
+    const ids = list.map((e) => e.id).filter(Boolean);
+    if (!ids.length) return;
+    const many = ids.length > 1;
+    if (window.StaffUI) {
+      const ok = await StaffUI.confirm({
+        title: many ? "Delete " + ids.length + " entries" : "Delete entry",
+        message: many
+          ? "Remove these " +
+            ids.length +
+            " entries from the activity board and the Desk. This cannot be undone."
+          : "Remove this entry from the activity board and the Desk. This cannot be undone.",
+        danger: true,
+        confirmText: "Delete",
+      });
+      if (!ok) return;
+    }
+    socket.emit("staff delete activity", { ids });
+  }
+
+  // The server took entries off the board. Drop them here without a reload so
+  // this dashboard and the Desk are never showing different histories.
+  function dropEntries(ids) {
+    const gone = new Set(ids.map(Number));
+    if (!gone.size) return;
+    entries = entries.filter((e) => !gone.has(Number(e.id)));
+    pendingNew = pendingNew.filter((e) => !gone.has(Number(e.id)));
+    for (const id of gone) commentsByRef.delete(id);
+    gone.forEach((id) => {
+      const card = listEl.querySelector('.entry[data-id="' + id + '"]');
+      if (card) card.remove();
+    });
+    renderDayPicker();
+    if (tab === "activity") renderActivity();
   }
 
   function appendComment(card, c) {
@@ -934,7 +987,7 @@
     StaffUI.menu({
       title: "Change ban duration",
       icon: '<i class="fas fa-hourglass-half"></i>',
-      subtitle: (b.label || b.ip) + " · re-timed from now",
+      subtitle: (b.label || b.ip || "This block") + " · re-timed from now",
       groups: [
         {
           items: durs.map((d) => ({
@@ -944,7 +997,7 @@
             danger: d.value === "permanent",
             onClick: () =>
               socket.emit("dev set block duration", {
-                ip: b.ip,
+                ref: b.ref,
                 duration: d.value,
               }),
           })),
@@ -975,7 +1028,7 @@
     });
     if (reason == null) return;
     socket.emit("dev set block message", {
-      ip: b.ip,
+      ref: b.ref,
       reason: String(reason).trim(),
     });
   }
@@ -1031,15 +1084,15 @@
     return groups;
   }
 
-  // One block line inside an expanded person row: kind tag, address (devs
-  // only), live countdown, and the per-block controls.
-  function buildBlockRow(b, isDev) {
+  // One block line inside an expanded person row: kind tag, address (only
+  // where it is served at all), live countdown, and the per-block controls.
+  function buildBlockRow(b, isDev, showIp) {
     const row = divc("blockrow");
     const kind = b.kind || "ip";
     const tag = span("btag " + (kind === "id" ? "uid" : kind));
     tag.textContent = kind === "id" ? "ID" : kind === "range" ? "RANGE" : "IP";
     row.appendChild(tag);
-    const addrText = isDev
+    const addrText = showIp
       ? kind === "id"
         ? String(b.ip || "").replace(/^id:/, "")
         : b.ip
@@ -1083,15 +1136,15 @@
     if (viewerIsFullMod())
       row.appendChild(
         mkIcon("fa-unlock", "Unban this one", true, () =>
-          confirmUnban([b], isDev),
+          confirmUnban([b], showIp),
         ),
       );
     return row;
   }
 
-  // Confirm, then lift one block or every block covering a person. A dev sends
-  // the raw key; a mod (who never sees the address) sends the opaque ref.
-  async function confirmUnban(blocks, isDev, name) {
+  // Confirm, then lift one block or every block covering a person. The
+  // opaque ref is what the server acts on; nobody needs the address for it.
+  async function confirmUnban(blocks, showIp, name) {
     const send = () =>
       blocks.forEach((b) =>
         socket.emit("dev unblock ip", { ip: b.ip, ref: b.ref }),
@@ -1109,7 +1162,7 @@
           " in total)? They can connect again straight away."
         : "Unblock " +
           who +
-          (isDev && blocks[0].ip ? " (" + blocks[0].ip + ")" : "") +
+          (showIp && blocks[0].ip ? " (" + blocks[0].ip + ")" : "") +
           "?",
       danger: many,
       confirmText: many ? "Unban all" : "Unban",
@@ -1120,7 +1173,7 @@
   // One person = one table row of fixed height, so a repeat evader with thirty
   // blocks takes no more vertical space than someone with one. Their blocks
   // live in a detail panel that opens underneath.
-  function buildBanRow(blocks, isDev) {
+  function buildBanRow(blocks, isDev, showIp) {
     const anyPerm = blocks.some((b) => b.permanent);
     const first = blocks[0];
     const name = blocks.map((b) => b.label).find(Boolean) || null;
@@ -1150,7 +1203,7 @@
     );
     const sub = divc("br-sub");
     if (did) sub.appendChild(span("mono", did.slice(0, 18) + "…"));
-    else if (isDev && first.ip) sub.appendChild(span("mono", first.ip));
+    else if (showIp && first.ip) sub.appendChild(span("mono", first.ip));
     whoCell.appendChild(sub);
     row.appendChild(whoCell);
 
@@ -1207,7 +1260,7 @@
       if (built) return;
       built = true;
       const rows = divc("blocks");
-      blocks.forEach((b) => rows.appendChild(buildBlockRow(b, isDev)));
+      blocks.forEach((b) => rows.appendChild(buildBlockRow(b, isDev, showIp)));
       detail.appendChild(rows);
 
       const withMsg = blocks.find((b) => b.reason);
@@ -1259,7 +1312,7 @@
         ),
       );
       unbanAll.addEventListener("click", () =>
-        confirmUnban(blocks, isDev, name),
+        confirmUnban(blocks, showIp, name),
       );
       foot.appendChild(unbanAll);
       detail.appendChild(foot);
@@ -1288,6 +1341,7 @@
   function renderBans() {
     const wrap = $("bansList");
     const isDev = me && me.role === "dev";
+    const showIp = !!(me && me.mainDev);
     wrap.textContent = "";
     $("bansBadge").textContent = String(bans.length);
     $("bansSub").textContent = bans.length
@@ -1324,7 +1378,7 @@
       "Ends",
     ].forEach((h) => head.appendChild(span(null, h)));
     wrap.appendChild(head);
-    groups.forEach((g) => wrap.appendChild(buildBanRow(g, isDev)));
+    groups.forEach((g) => wrap.appendChild(buildBanRow(g, isDev, showIp)));
     const note = divc("bantotal");
     note.textContent =
       groups.length +
@@ -3138,10 +3192,34 @@
         discard.title = "Clear this report as false or already handled";
         foot.appendChild(discard);
       }
+      // Discarding settles a report and says who settled it. Deleting is the
+      // other thing: the report should never have been here, so nothing about
+      // it is kept on either board.
+      if (me && me.role === "dev") {
+        const del = mkBtn("Delete", "fa-trash", true, () => deleteReport(r));
+        del.title = "Remove this report entirely, leaving no record";
+        foot.appendChild(del);
+      }
       card.appendChild(foot);
 
       wrap.appendChild(card);
     });
+  }
+
+  async function deleteReport(r) {
+    if (window.StaffUI) {
+      const ok = await StaffUI.confirm({
+        title: "Delete report",
+        message:
+          "Remove every report against " +
+          (r.name || "this user") +
+          " from the board and the Desk. Nothing is recorded. This cannot be undone.",
+        danger: true,
+        confirmText: "Delete",
+      });
+      if (!ok) return;
+    }
+    socket.emit("staff delete report", { targetUserId: r.targetUserId });
   }
 
   // ── Appeals tab (full mods + devs): ban appeals submitted on-site ──
@@ -4637,6 +4715,10 @@
     // Buffer and flush on a timer so a flood of events can't thrash the DOM.
     pendingNew.push(e);
     scheduleFlush();
+  });
+
+  socket.on("audit removed", (d) => {
+    if (d && Array.isArray(d.ids)) dropEntries(d.ids);
   });
 
   socket.on("dev blocks", (list) => {

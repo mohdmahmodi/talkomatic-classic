@@ -365,10 +365,10 @@ const isArchived = (t) => Date.now() - (t.lastTs || t.createdAt) > THREAD_QUIET_
 
 // A thread title is free text somebody typed, and the rail shows it to every
 // staff member, so it gets masked like anything else they could have written.
-function threadSummary(t, forDev) {
+function threadSummary(t, showIp) {
   return {
     id: t.id,
-    title: forDev ? t.title : maskIps(t.title),
+    title: showIp ? t.title : maskIps(t.title),
     createdBy: t.createdBy,
     createdAt: t.createdAt,
     lastTs: t.lastTs,
@@ -495,12 +495,12 @@ function mentions(msg, socket) {
 // Messages go to every eligible STAFF socket whether the Desk is open or not,
 // so the dock badge is always right. Volume is tiny: staff only.
 function outbound(msg, socket) {
-  // IP addresses are dev-only, so every string heading to a non-dev is masked
-  // in ONE pass over the whole message. Field by field was tried first and was
+  // Every string heading to a reader without the raw feed is masked in ONE
+  // pass over the whole message. Field by field was tried first and was
   // wrong: a reply carries a SNAPSHOT of the message it answers, so quoting a
   // masked line put the address straight back on screen. Doing it wholesale
   // means a field added to a message later is covered the day it is added.
-  const copy = socket.isDev ? { ...msg } : maskDeep(msg);
+  const copy = socket.isMainDev ? { ...msg } : maskDeep(msg);
   // Edit and delete history is a dev-only view; a mod sees the tombstone.
   if (!socket.isDev) delete copy.history;
   copy.mention = mentions(msg, socket);
@@ -535,7 +535,7 @@ function broadcastThreadList() {
   const full = desk.threads.map((t) => threadSummary(t, true));
   for (const [, s] of io().sockets.sockets)
     if (s.connected && isStaff(s))
-      s.emit("desk threads", { threads: s.isDev ? full : masked });
+      s.emit("desk threads", { threads: s.isMainDev ? full : masked });
 }
 
 // ── Messages ────────────────────────────────────────────────────────────────
@@ -697,6 +697,26 @@ const SETTLES_QUEUE =
   /^(kick|ban|ip block|unblock ip|warn|wipe buffer|dismiss report|freeze|reset location|turn pfp off|piano mute|approve mod application|reject mod application|dismiss appeal|lift ban|approve suggestion|decline suggestion|revoke mod)/;
 
 // Somebody acted on a user: stamp every open card about that user.
+// A queue card whose subject no longer exists at all. Stamping says somebody
+// dealt with it; this is for when there is nothing left to have dealt with, so
+// the card goes rather than sitting there marked.
+function dropQueue(match) {
+  const list = desk.channels.queues || [];
+  const gone = [];
+  desk.channels.queues = list.filter((m) => {
+    if (!m.card || !match(m)) return true;
+    gone.push(m.id);
+    byId.delete(m.id);
+    return false;
+  });
+  if (!gone.length) return;
+  scheduleSave();
+  if (!io()) return;
+  for (const [, s] of io().sockets.sockets)
+    if (s.connected && isStaff(s) && canRead(s, "queues"))
+      s.emit("desk drop", { key: "queues", ids: gone });
+}
+
 function stampQueueForTarget(byLabel, action, id) {
   if (!id || !SETTLES_QUEUE.test(String(action || ""))) return;
   stampQueue(
@@ -1183,18 +1203,21 @@ function virtualHistory(key, socket) {
     if (key === "activity") {
       if (!ctx || !ctx.audit) return [];
       // recent() already drops dev-only entries and anything above this
-      // person's level, and masks addresses when includeIp is false.
-      const rows = ctx.audit.recent(
-        VIRTUAL_LIMIT,
-        !!socket.isDev,
-        socket.isDev ? 0 : socket.modLevel || 2,
-        0,
-      );
+      // person's level, and masks addresses unless showIp is set.
+      const rows = ctx.audit.recent(VIRTUAL_LIMIT, {
+        showIp: !!socket.isMainDev,
+        isDev: !!socket.isDev,
+        modLevel: socket.isDev ? 0 : socket.modLevel || 2,
+      });
       return rows.map(activityRow);
     }
     if (key === "bans") {
       if (!ctx || !ctx.banHistory) return [];
-      return ctx.banHistory(!!socket.isDev).slice(0, VIRTUAL_LIMIT).map(banRow).reverse();
+      return ctx
+        .banHistory(!!socket.isMainDev)
+        .slice(0, VIRTUAL_LIMIT)
+        .map(banRow)
+        .reverse();
     }
     if (key === "announce") {
       if (!ctx || !ctx.announcements) return [];
@@ -1219,8 +1242,19 @@ function pushActivity(entry) {
     if (entry.minLevel && !s.isDev && (s.modLevel || 2) < entry.minLevel)
       continue;
     const shown =
-      s.isDev || !ctx || !ctx.audit ? entry : ctx.audit.redactForMod(entry);
+      s.isMainDev || !ctx || !ctx.audit ? entry : ctx.audit.redactEntry(entry);
     s.emit("desk message", { key: "activity", msg: activityRow(shown) });
+  }
+}
+
+// An activity row that no longer exists upstream. Sent to everyone who can
+// read the channel so open Desks drop it without a reload.
+function dropActivity(ids) {
+  if (!io() || !ids || !ids.length) return;
+  const rows = ids.map((id) => "a" + id);
+  for (const [, s] of io().sockets.sockets) {
+    if (!s.connected || !isStaff(s) || !canRead(s, "activity")) continue;
+    s.emit("desk drop", { key: "activity", ids: rows });
   }
 }
 
@@ -1228,7 +1262,7 @@ function pushBans() {
   if (!io() || !ctx || !ctx.banHistory) return;
   for (const [, s] of io().sockets.sockets) {
     if (!s.connected || !isStaff(s) || !canRead(s, "bans")) continue;
-    const list = ctx.banHistory(!!s.isDev);
+    const list = ctx.banHistory(!!s.isMainDev);
     if (!list.length) continue;
     s.emit("desk message", { key: "bans", msg: banRow(list[0]) });
   }
@@ -1276,7 +1310,9 @@ function register(socket, safe) {
       socket.deskHello = true;
       const w = who(socket);
       socket.emit("desk ready", {
-        me: w,
+        // `who` is also stamped onto every message this person sends, so the
+        // session-only bits are added here rather than in there.
+        me: { ...w, mainDev: !!socket.isMainDev },
         channels: CHANNELS.filter((c) => canRead(socket, c.key)).map((c) => ({
           key: c.key,
           name: c.name,
@@ -1284,7 +1320,7 @@ function register(socket, safe) {
           restricted: !!c.access,
           readonly: !!c.readonly,
         })),
-        threads: desk.threads.map((t) => threadSummary(t, socket.isDev)),
+        threads: desk.threads.map((t) => threadSummary(t, socket.isMainDev)),
         unread: unreadFor(socket),
         presence: buildPresence(socket),
       });
@@ -1313,7 +1349,7 @@ function register(socket, safe) {
       const thread = key.startsWith("t")
         ? threadSummary(
           desk.threads.find((t) => t.id === key) || {},
-          socket.isDev,
+          socket.isMainDev,
         )
         : null;
 
@@ -1768,11 +1804,11 @@ function register(socket, safe) {
           )
             hits.push({
               key,
-              title: (socket.isDev ? title : maskIps(title)) || null,
+              title: (socket.isMainDev ? title : maskIps(title)) || null,
               ts: m.ts,
               author: m.author ? m.author.label : null,
               // Masked before the cut, so a hit never ends on half an address.
-              text: (socket.isDev ? m.text : maskIps(m.text)).slice(0, 200),
+              text: (socket.isMainDev ? m.text : maskIps(m.text)).slice(0, 200),
             });
         }
       };
@@ -1796,11 +1832,13 @@ module.exports = {
   noteStaffAction,
   systemQueues,
   pushActivity,
+  dropActivity,
   pushBans,
   pushAnnounce,
   noteEvent,
   presenceDirty,
   rosterDirty,
   stampQueue,
+  dropQueue,
   flushSync,
 };

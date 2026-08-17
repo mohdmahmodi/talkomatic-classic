@@ -2701,10 +2701,17 @@ socket.on("dev blocks", (list) => {
     if (hrs < 48) return hrs + " hr left";
     return Math.round(hrs / 24) + " days left";
   };
+  // A block is named by whoever it hit, or by the kind of key it is. The
+  // address is only there for the operations feed, so the row has to read
+  // without one and the unblock has to go by the opaque ref.
+  const nameOf = (b) =>
+    b.label ||
+    b.ip ||
+    (b.kind === "id" ? "a client id" : b.kind === "range" ? "a range" : "an address");
   const items = blocks.length
     ? blocks.map((b) => ({
         icon: '<i class="fas fa-ban"></i>',
-        label: (b.label ? b.label + "  " : "") + b.ip,
+        label: nameOf(b),
         desc:
           fmtExpiry(b) +
           (b.by ? "  •  blocked by " + b.by : "") +
@@ -2716,14 +2723,11 @@ socket.on("dev blocks", (list) => {
           if (
             await StaffUI.confirm({
               title: "Unblock",
-              message:
-                "Unblock " +
-                (b.label ? b.label + " (" + b.ip + ")" : b.ip) +
-                "?",
+              message: "Unblock " + nameOf(b) + "?",
               confirmText: "Unblock",
             })
           )
-            socket.emit("dev unblock ip", { ip: b.ip });
+            socket.emit("dev unblock ip", { ip: b.ip, ref: b.ref });
         },
       }))
     : [

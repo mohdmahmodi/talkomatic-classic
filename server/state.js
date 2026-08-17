@@ -104,8 +104,11 @@ const CONFIG = {
 
   // Dev mode: SHA-256 hash of the secret dev key, set in .env as DEV_KEY_HASH.
   // Generate with: crypto.createHash('sha256').update('your_key').digest('hex')
+  // MAIN_KEY_HASH is the same format for the key that carries the site itself
+  // (uptime, error triage, the raw server-side detail the health checks read).
   DEV: {
     KEY_HASH: process.env.DEV_KEY_HASH || "",
+    MAIN_KEY_HASH: process.env.MAIN_DEV_KEY_HASH || "",
   },
 };
 

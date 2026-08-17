@@ -424,9 +424,13 @@ io.use((socket, next) => {
         permanent: expiry >= Number.MAX_SAFE_INTEGER,
         expiry,
         reason: (block && block.reason) || null,
-        // Who placed the ban and when, so the ban screen can name the staff
-        // member. Only the staff label is exposed, never the raw IP.
-        by: (block && block.by) || null,
+        // When it was placed, and who it came from as the user is told it:
+        // the team rather than the person, so nobody can be gone after for a
+        // decision the team made.
+        by: roles.publicStaffName(
+          (block && block.by) || null,
+          (block && block.byRole) || null,
+        ),
         bannedAt: (block && typeof block === "object" && block.ts) || null,
       };
       return next(err);
@@ -442,6 +446,7 @@ io.use((socket, next) => {
     const devMatch = devKey ? roles.getDevKey(devKey) : null;
     if (devMatch) {
       socket.isDev = true;
+      socket.isMainDev = !!devMatch.main;
       socket.staffLabel = devMatch.label;
       socket.devKeyHash = devMatch.hash;
       socket.isHidden = !!socket.handshake?.session?.isDevHidden;
@@ -871,6 +876,7 @@ app.post(`${API}/appeal`, (req, res) => {
       message,
       ban: {
         by: b.by || null,
+        byRole: b.byRole || null,
         label: b.label || null,
         reason: b.reason || null,
         expiry: b.expiry || 0,
@@ -957,14 +963,29 @@ function appealPayload(a, ctx) {
       id: m.id,
       ts: m.ts,
       from: m.from,
-      // Who they are talking to: the name, the rank, and the picture. Nothing
-      // here is private - it is the same flair the moderator wears in a room.
-      by: m.from === "staff" ? m.by || "staff" : null,
+      // Who they are talking to, as the team rather than as a person. An
+      // appeal is the one place a banned user is handed the name of whoever
+      // is holding the ban, which is exactly the name to go looking for
+      // afterwards - so the name and the picture both stay on our side.
+      by:
+        m.from === "staff"
+          ? roles.publicStaffName(m.by || "staff", m.role)
+          : null,
       role: m.from === "staff" ? m.role || "mod" : null,
       level: m.from === "staff" ? (m.level == null ? 2 : m.level) : null,
-      avatar: m.from === "staff" ? m.avatar || null : null,
+      avatar: null,
       text: m.text || "",
-      reply: m.reply || null,
+      // A quoted staff line carries the author it was written under, so it
+      // gets the same treatment as the line itself.
+      reply: m.reply
+        ? {
+            ...m.reply,
+            by:
+              m.reply.from === "staff"
+                ? roles.publicStaffName(m.reply.by || "staff")
+                : null,
+          }
+        : null,
     })),
   };
 }

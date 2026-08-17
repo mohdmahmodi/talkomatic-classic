@@ -116,22 +116,31 @@ async function saveFormerMods() {
 // Dev keys live in .env as DEV_KEY_HASH - a comma-separated list of
 // "<sha256hash>" or "<sha256hash>:Label" entries (owner-only, restart to
 // change). This supports multiple devs, each with a name for the audit log.
+//
+// MAIN_DEV_KEY_HASH is the same format for the key that carries the site
+// itself: uptime, error triage, and the raw server-side detail the health
+// checks are read against, on top of everything a dev key does. Its entries
+// load first, so a key named in both resolves to the higher one.
 let devKeys = [];
-function loadDevKeys() {
-  const raw = CONFIG.DEV.KEY_HASH || "";
-  devKeys = String(raw)
+
+function parseKeyList(raw, main) {
+  return String(raw || "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean)
     .map((part) => {
       const idx = part.indexOf(":");
-      if (idx === -1)
-        return { hash: part.trim().toLowerCase(), label: "dev" };
-      return {
-        hash: part.slice(0, idx).trim().toLowerCase(),
-        label: part.slice(idx + 1).trim() || "dev",
-      };
+      const hash = (idx === -1 ? part : part.slice(0, idx)).trim().toLowerCase();
+      const label = idx === -1 ? "dev" : part.slice(idx + 1).trim() || "dev";
+      return main ? { hash, label, main: true } : { hash, label };
     });
+}
+
+function loadDevKeys() {
+  devKeys = [
+    ...parseKeyList(CONFIG.DEV.MAIN_KEY_HASH, true),
+    ...parseKeyList(CONFIG.DEV.KEY_HASH, false),
+  ];
   return devKeys;
 }
 
@@ -148,6 +157,23 @@ function isDevKey(key) {
 // Hashes + labels only - safe for an info panel.
 function listDevKeys() {
   return devKeys.map((d) => ({ hash: d.hash, label: d.label }));
+}
+
+// How an action reads to the person it landed on. Staff surfaces keep the real
+// label, because the team has to be able to hold each other to account; the
+// user gets the team, not the individual. A moderator who bans somebody should
+// not have to wonder whether that person will come looking for them, and the
+// name is the only thing that makes that possible.
+const PUBLIC_DEV = "the Talkomatic team";
+const PUBLIC_STAFF = "the Talkomatic staff";
+
+function publicStaffName(label, role) {
+  if (!label) return null;
+  // Older records predate the role being stored with them, so fall back to
+  // asking whether that label is on the dev roster today.
+  const resolved =
+    role || (devKeys.some((d) => d.label === label) ? "dev" : "mod");
+  return resolved === "dev" ? PUBLIC_DEV : PUBLIC_STAFF;
 }
 
 function getModKeyByPlain(key) {
@@ -413,6 +439,7 @@ module.exports = {
   getDevKey,
   isDevKey,
   listDevKeys,
+  publicStaffName,
   getModKeyByPlain,
   validateKey,
   grantModKey,

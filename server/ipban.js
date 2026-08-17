@@ -67,6 +67,23 @@ function computeRangeCidr(ip, prefix) {
   }
 }
 
+// The span a ban has to cover to mean anything, worked out from the address
+// itself. An IPv6 client is handed a whole /64 for its own network and moves
+// around inside it freely, so blocking the single address it happens to be on
+// blocks nothing; that range is applied to every IPv6 ban rather than being
+// offered as a choice, because nobody placing the ban can see the address to
+// judge it. IPv4 gets null: one address per ban, since a /24 behind CGNAT is a
+// lot of unrelated people, and widening it stays an explicit decision.
+function autoRangeCidr(ip) {
+  try {
+    const addr = ipaddr.parse(String(ip));
+    if (addr.kind() !== "ipv6" || addr.isIPv4MappedAddress()) return null;
+    return computeRangeCidr(ip, DEFAULT_IPV6_PREFIX);
+  } catch (_) {
+    return null;
+  }
+}
+
 // Is `ip` inside the CIDR range `cidr`?
 function ipInCidr(ip, cidr) {
   try {
@@ -251,6 +268,7 @@ module.exports = {
   findActiveIdBlock,
   removeBlocksForDevice,
   computeRangeCidr,
+  autoRangeCidr,
   ipInCidr,
   matchesKey,
   findActiveBlock,

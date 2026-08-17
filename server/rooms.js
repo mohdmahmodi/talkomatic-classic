@@ -47,6 +47,7 @@ const announcements = require("./announcements");
 const banhistory = require("./banhistory");
 const blocklist = require("./blocklist");
 const ipban = require("./ipban");
+const evasion = require("./evasion");
 const gamesFloor = require("./games");
 const gamesSocket = require("./games/socket");
 const staffchat = require("./staffchat");
@@ -1167,7 +1168,7 @@ function resolveOfflineTarget(targetUserId) {
 // row per reported user, with the live name/room resolved when they are online.
 // For offline users we flag whether the server still has an IP on file, so the
 // board can offer an IP block without ever sending the address to the client.
-function buildReportsList(forDev) {
+function buildReportsList(showIp) {
   return reports.summary().map((s) => {
     const targets = findSocketsByUserId(s.targetKey);
     const online = targets.length > 0;
@@ -1196,7 +1197,7 @@ function buildReportsList(forDev) {
     return {
       targetUserId: s.targetKey,
       targetDeviceId,
-      ip: forDev ? targetIp : undefined,
+      ip: showIp ? targetIp : undefined,
       name: name || "(unknown user)",
       total: s.total,
       distinct: s.distinct,
@@ -1218,7 +1219,7 @@ function buildReportsList(forDev) {
           // staff can see the offending text even after it is cleared or they
           // leave. Captured at report time; rendered as plain text on the board.
           // Carries whatever they wrote, so it gets the same mask the room did.
-          targetText: forDev
+          targetText: showIp
             ? r.targetText || null
             : audit.maskIps(r.targetText || null),
         })),
@@ -1227,10 +1228,10 @@ function buildReportsList(forDev) {
 }
 
 // Build the appeals board payload (shared by the get + resolve handlers): one
-// row per appeal, newest first. The raw IP is dev-only, matching the reports
-// board and audit feed; `stillBlocked` lets the board show whether the ban the
-// appeal contests is still in force.
-function buildAppealsList(forDev) {
+// row per appeal, newest first. Raw addresses follow the same rule as the
+// reports board and the audit feed; `stillBlocked` lets the board show whether
+// the ban the appeal contests is still in force.
+function buildAppealsList(showIp) {
   return appeals.list().map((a) => {
     // Range-aware: an appellant whose exact address is not itself a key may
     // still be covered by an IPv6 /64 range ban.
@@ -1241,7 +1242,7 @@ function buildAppealsList(forDev) {
       name: a.name || null,
       userId: a.userId || null,
       deviceId: a.deviceId || null,
-      ip: forDev ? a.ip : undefined,
+      ip: showIp ? a.ip : undefined,
       message: a.message || "",
       at: a.at,
       status: a.status,
@@ -1250,7 +1251,7 @@ function buildAppealsList(forDev) {
       reviewedAt: a.reviewedAt || null,
       stillBlocked,
       banBy: ban.by || null,
-      banReason: forDev ? ban.reason || null : audit.maskIps(ban.reason || null),
+      banReason: showIp ? ban.reason || null : audit.maskIps(ban.reason || null),
       banPermanent: !!ban.permanent,
       banExpiry: ban.expiry || 0,
       banAt: ban.ts || null,
@@ -1288,11 +1289,11 @@ function broadcastAppealsList() {
   if (!io()) return;
   for (const [, s] of io().sockets.sockets)
     if (s.isModLog && (s.isDev || (s.isMod && (s.modLevel || 2) >= 2)))
-      s.emit("staff appeals", buildAppealsList(!!s.isDev));
+      s.emit("staff appeals", buildAppealsList(!!s.isMainDev));
 }
 
 // Feature suggestions for the dashboard. IP is never stored, so nothing here is
-// dev-only, but keep the forDev arg for symmetry with the other boards.
+// dev-only, but keep the arg for symmetry with the other boards.
 function buildSuggestionsList(forDev) {
   return suggestions.list().map((s) => ({
     id: s.id,
@@ -1430,7 +1431,7 @@ function broadcastAppeal(id) {
   for (const [, s] of io().sockets.sockets) {
     if (!s.connected || s.deskAppealId !== id) continue;
     if (!(s.isDev || (s.isMod && (s.modLevel || 2) >= 2))) continue;
-    s.emit("staff appeal", buildAppealsList(!!s.isDev).find((x) => x.id === id));
+    s.emit("staff appeal", buildAppealsList(!!s.isMainDev).find((x) => x.id === id));
   }
 }
 
@@ -1459,10 +1460,10 @@ function appStatusPayload(deviceId, isStaff) {
   };
 }
 
-// Send the mod-application list to one staff socket (the IP is dev-only).
+// Send the mod-application list to one staff socket.
 function sendAppsList(s) {
   if (!s) return;
-  const isDev = !!s.isDev;
+  const showIp = !!s.isMainDev;
   s.emit(
     "mod applications",
     applications.list().map((a) => ({
@@ -1475,12 +1476,12 @@ function sendAppsList(s) {
       reviewedAt: a.reviewedAt,
       reason: a.reason,
       claimed: a.claimed,
-      // Applicant identity, shown to all staff (same as the reports board); the
-      // raw IP stays dev-only, matching how the audit feed is redacted for mods.
+      // Applicant identity, shown to all staff (same as the reports board);
+      // the raw address follows the same rule as the audit feed.
       deviceId: a.deviceId || null,
       discord: a.discord || null,
       discordId: a.discordId || null,
-      ip: isDev ? a.ip : undefined,
+      ip: showIp ? a.ip : undefined,
     })),
   );
   // Bundle the open/closed switch with every list so the dashboard toggle always
@@ -1509,7 +1510,7 @@ function broadcastReportsList() {
   if (!io()) return;
   for (const [, s] of io().sockets.sockets)
     if (s.isModLog && (s.isDev || (s.isMod && (s.modLevel || 2) >= 2)))
-      s.emit("staff reports", buildReportsList(!!s.isDev));
+      s.emit("staff reports", buildReportsList(!!s.isMainDev));
 }
 
 // Acting on a reported user (warn / kick / ip block) settles their report, so
@@ -1521,7 +1522,7 @@ function clearReportAfterAction(socket, targetUserId) {
   broadcastReportsList();
   // Junior (L1) mods can warn and kick but sit outside the broadcast gate
   // above, so tell the acting staffer directly too.
-  socket.emit("staff reports", buildReportsList(!!socket.isDev));
+  socket.emit("staff reports", buildReportsList(!!socket.isMainDev));
 }
 
 // Push the IP ban list to every open dashboard (full mods + devs). Each socket
@@ -1530,7 +1531,7 @@ function broadcastBlockList() {
   if (!io()) return;
   for (const [, s] of io().sockets.sockets)
     if (s.isModLog && (s.isDev || (s.isMod && (s.modLevel || 2) >= 2)))
-      s.emit("dev blocks", buildBlockList(!!s.isDev));
+      s.emit("dev blocks", buildBlockList(!!s.isMainDev));
 }
 
 // Push the ban / unban history to every open dashboard (full mods + devs), so
@@ -1539,7 +1540,7 @@ function broadcastBanHistory() {
   if (!io()) return;
   for (const [, s] of io().sockets.sockets)
     if (s.isModLog && (s.isDev || (s.isMod && (s.modLevel || 2) >= 2)))
-      s.emit("staff ban history", buildBanHistory(!!s.isDev));
+      s.emit("staff ban history", buildBanHistory(!!s.isMainDev));
   // The Desk's #bans channel is the same feed, so it updates on the same beat
   // rather than waiting for somebody to reopen it.
   try {
@@ -1578,6 +1579,7 @@ async function settleNamePolicy(socket, username) {
   if (ip) state.blockedIPs.set(ip, { ...entry });
   if (did) state.blockedIPs.set(ipban.idKey(did), { ...entry });
   blocklist.saveSoon();
+  evasion.invalidate();
   banhistory.record({
     ip: ip || ipban.idKey(did),
     name: username || null,
@@ -1609,10 +1611,10 @@ const STAFF_KEY_MAX_ATTEMPTS = 15;
 const STAFF_KEY_WINDOW = 5 * 60 * 1000;
 
 // Snapshot of currently-blocked IPs for the ban list (skips expired entries).
-// The raw IP is dev-only; full mods get every other field plus an opaque `ref`
-// they can use to lift the ban without ever seeing the address. `bans` is how
-// many times that IP has been blocked over time (the repeat-offender count).
-function buildBlockList(forDev) {
+// Staff get every field except the raw address, plus an opaque `ref` they use
+// to lift the ban without ever seeing it. `bans` is how many times that key
+// has been blocked over time (the repeat-offender count).
+function buildBlockList(showIp) {
   const now = Date.now();
   const out = [];
   // Work out which accounts sit behind each block in ONE pass over the identity
@@ -1652,7 +1654,7 @@ function buildBlockList(forDev) {
       matched = seenByKey.get(ip) || [];
     }
     out.push({
-      ip: forDev ? ip : undefined,
+      ip: showIp ? ip : undefined,
       ref: banRef(ip),
       kind: isId ? "id" : ipban.isRangeKey(ip) ? "range" : "ip",
       // The client identifier a block carries (shown to all staff, like the
@@ -1662,8 +1664,8 @@ function buildBlockList(forDev) {
       label: (b && b.label) || (isId && matched[0] && matched[0].name) || null,
       by: (b && b.by) || null,
       // Staff wrote this, and "evading from x.x.x.x" is a natural thing to
-      // write. Masked for mods for the same reason the address itself is.
-      reason: forDev
+      // write. Masked for the same reason the address itself is.
+      reason: showIp
         ? (b && b.reason) || null
         : audit.maskIps((b && b.reason) || null),
       permanent: expiry >= Number.MAX_SAFE_INTEGER,
@@ -1672,32 +1674,32 @@ function buildBlockList(forDev) {
       bans: banhistory.countBans(ip),
       userCount: matched.length,
       users: matched.map((d) =>
-        forDev
+        showIp
           ? { id: d.id, name: d.name, ips: d.ips, last: d.last }
-          : { name: d.name || "Unknown", last: d.last },
+          : { id: d.id, name: d.name || "Unknown", last: d.last },
       ),
     });
   }
   return out;
 }
 
-// The ban / unban history feed (newest first) for the dashboard. The raw IP is
-// dev-only; full mods see who acted, on whom (by name), when, and why.
-function buildBanHistory(forDev) {
+// The ban / unban history feed (newest first) for the dashboard. Staff see who
+// acted, on whom (by name), when, and why - never the address itself.
+function buildBanHistory(showIp) {
   return banhistory.recent(200).map((e) => ({
     id: e.id,
     name: e.name,
     action: e.action, // "ban" | "unban"
     by: e.by,
     at: e.at,
-    reason: forDev ? e.reason : audit.maskIps(e.reason),
+    reason: showIp ? e.reason : audit.maskIps(e.reason),
     duration: e.duration,
     kind: ipban.isIdKey(e.ip)
       ? "id"
       : e.ip && String(e.ip).includes("/")
         ? "range"
         : "ip",
-    ip: forDev ? e.ip : undefined,
+    ip: showIp ? e.ip : undefined,
   }));
 }
 
@@ -1913,7 +1915,7 @@ function filterVotesForSocket(room, recipientSocket) {
 
 function filterCurrentMessagesForSocket(room, recipientSocket) {
   const messages = {};
-  const forDev = !!recipientSocket?.isDev;
+  const raw = !!recipientSocket?.isMainDev;
   const own = getRecipientUserId(recipientSocket);
   for (const user of room?.users || []) {
     if (!canRecipientSeeDevUser(recipientSocket, user)) continue;
@@ -1921,7 +1923,7 @@ function filterCurrentMessagesForSocket(room, recipientSocket) {
     // Same rule as the live update. Their own box comes back exactly as they
     // left it: rewriting what somebody is still typing helps nobody.
     messages[user.id] =
-      forDev || user.id === own ? text : ipredact.redact(text);
+      raw || user.id === own ? text : ipredact.redact(text);
   }
   return messages;
 }
@@ -2071,9 +2073,10 @@ function emitRoomChatUpdate(socket, payload) {
   if (!room) return;
   const senderUser = room.users?.find((u) => u.id === payload.userId);
   // A textbox is how one user hands another user's address to a whole room, so
-  // an address never leaves the server as it was typed. Devs read it as written,
-  // because somebody has to be able to act on it. The speaker is not a recipient
-  // in this loop, so nothing here rewrites the box they are still typing in.
+  // an address never leaves the server as it was typed. It stays readable on
+  // the operations feed, because somebody has to be able to act on it. The
+  // speaker is not a recipient in this loop, so nothing here rewrites the box
+  // they are still typing in.
   const text = payload.diff?.text;
   const safe = ipredact.looksLikeIp(text)
     ? { ...payload, diff: { ...payload.diff, text: ipredact.redact(text) } }
@@ -2086,7 +2089,7 @@ function emitRoomChatUpdate(socket, payload) {
     )
       continue;
     if (!canRecipientSeeDevUser(recipient, senderUser)) continue;
-    recipient.emit("chat update", recipient.isDev ? payload : safe);
+    recipient.emit("chat update", recipient.isMainDev ? payload : safe);
   }
 }
 
@@ -3162,6 +3165,18 @@ function registerSocketHandlers(opts) {
       );
       socket._idAt = Date.now();
       socket.emit("identity status", identity.summary(socket.deviceId));
+      // They got in, which means nothing on the blocklist matched them. Ask
+      // the other question: does anything on it know them anyway?
+      if (!socket.isDev && !socket.isMod)
+        try {
+          evasion.check({
+            deviceId: socket.deviceId,
+            ip: clientIp,
+            username: socket.handshake?.session?.username || null,
+          });
+        } catch (e) {
+          console.error("evasion check failed:", e.message);
+        }
       // Deliver any staff warnings queued while this device was offline. Slight
       // delay so the page (and its toast handler) is ready to show them.
       const queuedWarnings = warnings.takeFor(socket.deviceId);
@@ -5378,23 +5393,29 @@ function registerSocketHandlers(opts) {
             typeof data?.reason === "string" ? data.reason : "",
           ).slice(0, 500) || null;
 
-        // Range ban (opt-in): only meaningful for a real IPv6 address, where a
-        // client rotates within its /64 to dodge a single-IP ban. computeRangeCidr
-        // returns null for IPv4 (and IPv4-mapped) addresses, so the checkbox is a
-        // harmless no-op there and the ban stays a single IP. The block is stored
-        // under the CIDR key, which covers the exact address too.
-        const cidr = data?.banRange ? ipban.computeRangeCidr(ip) : null;
+        // An IPv6 ban always covers the client's own /64, because banning one
+        // address out of a range it rotates through freely bans nothing. The
+        // checkbox is what widens an IPv4 ban to its /24, which stays a
+        // decision somebody makes. Either way the block is stored under the
+        // CIDR key, which covers the exact address too.
+        const cidr =
+          ipban.autoRangeCidr(ip) ||
+          (data?.banRange ? ipban.computeRangeCidr(ip) : null);
         const blockKey = cidr || ip;
 
         state.blockedIPs.set(blockKey, {
           expiry,
           label: blockedName,
           by: socket.staffLabel || null,
+          // Kept so the ban screen can say which half of the team it came
+          // from without naming anybody.
+          byRole: socket.isDev ? "dev" : "mod",
           ts: Date.now(),
           reason,
           did: blockedDid,
         });
         blocklist.saveSoon(); // persist so the ban survives a restart
+        evasion.invalidate();
         // Record the ban so the history feed and repeat-offender count stay
         // accurate even after the block expires or is lifted.
         banhistory.record({
@@ -5507,7 +5528,10 @@ function registerSocketHandlers(opts) {
           sanitizeMessage(
             typeof data?.reason === "string" ? data.reason : "",
           ).slice(0, 500) || null;
-        const cidr = data?.banRange && isIp ? ipban.computeRangeCidr(ip) : null;
+        const cidr = isIp
+          ? ipban.autoRangeCidr(ip) ||
+            (data?.banRange ? ipban.computeRangeCidr(ip) : null)
+          : null;
         const blockKey = cidr || ip;
         // For an id entry, name it from the identity record so the list and
         // history show who it hits instead of a bare token.
@@ -5517,10 +5541,12 @@ function registerSocketHandlers(opts) {
           expiry,
           label: blockedName,
           by: socket.staffLabel || null,
+          byRole: socket.isDev ? "dev" : "mod",
           ts: Date.now(),
           reason,
         });
         blocklist.saveSoon();
+        evasion.invalidate();
         banhistory.record({
           ip: blockKey,
           name: blockedName,
@@ -5553,7 +5579,7 @@ function registerSocketHandlers(opts) {
         logStaff(
           socket,
           `ban ip ${duration}${cidr ? " (range)" : ""}`,
-          socket.isDev ? blockKey : "ip",
+          blockedName || blockKey,
           "-",
           reason || undefined,
         );
@@ -6644,7 +6670,7 @@ function registerSocketHandlers(opts) {
       "dev list blocks",
       safe(async () => {
         if (!requireStaff(socket)) return;
-        socket.emit("dev blocks", buildBlockList(!!socket.isDev));
+        socket.emit("dev blocks", buildBlockList(!!socket.isMainDev));
       }),
     );
 
@@ -6654,7 +6680,7 @@ function registerSocketHandlers(opts) {
       "staff get ban history",
       safe(async () => {
         if (!requireStaff(socket)) return;
-        socket.emit("staff ban history", buildBanHistory(!!socket.isDev));
+        socket.emit("staff ban history", buildBanHistory(!!socket.isMainDev));
       }),
     );
 
@@ -6682,26 +6708,26 @@ function registerSocketHandlers(opts) {
           g.ips.add(s.clientIp || s.handshake.address || "?");
           g.count += 1;
         }
-        // Moderators may look at this board, but never at raw addresses: these
-        // are other staff members' home IPs, and a mod does not see any other
-        // IP anywhere else in the dashboard. They still get the shape of the
-        // problem (how many addresses a key is live on), which is the point of
-        // the board, without the addresses themselves.
-        const isDev = !!socket.isDev;
+        // Staff may look at this board, but never at raw addresses: these are
+        // other staff members' home IPs, and nobody sees any other IP anywhere
+        // else in the dashboard. They still get the shape of the problem (how
+        // many addresses a key is live on), which is the point of the board,
+        // without the addresses themselves.
+        const showIp = !!socket.isMainDev;
         const sessions = [...byKey.values()].map((g) => ({
-          hash: isDev ? g.hash : g.hash.slice(0, 8),
+          hash: showIp ? g.hash : g.hash.slice(0, 8),
           label: g.label,
           role: g.role,
-          ips: isDev ? [...g.ips] : [],
+          ips: showIp ? [...g.ips] : [],
           ipCount: g.ips.size,
           sessionCount: g.count,
           multiIp: g.ips.size > 1,
         }));
         const history = roles.getKeyActivity().map((h) => ({
-          hash: isDev ? h.hash : String(h.hash || "").slice(0, 8),
+          hash: showIp ? h.hash : String(h.hash || "").slice(0, 8),
           label: h.label,
           role: h.role,
-          ips: isDev
+          ips: showIp
             ? h.ips
             : (h.ips || []).map((x) => ({
               first: x.first,
@@ -6714,8 +6740,9 @@ function registerSocketHandlers(opts) {
       }),
     );
 
-    // Unban: full mods + devs. A dev sends the raw IP; a mod (who never sees the
-    // IP) sends the ban's opaque `ref`, which we resolve back to the address.
+    // Unban: full mods + devs. The dashboard sends the ban's opaque `ref`,
+    // which resolves back to the address here; a raw IP is still accepted for
+    // anything typed in by hand.
     socket.on(
       "dev unblock ip",
       safe(async (data) => {
@@ -6734,6 +6761,7 @@ function registerSocketHandlers(opts) {
         const removed = state.blockedIPs.delete(ip);
         state.botBlacklist.delete(ip);
         blocklist.saveSoon();
+        evasion.invalidate();
         if (removed)
           banhistory.record({
             ip,
@@ -6751,9 +6779,9 @@ function registerSocketHandlers(opts) {
           ? appeals.resolveOpenForDevice(ip.slice(3), "lifted", reviewer)
           : appeals.resolveOpenForIp(ip, "lifted", reviewer);
         if (resolved) broadcastAppealsList();
-        // Audit target is the user's name (mods never see the IP); devs still
-        // get the IP in their own audit feed via the action's separate logging.
-        logStaff(socket, "unblock ip", blockedName || (socket.isDev ? ip : "user"), "-");
+        // Audit target is the user's name; the address itself rides on the
+        // entry's own `ip` field, where the feed's redaction can reach it.
+        logStaff(socket, "unblock ip", blockedName || ip, "-");
         socket.emit("staff action result", {
           action: "unblock ip",
           ok: true,
@@ -6761,7 +6789,7 @@ function registerSocketHandlers(opts) {
           removed,
         });
         // Refresh this dashboard's live block list immediately.
-        socket.emit("dev blocks", buildBlockList(!!socket.isDev));
+        socket.emit("dev blocks", buildBlockList(!!socket.isMainDev));
       }),
     );
 
@@ -6772,7 +6800,8 @@ function registerSocketHandlers(opts) {
       "dev set block duration",
       safe(async (data) => {
         if (!requireDev(socket)) return;
-        const ip = typeof data?.ip === "string" ? data.ip.trim() : "";
+        let ip = typeof data?.ip === "string" ? data.ip.trim() : "";
+        if (!ip && typeof data?.ref === "string") ip = ipForBanRef(data.ref);
         if (!ip)
           return socket.emit(
             "error",
@@ -6811,14 +6840,15 @@ function registerSocketHandlers(opts) {
         rec.expiry = expiry;
         state.blockedIPs.set(ip, rec);
         blocklist.saveSoon();
+        evasion.invalidate();
         broadcastBlockList();
         logStaff(socket, `set block duration ${duration}`, ip, "-");
         socket.emit("staff action result", {
           action: "set block duration",
           ok: true,
-          ip,
+          ref: data?.ref || null,
         });
-        socket.emit("dev blocks", buildBlockList());
+        socket.emit("dev blocks", buildBlockList(!!socket.isMainDev));
       }),
     );
 
@@ -6829,7 +6859,8 @@ function registerSocketHandlers(opts) {
       "dev set block message",
       safe(async (data) => {
         if (!requireDev(socket)) return;
-        const ip = typeof data?.ip === "string" ? data.ip.trim() : "";
+        let ip = typeof data?.ip === "string" ? data.ip.trim() : "";
+        if (!ip && typeof data?.ref === "string") ip = ipForBanRef(data.ref);
         if (!ip)
           return socket.emit(
             "error",
@@ -6855,14 +6886,15 @@ function registerSocketHandlers(opts) {
         rec.reason = reason;
         state.blockedIPs.set(ip, rec);
         blocklist.saveSoon();
+        evasion.invalidate();
         broadcastBlockList();
         logStaff(socket, "set block message", ip, "-", reason || "(cleared)");
         socket.emit("staff action result", {
           action: "set block message",
           ok: true,
-          ip,
+          ref: data?.ref || null,
         });
-        socket.emit("dev blocks", buildBlockList());
+        socket.emit("dev blocks", buildBlockList(!!socket.isMainDev));
       }),
     );
 
@@ -7123,18 +7155,19 @@ function registerSocketHandlers(opts) {
         const days = audit.pacificDayStarts(7);
         const weekStart = days[0];
         socket.emit("audit snapshot", {
-          entries: audit.recent(
-            limit,
-            !!socket.isDev,
-            socket.modLevel || 2,
-            weekStart,
-          ),
+          entries: audit.recent(limit, {
+            showIp: !!socket.isMainDev,
+            isDev: !!socket.isDev,
+            modLevel: socket.modLevel || 2,
+            since: weekStart,
+          }),
           dayStart: days[days.length - 1],
           days,
           me: {
             role: socket.isDev ? "dev" : "mod",
             label: socket.staffLabel || null,
             modLevel: socket.isDev ? 0 : socket.modLevel || 2,
+            mainDev: !!socket.isMainDev,
           },
           roster: {
             devs: roles.listDevKeys().map((d) => d.label),
@@ -7145,8 +7178,8 @@ function registerSocketHandlers(opts) {
     );
 
     // Everything one staff member has ever done. Any staff level may look at
-    // any other, so the team can hold each other to account. The raw IP on
-    // each entry stays dev-only, same as the main feed.
+    // any other, so the team can hold each other to account. The addresses on
+    // each entry come off, same as the main feed.
     socket.on(
       "staff get mod history",
       safe(async (data) => {
@@ -7165,7 +7198,9 @@ function registerSocketHandlers(opts) {
           // Same redaction as the main feed rather than a second copy of the
           // rule: deleting `ip` here was not enough, because an IP ban records
           // the address it blocked as the entry's target.
-          entries: socket.isDev ? h.entries : h.entries.map(audit.redactForMod),
+          entries: socket.isMainDev
+            ? h.entries
+            : h.entries.map(audit.redactEntry),
         });
       }),
     );
@@ -7218,12 +7253,35 @@ function registerSocketHandlers(opts) {
       }),
     );
 
+    // Take rows off the activity board for good. Dev-only, and deliberately
+    // not logged: a cleared row that leaves a "cleared a row" entry behind has
+    // not been cleared. The Desk reads the same rows, so it drops them on the
+    // same beat rather than showing a board the dashboard no longer has.
+    socket.on(
+      "staff delete activity",
+      safe(async (data) => {
+        if (!requireDev(socket)) return;
+        const ids = Array.isArray(data?.ids)
+          ? data.ids.slice(0, 500)
+          : data?.id != null
+            ? [data.id]
+            : [];
+        if (!ids.length) return;
+        const gone = audit.remove(ids);
+        socket.emit("staff action result", {
+          action: "delete activity",
+          ok: gone.length > 0,
+          ids: gone,
+        });
+      }),
+    );
+
     // ── Reports board (full mods + devs): who has been reported, with actions ─
     socket.on(
       "staff get reports",
       safe(async () => {
         if (!requireStaff(socket)) return;
-        socket.emit("staff reports", buildReportsList(!!socket.isDev));
+        socket.emit("staff reports", buildReportsList(!!socket.isMainDev));
       }),
     );
 
@@ -7245,7 +7303,36 @@ function registerSocketHandlers(opts) {
           { name: before?.name || "?", id: targetUserId },
           "-",
         );
-        socket.emit("staff reports", buildReportsList(!!socket.isDev));
+        socket.emit("staff reports", buildReportsList(!!socket.isMainDev));
+      }),
+    );
+
+    // ── Delete a report (dev): the row goes, and so does the Desk card ──────
+    // Dismissing settles a report and says who settled it. This is the other
+    // thing: the report should never have been on the board, so nothing about
+    // it is kept - no audit line, no stamped card, no trace on either surface.
+    socket.on(
+      "staff delete report",
+      safe(async (data) => {
+        if (!requireDev(socket)) return;
+        const targetUserId = data?.targetUserId;
+        if (!targetUserId || typeof targetUserId !== "string") return;
+        const had = reports.clear(targetUserId);
+        try {
+          staffchat.dropQueue(
+            (m) =>
+              m.qkind === "report" &&
+              (m.card.targetUserId === targetUserId ||
+                (m.card.ids || []).includes(targetUserId)),
+          );
+        } catch (_) {}
+        broadcastReportsList();
+        socket.emit("staff reports", buildReportsList(!!socket.isMainDev));
+        socket.emit("staff action result", {
+          action: "delete report",
+          ok: had,
+          targetUserId,
+        });
       }),
     );
 
@@ -7254,7 +7341,7 @@ function registerSocketHandlers(opts) {
       "staff get appeals",
       safe(async () => {
         if (!requireStaff(socket)) return;
-        socket.emit("staff appeals", buildAppealsList(!!socket.isDev));
+        socket.emit("staff appeals", buildAppealsList(!!socket.isMainDev));
       }),
     );
 
@@ -7267,7 +7354,7 @@ function registerSocketHandlers(opts) {
         const id = Number(data?.id) || null;
         socket.deskAppealId = id;
         if (!id) return;
-        const row = buildAppealsList(!!socket.isDev).find((x) => x.id === id);
+        const row = buildAppealsList(!!socket.isMainDev).find((x) => x.id === id);
         if (row) socket.emit("staff appeal", row);
       }),
     );
@@ -7437,6 +7524,7 @@ function registerSocketHandlers(opts) {
           const removed = removedKeys.length > 0;
           state.botBlacklist.delete(a.ip);
           blocklist.saveSoon();
+          evasion.invalidate();
           if (removed)
             banhistory.record({
               ip: a.ip,
@@ -7472,7 +7560,7 @@ function registerSocketHandlers(opts) {
           id,
           decision === "lift" ? "ban lifted" : "dismissed",
         );
-        socket.emit("staff appeals", buildAppealsList(!!socket.isDev));
+        socket.emit("staff appeals", buildAppealsList(!!socket.isMainDev));
       }),
     );
 
@@ -7497,7 +7585,7 @@ function registerSocketHandlers(opts) {
           );
         } catch (_) {}
         broadcastAppealsList();
-        socket.emit("staff appeals", buildAppealsList(!!socket.isDev));
+        socket.emit("staff appeals", buildAppealsList(!!socket.isMainDev));
       }),
     );
 

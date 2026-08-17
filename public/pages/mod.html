@@ -792,6 +792,23 @@
         color: var(--dim2);
         margin-top: 0.125rem;
       }
+      .e-del {
+        background: none;
+        border: none;
+        color: var(--dim2);
+        cursor: pointer;
+        padding: 0.125rem 0.25rem;
+        font-size: 0.75rem;
+        opacity: 0;
+        transition: opacity 0.12s, color 0.12s;
+      }
+      .entry:hover .e-del,
+      .e-del:focus-visible {
+        opacity: 1;
+      }
+      .e-del:hover {
+        color: var(--red);
+      }
       .e-body {
         padding: 0.125rem 0.8125rem 0.6875rem;
         display: flex;
