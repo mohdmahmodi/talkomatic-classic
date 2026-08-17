@@ -387,7 +387,7 @@ const ACTION_GROUPS = [
       "kick", "kick+ban", "wipe buffer", "warn",
       "ban", "ban ip", "ip block", "unblock ip",
       "rename", "reset location", "turn pfp off", "allow pfp",
-      "freeze", "unfreeze", "piano mute", "piano unmute",
+      "freeze", "unfreeze",
     ],
   },
   {
@@ -470,8 +470,6 @@ const TOGGLE_PAIRS = new Map([
   ["unfreeze", "freeze"],
   ["turn pfp off", "allow pfp"],
   ["allow pfp", "turn pfp off"],
-  ["piano mute", "piano unmute"],
-  ["piano unmute", "piano mute"],
   ["maintenance on", "maintenance off"],
   ["maintenance off", "maintenance on"],
 ]);

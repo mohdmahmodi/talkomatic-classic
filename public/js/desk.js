@@ -2430,7 +2430,7 @@
   // ── Virtual channel rows ──────────────────────────────────────────────────
 
   const ACT_HEAVY = /^(ban|kick\+ban|ip block|unblock ip|lift ban|nuke)/;
-  const ACT_USER = /^(kick|warn|wipe buffer|rename|freeze|unfreeze|reset location|turn pfp off|allow pfp|piano)/;
+  const ACT_USER = /^(kick|warn|wipe buffer|rename|freeze|unfreeze|reset location|turn pfp off|allow pfp)/;
 
   function activityTone(action) {
     const a = String(action || "").toLowerCase();

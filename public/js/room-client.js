@@ -43,7 +43,6 @@ let chatInput = null;
 const CLIENT_PROTOCOL = 1;
 let pendingRestoreText = null;
 let talkoboardInstance = null;
-let pianoInstance = null;
 
 let currentUserIsDev = false;
 let currentUserIsVanished = false;
@@ -1442,15 +1441,6 @@ function createEmotesDropdown() {
 // ── 7. APP DIRECTORY ────────────────────────────────────────────────────────
 
 const APPS_DATA = {
-  watchparty: {
-    name: "WatchParty",
-    description: "Watch YouTube videos together",
-    icon: "https://watchparty.talkomatic.co/images/logo.png",
-    iconClass: "watchparty",
-    status: "available",
-    url: "https://watchparty.talkomatic.co/",
-    openInNewTab: true,
-  },
   infiniteboard: {
     name: "Talkoboard",
     description: "Draw together in real-time",
@@ -1460,16 +1450,6 @@ const APPS_DATA = {
     url: null,
     openInNewTab: false,
     action: "talkoboard",
-  },
-  piano: {
-    name: "Multiplayer Piano",
-    description: "Play piano together in real-time",
-    icon: "🎹",
-    iconClass: "placeholder",
-    status: "available",
-    url: null,
-    openInNewTab: false,
-    action: "piano",
   },
   themeEditor: {
     name: "Theme Editor",
@@ -1542,8 +1522,6 @@ function createAppDirectoryDropdown() {
         hideAppDirectory();
         if (app.action === "talkoboard") {
           openTalkoboard();
-        } else if (app.action === "piano") {
-          openPiano();
         } else if (app.action === "themeEditor") {
           if (window.ThemeEditor) window.ThemeEditor.open();
         } else if (app.action === "games") {
@@ -1620,32 +1598,6 @@ function openTalkoboard() {
   talkoboardInstance.open();
 }
 
-function openPiano() {
-  if (!currentRoomId || !currentUserId) {
-    showErrorModal("You must be in a room to use the Piano.");
-    return;
-  }
-  if (typeof Piano === "undefined") {
-    showErrorModal(
-      "The Piano is still loading. Please refresh the page and try again.",
-    );
-    return;
-  }
-  try {
-    if (!pianoInstance) {
-      pianoInstance = new Piano(socket, currentUserId, currentUsername, {
-        isDev: currentUserIsDev,
-        isMod: currentUserIsMod,
-      });
-    }
-    pianoInstance.open();
-  } catch (err) {
-    console.error("Piano failed to open:", err);
-    showErrorModal(
-      "Sorry, the Piano failed to open. Please refresh the page and try again.",
-    );
-  }
-}
 
 // ── 9. VOTING UI ────────────────────────────────────────────────────────────
 

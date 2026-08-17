@@ -364,8 +364,8 @@ const io = socketIo(server, {
   // out uncompressed anyway - but it is not free just because it rarely fires.
   // ws compresses on the thread pool, and it holds back everything else queued
   // on that connection until the compressor comes back, so one oversized room
-  // state broadcast would sit in front of a burst of piano notes or draw
-  // strokes. Real time traffic being stuck behind bulk traffic is exactly what
+  // state broadcast would sit in front of a burst of draw strokes or game
+  // frames. Real time traffic being stuck behind bulk traffic is exactly what
   // this is for avoiding, and the bandwidth it saved was never the constraint.
   perMessageDeflate: false,
   // Whole-page and asset responses still compress. That path is bulk by
@@ -521,11 +521,6 @@ io.use((socket, next) => {
               "disconnect",
               "disconnecting",
               "typing",
-              // Piano note batches are a real-time stream (~18/sec while playing)
-              // with their own dedicated flood caps (msgs/sec, notes/sec, and
-              // per-message), so the blunt generic limiter must not drop them -
-              // that is what made notes cut out during active play.
-              "piano notes",
               // Same story for Draw & Guess strokes: batched, and capped by
               // its own per-second limit in server/games/socket.js.
               "games draw",

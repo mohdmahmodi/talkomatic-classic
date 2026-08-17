@@ -561,7 +561,7 @@ function settleQueue(match) {
 }
 
 const SETTLES_QUEUE =
-  /^(kick|ban|ip block|unblock ip|warn|wipe buffer|dismiss report|freeze|reset location|turn pfp off|piano mute|approve mod application|reject mod application|dismiss appeal|lift ban|approve suggestion|decline suggestion|revoke mod)/;
+  /^(kick|ban|ip block|unblock ip|warn|wipe buffer|dismiss report|freeze|reset location|turn pfp off|approve mod application|reject mod application|dismiss appeal|lift ban|approve suggestion|decline suggestion|revoke mod)/;
 
 function dropQueue(match) {
   const list = desk.channels.queues || [];

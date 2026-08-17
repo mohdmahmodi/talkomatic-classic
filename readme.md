@@ -28,7 +28,7 @@ Talkomatic was created in 1973 on the PLATO system at the University of Illinois
 - **Rooms**: public, semi-private (6-digit access code), and private, in horizontal or vertical layouts
 - **Community suggestion board**: post ideas, reply, upvote, and see what gets approved and shipped
 - **Discord avatars**: optionally show your Discord profile picture next to your name
-- **Built-in apps**: a shared piano, a collaborative whiteboard, and minigames
+- **Built-in apps**: a collaborative whiteboard and minigames
 - **Themes**: swappable full-page themes, plus community themes
 - **Moderation**: staff dashboard with audit log, reports, appeals, IP bans, and a word filter
 - **Bot API**: token-based access for bots, with REST and Socket.IO

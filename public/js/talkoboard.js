@@ -101,7 +101,7 @@ class Talkoboard {
     // ── Point simplification ────────────────────────────────────────
     this.MIN_POINT_DISTANCE_SQ = 2.25;
 
-    // ── Live cursors (entity interpolation, mirrors the piano) ──────
+    // ── Live cursors (entity interpolation) ──────
     this.remoteCursors = new Map();
     this.cursorThrottle = 0;
     this.CURSOR_SEND_INTERVAL = 45;
