@@ -40,6 +40,7 @@ function io() {
 // greedy: over-redacting a version number costs nothing, leaking an address
 // costs a user their approximate location.
 const ipredact = require("./ipredact");
+const roles = require("./roles");
 
 const HIDDEN = "[ip hidden]";
 
@@ -70,9 +71,15 @@ function redactEntry(entry) {
   delete copy.targetIp;
   for (const f of MASKED_FIELDS)
     if (copy[f] != null) copy[f] = maskIps(copy[f]);
+  // Who did it comes off for every reader but site operations. A row saying
+  // which moderator placed a ban is the same thing as a ban row saying it, and
+  // the feed is the easiest place to go looking. The action, the target and
+  // the time all stay: this reads as a record of what the team did.
+  if (copy.label && (copy.role === "mod" || copy.role === "dev"))
+    copy.label = roles.teamLabel(copy.label);
   // A forced rename is the one entry that is not an action but still names the
   // staff member behind it. The event stays on the feed; the name does not.
-  if (copy.byRole === "dev") {
+  if (copy.byRole === "mod" || copy.byRole === "dev") {
     delete copy.by;
     delete copy.byRole;
   }

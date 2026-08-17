@@ -1675,14 +1675,16 @@
     card.appendChild(grid);
 
     const actions = divc("mc-actions");
-    // Anyone on staff can read anyone's record, including a dev's.
-    const histBtn = document.createElement("button");
-    histBtn.className = "btn sm";
-    histBtn.appendChild(icon("fa-clock-rotate-left"));
-    histBtn.appendChild(document.createTextNode(" Their record"));
-    histBtn.title = "Everything " + (m.label || "this person") + " has ever done";
-    histBtn.addEventListener("click", () => openModHistory(m));
-    actions.appendChild(histBtn);
+    if (viewerIsOps()) {
+      const histBtn = document.createElement("button");
+      histBtn.className = "btn sm";
+      histBtn.appendChild(icon("fa-clock-rotate-left"));
+      histBtn.appendChild(document.createTextNode(" Their record"));
+      histBtn.title =
+        "Everything " + (m.label || "this person") + " has ever done";
+      histBtn.addEventListener("click", () => openModHistory(m));
+      actions.appendChild(histBtn);
+    }
 
     // Promote / demote / revoke apply to mod keys only, and only a dev may do
     // them; dev keys themselves live in the server config.
@@ -2587,15 +2589,18 @@
     // Their record outlives the key: what they did while they held it is still
     // readable, which is the whole point of keeping the name.
     const actions = divc("mc-actions");
-    const histBtn = document.createElement("button");
-    histBtn.className = "btn sm";
-    histBtn.appendChild(icon("fa-clock-rotate-left"));
-    histBtn.appendChild(document.createTextNode(" Their record"));
-    histBtn.title = "Everything " + (f.label || "this person") + " did as staff";
-    histBtn.addEventListener("click", () =>
-      openModHistory({ label: f.label, rank: f.level === 1 ? "l1" : "l2" }),
-    );
-    actions.appendChild(histBtn);
+    if (viewerIsOps()) {
+      const histBtn = document.createElement("button");
+      histBtn.className = "btn sm";
+      histBtn.appendChild(icon("fa-clock-rotate-left"));
+      histBtn.appendChild(document.createTextNode(" Their record"));
+      histBtn.title =
+        "Everything " + (f.label || "this person") + " did as staff";
+      histBtn.addEventListener("click", () =>
+        openModHistory({ label: f.label, rank: f.level === 1 ? "l1" : "l2" }),
+      );
+      actions.appendChild(histBtn);
+    }
 
     // Handing the key back from here reuses the exact label they had, which is
     // what their record is filed under. Typing the name again in the grant box
@@ -4632,6 +4637,8 @@
   const viewerIsDev = () => !!(me && me.role === "dev");
   const viewerIsFullMod = () =>
     viewerIsDev() || !!(me && (me.modLevel || 2) >= 2);
+  // Site operations: the one reader the boards still name staff to.
+  const viewerIsOps = () => !!(me && me.mainDev);
 
   // A short line at the top of a board telling a junior what they are looking
   // at and why the buttons are missing, rather than leaving them to guess.
@@ -4701,7 +4708,7 @@
     );
     readOnlyNote(
       "tab-mods",
-      "Anyone on staff can read the roster and any record. Granting, promoting, and revoking keys are dev-only.",
+      "Anyone on staff can read the roster. Granting, promoting, and revoking keys are dev-only, and a person's record is read by site operations.",
     );
     readOnlyNote(
       "tab-sessions",

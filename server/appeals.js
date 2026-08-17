@@ -326,10 +326,11 @@ function reopen(id, byLabel, note) {
   a.lockedAt = null;
   a.reopenedBy = byLabel || null;
   a.reopenedAt = Date.now();
+  // The name goes on the record field, never into the note: a line of text is
+  // the one place no reader-side rule can take it back out again.
   systemNote(
     a,
-    (byLabel ? byLabel + " reopened this appeal." : "This appeal was reopened.") +
-      " Somebody is looking at it again." +
+    "This appeal was reopened. Somebody is looking at it again." +
       (note ? " " + note : ""),
   );
   saveSoon();

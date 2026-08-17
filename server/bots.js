@@ -47,6 +47,7 @@ const {
   isReservedName,
 } = require("./state");
 const ipredact = require("./ipredact");
+const linkfilter = require("./linkfilter");
 const { DATA_DIR } = require("./datadir");
 
 const STORE_PATH = path.join(DATA_DIR, "bots.json");
@@ -171,6 +172,8 @@ function validateConfig(input, existingId) {
     return { ok: false, error: "That name is reserved." };
   if (ipredact.containsIp(name))
     return { ok: false, error: "Names cannot contain an IP address." };
+  if (linkfilter.containsLink(name))
+    return { ok: false, error: "Names cannot contain a link." };
 
   // The line after the slash, like a person's "Sara / Earth". Their choice;
   // the BOT badge is what marks it as a bot, not this text.
@@ -179,6 +182,8 @@ function validateConfig(input, existingId) {
     return { ok: false, error: "That location is not allowed." };
   if (location && ipredact.containsIp(location))
     return { ok: false, error: "Locations cannot contain an IP address." };
+  if (location && linkfilter.containsLink(location))
+    return { ok: false, error: "Locations cannot contain a link." };
   if (!location) location = "Bot";
 
   const rulesIn = Array.isArray(input.rules) ? input.rules : [];

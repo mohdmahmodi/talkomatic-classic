@@ -35,6 +35,7 @@ const {
 const roles = require("./roles");
 const audit = require("./audit");
 const ipredact = require("./ipredact");
+const linkfilter = require("./linkfilter");
 const identity = require("./identity");
 const modwatch = require("./modwatch");
 const keywatch = require("./keywatch");
@@ -1269,10 +1270,10 @@ function buildAppealsList(showIp) {
       barredBy: bar
         ? showIp
           ? bar.by || null
-          : roles.teamLabel(bar.by, bar.byRole)
+          : roles.teamLabel(bar.by)
         : null,
       barredAt: bar ? bar.at : null,
-      banBy: showIp ? ban.by || null : roles.teamLabel(ban.by, ban.byRole),
+      banBy: showIp ? ban.by || null : roles.teamLabel(ban.by),
       banReason: showIp ? ban.reason || null : audit.maskIps(ban.reason || null),
       banPermanent: !!ban.permanent,
       banExpiry: ban.expiry || 0,
@@ -1286,18 +1287,19 @@ function buildAppealsList(showIp) {
       reopenedBy: showIp
         ? a.reopenedBy || null
         : roles.teamReviewer(a.reopenedBy),
-      // The thread itself. A developer answering an appeal signs it as the
-      // team here too, and their picture comes off with the name - otherwise
-      // the avatar says who it was as plainly as the label would.
+      // The thread itself. Staff answering an appeal sign it as the team, and
+      // the picture comes off with the name - otherwise the avatar says who it
+      // was as plainly as the label would.
       messages: (a.messages || []).map((m) => {
-        const hide = !showIp && m.from === "staff" && m.role === "dev";
+        const hide = !showIp && m.from === "staff";
         return {
           id: m.id,
           ts: m.ts,
           from: m.from,
-          by: hide ? roles.teamLabel(m.by, "dev") : m.by || null,
+          by: hide ? roles.teamLabel(m.by) : m.by || null,
           role: m.role || null,
-          level: m.level == null ? null : m.level,
+          // The level narrows a small team down as surely as a name does.
+          level: hide ? null : m.level == null ? null : m.level,
           avatar: hide ? null : m.avatar || null,
           text: m.text || "",
           reply:
@@ -1719,7 +1721,7 @@ function buildBlockList(showIp) {
       label: (b && b.label) || (isId && matched[0] && matched[0].name) || null,
       by: showIp
         ? (b && b.by) || null
-        : roles.teamLabel((b && b.by) || null, b && b.byRole),
+        : roles.teamLabel((b && b.by) || null),
       // Staff wrote this, and "evading from x.x.x.x" is a natural thing to
       // write. Masked for the same reason the address itself is.
       reason: showIp
@@ -1747,7 +1749,7 @@ function buildBanHistory(showIp) {
     id: e.id,
     name: e.name,
     action: e.action, // "ban" | "unban"
-    by: showIp ? e.by : roles.teamLabel(e.by, e.byRole),
+    by: showIp ? e.by : roles.teamLabel(e.by),
     at: e.at,
     reason: showIp ? e.reason : audit.maskIps(e.reason),
     duration: e.duration,
@@ -1970,6 +1972,14 @@ function filterVotesForSocket(room, recipientSocket) {
   return filtered;
 }
 
+// Everything a textbox must not carry out of the room it was typed in.
+function scrubRoomText(text) {
+  let out = text;
+  if (ipredact.looksLikeIp(out)) out = ipredact.redact(out);
+  if (linkfilter.looksLikeLink(out)) out = linkfilter.redact(out);
+  return out;
+}
+
 function filterCurrentMessagesForSocket(room, recipientSocket) {
   const messages = {};
   const raw = !!recipientSocket?.isMainDev;
@@ -1979,8 +1989,7 @@ function filterCurrentMessagesForSocket(room, recipientSocket) {
     const text = state.userMessageBuffers.get(user.id) || "";
     // Same rule as the live update. Their own box comes back exactly as they
     // left it: rewriting what somebody is still typing helps nobody.
-    messages[user.id] =
-      raw || user.id === own ? text : ipredact.redact(text);
+    messages[user.id] = raw || user.id === own ? text : scrubRoomText(text);
   }
   return messages;
 }
@@ -2129,15 +2138,17 @@ function emitRoomChatUpdate(socket, payload) {
   const room = state.rooms.get(socket.roomId);
   if (!room) return;
   const senderUser = room.users?.find((u) => u.id === payload.userId);
-  // A textbox is how one user hands another user's address to a whole room, so
-  // an address never leaves the server as it was typed. It stays readable on
-  // the operations feed, because somebody has to be able to act on it. The
-  // speaker is not a recipient in this loop, so nothing here rewrites the box
-  // they are still typing in.
+  // A textbox is how one user hands another user's address - or an outside
+  // link - to a whole room, so neither leaves the server as it was typed. Both
+  // stay readable to the main dev, because somebody has to be able to act on
+  // them. The speaker is not a recipient in this loop, so nothing here
+  // rewrites the box they are still typing in.
   const text = payload.diff?.text;
-  const safe = ipredact.looksLikeIp(text)
-    ? { ...payload, diff: { ...payload.diff, text: ipredact.redact(text) } }
-    : payload;
+  const clean = typeof text === "string" ? scrubRoomText(text) : text;
+  const safe =
+    clean === text
+      ? payload
+      : { ...payload, diff: { ...payload.diff, text: clean } };
   for (const [, recipient] of io().sockets.sockets) {
     if (
       !recipient.connected ||
@@ -2589,6 +2600,19 @@ async function processPendingChatUpdates(userId, socket) {
     // Redaction happens on the way out instead: emitRoomChatUpdate and
     // filterCurrentMessagesForSocket.
     state.userMessageBuffers.set(userId, msg);
+
+    // Their own box is never rewritten, so without this a link just sits there
+    // looking sent. Edge-triggered, or it would re-warn on every keystroke.
+    const hasLink = linkfilter.containsLink(msg);
+    if (hasLink && !socket._linkWarned) {
+      socket._linkWarned = true;
+      socket.emit("message", {
+        type: "warning",
+        text: "Links cannot be shared on Talkomatic. Nobody else in the room can see it.",
+      });
+    } else if (!hasLink && socket._linkWarned) {
+      socket._linkWarned = false;
+    }
 
     // Typing "@someone" in a room nudges that person. Their name may contain
     // spaces, so this matches against the actual roster rather than trying to
@@ -3537,6 +3561,16 @@ function registerSocketHandlers(opts) {
               "Names and locations cannot contain an IP address.",
             ),
           );
+        // A link in a name is the same problem with the same answer: there is
+        // no per-reader copy of a name to strip it out of.
+        if (linkfilter.containsLink(username) || linkfilter.containsLink(location))
+          return socket.emit(
+            "error",
+            createErrorResponse(
+              ERROR_CODES.VALIDATION_ERROR,
+              "Names and locations cannot contain a link.",
+            ),
+          );
 
         // Nobody chats as a guest. The lobby no longer hands out a name, so
         // this catches a stale one from an old session and anyone typing the
@@ -4233,7 +4267,8 @@ function registerSocketHandlers(opts) {
         if (!socket.roomId || !socket.handshake.session?.userId) return;
         if (socket.spectating) return;
         if (!data?.text || typeof data.text !== "string") return;
-        const text = data.text.slice(0, 200);
+        // Goes to the whole room, so it gets the same treatment as a textbox.
+        const text = linkfilter.redact(data.text.slice(0, 200));
         emitSubAppEvent(
           socket,
           "board chat",
@@ -4724,13 +4759,21 @@ function registerSocketHandlers(opts) {
           );
         // A room name sits in the lobby for everyone, staff or not. Same rule
         // as a username: refused, because there is nobody to hide it from
-        // selectively.
+        // selectively. A link is refused for the same reason.
         if (ipredact.containsIp(roomName))
           return socket.emit(
             "error",
             createErrorResponse(
               ERROR_CODES.VALIDATION_ERROR,
               "Room name cannot contain an IP address.",
+            ),
+          );
+        if (linkfilter.containsLink(roomName))
+          return socket.emit(
+            "error",
+            createErrorResponse(
+              ERROR_CODES.VALIDATION_ERROR,
+              "Room name cannot contain a link.",
             ),
           );
 
@@ -6256,6 +6299,14 @@ function registerSocketHandlers(opts) {
               "Room name cannot contain an IP address.",
             ),
           );
+        if (linkfilter.containsLink(roomName))
+          return socket.emit(
+            "error",
+            createErrorResponse(
+              ERROR_CODES.VALIDATION_ERROR,
+              "Room name cannot contain a link.",
+            ),
+          );
         const oldName = room.name;
         room.name = roomName;
         state.apiCache.delete("public_rooms");
@@ -7351,36 +7402,37 @@ function registerSocketHandlers(opts) {
             modLevel: socket.isDev ? 0 : socket.modLevel || 2,
             mainDev: !!socket.isMainDev,
           },
-          // Who the feed can be filtered by. Developers are left off it for
-          // anyone but operations: there is nothing of theirs on the feed to
-          // filter to, and a name in the picker is an invitation to look for
-          // one.
+          // Who the feed can be filtered by. Only operations, because the feed
+          // is the only place the rest of the team reads and it no longer says
+          // who did what - a picker of names would hand that straight back, one
+          // filter at a time.
           roster: {
             devs: socket.isMainDev
               ? roles.listDevKeys().map((d) => d.label)
               : [],
-            mods: roles.listModKeys().map((m) => m.label),
+            mods: socket.isMainDev
+              ? roles.listModKeys().map((m) => m.label)
+              : [],
           },
         });
       }),
     );
 
-    // Everything one staff member has ever done. Any staff level may look at
-    // any other, so the team can hold each other to account. The addresses on
-    // each entry come off, same as the main feed.
+    // Everything one staff member has ever done. The addresses on each entry
+    // come off, same as the main feed.
     socket.on(
       "staff get mod history",
       safe(async (data) => {
         if (!requireStaff(socket)) return;
+        // A record is a question asked by name, so it answers the one thing
+        // the boards no longer say: which staff member did a given thing. That
+        // makes it the way round every other rule here - ask for each name in
+        // turn, match a timestamp to the ban being appealed, and you have your
+        // colleague. It stays with site operations, where the record is read
+        // for what it is for.
+        if (!socket.isMainDev) return;
         const label = typeof data?.label === "string" ? data.label : "";
         const role = data?.role === "dev" ? "dev" : "mod";
-        // The feed does not carry developer actions, so neither does the
-        // record they add up to. Asking for one by name is the obvious way
-        // round the feed, so it is refused rather than answered emptily -
-        // and refused on the LABEL too, or the same question asked with
-        // role "mod" would still confirm the name back.
-        if (!socket.isMainDev && (role === "dev" || roles.isDevLabel(label)))
-          return;
         const h = audit.historyFor(label, role, {
           offset: data?.offset,
           limit: data?.limit,
@@ -7400,13 +7452,12 @@ function registerSocketHandlers(opts) {
       }),
     );
 
-    // A developer who has read the log and is satisfied puts a flag to sleep.
-    // Dev-only: a moderator clearing the flags on their own record would make
-    // the whole panel pointless.
+    // Somebody who has read the log and is satisfied puts a flag to sleep.
+    // Site operations only, because it answers with the record itself.
     socket.on(
       "staff review flag",
       safe(async (data) => {
-        if (!requireDev(socket)) return;
+        if (!socket.isMainDev) return;
         const label = typeof data?.label === "string" ? data.label : "";
         const key = typeof data?.key === "string" ? data.key : "";
         const role = data?.role === "dev" ? "dev" : "mod";
@@ -8087,6 +8138,8 @@ function registerSocketHandlers(opts) {
           typeof data?.text === "string" ? data.text : "",
         ).slice(0, 600);
         text = wordFilter.filterText(text);
+        // A one-shot submit, so what is stored is what every reader gets.
+        text = linkfilter.redact(text);
         if (text.trim().length < 8) return fail("Please write a little more.");
         // A one-line title, so a list of 300 can be skimmed instead of read.
         let title = wordFilter.filterText(
@@ -8156,6 +8209,7 @@ function registerSocketHandlers(opts) {
           typeof data?.text === "string" ? data.text : "",
         ).slice(0, 300);
         text = wordFilter.filterText(text);
+        text = linkfilter.redact(text);
         if (text.trim().length < 2) return fail("Please write a little more.");
         const r = suggestions.reply({
           id: Number(data?.id),
@@ -8291,6 +8345,7 @@ function registerSocketHandlers(opts) {
           typeof data?.text === "string" ? data.text : "",
         ).slice(0, replyId ? 300 : 600);
         text = wordFilter.filterText(text);
+        text = linkfilter.redact(text);
         if (text.trim().length < (replyId ? 2 : 8))
           return fail("Please write a little more.");
         const r = suggestions.editPost({

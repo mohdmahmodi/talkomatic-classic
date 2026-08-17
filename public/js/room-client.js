@@ -1889,7 +1889,8 @@ function adjustMuteButtonVisibility() {
 
 // ── 10. CHAT PROCESSING ─────────────────────────────────────────────────────
 
-// Renders another user's message: filter, emotes, then link detection
+// Renders another user's message: filter, then emotes. Nothing here turns text
+// into a link - links are not shareable, so there is never one to highlight.
 function renderOtherUserMessage(element, rawMessage) {
   if (!element) return;
   element.dataset.rawText = rawMessage;
@@ -1897,7 +1898,6 @@ function renderOtherUserMessage(element, rawMessage) {
   element.innerHTML = "";
   element.appendChild(document.createTextNode(display));
   replaceEmotes(element);
-  linkifyElement(element);
 }
 
 function updateCurrentMessages(messages) {
@@ -1987,181 +1987,8 @@ function displayChatMessage(data) {
 }
 
 // ── 11. LINK SAFETY ─────────────────────────────────────────────────────────
-// URLs in OTHER users' messages are wrapped in .chat-link spans, never real
-// anchors. Clicking one opens a warning popup explaining that strange links
-// can log your IP or scam you; navigation only happens after confirmation,
-// in a new tab with noopener/noreferrer. The user's own input is NOT
-// linkified because it is a contenteditable with delicate caret handling.
-
-// A whole URL is "everything up to whitespace": after the domain we capture the
-// full path / query / fragment ([\/?#] then anything non-space), so slugs and
-// handles like youtube.com/@mohdmahmodi are part of the link, not just the host.
-const URL_PATTERN = new RegExp(
-  "(?:https?:\\/\\/[^\\s<>\"']+)" +
-  "|(?:www\\.[^\\s<>\"']+)" +
-  "|(?:\\b[a-z0-9](?:[a-z0-9-]*[a-z0-9])?" +
-  "(?:\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*" +
-  "\\.(?:com|net|org|io|gg|co|me|app|dev|xyz|info|link|site|online|club|live|stream|fun|top|cc|tv|to|gl|ly|us|uk|ca|eu|de|fr|es|it|nl|jp|kr|in|br|au|ru|cn|edu|gov|biz|pro|tech|store|shop|blog|news|wiki|games|chat|space|world|media|tube|ai|so|sh|fm|im|re)" +
-  "(?:[\\/?#][^\\s<>\"']*)?)",
-  "gi",
-);
-
-const TRAILING_PUNCTUATION = /[.,!?;:)\]}'"]+$/;
-
-let linkWarningOverlay = null;
-let pendingLinkUrl = "";
-
-// Walks the text nodes of a rendered message and wraps detected URLs in
-// .chat-link spans. Only TEXT nodes are visited, so emote <img> elements
-// are untouched. Runs after replaceEmotes().
-function linkifyElement(element) {
-  if (!element) return;
-
-  const walker = document.createTreeWalker(
-    element,
-    NodeFilter.SHOW_TEXT,
-    null,
-    false,
-  );
-  const candidates = [];
-  while (walker.nextNode()) {
-    const node = walker.currentNode;
-    if (node.parentNode?.closest?.(".chat-link")) continue;
-    URL_PATTERN.lastIndex = 0;
-    if (URL_PATTERN.test(node.textContent)) candidates.push(node);
-  }
-
-  for (const node of candidates) {
-    const text = node.textContent;
-    const frag = document.createDocumentFragment();
-    let last = 0;
-    let found = false;
-    let match;
-
-    URL_PATTERN.lastIndex = 0;
-    while ((match = URL_PATTERN.exec(text)) !== null) {
-      const url = match[0].replace(TRAILING_PUNCTUATION, "");
-      if (!url) continue;
-
-      frag.appendChild(document.createTextNode(text.slice(last, match.index)));
-
-      const span = document.createElement("span");
-      span.className = "chat-link";
-      span.dataset.url = url;
-      span.title = "Outside link. Click for safety info.";
-      span.textContent = url;
-      frag.appendChild(span);
-
-      last = match.index + url.length;
-      found = true;
-    }
-
-    if (!found) continue;
-    frag.appendChild(document.createTextNode(text.slice(last)));
-    node.parentNode.replaceChild(frag, node);
-  }
-}
-
-function createLinkWarningModal() {
-  linkWarningOverlay = document.createElement("div");
-  linkWarningOverlay.className = "link-warning-overlay";
-
-  const box = document.createElement("div");
-  box.className = "link-warning-box";
-
-  const icon = document.createElement("div");
-  icon.className = "link-warning-icon";
-  icon.textContent = "\u26A0\uFE0F";
-
-  const title = document.createElement("div");
-  title.className = "link-warning-title";
-  title.textContent = "You Are Leaving Talkomatic";
-
-  const body = document.createElement("div");
-  body.textContent =
-    "This link was posted by another user. The site behind it can log " +
-    "your IP address, estimate your location, or try to scam you. Never " +
-    "trust links from strangers. The safest option is to type the address " +
-    "yourself in a new tab, on your own.";
-
-  const urlBox = document.createElement("div");
-  urlBox.className = "link-warning-url";
-
-  const note = document.createElement("div");
-  note.className = "link-warning-note";
-  note.textContent =
-    "Talkomatic does not check or endorse outside links. Continue only if " +
-    "you know and trust this site.";
-
-  const buttons = document.createElement("div");
-  buttons.className = "link-warning-buttons";
-
-  const backBtn = document.createElement("button");
-  backBtn.className = "link-warning-back";
-  backBtn.textContent = "Go Back";
-  backBtn.addEventListener("click", hideLinkWarning);
-
-  const visitBtn = document.createElement("button");
-  visitBtn.className = "link-warning-visit";
-  visitBtn.textContent = "Visit At My Own Risk";
-  visitBtn.addEventListener("click", () => {
-    let target = pendingLinkUrl;
-    if (!target) return hideLinkWarning();
-    if (!/^https?:\/\//i.test(target)) target = "https://" + target;
-    window.open(target, "_blank", "noopener,noreferrer");
-    hideLinkWarning();
-  });
-
-  buttons.appendChild(backBtn);
-  buttons.appendChild(visitBtn);
-
-  box.appendChild(icon);
-  box.appendChild(title);
-  box.appendChild(body);
-  box.appendChild(urlBox);
-  box.appendChild(note);
-  box.appendChild(buttons);
-  linkWarningOverlay.appendChild(box);
-
-  linkWarningOverlay.addEventListener("click", (e) => {
-    if (e.target === linkWarningOverlay) hideLinkWarning();
-  });
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && linkWarningOverlay.classList.contains("show")) {
-      hideLinkWarning();
-    }
-  });
-
-  document.body.appendChild(linkWarningOverlay);
-}
-
-function showLinkWarning(url) {
-  if (!url) return;
-  if (!linkWarningOverlay) createLinkWarningModal();
-  pendingLinkUrl = url;
-  linkWarningOverlay.querySelector(".link-warning-url").textContent = url;
-  linkWarningOverlay.classList.add("show");
-}
-
-function hideLinkWarning() {
-  if (!linkWarningOverlay) return;
-  linkWarningOverlay.classList.remove("show");
-  pendingLinkUrl = "";
-}
-
-// One delegated click listener on the static chat container, so it survives
-// every room update that rebuilds the rows inside it
-function initLinkSafety() {
-  const container = document.querySelector(".chat-container");
-  if (!container) return;
-  container.addEventListener("click", (e) => {
-    const link = e.target.closest?.(".chat-link");
-    if (!link) return;
-    e.preventDefault();
-    e.stopPropagation();
-    showLinkWarning(link.dataset.url);
-  });
-}
+// Links are not shareable on Talkomatic, so there is nothing for the client to
+// highlight, warn about, or open.
 
 // ── 12. DEV MODE: Confetti & Navbar Controls ────────────────────────────────
 
@@ -2963,20 +2790,6 @@ function injectStyles() {
     #filterToggle.filter-off { opacity:0.4; }
 
     /* Link safety */
-    .chat-link { color:#4da6ff; text-decoration:underline; cursor:pointer; word-break:break-all; }
-    .chat-link:hover { color:#80c1ff; }
-    .link-warning-overlay { display:none; position:fixed; inset:0; z-index:100000; background:rgba(0,0,0,0.8); align-items:center; justify-content:center; }
-    .link-warning-overlay.show { display:flex; }
-    .link-warning-box { background:#1a1a1a; border:2px solid #ff9800; border-radius:12px; max-width:440px; width:90%; padding:24px 28px; text-align:center; color:#ccc; font-size:14px; line-height:1.6; box-shadow:0 12px 40px rgba(0,0,0,0.6); }
-    .link-warning-icon { font-size:40px; margin-bottom:6px; }
-    .link-warning-title { color:#ff9800; font-size:18px; font-weight:bold; margin:6px 0 12px; }
-    .link-warning-url { background:#000; border:1px solid #555; border-radius:6px; padding:8px 10px; margin:12px 0; color:#fff; word-break:break-all; font-family:monospace; font-size:13px; max-height:80px; overflow-y:auto; }
-    .link-warning-note { color:#888; font-size:12px; margin-top:10px; }
-    .link-warning-buttons { display:flex; gap:10px; justify-content:center; margin-top:18px; }
-    .link-warning-back { background:#444; color:#fff; border:none; padding:10px 18px; border-radius:6px; cursor:pointer; font-weight:bold; }
-    .link-warning-back:hover { background:#555; }
-    .link-warning-visit { background:#ff9800; color:#000; border:none; padding:10px 18px; border-radius:6px; cursor:pointer; font-weight:bold; }
-    .link-warning-visit:hover { background:#ffb74d; }
 
     /* Mobile: prefer dynamic viewport units where supported */
     @supports (height: 100dvh) {
@@ -3774,9 +3587,6 @@ window.addEventListener("load", () => {
   // Viewport: immediate handler so the mobile keyboard reflows without lag
   if (window.visualViewport)
     window.visualViewport.addEventListener("resize", handleViewportChange);
-
-  // Link safety (delegated click handler + warning popup)
-  initLinkSafety();
 
   // Ensure autocomplete element exists
   if (!document.getElementById("emoteAutocomplete")) {

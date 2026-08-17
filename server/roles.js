@@ -164,26 +164,29 @@ function listDevKeys() {
 // user gets the team, not the individual. A moderator who bans somebody should
 // not have to wonder whether that person will come looking for them, and the
 // name is the only thing that makes that possible.
-const PUBLIC_DEV = "the Talkomatic team";
+// One phrase for everyone on the team. Two of them told the reader which half
+// of it had acted, which is a smaller tell than a name and still a tell.
 const PUBLIC_STAFF = "the Talkomatic staff";
 
-// How a stored staff label reads to a member of the team who is not on the
-// operations feed. A moderator's name always stays: holding each other to
-// account is the whole point of the record. A developer's does not, because
-// their actions are not on the boards the team reads either, and a name left
-// on a ban row or an appeal decision would put it back.
+// How a stored staff label reads to anybody who is not on the operations feed
+// - and that includes the rest of the team. A ban row, an appeal decision and
+// an activity line all say the team did it, not who.
+//
+// Two reasons, and the second is the one that decides it. A moderator who bans
+// somebody should not be identifiable to the person judging the appeal against
+// that ban, because a decision made about a colleague's call is not the same
+// decision as one made about the facts. And a name nobody can read is a name
+// nobody can pass on. Attribution is not lost: site operations reads every
+// record with the labels intact, which is where holding the team to account
+// actually happens.
 const TEAM_LABEL = "Talkomatic staff";
 
 function isDevLabel(label) {
   return !!label && devKeys.some((d) => d.label === label);
 }
 
-// `role` is used when the caller knows it; otherwise the roster answers, which
-// is what makes this work on records written before roles were stored.
-function teamLabel(label, role) {
-  if (!label) return label;
-  const dev = role ? role === "dev" : isDevLabel(label);
-  return dev ? TEAM_LABEL : label;
+function teamLabel(label) {
+  return label ? TEAM_LABEL : label;
 }
 
 // The same, for the "dev:Label" / "mod:Label" form the review fields store.
@@ -192,19 +195,11 @@ function teamReviewer(value) {
   const s = String(value || "");
   if (!s) return value;
   const idx = s.indexOf(":");
-  const role = idx === -1 ? null : s.slice(0, idx);
-  const label = idx === -1 ? s : s.slice(idx + 1);
-  const dev = role ? role === "dev" : isDevLabel(label);
-  return dev ? (role ? role + ":" : "") + TEAM_LABEL : s;
+  return idx === -1 ? TEAM_LABEL : s.slice(0, idx + 1) + TEAM_LABEL;
 }
 
-function publicStaffName(label, role) {
-  if (!label) return null;
-  // Older records predate the role being stored with them, so fall back to
-  // asking whether that label is on the dev roster today.
-  const resolved =
-    role || (devKeys.some((d) => d.label === label) ? "dev" : "mod");
-  return resolved === "dev" ? PUBLIC_DEV : PUBLIC_STAFF;
+function publicStaffName(label) {
+  return label ? PUBLIC_STAFF : null;
 }
 
 function getModKeyByPlain(key) {

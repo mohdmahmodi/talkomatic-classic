@@ -25,6 +25,7 @@
 // Icons are one of { emoji }, { fa } (Font Awesome class) or { image } (path
 // under public/), so a game can use whichever suits it.
 
+const linkfilter = require("../linkfilter");
 const tictactoe = require("./tictactoe");
 const connect4 = require("./connect4");
 const drawguess = require("./drawguess");
@@ -938,6 +939,9 @@ function chat(roomId, user, tableId, text) {
 
   let body = String(text || "").replace(/\s+/g, " ").trim().slice(0, CHAT_LEN);
   if (!body) return { ok: true };
+  // Reaches the whole room like a textbox does. Unlike the word filter below,
+  // this is not a per-viewer choice.
+  body = linkfilter.redact(body);
   const last = t.lastChatAt.get(user.userId) || 0;
   if (Date.now() - last < CHAT_MIN_GAP_MS) return { err: "Slow down a moment." };
   // Saying "a" thirty times is under any per-message gap, so the same line
