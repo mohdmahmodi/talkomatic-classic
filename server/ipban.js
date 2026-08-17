@@ -54,6 +54,16 @@ function isActiveBlock(b) {
   );
 }
 
+// A block with no end on it. Tolerates the same shapes isActiveBlock does: a
+// bare expiry number, and an entry written without an expiry at all. Undoing
+// one of these is a developer's call, so several handlers ask this before they
+// let a block be lifted or rewritten.
+function isPermanentBlock(b) {
+  if (!b) return false;
+  const expiry = typeof b === "object" ? b.expiry : b;
+  return !expiry || expiry >= Number.MAX_SAFE_INTEGER;
+}
+
 // Given an address, return the CIDR string of the range we'd ban to catch
 // rotation, or null if it cannot be computed. IPv6 collapses to its /64 (the
 // home network); IPv4 collapses to its /24 (the surrounding pool). An
@@ -320,6 +330,7 @@ module.exports = {
   isIdKey,
   idKey,
   isActiveBlock,
+  isPermanentBlock,
   findActiveIdBlock,
   removeBlocksForDevice,
   computeRangeCidr,

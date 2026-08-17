@@ -5463,6 +5463,19 @@ function registerSocketHandlers(opts) {
           ipban.autoRangeCidr(ip) ||
           (data?.banRange ? ipban.computeRangeCidr(ip) : null);
         const blockKey = cidr || ip;
+        // Already covered by a permanent block: writing a shorter one over it
+        // undoes a developer's decision on a timer, so it takes a developer.
+        if (
+          !socket.isDev &&
+          ipban.isPermanentBlock((ipban.findActiveBlock(ip) || {}).block)
+        )
+          return socket.emit(
+            "error",
+            createErrorResponse(
+              ERROR_CODES.FORBIDDEN,
+              "This user is already covered by a permanent block. Only a developer can change that block.",
+            ),
+          );
 
         state.blockedIPs.set(blockKey, {
           expiry,
@@ -5645,6 +5658,18 @@ function registerSocketHandlers(opts) {
           }
           if (!key || seen.has(key)) continue;
           seen.add(key);
+          // Anything a permanent block already covers is a developer's to
+          // change. Re-banning the key itself rewrites its expiry outright; a
+          // shorter block on one address inside a permanent range shadows it
+          // on the ban screen until it lapses. Neither is a mod's to do.
+          const covering = did
+            ? state.blockedIPs.get(key)
+            : (ipban.findActiveBlock(key.split("/")[0]) || {}).block;
+          if (!socket.isDev && ipban.isPermanentBlock(covering))
+            return fail(
+              ERROR_CODES.FORBIDDEN,
+              `${entry} is already covered by a permanent block. Only a developer can change that block.`,
+            );
           // For an id entry, name it from the identity record so the list and
           // history show who it hits instead of a bare token.
           const idRec = did ? identity.getRecord(did) : null;
@@ -6884,9 +6909,9 @@ function registerSocketHandlers(opts) {
       }),
     );
 
-    // Unban: full mods + devs. The dashboard sends the ban's opaque `ref`,
-    // which resolves back to the address here; a raw IP is still accepted for
-    // anything typed in by hand.
+    // Unban: full mods + devs, except on a permanent block, which is dev-only.
+    // The dashboard sends the ban's opaque `ref`, which resolves back to the
+    // address here; a raw IP is still accepted for anything typed in by hand.
     socket.on(
       "dev unblock ip",
       safe(async (data) => {
@@ -6901,6 +6926,17 @@ function registerSocketHandlers(opts) {
         // Capture who was blocked before we drop the entry, so the history feed
         // can name them.
         const prev = state.blockedIPs.get(ip);
+        // A permanent block ends when a developer says it does. A mod keeps
+        // the temporary ones they place, and this is the line a mod key that
+        // has been stolen or turned runs into when it tries to empty the list.
+        if (!socket.isDev && ipban.isPermanentBlock(prev))
+          return socket.emit(
+            "error",
+            createErrorResponse(
+              ERROR_CODES.FORBIDDEN,
+              "That block is permanent. Only a developer can lift it.",
+            ),
+          );
         const blockedName = (prev && typeof prev === "object" && prev.label) || null;
         const removed = state.blockedIPs.delete(ip);
         state.botBlacklist.delete(ip);

@@ -3039,6 +3039,14 @@
         background: var(--tile-hover);
         color: var(--orange);
       }
+      /* Stands in for the unban button on a block this viewer cannot lift. */
+      .blockrow .ibtn.locked,
+      .blockrow .ibtn.locked:hover {
+        background: transparent;
+        color: var(--dim);
+        cursor: default;
+        opacity: 0.6;
+      }
       .blockrow .ibtn.danger:hover {
         color: var(--red);
       }

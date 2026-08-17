@@ -1132,13 +1132,23 @@
         ),
       );
     }
-    // Lifting a block is a full-mod action; juniors read the list only.
-    if (viewerIsFullMod())
-      row.appendChild(
-        mkIcon("fa-unlock", "Unban this one", true, () =>
-          confirmUnban([b], showIp),
-        ),
-      );
+    // Lifting a block is a full-mod action; juniors read the list only. A
+    // permanent one is a developer's, so everybody else gets a lock here
+    // rather than a button that refuses after the click.
+    if (viewerIsFullMod()) {
+      if (b.permanent && !isDev) {
+        const lock = span("ibtn locked");
+        lock.title = "Permanent: only a developer can lift this";
+        lock.appendChild(icon("fa-lock"));
+        row.appendChild(lock);
+      } else {
+        row.appendChild(
+          mkIcon("fa-unlock", "Unban this one", true, () =>
+            confirmUnban([b], showIp),
+          ),
+        );
+      }
+    }
     return row;
   }
 
@@ -1303,18 +1313,39 @@
 
       if (!viewerIsFullMod()) return;
       const foot = divc("bandetail-foot");
-      const unbanAll = document.createElement("button");
-      unbanAll.className = "btn sm danger";
-      unbanAll.appendChild(icon("fa-unlock"));
-      unbanAll.appendChild(
-        document.createTextNode(
-          blocks.length > 1 ? " Unban all " + blocks.length : " Unban",
-        ),
-      );
-      unbanAll.addEventListener("click", () =>
-        confirmUnban(blocks, showIp, name),
-      );
-      foot.appendChild(unbanAll);
+      // Permanent blocks are dev-only to lift, so for anybody else this button
+      // covers the temporary ones and the rest are spelled out. Sending the
+      // permanent ones anyway would just collect refusals.
+      const liftable = viewerIsDev()
+        ? blocks
+        : blocks.filter((b) => !b.permanent);
+      const held = blocks.length - liftable.length;
+      if (liftable.length) {
+        const unbanAll = document.createElement("button");
+        unbanAll.className = "btn sm danger";
+        unbanAll.appendChild(icon("fa-unlock"));
+        unbanAll.appendChild(
+          document.createTextNode(
+            liftable.length > 1 ? " Unban all " + liftable.length : " Unban",
+          ),
+        );
+        unbanAll.addEventListener("click", () =>
+          confirmUnban(liftable, showIp, name),
+        );
+        foot.appendChild(unbanAll);
+      }
+      if (held) {
+        const note = span("dim");
+        note.appendChild(icon("fa-lock"));
+        note.appendChild(
+          document.createTextNode(
+            held === 1
+              ? " 1 permanent block, dev-only to lift"
+              : ` ${held} permanent blocks, dev-only to lift`,
+          ),
+        );
+        foot.appendChild(note);
+      }
       detail.appendChild(foot);
     };
 
@@ -4666,7 +4697,7 @@
     );
     readOnlyNote(
       "tab-bans",
-      "Read-only for junior mods. Placing and lifting blocks are full-mod actions. Addresses are only ever shown to developers.",
+      "Read-only for junior mods. Placing and lifting blocks are full-mod actions, and a permanent block can only be lifted by a developer. Addresses are only ever shown to developers.",
     );
     readOnlyNote(
       "tab-mods",
@@ -4891,7 +4922,14 @@
   // perfectly good, which is why some staff were asked for a key they already
   // had. If the socket is connected we are simply waiting, so say so and keep
   // waiting rather than claiming they have no access.
-  socket.on("error", showDenied);
+  // Before the dashboard is up an error means "you are not staff". After it is,
+  // it is the server refusing the action just taken, and it used to go nowhere
+  // at all - the click simply did nothing. Say what it said.
+  socket.on("error", (e) => {
+    if (!authorized) return showDenied();
+    const msg = (e && e.error && e.error.message) || (e && e.message) || null;
+    if (msg && window.StaffUI) StaffUI.toast(msg, { type: "error" });
+  });
   socket.on("connect_error", showDenied);
   let waited = 0;
   const waitTimer = setInterval(() => {
