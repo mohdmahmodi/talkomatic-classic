@@ -55,6 +55,39 @@ const crypto = require("crypto");
 
 const gamePrevText = new Map();
 
+// Everyone else sees the placeholder the moment it is typed. The person who
+// typed it keeps their own text until they pause, because rewriting a box
+// mid-word leaves them typing into the middle of a placeholder. On the pause
+// their box catches up with what the room has been seeing all along.
+const LINK_SETTLE_MS = 1200;
+const linkSweepTimers = new Map();
+
+function cancelLinkSweep(userId) {
+  const t = linkSweepTimers.get(userId);
+  if (t) {
+    clearTimeout(t);
+    linkSweepTimers.delete(userId);
+  }
+}
+
+function armLinkSweep(socket, userId) {
+  cancelLinkSweep(userId);
+  const t = setTimeout(() => {
+    linkSweepTimers.delete(userId);
+    const raw = state.userMessageBuffers.get(userId) || "";
+    const clean = linkfilter.redact(raw);
+    if (clean === raw) return;
+    state.userMessageBuffers.set(userId, clean);
+    const username = socket.handshake?.session?.username;
+    const diff = { type: "full-replace", text: clean };
+    emitRoomChatUpdate(socket, { userId, username, diff });
+    socket.emit("chat update", { userId, username, diff });
+    socket.emit("links not allowed");
+  }, LINK_SETTLE_MS);
+  if (t.unref) t.unref();
+  linkSweepTimers.set(userId, t);
+}
+
 const BAN_REF_SECRET = crypto.randomBytes(32);
 function banRef(ip) {
   return crypto
@@ -2245,16 +2278,8 @@ async function processPendingChatUpdates(userId, socket) {
     msg = sanitizeMessage(msg);
     state.userMessageBuffers.set(userId, msg);
 
-    const hasLink = linkfilter.containsLink(msg);
-    if (hasLink && !socket._linkWarned) {
-      socket._linkWarned = true;
-      socket.emit("message", {
-        type: "warning",
-        text: "Links cannot be shared on Talkomatic. Nobody else in the room can see it.",
-      });
-    } else if (!hasLink && socket._linkWarned) {
-      socket._linkWarned = false;
-    }
+    if (linkfilter.containsLink(msg)) armLinkSweep(socket, userId);
+    else cancelLinkSweep(userId);
 
     if (msg.includes("@")) notifyRoomMentions(socket, userId, msg);
 
@@ -8109,6 +8134,7 @@ function registerSocketHandlers(opts) {
           await leaveRoom(socket, userId);
           state.userMessageBuffers.delete(userId);
           state.devUsers.delete(userId);
+          cancelLinkSweep(userId);
           if (state.typingTimeouts.has(userId)) {
             clearTimeout(state.typingTimeouts.get(userId));
             state.typingTimeouts.delete(userId);
@@ -8206,6 +8232,8 @@ function startCleanupIntervals() {
     for (const id of state.userMessageBuffers.keys()) {
       if (!active.has(id)) state.userMessageBuffers.delete(id);
     }
+    for (const id of [...linkSweepTimers.keys()])
+      if (!active.has(id)) cancelLinkSweep(id);
     for (const id of state.typingTimeouts.keys()) {
       if (!active.has(id)) {
         clearTimeout(state.typingTimeouts.get(id));
@@ -8332,6 +8360,7 @@ function startCleanupIntervals() {
           state.devUsers.delete(u.id);
           finalizeBoardUserStroke(roomId, u.id);
           pianoDropPresence(roomId, u.id, true);
+          cancelLinkSweep(u.id);
           if (state.typingTimeouts.has(u.id)) {
             clearTimeout(state.typingTimeouts.get(u.id));
             state.typingTimeouts.delete(u.id);

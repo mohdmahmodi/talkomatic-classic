@@ -2857,6 +2857,14 @@ function msToTime(duration) {
 
 socket.on("chat update", displayChatMessage);
 
+socket.on("links not allowed", () => {
+  if (window.StaffUI)
+    StaffUI.toast(
+      "This was voted in on the suggestion board.",
+      { title: "Talkomatic does not allow links", type: "info" },
+    );
+});
+
 socket.on("update votes", updateVotesUI);
 
 socket.on("kicked", (data) => {
