@@ -1,14 +1,5 @@
 // server/audit.js
-// Accountability log. Records two kinds of events for the staff board
-// (mod.html), keeps an in-memory ring buffer for fast reads, persists to
-// audit-log.jsonl, and live-broadcasts to subscribed staff sockets:
-//
-//   type "action"   - a privileged staff action (who, what, target, room, IP)
-//   type "identity" - a user signing in or changing their username (IP +
-//                     old/new name) so any name can always be traced back
-//
-// Staff actions are ALSO mirrored to the human-readable modlog.txt (the file
-// named in the v4 spec) for plain forensics.
+// Accountability log.
 
 const path = require("path");
 const fs = require("fs");
@@ -20,25 +11,14 @@ const { DATA_DIR } = require("./datadir");
 const AUDIT_PATH = path.join(DATA_DIR, "audit-log.jsonl");
 const MODLOG_PATH = path.join(DATA_DIR, "modlog.txt");
 
-let entries = []; // append-only history, oldest first
+let entries = [];
 let seq = 0;
-// userId -> { username, location } - last known identity, to detect changes
 const lastIdentity = new Map();
 
 function io() {
   return state.io;
 }
 
-// An address can arrive in a free-text field as easily as in `ip`. An IP ban
-// logs the address it blocked as the action's TARGET, and a ban reason can
-// name one in passing. Stripping only the dedicated fields left both of those
-// on screen for every moderator - which is how the whole block list was
-// readable from the activity feed.
-//
-// The matcher is shared with room chat (server/ipredact.js) so there is one
-// answer to "is this an address"; only the placeholder differs. Deliberately
-// greedy: over-redacting a version number costs nothing, leaking an address
-// costs a user their approximate location.
 const ipredact = require("./ipredact");
 const roles = require("./roles");
 
@@ -48,17 +28,8 @@ function maskIps(value) {
   return ipredact.redact(value, HIDDEN);
 }
 
-// Raw addresses are served to site-operations sockets only. Every other
-// reader, staff or not, gets every field except them.
 const MASKED_FIELDS = ["target", "details", "text"];
 
-// Entries that stay off the boards the wider team reads. Nothing is dropped
-// from the log itself - the record is complete and always was - this only
-// decides what the feed shows, so it reads as a record of moderation rather
-// than of the people running the server.
-//
-// Deliberately narrow: it is the ACTION rows and the key alerts. A comment is
-// somebody talking to the team on purpose and stays where they wrote it.
 function isPrivilegedEntry(e) {
   if (!e) return false;
   if (e.devOnly) return true;
@@ -71,14 +42,8 @@ function redactEntry(entry) {
   delete copy.targetIp;
   for (const f of MASKED_FIELDS)
     if (copy[f] != null) copy[f] = maskIps(copy[f]);
-  // Who did it comes off for every reader but site operations. A row saying
-  // which moderator placed a ban is the same thing as a ban row saying it, and
-  // the feed is the easiest place to go looking. The action, the target and
-  // the time all stay: this reads as a record of what the team did.
-  if (copy.label && (copy.role === "mod" || copy.role === "dev"))
+  if (copy.label && copy.type !== "comment")
     copy.label = roles.teamLabel(copy.label);
-  // A forced rename is the one entry that is not an action but still names the
-  // staff member behind it. The event stays on the feed; the name does not.
   if (copy.byRole === "mod" || copy.byRole === "dev") {
     delete copy.by;
     delete copy.byRole;
@@ -87,9 +52,6 @@ function redactEntry(entry) {
 }
 
 function broadcast(entry) {
-  // The Desk's #activity channel is the same feed as the dashboard's Activity
-  // tab. It applies its own per-reader level and address rules, so the raw
-  // entry goes over and it decides what each person sees.
   try {
     require("./staffchat").pushActivity(entry);
   } catch (_) {}
@@ -102,23 +64,17 @@ function broadcast(entry) {
       s.emit("audit entry", entry);
       continue;
     }
-    // Nobody else, developers included, gets a developer's actions or a key
-    // alert on their feed.
     if (privileged) continue;
     if (s.isDev) {
       s.emit("audit entry", masked);
       continue;
     }
     if (!s.isMod) continue;
-    // Some entries (mod-abuse flags, reports) are for full (level 2) mods +.
     if (entry.minLevel && (s.modLevel || 2) < entry.minLevel) continue;
     s.emit("audit entry", masked);
   }
 }
 
-// Drops entries from the feed for good: the ring buffer, the file behind it,
-// and every open board. Returns the ids that were actually there. The removal
-// itself is deliberately not an event - a cleared row leaves no stub.
 function remove(ids) {
   const want = new Set(
     (Array.isArray(ids) ? ids : [ids]).map((n) => Number(n)).filter(Boolean),
@@ -131,8 +87,6 @@ function remove(ids) {
     return false;
   });
   if (!gone.length) return [];
-  // Rewritten whole rather than appended to: the file IS the history, so a
-  // deleted row must not survive the next restart.
   enqueueWrite(async () => {
     const tmp = AUDIT_PATH + ".tmp";
     await fsp.writeFile(
@@ -145,7 +99,6 @@ function remove(ids) {
   if (io())
     for (const [, s] of io().sockets.sockets)
       if (s.auditSub) s.emit("audit removed", { ids: gone });
-  // The Desk reads the same rows, so it drops them on the same beat.
   try {
     require("./staffchat").dropActivity(gone);
   } catch (_) {}
@@ -175,7 +128,6 @@ function push(entry) {
   return entry;
 }
 
-// A privileged staff action. Mirrors one line to modlog.txt.
 function recordAction({ roleTag, label, action, target, room, ip, details }) {
   const ts = Date.now();
   push({
@@ -203,8 +155,6 @@ function recordAction({ roleTag, label, action, target, room, ip, details }) {
   fsp.appendFile(MODLOG_PATH, line).catch(() => {});
 }
 
-// A user picking or changing their displayed identity. Deduped: no entry if
-// nothing changed. `event` is "signin" the first time, "rename" on a change.
 function recordIdentity({ userId, username, location, ip }) {
   if (!userId || !username) return;
   const prev = lastIdentity.get(userId);
@@ -231,7 +181,6 @@ function recordIdentity({ userId, username, location, ip }) {
   });
 }
 
-// Staff forced a user's name to Anonymous - log it and reset the baseline.
 function recordForcedRename({ userId, from, ip, by, byRole, room }) {
   const prevLoc = lastIdentity.get(userId)?.location || null;
   lastIdentity.set(userId, { username: "Anonymous", location: prevLoc });
@@ -250,9 +199,6 @@ function recordForcedRename({ userId, from, ip, by, byRole, room }) {
   });
 }
 
-// A staff-key security alert: a dev/mod key used from an IP it has never
-// connected from, or active from multiple IPs at once. These are the signals
-// of a shared or leaked key. Dev-only (involves keys + raw IPs).
 function recordKeyAlert({ role, label, ip, kind, detail }) {
   push({
     ts: Date.now(),
@@ -260,23 +206,15 @@ function recordKeyAlert({ role, label, ip, kind, detail }) {
     devOnly: true,
     role: role || "?",
     label: label || role || "?",
-    kind: kind || "alert", // "new-ip" | "concurrent"
+    kind: kind || "alert",
     ip: ip || null,
     detail: detail || null,
   });
 }
 
-// A staff notification: a user report, or a possible mod-abuse flag. Shown in
-// the dashboard feed AND pushed as a live toast to qualifying staff so it isn't
-// missed. Default visibility is full (level 2) mods + devs; never junior mods.
-// `ip` is whoever raised it, `targetIp` whoever it is about. Both are stripped
-// by redactEntry on the way out, same as anywhere else, but recording them
-// means the feed is still the place the addresses can be resolved from.
 function recordNotification({
   kind, label, role, text, target, room, by, minLevel,
   ip, targetIp, targetUserId, byUserId, reports, byRole, targetRole,
-  // The same event in fields rather than a sentence, for the Desk's #queues
-  // cards. Never stored on the audit entry: the log stays a log.
   card,
 }) {
   const lvl = minLevel === 1 ? 1 : 2;
@@ -293,8 +231,6 @@ function recordNotification({
     by: by || null,
     byUserId: byUserId || null,
     targetUserId: targetUserId || null,
-    // Staff status as the server knows it, so the board never has to guess
-    // from a username. Explicitly null when they are an ordinary user.
     byRole: byRole || null,
     targetRole: targetRole || null,
     ip: ip || null,
@@ -302,10 +238,6 @@ function recordNotification({
     reports: reports || null,
   });
   notifyStaffToast(text || "New staff notification", lvl);
-  // Every queue event flows through here, so this one hook feeds the Desk's
-  // #queues channel: reports, appeals, applications, suggestions, abuse
-  // flags. The Desk applies the same audience rules (minLevel, junior mods
-  // see reports only) when it fans the card out.
   try {
     require("./staffchat").systemQueues(kind || "notice", text || "", {
       minLevel: lvl,
@@ -315,11 +247,6 @@ function recordNotification({
   return entry;
 }
 
-// Live toast to qualifying staff regardless of whether the dashboard is open,
-// so reports and abuse flags surface even to staff sitting in a room or lobby.
-// The toast carries the same sentence the feed does, so it gets the same mask:
-// a mod-abuse flag lists the actions that tripped it, and an IP block's target
-// is the address itself.
 function notifyStaffToast(text, minLevel) {
   if (!io()) return;
   const masked = maskIps(text);
@@ -333,7 +260,6 @@ function notifyStaffToast(text, minLevel) {
   }
 }
 
-// A staff comment attached to an existing log entry (discussion / "why?").
 function recordComment({ entryId, role, label, text, ip }) {
   if (!entryId || !text) return;
   push({
@@ -347,10 +273,6 @@ function recordComment({ entryId, role, label, text, ip }) {
   });
 }
 
-// Midnight in Los Angeles, as a UTC timestamp. The dashboard shows one Pacific
-// day at a time so every staff member is looking at the same window whatever
-// timezone they are in. Uses Intl rather than a fixed offset so the switch
-// between PST and PDT is handled for us.
 const PACIFIC_FMT = (() => {
   try {
     return new Intl.DateTimeFormat("en-US", {
@@ -369,14 +291,13 @@ const PACIFIC_FMT = (() => {
 })();
 
 function startOfPacificDay(now = Date.now()) {
-  if (!PACIFIC_FMT) return 0; // no Intl: show everything rather than nothing
+  if (!PACIFIC_FMT) return 0;
   try {
     const partsAt = (t) =>
       PACIFIC_FMT.formatToParts(new Date(t)).reduce(
         (a, p) => ((a[p.type] = p.value), a),
         {},
       );
-    // How far the Pacific wall clock sits from UTC at a given instant.
     const offsetAt = (t) => {
       const p = partsAt(t);
       return (
@@ -393,9 +314,6 @@ function startOfPacificDay(now = Date.now()) {
     };
     const today = partsAt(now);
     const localMidnight = Date.UTC(+today.year, +today.month - 1, +today.day);
-    // Convert local midnight to a real instant. The offset can change during
-    // the day (the two DST switchovers), so resolve with the offset that is
-    // actually in force at midnight, not the one in force right now.
     let guess = localMidnight - offsetAt(now);
     guess = localMidnight - offsetAt(guess);
     return guess;
@@ -404,9 +322,6 @@ function startOfPacificDay(now = Date.now()) {
   }
 }
 
-// The last `n` Pacific midnights, oldest first, ending with today's. Each one
-// is resolved on its own rather than by subtracting 24h repeatedly, so the two
-// daylight-saving switchover days do not drag the whole week an hour out.
 const DAY_MS = 24 * 60 * 60 * 1000;
 function pacificDayStarts(n = 7, now = Date.now()) {
   const out = [];
@@ -417,10 +332,6 @@ function pacificDayStarts(n = 7, now = Date.now()) {
   return out;
 }
 
-// `showIp`, `showAll` and `isDev` are asked separately on purpose. What a
-// reader may open (anything above their level), whether developer actions are
-// among it, and whether raw addresses come with it are three questions, and
-// answering them with one flag is how a leak gets built.
 function recent(limit = 500, opts = {}) {
   const showIp = !!opts.showIp;
   const showAll = !!opts.showAll;
@@ -430,9 +341,6 @@ function recent(limit = 500, opts = {}) {
   const n = Math.max(1, Number(limit) || 500);
   let slice;
   if (since > 0) {
-    // Walk back from the newest entry until we leave the window or hit the
-    // cap, so a long history is never copied wholesale just to be filtered
-    // away. This runs on every dashboard connect.
     let i = entries.length - 1;
     let taken = 0;
     while (i >= 0 && (entries[i].ts || 0) >= since && taken < n) {
@@ -443,7 +351,6 @@ function recent(limit = 500, opts = {}) {
   } else {
     slice = entries.slice(-n);
   }
-  // Watching a room is not work and never belonged on the feed, for anybody.
   slice = slice.filter(
     (e) =>
       !(
@@ -452,10 +359,7 @@ function recent(limit = 500, opts = {}) {
         baseAction(e.action) === "spectate"
       ),
   );
-  // Developer actions and key alerts are for the operations feed only.
   if (!showAll) slice = slice.filter((e) => !isPrivilegedEntry(e));
-  // Devs see every entry; mods lose the dev-only ones and anything above
-  // their level. Addresses come off for everyone but site operations.
   const visible = isDev
     ? slice
     : slice.filter(
@@ -464,14 +368,6 @@ function recent(limit = 500, opts = {}) {
   return showIp ? visible : visible.map(redactEntry);
 }
 
-// Action strings carry their parameters ("ip block 24h", "rename (was Bob)",
-// "grant mod L1"). Strip those so the per-moderator tally groups the same kind
-// of action together instead of splitting it across every variation.
-//
-// The bracket is cut from the first "(" to the end rather than matched as a
-// pair: room and user names contain brackets of their own, so a paired match on
-// `rename room (was Ha(ha))` left a stray ")" behind and split one action into
-// two separate tallies.
 function baseAction(action) {
   return String(action || "?")
     .replace(/\s*\([\s\S]*$/, "")
@@ -482,16 +378,6 @@ function baseAction(action) {
     .toLowerCase();
 }
 
-// Which bucket an action belongs to.
-//
-// Membership is by exact action name, not by prefix. Prefix matching used to
-// file `rename room` under "Acting on users" because the list had `rename` in
-// it, which quietly inflated the one number promotion is judged on: a mod who
-// renamed rooms all day read as a mod who had handled people all day.
-//
-// "passive" is deliberately separate: watching a room or unlocking the panel is
-// not moderation work, and counting it would make a lurker look busier than
-// somebody actually answering reports.
 const ACTION_GROUPS = [
   {
     key: "users",
@@ -524,9 +410,6 @@ const ACTION_GROUPS = [
     actions: [
       "lock room", "unlock room", "slow mode on", "slow mode off",
       "close room", "rename room", "clear board",
-      // Board tools are aimed at a person, but they are cheap and instantly
-      // repeatable - a mod could draw and wipe all afternoon. They count as
-      // work done, and deliberately NOT toward the promotion number.
       "wipe board drawings", "remove from board", "allow back on board",
       "release board area",
       "spotlight on", "spotlight off", "set room size", "party mode",
@@ -560,34 +443,22 @@ const ACTION_GROUPS = [
   },
 ];
 
-// baseAction -> group key, built once.
 const GROUP_BY_ACTION = new Map();
 for (const g of ACTION_GROUPS)
   for (const a of g.actions) GROUP_BY_ACTION.set(a, g.key);
 
 const GROUP_LABEL = new Map(ACTION_GROUPS.map((g) => [g.key, g.label]));
 
-// Anything new that has not been added to a bucket yet. Kept out of "Acting on
-// users" on purpose: an unrecognised action must never silently pad the number
-// a promotion is decided on.
 function groupOf(action) {
   return GROUP_BY_ACTION.get(baseAction(action)) || "other";
 }
 
-// The three actions a junior moderator has, and the only ones they can use to
-// build a record. Broken out so the record can say plainly how much of somebody
-// is the day-to-day job rather than the powers that came with a level.
 const CORE_USER_ACTIONS = new Set(["kick", "wipe buffer", "warn"]);
 
-// Anything that is not passive counts as something happening. It is NOT the
-// promotion number - see onUsers in historyFor.
 function isUsefulAction(action) {
   return groupOf(action) !== "passive";
 }
 
-// Switches that can be flipped back and forth. Flipping one and immediately
-// flipping it back is two log lines and zero moderation, so a record full of
-// them is the clearest sign somebody is padding a total.
 const TOGGLE_PAIRS = new Map([
   ["lock room", "unlock room"],
   ["unlock room", "lock room"],
@@ -605,9 +476,6 @@ const TOGGLE_PAIRS = new Map([
   ["maintenance off", "maintenance on"],
 ]);
 
-// How much a flip-and-flip-back counts for, by how fast it was undone. A flat
-// window scored "locked the room while I sort this out" the same as farming;
-// the gap IS the evidence, so it sets the weight.
 const TOGGLE_WEIGHTS = [
   [5 * 1000, 1],
   [30 * 1000, 0.6],
@@ -621,9 +489,6 @@ function toggleWeight(gap) {
   return 0;
 }
 
-// Actions that arrive together as ONE decision. Banning somebody fires kick,
-// ban and ip block from a single button; counting that as three actions three
-// seconds apart is what made a considered ban read as a toolbar being mashed.
 const COMBOS = [
   ["kick", "kick+ban", "ban", "ban ip", "ip block", "wipe buffer"],
   ["warn", "wipe buffer"],
@@ -633,22 +498,15 @@ const COMBO_WINDOW_MS = 20 * 1000;
 
 function sameDecision(a, b, gap) {
   if (gap > COMBO_WINDOW_MS) return false;
-  if (a === b) return false; // the same action twice is a repeat, not a combo
+  if (a === b) return false;
   return COMBOS.some((c) => c.includes(a) && c.includes(b));
 }
 
-// Being kicked removes you from the room, and staff can only kick somebody who
-// is currently in one. So a second kick on the same person is not a moderator
-// leaning on them - it is proof that person came back. Repetition of these is
-// never counted against anybody; it is reported separately, as what it is.
 const REQUIRES_REJOIN = new Set(["kick", "kick+ban"]);
 
-// A run of actions on one person with less than this between them is one
-// sitting, however many log lines it produced.
 const INCIDENT_GAP_MS = 10 * 60 * 1000;
-const RAPID_GAP_MS = 5 * 1000; // back-to-back, faster than reading a room
+const RAPID_GAP_MS = 5 * 1000;
 
-// Punishments that are supposed to come after something milder.
 const HEAVY = new Set(["ban", "ban ip", "ip block", "kick+ban"]);
 const MILD = new Set(["warn", "kick", "wipe buffer"]);
 const UNDO = new Map([
@@ -659,9 +517,6 @@ const UNDO = new Map([
 ]);
 const UNDO_ACTIONS = new Set(UNDO.values());
 
-// Pull the display name and id back out of the "user:Name(id)" / "room:Name(id)"
-// strings logStaff writes. Names can contain brackets, so anchor on the LAST
-// "(" rather than the first.
 function splitTag(tag, prefix) {
   const s = String(tag || "");
   if (!s.startsWith(prefix)) return null;
@@ -677,18 +532,8 @@ const parseRoomTag = (t) => splitTag(t, "room:");
 
 const HISTORY_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
-// How much work on actual users a junior should have behind them before a
-// developer is asked to look at full mod. It is a prompt to go and read the
-// record, never an entitlement, and only actions in the "users" group count -
-// renaming rooms and writing notes cannot carry somebody to it.
 const PROMOTION_AT = 1000;
 
-// Reads a staff member's whole record and works out both what they did and
-// whether the shape of it should worry anybody.
-//
-// The tallies are lifetime and never move. The listed entries cover the last 30
-// days, are filterable by group or by who they landed on, and are paged, so a
-// moderator with tens of thousands of actions cannot hang the page.
 function historyFor(label, role, opts = {}) {
   const want = String(label || "");
   const offset = Math.max(0, Number(opts.offset) || 0);
@@ -705,7 +550,7 @@ function historyFor(label, role, opts = {}) {
 
   const counts = new Map();
   const groupTotals = new Map();
-  const targets = new Map(); // uid -> { uid, name, n, actions: Map }
+  const targets = new Map();
   const recent = [];
   const cutoff = Date.now() - HISTORY_WINDOW_MS;
   let total = 0;
@@ -715,9 +560,6 @@ function historyFor(label, role, opts = {}) {
   let first = null;
   let last = null;
 
-  // The actions themselves, kept so the shape analysis below can show its
-  // working. Capped so a moderator with a hundred thousand entries cannot make
-  // this pass expensive; the newest are the ones worth reading anyway.
   const acts = [];
   const ACTS_CAP = 6000;
 
@@ -744,7 +586,6 @@ function historyFor(label, role, opts = {}) {
     const room = parseRoomTag(e.room);
     const ts = e.ts || 0;
 
-    // Who they have actually pointed their powers at.
     if (group === "users" && tgt) {
       const key = tgt.id || "name:" + tgt.name;
       let t = targets.get(key);
@@ -752,7 +593,7 @@ function historyFor(label, role, opts = {}) {
         t = { uid: tgt.id || null, name: tgt.name, n: 0, actions: new Map() };
         targets.set(key, t);
       }
-      t.name = tgt.name; // keep the most recent name they were logged under
+      t.name = tgt.name;
       t.n++;
       t.actions.set(base, (t.actions.get(base) || 0) + 1);
     }
@@ -772,7 +613,7 @@ function historyFor(label, role, opts = {}) {
     if (ts >= cutoff) recent.push({ ...e, base, group });
   }
 
-  recent.reverse(); // newest first
+  recent.reverse();
 
   const groups = ACTION_GROUPS.map((g) => ({
     key: g.key,
@@ -785,8 +626,6 @@ function historyFor(label, role, opts = {}) {
       .sort((a, b) => b.n - a.n),
   })).filter((g) => g.n > 0);
 
-  // Anything the buckets above do not know about yet, so a new action is
-  // visible in the record instead of disappearing.
   const otherActions = [...counts.entries()]
     .filter(([a]) => groupOf(a) === "other")
     .map(([action, n]) => ({ action, n }))
@@ -850,14 +689,7 @@ function historyFor(label, role, opts = {}) {
 }
 
 // ── Reading the shape of a record ─────────────────────────────────────────
-//
-// Every signal below scores 0-100 and carries the entries that produced it, so
-// the panel can show its working instead of asserting a number. They are
-// prompts to go and read the log, never verdicts: each one states what would
-// make it innocent, because the reader needs to know what they are checking.
 
-// Collapse actions that arrived together into single decisions. Everything
-// downstream counts decisions, not log lines.
 function toDecisions(acts) {
   const out = [];
   for (const a of acts) {
@@ -888,10 +720,8 @@ function toDecisions(acts) {
   return out;
 }
 
-// Runs of decisions against one person with short gaps: one sitting, however
-// many entries it produced.
 function toIncidents(decisions) {
-  const open = new Map(); // targetId -> incident
+  const open = new Map();
   const done = [];
   for (const d of decisions) {
     if (d.group !== "users" || !d.targetId) continue;
@@ -925,7 +755,6 @@ const relGap = (ms) => {
   return Math.round(m / 60) + "h";
 };
 
-// One evidence row, as the panel renders it.
 const ev = (d, gap, note) => ({
   ts: d.ts,
   action: d.parts && d.parts.length > 1 ? d.parts.join(" + ") : d.action || d.base,
@@ -940,14 +769,8 @@ const levelFor = (score) =>
   score >= 70 ? "concern" : score >= 40 ? "look" : "notice";
 
 // ── Reviewed flags ────────────────────────────────────────────────────────
-// A developer who has read the log and is satisfied can put a flag to sleep.
-// Without this, a known-good moderator trips the same false alarm forever and
-// the whole panel learns to be ignored - which is worse than no panel.
-//
-// Sleep is not permanent: the review remembers when it was made, and anything
-// the moderator does AFTER that date wakes the flag back up, louder.
 const FLAG_REVIEWS_PATH = path.join(DATA_DIR, "flag-reviews.json");
-let flagReviews = {}; // "role:label:key" -> { by, at, note }
+let flagReviews = {};
 
 const reviewKey = (role, label, key) =>
   (role || "mod") + ":" + (label || "?") + ":" + key;
@@ -993,7 +816,6 @@ function applyReview(signal, who) {
     (m, e) => Math.max(m, e.ts || 0),
     0,
   );
-  // Nothing new since it was looked at: put it to sleep.
   if (newest <= rec.at)
     return {
       ...signal,
@@ -1001,7 +823,6 @@ function applyReview(signal, who) {
       reviewed: rec,
       counts: false,
     };
-  // It happened again afterwards. That is a stronger signal than the first time.
   return {
     ...signal,
     score: Math.min(100, signal.score + 15),
@@ -1026,7 +847,6 @@ function buildFlags(acts, who) {
     if (score >= 15) signals.push({ ...s, score, level: levelFor(score) });
   };
 
-  // ── Switches flipped and flipped straight back ──
   {
     const used = new Set();
     const pairs = [];
@@ -1056,8 +876,6 @@ function buildFlags(acts, who) {
       const share = pct(pairs.length * 2, roomWork.length + userWork.length);
       add({
         key: "toggles",
-        // Rate-led, so a busy moderator is not punished for volume: what
-        // matters is how much of their room work is flipping and unflipping.
         score: share * 2 + Math.min(25, weighted),
         title:
           pairs.length +
@@ -1078,13 +896,7 @@ function buildFlags(acts, who) {
     }
   }
 
-  // ── Somebody leaned on ──
-  // Kicks are excluded on purpose: staff can only kick a person who is in the
-  // room, and a kick removes them, so a second kick proves they came back. That
-  // is reported below as its own, non-accusing observation.
   {
-    // Check every part of a decision, not just the one it was filed under: a
-    // "wipe buffer + kick" carries a kick even though its base is the wipe.
     const hasKick = (d) => d.parts.some((p) => REQUIRES_REJOIN.has(p));
     const hounded = incidents.filter(
       (inc) => inc.steps.filter((d) => !hasKick(d)).length >= 3,
@@ -1120,9 +932,6 @@ function buildFlags(acts, who) {
     }
   }
 
-  // ── They kept coming back ──
-  // Not a fault. It is the single most useful thing the old "repeats" number
-  // was accidentally measuring, and it reads as training, not suspicion.
   {
     const returns = incidents
       .map((inc) => ({
@@ -1167,7 +976,6 @@ function buildFlags(acts, who) {
     }
   }
 
-  // ── Bursts ──
   {
     const fast = [];
     for (let i = 1; i < work.length; i++) {
@@ -1195,7 +1003,6 @@ function buildFlags(acts, who) {
     }
   }
 
-  // ── One person taking all the attention ──
   {
     const byTarget = new Map();
     for (const inc of incidents)
@@ -1236,11 +1043,6 @@ function buildFlags(acts, who) {
     }
   }
 
-  // ── Following somebody between rooms ──
-  // Bumping into the same nuisance in four rooms once each is breadth of work,
-  // not pursuit. Pursuit is a SMALL number of people, met repeatedly, in room
-  // after room - so it needs both a room spread and repeat sittings, and it
-  // stops meaning anything once it is true of lots of people.
   {
     const perTarget = new Map();
     for (const d of userWork) {
@@ -1261,7 +1063,6 @@ function buildFlags(acts, who) {
       )
       .sort((a, b) => b[1].rooms.size - a[1].rooms.size);
 
-    // True of many people at once? Then it is just how this moderator works.
     if (followed.length >= 1 && followed.length <= 3)
       add({
         key: "following",
@@ -1286,9 +1087,8 @@ function buildFlags(acts, who) {
       });
   }
 
-  // ── Punishment with no process ──
   {
-    const seen = new Map(); // targetId -> saw a mild action first
+    const seen = new Map();
     const cold = [];
     for (const d of decisions) {
       if (!d.targetId) continue;
@@ -1316,7 +1116,6 @@ function buildFlags(acts, who) {
       });
   }
 
-  // ── Undone punishments ──
   {
     const pending = new Map();
     const reversals = [];
@@ -1352,7 +1151,6 @@ function buildFlags(acts, who) {
       });
   }
 
-  // ── All the work in short daily bursts ──
   {
     const byDay = new Map();
     for (const d of work) {
@@ -1394,7 +1192,6 @@ function buildFlags(acts, who) {
     }
   }
 
-  // ── A record with nobody in it ──
   if (userWork.length === 0 && work.length >= 40)
     add({
       key: "nousers",
@@ -1408,19 +1205,14 @@ function buildFlags(acts, who) {
       evidence: work.slice(-10).map((d) => ev(d)),
     });
 
-  // Rank, mark reviewed, and hand back the strongest first.
   signals.sort((a, b) => b.score - a.score);
   return signals.map((s) => applyReview(s, who));
 }
 
-// When each staff label was last seen acting, keyed "role:label". The Desk
-// roster uses it to show a last-active time against an offline key holder.
 function lastActiveByLabel() {
   const by = new Map();
   for (const e of entries) {
     if (e.type !== "action" || !e.label) continue;
-    // A developer's last-active would say when they acted, which is the same
-    // thing the feed no longer says.
     if (isPrivilegedEntry(e)) continue;
     by.set((e.role || "mod") + ":" + e.label, e.ts || null);
   }
@@ -1431,7 +1223,6 @@ function setAuditSub(socket, on) {
   if (socket) socket.auditSub = !!on;
 }
 
-// Hydrate the ring buffer (and identity baselines) from disk at boot.
 function load() {
   try {
     const raw = fs.readFileSync(AUDIT_PATH, "utf8");

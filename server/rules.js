@@ -1,12 +1,5 @@
 // server/rules.js
 // The written rules: what users agree to, and what moderators are held to.
-// Both sets are PUBLIC. A moderator rule people cannot read is not a rule
-// anybody can hold a moderator to, and most complaints about staff are really
-// complaints that nobody could tell what staff were allowed to do.
-//
-// Devs edit them from the dashboard; everyone reads them from the lobby. The
-// defaults below ship with the server, so a fresh install is never ruleless -
-// load() only fills in a section that has never been written.
 
 const path = require("path");
 const fs = require("fs");
@@ -16,17 +9,13 @@ const { DATA_DIR } = require("./datadir");
 
 const STORE_PATH = path.join(DATA_DIR, "rules.json");
 
-const MAX_RULES = 60; // per section
+const MAX_RULES = 60;
 const MAX_TITLE = 120;
 const MAX_BODY = 900;
 
-// Which moderators a rule is aimed at. "all" is the default and covers both.
 const LEVELS = ["all", "jr", "full"];
 
 // ── Defaults ────────────────────────────────────────────────────────────────
-// Every rule is one plain sentence of instruction plus a "why". The why is not
-// decoration: a rule people understand the reason for is one they can apply to
-// a situation nobody wrote down.
 
 const DEFAULT_COMMUNITY = [
   {
@@ -245,8 +234,6 @@ let store = {
   mod: [],
   updatedAt: 0,
   updatedBy: null,
-  // Set the first time defaults are written. Persisted, so a dev who
-  // deliberately empties a section does not get it re-seeded on the next boot.
   seeded: false,
 };
 let seq = 0;
@@ -260,8 +247,6 @@ function nextId() {
   return "r" + ++seq;
 }
 
-// Normalise one rule off the wire. Anything unrecognised is dropped rather
-// than stored, so the editor cannot smuggle extra fields into the file.
 function normalise(raw, isMod) {
   const title = clean(raw && raw.title, MAX_TITLE);
   const body = clean(raw && raw.body, MAX_BODY);
@@ -294,9 +279,6 @@ function load() {
   } catch (err) {
     if (err.code !== "ENOENT") console.error("Error loading rules.json:", err);
   }
-  // First boot only: fill both sections from the shipped defaults so a fresh
-  // install is never ruleless. After that the file is the authority, empty
-  // sections included.
   if (!store.seeded) {
     store.community = seed(DEFAULT_COMMUNITY, false);
     store.mod = seed(DEFAULT_MOD, true);
@@ -329,8 +311,6 @@ function flushSync() {
   }
 }
 
-// What the lobby modal reads. Both sections, because the moderator rules being
-// public is the point of them.
 function publicRules() {
   return {
     community: store.community.map((r) => ({ ...r })),
@@ -339,8 +319,6 @@ function publicRules() {
   };
 }
 
-// Replace a whole section. The editor sends the list it is showing, so a
-// reorder, an edit, and a delete are all the same write.
 function setSection(section, list, byLabel) {
   if (section !== "community" && section !== "mod") return { ok: false };
   if (!Array.isArray(list)) return { ok: false };
@@ -356,8 +334,6 @@ function setSection(section, list, byLabel) {
   return { ok: true, count: next.length };
 }
 
-// Put a section back to what the server shipped with, for when an edit went
-// wrong and nobody has the original text to hand.
 function resetSection(section, byLabel) {
   if (section === "community")
     return setSection("community", DEFAULT_COMMUNITY, byLabel);

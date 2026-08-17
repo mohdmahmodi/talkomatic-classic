@@ -1,13 +1,6 @@
 // server/games/words.js
 // Word data for the games: DRAW, the drawable prompts for Draw and Guess,
-// split by difficulty. Stored as space-delimited strings because a 2k-entry
-// JSON array is mostly quotes and commas. Split once at boot.
-
-// Drawable prompts. Everything here is a concrete thing you can actually put
-// on a canvas in eighty seconds. No idioms, no abstract nouns: "cold feet" and
-// "social network" read fine in a word list and are miserable to draw.
-// Easy is one recognisable shape, medium needs a bit of care, hard is a small
-// scene. Multi word prompts use hyphens; prettyPrompt turns them back.
+// split by difficulty.
 
 const DRAW_EASY = `
 sun moon star cloud rain snow rainbow lightning
@@ -281,7 +274,6 @@ const DRAW = {
   hard: split(DRAW_HARD),
 };
 
-// Prompts are shown to the drawer with the hyphens turned back into spaces.
 function prettyPrompt(word) {
   return String(word || "").replace(/-/g, " ");
 }

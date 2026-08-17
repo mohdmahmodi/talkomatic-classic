@@ -1,12 +1,5 @@
 // server/themes.js
-// Community theme library store. Anyone signed in can publish the theme they
-// built in the visual editor (tokens + effect + fonts per page; custom CSS is
-// deliberately NOT accepted, so a shared theme can never inject rules onto
-// someone else's page). Same flat-array JSON store as suggestions: DATA_DIR,
-// atomic tmp+rename, debounced saves, capped, submissions rate limited per
-// device AND per IP hash. Word filtering happens in the route and is always
-// on. Curated featured themes are separate: public/themes/featured.json,
-// edited by hand.
+// Community theme library store.
 
 const path = require("path");
 const fs = require("fs");
@@ -29,7 +22,7 @@ const FONTS = [
 ];
 const RANGES = { radius: [0, 24], "border-width": [1, 4], blur: [4, 30] };
 
-let themes = []; // oldest first
+let themes = [];
 let seq = 0;
 let saveTimer = null;
 
@@ -76,9 +69,6 @@ function ipKeyFor(ip) {
   return crypto.createHash("sha256").update(String(ip)).digest("hex").slice(0, 16);
 }
 
-// Accept ONLY known-shaped data from a submitted profile: hex tokens, numeric
-// range tokens, whitelisted effect and fonts. Everything else is dropped, so
-// a hand-crafted request cannot smuggle anything through.
 function cleanProfile(p) {
   const out = { tokens: {}, effect: "", fonts: {} };
   if (!p || typeof p !== "object") return out;
@@ -156,7 +146,6 @@ function remove(id) {
   return true;
 }
 
-// Public projection: device/ip identifiers never leave the server.
 function publicList(limit = 100) {
   return themes
     .slice()

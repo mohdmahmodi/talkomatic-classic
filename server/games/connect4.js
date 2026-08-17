@@ -1,6 +1,5 @@
 // server/games/connect4.js
-// Rules only. Board is 7 columns of 6, stored bottom-up per column so a drop
-// is just a push. The view flattens it to a top-down grid for rendering.
+// Rules only.
 
 const COLS = 7;
 const ROWS = 6;
@@ -65,8 +64,6 @@ function move(state, userId, mv) {
   return { ok: true };
 }
 
-// Only the four directions through the piece just dropped can be new, so
-// there is no reason to rescan the whole board.
 function lineThrough(state, c, r, mark) {
   const dirs = [
     [1, 0],
@@ -113,7 +110,6 @@ function result(state) {
   };
 }
 
-// Flatten to rows top-down, which is the order the client paints.
 function view(state) {
   const grid = [];
   for (let r = ROWS - 1; r >= 0; r--) {

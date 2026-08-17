@@ -1,17 +1,5 @@
 // server/suggestions.js
-// Community suggestion board. Anyone in the lobby can post, reply, and vote;
-// devs set a status tag (approved / declined / implemented) everyone can see.
-// Same flat-array JSON store as appeals; load() migrates the old mod-dashboard
-// records (status "resolved" + resolution) forward so nothing is lost.
-//
-// Abuse posture, all server-side:
-//   - posts capped per rolling 24h by BOTH device id and IP hash (fresh
-//     incognito tabs share the IP, clearing storage does not reset the cap)
-//   - one vote per device per suggestion, and at most VOTES_PER_IP distinct
-//     devices from the same IP may hold a vote on one suggestion, so opening
-//     new private tabs cannot stack upvotes
-//   - roles (dev/mod/jr) are stamped from the socket at write time, never
-//     taken from the client, so badges cannot be impersonated
+// Community suggestion board.
 
 const path = require("path");
 const fs = require("fs");
@@ -20,6 +8,7 @@ const crypto = require("crypto");
 
 const { DATA_DIR } = require("./datadir");
 const roles = require("./roles");
+const linkfilter = require("./linkfilter");
 
 const STORE_PATH = path.join(DATA_DIR, "suggestions.json");
 const MAX = 2000;
@@ -28,10 +17,10 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 const POSTS_PER_DAY = 3;
 const REPLIES_PER_DAY = 15;
-const MAX_REPLIES = 40; // per suggestion
-const VOTES_PER_IP = 2; // distinct devices per IP holding a vote on one post
+const MAX_REPLIES = 40;
+const VOTES_PER_IP = 2;
 
-let suggestions = []; // oldest first
+let suggestions = [];
 let seq = 0;
 let saveTimer = null;
 
@@ -57,13 +46,6 @@ function load() {
 const STATUSES = ["open", "approved", "declined", "implemented"];
 const KINDS = ["idea", "bug"];
 
-// Old records: { status: "open"|"resolved", resolution, reviewedBy, reviewedAt }
-// New records: { kind, status: "open"|"approved"|"declined"|"implemented",
-//                statusBy, statusAt, voters, replies, role, ipKey, editedAt }
-//
-// Everything already on the board predates the idea/bug split, so it becomes an
-// idea: that is what people were posting when the box only asked for one thing,
-// and silently refiling 300 posts as bugs would be worse than leaving them.
 function migrate(s) {
   if (s.status === "resolved") {
     s.status = s.resolution === "approved" ? "approved" : "declined";
@@ -112,7 +94,6 @@ function prune(now) {
   if (suggestions.length > MAX) suggestions = suggestions.slice(-MAX);
 }
 
-// Rolling-24h post count for a device or IP. Counts replies separately.
 function countRecent(kind, deviceId, ipKey) {
   const cutoff = Date.now() - DAY_MS;
   let n = 0;
@@ -192,8 +173,6 @@ function reply({ id, deviceId, ip, userId, name, role, text, avatar }) {
   return { ok: true };
 }
 
-// dir: 1 (up), -1 (down), 0 (clear). One vote per device; the per-IP cap only
-// applies when ADDING a vote from a device that does not already hold one.
 function vote({ id, deviceId, ip, dir }) {
   const s = get(id);
   if (!s) return { ok: false, code: "not_found" };
@@ -231,20 +210,12 @@ function setStatus(id, status, byLabel, byRole) {
   if (!s) return null;
   s.status = status;
   s.statusBy = byLabel || null;
-  // Kept so the public board can say which half of the team set it without
-  // naming anybody. Left alone when the caller does not know, rather than
-  // defaulted: writing "mod" over an unknown role would beat the roster
-  // fallback and file a developer under the wrong half.
   if (byRole) s.statusRole = byRole === "dev" ? "dev" : "mod";
   s.statusAt = Date.now();
   saveSoon();
   return s;
 }
 
-// Who may change or remove a given post. Ownership is by device id, which is
-// the same thing the vote and rate limits key on - never a client-sent id, so
-// "mine" cannot be claimed by asking. Staff may always remove; only the author
-// may edit, because an edit puts words in somebody's mouth under their name.
 function ownsPost(s, deviceId) {
   return !!(s && deviceId && s.deviceId === deviceId);
 }
@@ -268,8 +239,6 @@ function editPost({ id, replyId, deviceId, text }) {
   return { ok: true };
 }
 
-// `byStaff` skips the ownership check: a mod clearing something abusive is the
-// whole reason the board can be left open to everybody.
 function remove(id, replyId, deviceId, byStaff) {
   const s = get(id);
   if (!s) return false;
@@ -290,12 +259,6 @@ function get(id) {
   return suggestions.find((s) => s.id === id) || null;
 }
 
-// Projection sent to browsers. deviceId / ipKey never leave the server;
-// userId is included for devs only (user tracing, same as the old dashboard).
-// The whole board goes to the client in one payload and is filtered, searched
-// and sorted there. At a couple of thousand posts that is a few hundred KB
-// once, against a round trip for every keystroke in the search box - and the
-// board is opened far less often than it is scrolled.
 function publicList({ deviceId, isDev, isStaff, limit = MAX } = {}) {
   const out = suggestions
     .slice()
@@ -310,13 +273,10 @@ function publicList({ deviceId, isDev, isStaff, limit = MAX } = {}) {
         avatar: s.avatar || null,
         kind: s.kind || "idea",
         title: s.title || null,
-        text: s.text,
+        text: linkfilter.redact(s.text),
         at: s.at,
         editedAt: s.editedAt || null,
         status: s.status,
-        // The board is public, so a declined idea would otherwise hand its
-        // author the name of whoever declined it. Staff triaging the queue
-        // still see who set what.
         statusBy: isStaff
           ? s.statusBy
           : roles.publicStaffName(s.statusBy, s.statusRole),
@@ -333,11 +293,9 @@ function publicList({ deviceId, isDev, isStaff, limit = MAX } = {}) {
           name: r.name,
           role: r.role || "user",
           avatar: r.avatar || null,
-          text: r.text,
+          text: linkfilter.redact(r.text),
           at: r.at,
           editedAt: r.editedAt || null,
-          // Replies carry it too, so the author gets edit and delete on their
-          // own without the client guessing from a name.
           mine: !!deviceId && r.deviceId === deviceId,
           userId: isDev ? r.userId : undefined,
         })),
@@ -346,13 +304,6 @@ function publicList({ deviceId, isDev, isStaff, limit = MAX } = {}) {
   return out;
 }
 
-// What has happened to THIS person's own posts since they last looked, split
-// into the three things worth pulling somebody back to the board for: a
-// decision that went their way, one that did not, and somebody talking to them.
-//
-// `since` comes from the browser rather than being stored per device: it is a
-// read marker on the reader's own posts, so the worst a tampered value can do
-// is show somebody their own history again.
 function unreadFor(deviceId, since) {
   const out = { approved: 0, declined: 0, replies: 0 };
   if (!deviceId) return out;
@@ -360,13 +311,10 @@ function unreadFor(deviceId, since) {
   for (const s of suggestions) {
     if (s.deviceId !== deviceId) continue;
     if ((s.statusAt || 0) > from) {
-      // "Built" is the same good news as "approved" as far as a notification
-      // goes - three colours is already the most a chip row can say clearly.
       if (s.status === "approved" || s.status === "implemented") out.approved++;
       else if (s.status === "declined") out.declined++;
     }
     for (const r of s.replies || [])
-      // Your own reply to your own thread is not news.
       if ((r.at || 0) > from && r.deviceId !== deviceId) out.replies++;
   }
   return out;

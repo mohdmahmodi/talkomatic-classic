@@ -1,6 +1,6 @@
 // ╔═══════════════════════════════════════════════════════════════════════════╗
-// ║  FILE 2: server/security.js                                             ║
-// ║  Rate limiting, bot protection, validation, auth                        ║
+// ║ FILE 2: server/security.js ║ ║ Rate limiting, bot protection,
+// validation, auth ║
 // ╚═══════════════════════════════════════════════════════════════════════════╝
 
 const crypto = require("crypto");
@@ -414,9 +414,6 @@ const validationRules = {
     }
     return null;
   },
-  // Optional Discord avatar: only a snowflake id + CDN hash ever cross the
-  // wire; clients rebuild the cdn.discordapp.com URL from these two, so an
-  // arbitrary URL can never be injected.
   avatar: (v) => {
     if (v === undefined || v === null) return null;
     if (typeof v !== "object") return "Avatar must be an object.";
@@ -452,26 +449,21 @@ function validateObject(obj, rules) {
 // ── Exports ─────────────────────────────────────────────────────────────────
 
 module.exports = {
-  // Rate limiters
   socketRateLimiter,
   chatUpdateLimiter,
   typingLimiter,
   ipRateLimiter,
   enhancedRateLimiters,
-  // Detection
   detectBrowserRequest,
   detectBotBehavior,
   isBlacklisted,
   validateBotToken,
   createIPBasedUser,
-  // Middleware
   antibotMiddleware,
   enhancedRateLimit,
   apiAuth,
-  // Handlers
   handleBotTokenRequest,
   handleBotTokenInfo,
-  // Validation
   validate,
   validateObject,
 };

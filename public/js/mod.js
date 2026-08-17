@@ -1,34 +1,20 @@
 // public/js/mod.js
-// Talkomatic moderation dashboard. Connects with the dev/mod key from
-// localStorage (the server validates by hash), then drives a tabbed UI:
-//   Activity  live, permanent audit feed of staff actions + identity events
-//   Ban list  active IP blocks with a live countdown and one-tap unban (dev)
-//   Moderators active mod keys with instant revoke + grant (dev)
-// Everything rendered with textContent, so it is XSS-safe. The feed batches
-// live entries and caps how many cards live in the DOM, so a sudden spike in
-// sign-ins cannot thrash the page.
+// Talkomatic moderation dashboard.
 
 (function () {
   const socket = io({
-    // WebSocket only, matching the server. No long-poll handshake first.
     transports: ["websocket"],
     upgrade: false,
     auth: {
       devKey: localStorage.getItem("talkomatic_devKey") || undefined,
       modKey: localStorage.getItem("talkomatic_modKey") || undefined,
-      // The same device id the lobby and the rooms send. The key watch counts
-      // people by it, so a dashboard tab that left it out used to look like a
-      // second person holding the same key.
       deviceId:
         (window.TalkomaticIdentity && window.TalkomaticIdentity.deviceId) ||
         undefined,
-      // The dashboard is a separate read-only board, exempt from the
-      // one-active-tab rule so it can stay open beside a room.
       app: "modlog",
     },
   });
 
-  // The Desk (staff chat) rides the dashboard socket like everywhere else.
   if (window.TalkoDesk) window.TalkoDesk.init(socket);
 
   const $ = (id) => document.getElementById(id);
@@ -42,9 +28,8 @@
   const focusBar = $("focusBar");
   const feedNote = $("feedNote");
 
-  // ── State ──
-  let entries = []; // oldest first (actions + identity + comments)
-  const commentsByRef = new Map(); // parentId -> [comment]
+  let entries = [];
+  const commentsByRef = new Map();
   let me = null;
   let authorized = false;
   let tab = "activity";
@@ -54,17 +39,14 @@
   let unreadNotifs = 0;
   let applicationsList = [];
   let appsPage = 0;
-  let appsFilter = "pending"; // pending | approved | rejected | all
+  let appsFilter = "pending";
   let appsQuery = "";
-  let applicationsOpen = true; // dev kill switch for new mod applications
+  let applicationsOpen = true;
   const APPS_PAGE = 8;
   let reportsList = [];
-  let appealsList = []; // ban appeals (Appeals tab)
-  let suggestionsList = []; // feature suggestions (Suggestions tab)
+  let appealsList = [];
+  let suggestionsList = [];
 
-  // The feed covers one Pacific day, 12:00am to 11:59pm, so every staff member
-  // sees the same window whatever timezone they are in, and it empties at
-  // midnight PT. Computed with Intl so PST/PDT is handled automatically.
   const PACIFIC_FMT = (() => {
     try {
       return new Intl.DateTimeFormat("en-US", {
@@ -98,8 +80,6 @@
       };
       const today = partsAt(now);
       const localMidnight = Date.UTC(+today.year, +today.month - 1, +today.day);
-      // Resolve with the offset in force at midnight, not right now, so the two
-      // daylight-saving switchover days land correctly.
       let guess = localMidnight - offsetAt(now);
       guess = localMidnight - offsetAt(guess);
       return guess;
@@ -107,9 +87,6 @@
       return 0;
     }
   }
-  // The board holds a week: seven Pacific midnights, oldest first, today last.
-  // Each is resolved separately rather than by subtracting 24h, so the two
-  // daylight-saving switchover days do not drag the week an hour out.
   const DAY_MS = 24 * 60 * 60 * 1000;
   function weekDayStarts(now = Date.now()) {
     const out = [];
@@ -120,10 +97,8 @@
     return out;
   }
   let weekDays = weekDayStarts();
-  let dayIndex = weekDays.length - 1; // today
+  let dayIndex = weekDays.length - 1;
   let dayStart = weekDays[dayIndex];
-  // The end of the day on screen. Today has no end, so live entries keep
-  // arriving; any earlier day stops at the next midnight.
   function dayEnd() {
     return dayIndex < weekDays.length - 1 ? weekDays[dayIndex + 1] : Infinity;
   }
@@ -143,11 +118,10 @@
     pacificParts(ts, { weekday: "long", month: "long", day: "numeric" }) ||
     "today";
 
-  const DOM_CAP = 250; // max activity cards kept in the DOM at once
-  let pendingNew = []; // live entries waiting for the next batched flush
+  const DOM_CAP = 250;
+  let pendingNew = [];
   let flushTimer = null;
 
-  // ── Categories ──
   const CAT = {
     security: {
       color: "#ff5468",
@@ -217,7 +191,6 @@
     return "other";
   }
 
-  // ── Small helpers ──
   const fmtTime = (ts) => {
     try {
       return new Date(ts).toLocaleString();
@@ -241,7 +214,6 @@
     if (cls) d.className = cls;
     return d;
   }
-  // A centered empty-state block (returns the node; callers append it).
   function emptyBox(faClass, text) {
     const e = divc("empty");
     e.appendChild(icon(faClass));
@@ -271,8 +243,6 @@
     }
     return s;
   }
-  // One labelled "KEY  value" line for an activity card body. Pass a node as
-  // `v` (e.g. a uref) or plain text; `uid` turns the text into a trace link.
   function kvRow(k, v, vClass, uid) {
     if (v == null || v === "") return null;
     const row = divc("kv");
@@ -293,10 +263,6 @@
     if (row) parent.appendChild(row);
   }
 
-  // A name plus what the server says they actually are. Anyone can call
-  // themselves "MOD katie"; only the badge here is authoritative, and the
-  // plain "Mod: no" beside it is there so the absence of a badge cannot be
-  // mistaken for the board simply not knowing.
   const ROLE_CHIP = { dev: ["dev", "DEV"], mod: ["l2", "MOD"], jr: ["l1", "JR MOD"] };
   function whoWithRole(name, role, uid) {
     const wrap = span("whorole");
@@ -312,7 +278,7 @@
     if (role === "dev") return "yes - developer";
     if (role === "mod") return "yes - full moderator";
     if (role === "jr") return "yes - junior moderator";
-    if (role) return "yes - " + role; // an unfamiliar tag is still staff
+    if (role) return "yes - " + role;
     return "no - ordinary user";
   }
   function searchable(e) {
@@ -357,9 +323,6 @@
     return true;
   }
 
-  // ── Activity cards ──
-  // Each card: colorful icon tile + a plain-language headline ("who did
-  // what"), then labelled rows so the target, room, and IP are unmistakable.
   function buildCard(e) {
     const cat = categorize(e);
     const card = document.createElement("div");
@@ -437,8 +400,6 @@
     when.title = fmtTime(e.ts);
     head.appendChild(when);
     top.appendChild(head);
-    // Clearing a row is a developer act, and it is final: the entry goes from
-    // the board, from the Desk, and from the file behind both.
     if (me && me.role === "dev" && e.id) {
       const del = document.createElement("button");
       del.className = "e-del";
@@ -453,9 +414,6 @@
     }
     card.appendChild(top);
 
-    // Every field the entry carries goes on the card. Cards are no longer a
-    // fixed height with an inner scrollbar, so there is nowhere for a field to
-    // hide, and a half-shown record is no use for real work.
     const body = divc("e-body");
     if (e.type === "security") {
       addKv(body, "Key", e.label);
@@ -476,9 +434,6 @@
       addKv(body, "Staff IP", e.ip, "ip");
       addKv(body, "When", fmtTime(e.ts), "dimv");
     } else if (e.type === "notification") {
-      // Both sides of a report, each with what the server says they are. A
-      // username that looks like staff proves nothing; the badge and the
-      // "Staff" line come off the socket that raised it.
       const tn = parseTarget(e.target);
       if (tn) {
         addKv(body, "About", whoWithRole(tn.name, e.targetRole, tn.uid));
@@ -489,8 +444,6 @@
       if (e.target) addKv(body, "Staff", staffLine(e.targetRole), "dimv");
       addKv(body, "Their IP", e.targetIp, "ip");
 
-      // A report carries the reporter in `by`; an abuse flag names the mod it
-      // is about in `label` with their role in `role`.
       const raiser = e.by || e.label;
       const raiserRole = e.by ? e.byRole : e.role || e.byRole;
       if (raiser) {
@@ -514,8 +467,6 @@
     } else {
       addKv(body, "Was", e.prevUsername, "dimv");
       addKv(body, "Location", e.location, "dimv");
-      // Show the prior location too when a rename changed it, so the location
-      // history is visible on the entry itself, not only in the trace summary.
       addKv(
         body,
         "Was at",
@@ -570,9 +521,6 @@
     return card;
   }
 
-  // Confirm, then clear entries off the board for good. Nothing is written
-  // in their place - a cleared row that leaves a "cleared a row" behind has
-  // not been cleared.
   async function deleteActivity(list) {
     const ids = list.map((e) => e.id).filter(Boolean);
     if (!ids.length) return;
@@ -593,8 +541,6 @@
     socket.emit("staff delete activity", { ids });
   }
 
-  // The server took entries off the board. Drop them here without a reload so
-  // this dashboard and the Desk are never showing different histories.
   function dropEntries(ids) {
     const gone = new Set(ids.map(Number));
     if (!gone.size) return;
@@ -626,14 +572,10 @@
     thread.appendChild(row);
   }
 
-  // Full rebuild of the feed, capped to the most recent DOM_CAP matches and
-  // rendered in animation-frame chunks so a long feed never blocks the page.
   let activityToken = 0;
   function renderActivity() {
     pendingNew = [];
     listEl.textContent = "";
-    // The per-day counts follow the search and filter, so redraw them here
-    // rather than only when the day changes.
     renderDayPicker();
     const token = ++activityToken;
     const matches = entries.filter((e) => e.type !== "comment" && passes(e));
@@ -648,10 +590,9 @@
     }
     const shown = matches.slice(-DOM_CAP);
     updateFeedNote(matches.length);
-    // Newest first; live inserts still arrive at the top via flushPending.
     let i = shown.length - 1;
     (function chunk() {
-      if (token !== activityToken) return; // a newer render superseded this one
+      if (token !== activityToken) return;
       for (let n = 0; i >= 0 && n < 40; i--, n++)
         listEl.appendChild(buildCard(shown[i]));
       if (i >= 0) requestAnimationFrame(chunk);
@@ -672,7 +613,6 @@
     }
   }
 
-  // Say which day is on screen, since the feed deliberately only covers one.
   function updateDayLabel() {
     const el = $("dayLabel");
     if (!el) return;
@@ -682,9 +622,6 @@
       ", 12:00am to 11:59pm Pacific";
   }
 
-  // How many entries the feed would show on a given day, ignoring the day
-  // filter itself. Drives the count under each day button, so a mod can see
-  // where the week was busy before clicking into it.
   function countForDay(i) {
     const from = weekDays[i];
     const to = i < weekDays.length - 1 ? weekDays[i + 1] : Infinity;
@@ -701,7 +638,6 @@
     return n;
   }
 
-  // A week of days, oldest on the left, today on the right.
   function renderDayPicker() {
     const host = $("dayPicker");
     if (!host) return;
@@ -727,16 +663,11 @@
     });
   }
 
-  // Roomy or compact, remembered per browser. Two named options rather than
-  // one button that renames itself: with a single button nobody could tell
-  // whether "Roomy" was the mode they were in or the one they were about to
-  // get. The highlighted half is always the one you are looking at.
   function setCompact(on) {
     document.body.classList.toggle("compact", !!on);
     try {
       localStorage.setItem("talkomatic_modCompact", on ? "1" : "0");
     } catch (_) {
-      /* private mode: the choice just will not stick */
     }
     const seg = $("viewSeg");
     if (seg)
@@ -767,12 +698,9 @@
     dayIndex = next;
     dayStart = weekDays[dayIndex];
     updateDayLabel();
-    renderActivity(); // redraws the picker too
+    renderActivity();
   }
 
-  // Roll the week on at midnight Pacific. A dashboard left open overnight
-  // slides the seven days along and drops what fell off the back, keeping
-  // whichever day the mod was reading if it is still in the window.
   function checkDayRollover() {
     const fresh = weekDayStarts();
     if (fresh[fresh.length - 1] === weekDays[weekDays.length - 1]) return;
@@ -794,8 +722,6 @@
   }
   setInterval(checkDayRollover, 30000);
 
-  // Batched insert of new live entries (keeps existing cards, their comments and
-  // scroll intact) plus a DOM trim, so a flood of sign-ins can't thrash the page.
   function scheduleFlush() {
     if (flushTimer) return;
     flushTimer = setTimeout(() => {
@@ -813,21 +739,18 @@
     if (toShow.length === 0) return;
     const empty = listEl.querySelector(".empty");
     if (empty) empty.remove();
-    // Newest at the top
     for (let i = 0; i < toShow.length; i++) {
       listEl.insertBefore(buildCard(toShow[i]), listEl.firstChild);
     }
-    // Trim oldest cards beyond the cap
     let cards = listEl.querySelectorAll(".entry");
     for (let i = cards.length - 1; i >= DOM_CAP; i--) cards[i].remove();
     const totalMatches = entries.filter(
       (e) => e.type !== "comment" && passes(e),
     ).length;
     updateFeedNote(totalMatches);
-    renderDayPicker(); // today's count just moved
+    renderDayPicker();
   }
 
-  // ── Focus (trace a user) ──
   function setFocus(uid) {
     focusUid = uid || null;
     if (!focusUid) {
@@ -877,7 +800,6 @@
         if (e.username) names.add(e.username);
         if (e.prevUsername) names.add(e.prevUsername);
         if (e.ip) ips.add(e.ip);
-        // Location history: every place this user has set on sign-in or rename.
         if (e.location) locations.add(e.location);
         if (e.prevLocation) locations.add(e.prevLocation);
       } else if (e.type === "action") {
@@ -928,17 +850,14 @@
     });
   }
 
-  // ── Ban list tab (full mods + devs) ──
   let bans = [];
-  let banHistory = []; // ban/unban events (Bans tab history feed)
+  let banHistory = [];
   let bansTimer = null;
   let bansQuery = "";
-  let bansFilter = "all"; // all | perm | temp | id
-  // Which people are expanded, so a live refresh does not collapse the row a
-  // moderator is reading.
+  let bansFilter = "all";
   const openBanKeys = new Set();
   let banHistQuery = "";
-  let banHistFilter = "all"; // all | ban | unban
+  let banHistFilter = "all";
   function fmtRemaining(b) {
     if (b.permanent) return null;
     const ms = (b.expiry || 0) - Date.now();
@@ -954,8 +873,6 @@
     if (d > 0) return d + "d " + pad(h) + ":" + pad(m) + ":" + pad(s) + " left";
     return pad(h) + ":" + pad(m) + ":" + pad(s) + " left";
   }
-  // Duration picker to re-time a live block from now (dev). Shortening reduces
-  // an over-long ban without lifting it first.
   function openBanDurationMenu(b) {
     if (!window.StaffUI) return;
     const durs = [
@@ -1006,7 +923,6 @@
     });
   }
 
-  // Edit the message a blocked user sees on the ban screen (dev).
   async function editBanMessage(b) {
     if (!window.StaffUI) return;
     const reason = await StaffUI.prompt({
@@ -1033,7 +949,6 @@
     });
   }
 
-  // Everything searchable about one block entry.
   function banSearchable(b) {
     return [
       b.label,
@@ -1048,9 +963,6 @@
       .toLowerCase();
   }
 
-  // Group active blocks that belong to the same person: shared client id
-  // first, then a shared display name. Newest group first, newest block first
-  // inside each group.
   function groupBans(list) {
     const byDid = new Map();
     const byName = new Map();
@@ -1067,7 +979,6 @@
         solos.push([b]);
       }
     }
-    // Fold name-only blocks into an id group carrying the same name.
     for (const [nameKey, blocks] of [...byName]) {
       for (const g of byDid.values()) {
         if (g.some((x) => (x.label || "").trim().toLowerCase() === nameKey)) {
@@ -1084,8 +995,6 @@
     return groups;
   }
 
-  // One block line inside an expanded person row: kind tag, address (only
-  // where it is served at all), live countdown, and the per-block controls.
   function buildBlockRow(b, isDev, showIp) {
     const row = divc("blockrow");
     const kind = b.kind || "ip";
@@ -1132,9 +1041,6 @@
         ),
       );
     }
-    // Lifting a block is a full-mod action; juniors read the list only. A
-    // permanent one is a developer's, so everybody else gets a lock here
-    // rather than a button that refuses after the click.
     if (viewerIsFullMod()) {
       if (b.permanent && !isDev) {
         const lock = span("ibtn locked");
@@ -1152,8 +1058,6 @@
     return row;
   }
 
-  // Confirm, then lift one block or every block covering a person. The
-  // opaque ref is what the server acts on; nobody needs the address for it.
   async function confirmUnban(blocks, showIp, name) {
     const send = () =>
       blocks.forEach((b) =>
@@ -1180,9 +1084,6 @@
     if (ok) send();
   }
 
-  // One person = one table row of fixed height, so a repeat evader with thirty
-  // blocks takes no more vertical space than someone with one. Their blocks
-  // live in a detail panel that opens underneath.
   function buildBanRow(blocks, isDev, showIp) {
     const anyPerm = blocks.some((b) => b.permanent);
     const first = blocks[0];
@@ -1217,7 +1118,6 @@
     whoCell.appendChild(sub);
     row.appendChild(whoCell);
 
-    // Blocks column: how many, and of what kinds
     const blocksCell = divc("br-blocks");
     const kinds = [...new Set(blocks.map((b) => b.kind || "ip"))];
     const n = span("br-count", String(blocks.length));
@@ -1246,7 +1146,6 @@
     if (first.ts) when.title = fmtTime(first.ts);
     row.appendChild(when);
 
-    // Ends: permanent wins, otherwise the block that runs longest
     const endCell = span("br-ends");
     if (anyPerm) {
       const p = span("pill perm", "Permanent");
@@ -1262,7 +1161,6 @@
     row.appendChild(endCell);
     wrap.appendChild(row);
 
-    // Detail panel, built once on first open
     const detail = divc("bandetail");
     detail.hidden = true;
     let built = false;
@@ -1313,9 +1211,6 @@
 
       if (!viewerIsFullMod()) return;
       const foot = divc("bandetail-foot");
-      // Permanent blocks are dev-only to lift, so for anybody else this button
-      // covers the temporary ones and the rest are spelled out. Sending the
-      // permanent ones anyway would just collect refusals.
       const liftable = viewerIsDev()
         ? blocks
         : blocks.filter((b) => !b.permanent);
@@ -1358,7 +1253,6 @@
       if (open) openBanKeys.add(key);
       else openBanKeys.delete(key);
     });
-    // Re-open whatever was open before a live refresh redrew the table
     if (openBanKeys.has(key)) {
       build();
       detail.hidden = false;
@@ -1438,10 +1332,6 @@
     }, 1000);
   }
 
-  // Ban / unban history: who banned or unbanned whom, newest first, with a
-  // search box and a Bans / Unbans filter. The raw IP appears for devs only
-  // (the server omits it for mods). A ban that is still in force gets a green
-  // ACTIVE chip so open blocks stand out from history at a glance.
   function renderBanHistory() {
     const wrap = $("banHistoryList");
     if (!wrap) return;
@@ -1459,8 +1349,6 @@
       );
       return;
     }
-    // Keys of blocks still in force (devs receive the key; mods do not, so the
-    // ACTIVE chip is effectively dev-only).
     const activeKeys = new Set(bans.map((b) => b.ip).filter(Boolean));
     let list = banHistory.slice();
     if (banHistFilter !== "all")
@@ -1516,7 +1404,7 @@
         s.appendChild(tag);
       }
       if (e.ip)
-        s.appendChild(span("ip", String(e.ip).replace(/^id:/, "id "))); // devs only
+        s.appendChild(span("ip", String(e.ip).replace(/^id:/, "id ")));
       if (e.reason) s.appendChild(span(null, '"' + e.reason + '"'));
       if (!isUnban && e.ip && activeKeys.has(e.ip)) {
         const st = span("stchip active");
@@ -1534,15 +1422,9 @@
     });
   }
 
-  // ── Moderators tab (dev only) ──
   let modKeys = [];
-  // People whose key has been pulled. They are not staff any more, so they are
-  // kept out of the roster, and shown in their own list with the reason they
-  // stopped.
   let formerMods = [];
-  let modsFilter = "all"; // all | dev | l2 | l1 | active | inactive | former
-  // Turn a last-connected timestamp into a label + freshness colour, so a stale
-  // (long-inactive) mod stands out at a glance.
+  let modsFilter = "all";
   function lastSeenMeta(ts) {
     if (!ts) return { text: "Never connected", cls: "dim" };
     const ms = Date.now() - ts;
@@ -1552,7 +1434,6 @@
     else if (ms >= day) cls = "stale";
     return { text: relTime(ts), cls };
   }
-  // One label/value cell in a mod card's stat grid.
   function modStat(k, v, vCls, title) {
     const s = divc("mc-stat");
     s.appendChild(span("mc-k", k));
@@ -1561,7 +1442,6 @@
     s.appendChild(val);
     return s;
   }
-  // Active = connected right now, or seen within the last 7 days.
   function isActiveStaff(m) {
     return m.online || (m.lastSeen && Date.now() - m.lastSeen < 7 * 86400000);
   }
@@ -1570,8 +1450,6 @@
     l2: { chip: "chip l2", name: "MOD L2", color: "var(--blue)" },
     l1: { chip: "chip l1", name: "MOD L1", color: "var(--purple)" },
   };
-  // The full staff roster: mod keys from the server, plus dev keys taken from
-  // the key-activity history (Sessions data), so devs appear on the same board.
   function buildStaffRoster() {
     const online = new Set((sessionData.sessions || []).map((s) => s.hash));
     const activityByHash = new Map(
@@ -1686,8 +1564,6 @@
       actions.appendChild(histBtn);
     }
 
-    // Promote / demote / revoke apply to mod keys only, and only a dev may do
-    // them; dev keys themselves live in the server config.
     if (m.key && viewerIsDev()) {
       const k = m.key;
       const toLevel = k.level === 1 ? 2 : 1;
@@ -1727,8 +1603,6 @@
       revoke.appendChild(document.createTextNode(" Remove from staff"));
       revoke.addEventListener("click", async () => {
         if (!window.StaffUI) return;
-        // The reason is not optional: it is what the former-staff record says
-        // about this person from here on, and the server rejects an empty one.
         const r = await StaffUI.prompt({
           title: "Remove " + (k.label || "mod") + " from staff",
           icon: '<i class="fas fa-user-xmark"></i>',
@@ -1764,17 +1638,8 @@
   }
 
   // ── One staff member's whole record ──────────────────────────────────────
-  // Lifetime tallies (which never move) up top, then the last 30 days of
-  // actions a page at a time. Somebody with tens of thousands of actions must
-  // not be able to hang this modal, so the list is paged server-side.
   const RECORD_PAGE = 50;
-  // Actions on users a junior should have behind them before a developer is
-  // asked to look at full mod. The server owns the real number and sends it
-  // with every record; this is only the fallback if an old payload arrives.
   let PROMOTION_AT = 1000;
-  // { label, role, modLevel, offset, group, targetUid, host } for the open
-  // record. `host` is the mounted .mh-wrap so paging and filtering can swap the
-  // contents in place instead of closing and reopening the modal.
   let recordCtx = null;
 
   function openModHistory(m, opts) {
@@ -1798,7 +1663,6 @@
     });
   }
 
-  // Re-query the open record with one thing changed, keeping the modal up.
   function refineRecord(patch) {
     if (!recordCtx) return;
     const rank =
@@ -1821,7 +1685,6 @@
     );
   }
 
-  // "3 months" / "6 days" for how long they have been active.
   function spanLabel(from, to) {
     const ms = Math.max(0, (to || Date.now()) - (from || Date.now()));
     const d = Math.floor(ms / 86400000);
@@ -1839,8 +1702,6 @@
     return t;
   }
 
-  // Which bucket a logged action belongs to, for the row icon. The server sends
-  // `group` on every entry now, so this no longer has to guess from the text.
   const REC_GROUP = {
     users: { icon: "fa-user-shield", label: "Acting on users" },
     queues: { icon: "fa-inbox", label: "Clearing queues" },
@@ -1851,9 +1712,6 @@
     other: { icon: "fa-circle-info", label: "Not yet classified" },
   };
 
-  // "rename room (was Old Name)" -> { verb: "rename room", note: "was Old Name" }
-  // The parameter is the useful half and it was buried in the middle of a long
-  // headline, so it is split out onto its own line.
   function splitAction(action) {
     const s = String(action || "?");
     const i = s.indexOf(" (");
@@ -1861,8 +1719,6 @@
     return { verb: s.slice(0, i), note: s.slice(i + 2, -1) };
   }
 
-  // "room:Some name(123456)" -> { name, id }. Names contain brackets of their
-  // own, so anchor on the LAST "(" rather than the first.
   function parseRoomTag(tag) {
     const s = String(tag || "");
     if (!s.startsWith("room:")) return null;
@@ -1874,10 +1730,6 @@
   }
 
   // ── The headline figures ────────────────────────────────────────────────
-  // "Actions on users" leads, because that is the job. Everything else is real
-  // but does not make somebody a moderator, and mixing the two into one "real
-  // work" total was how a record made mostly of room renames and notes read as
-  // a busy moderator.
   function recordSummary(h, isDev) {
     const sum = divc("mh-sum");
     if (!isDev) {
@@ -1921,10 +1773,6 @@
   }
 
   // ── Worth a look ────────────────────────────────────────────────────────
-  // Shapes in the log that a person should read before trusting the numbers
-  // above them. Every one of these has an innocent explanation, says so, and
-  // can show the exact rows it was built from - a flag you cannot open is an
-  // accusation, and people learn to ignore those.
   const FLAG_LEVEL = {
     concern: { label: "Concern", icon: "fa-triangle-exclamation" },
     look: { label: "Look", icon: "fa-circle-exclamation" },
@@ -1950,7 +1798,6 @@
       if (e.room) mid.appendChild(span("mh-evroom", e.room));
       if (e.note) mid.appendChild(span("mh-evnote", e.note));
       row.appendChild(mid);
-      // The gap between actions IS the evidence, so it gets its own column.
       if (e.gap) row.appendChild(span("mh-evgap", e.gap));
       wrap.appendChild(row);
     });
@@ -2007,8 +1854,6 @@
       acts.appendChild(btn);
     }
 
-    // Putting a flag to sleep is a developer decision: a moderator clearing
-    // the flags on their own record would make the whole panel pointless.
     if (h.canReview) {
       const rb = document.createElement("button");
       rb.type = "button";
@@ -2059,7 +1904,6 @@
     const live = all.filter((f) => f.level !== "reviewed");
     const asleep = all.filter((f) => f.level === "reviewed");
 
-    // Saying nothing at all leaves you unsure whether the check even ran.
     if (!all.length) {
       if (!h.total) return null;
       const ok = divc("mh-flags clear");
@@ -2090,8 +1934,6 @@
     );
     box.appendChild(head);
 
-    // Loudest three up front. Anything quieter is real but should not be the
-    // first thing somebody reads, or the top signal gets buried again.
     const shown = live.slice(0, 3);
     const rest = live.slice(3);
     shown.forEach((f) => box.appendChild(flagRow(f, h)));
@@ -2163,8 +2005,6 @@
   }
 
   // ── Who they acted on ───────────────────────────────────────────────────
-  // The question the old record could not answer without reading every page.
-  // Clicking a name filters the log down to just that person.
   function recordTargets(h) {
     const targets = h.targets || [];
     if (!targets.length) return null;
@@ -2218,9 +2058,6 @@
   }
 
   // ── One line of the log ─────────────────────────────────────────────────
-  // What was done, and to whom, on the same line. Where and from which address
-  // sit underneath, so scanning a page answers "who did they do this to"
-  // without reading past the action name.
   function recordRow(e) {
     const row = divc("mh-row");
     const g = REC_GROUP[e.group] || REC_GROUP.other;
@@ -2266,8 +2103,6 @@
     return row;
   }
 
-  // Day heading, so a burst of thirty actions inside one minute is visibly a
-  // burst rather than a wall of "5h ago".
   function dayKey(ts) {
     const d = new Date(ts || 0);
     return d.getFullYear() + "-" + d.getMonth() + "-" + d.getDate();
@@ -2292,9 +2127,6 @@
   function renderModHistory(h) {
     if (!window.StaffUI || !h) return;
     if (h.promotionAt) PROMOTION_AT = h.promotionAt;
-    // A reply can outlive the context that asked for it (the modal was closed
-    // and the response landed after). Rebuild enough of it to render rather
-    // than dropping the record on the floor.
     if (!recordCtx) {
       recordCtx = {
         label: h.label,
@@ -2307,8 +2139,6 @@
       };
     }
     const ctx = recordCtx;
-    // The server is the authority on the filters actually applied, so a reply
-    // that arrives out of order cannot leave the chips lying about the list.
     if (recordCtx) {
       recordCtx.group = h.group || null;
       recordCtx.targetUid = h.targetUid || null;
@@ -2335,7 +2165,6 @@
       return mountRecord(h, wrap, isDev, ctx);
     }
 
-    // ── What they spend their time on ──
     const gsect = divc("mh-sect");
     const ghead = divc("mh-lhead");
     ghead.appendChild(span("mh-lt", "What they spend their time on"));
@@ -2365,14 +2194,11 @@
     const targets = recordTargets(h);
     if (targets) wrap.appendChild(targets);
 
-    // ── The log itself ──
     const listHead = divc("mh-lhead mh-loghead");
     listHead.appendChild(span("mh-lt", "What they did"));
     listHead.appendChild(span("mh-ls", "last " + h.windowDays + " days"));
     wrap.appendChild(listHead);
 
-    // Filters. Only buckets they have actually used are offered, so the row
-    // does not fill up with chips that lead to an empty list.
     const filters = divc("mh-filters");
     const chip = (label, group) => {
       const b = document.createElement("button");
@@ -2420,7 +2246,6 @@
       );
     wrap.appendChild(list);
 
-    // ── Paging ──
     const shown = h.windowMatched != null ? h.windowMatched : h.windowTotal;
     if (shown > h.limit) {
       const pages = Math.max(1, Math.ceil(shown / h.limit));
@@ -2482,9 +2307,6 @@
     return mountRecord(h, wrap, isDev, ctx);
   }
 
-  // Opens the record, or swaps the contents of the one already open. Paging and
-  // filtering used to close and reopen the modal, which threw away the scroll
-  // position and flashed the whole card on every click.
   function mountRecord(h, wrap, isDev, ctx) {
     const rank = isDev
       ? "Developer"
@@ -2508,9 +2330,6 @@
       if (sub) sub.textContent = subtitle;
       body.replaceChild(wrap, open);
       recordCtx.host = wrap;
-      // Land on the log, not back at the top of the card. Filtering or paging
-      // then leaves you looking at the thing you just asked for instead of
-      // scrolling past the summary again every time.
       const anchor = wrap.querySelector(".mh-loghead");
       if (anchor)
         body.scrollTop +=
@@ -2533,8 +2352,6 @@
     if (recordCtx) recordCtx.host = wrap;
   }
 
-  // A former moderator's card. Their record is the point, and a dev can hand
-  // the key back from here.
   function buildFormerCard(f) {
     const card = divc("modcard former");
 
@@ -2586,8 +2403,6 @@
     );
     card.appendChild(grid);
 
-    // Their record outlives the key: what they did while they held it is still
-    // readable, which is the whole point of keeping the name.
     const actions = divc("mc-actions");
     if (viewerIsOps()) {
       const histBtn = document.createElement("button");
@@ -2602,10 +2417,6 @@
       actions.appendChild(histBtn);
     }
 
-    // Handing the key back from here reuses the exact label they had, which is
-    // what their record is filed under. Typing the name again in the grant box
-    // is how a returning moderator ended up with a blank record - one stray
-    // character and none of their work follows them back.
     if (viewerIsDev()) {
       const back = document.createElement("button");
       back.className = "btn sm";
@@ -2648,8 +2459,6 @@
     return card;
   }
 
-  // Former staff, minus anybody who has since been given a key again - they
-  // are back on the live roster, so listing them as gone would be a lie.
   const goneStaff = () => formerMods.filter((f) => !f.returned);
 
   function renderMods() {
@@ -2668,8 +2477,6 @@
         (gone.length ? "  ·  " + gone.length + " former" : "")
       : "No staff yet";
 
-    // Former staff are not on the roster at all, so this filter renders its
-    // own list rather than a subset of one.
     if (modsFilter === "former") {
       if (!gone.length) {
         wrap.appendChild(
@@ -2687,7 +2494,6 @@
     else if (modsFilter === "active") list = roster.filter(isActiveStaff);
     else if (modsFilter === "inactive")
       list = roster.filter((m) => !isActiveStaff(m));
-    // Devs first, then full mods, then juniors; freshest first inside a rank.
     const order = { dev: 0, l2: 1, l1: 2 };
     list = list
       .slice()
@@ -2709,8 +2515,6 @@
     }
     list.forEach((m) => wrap.appendChild(buildModCard(m)));
 
-    // On "Everyone", the people who used to hold a key follow the team, below
-    // a line, so nobody mistakes them for current staff.
     if (modsFilter === "all" && gone.length) {
       const div = divc("mods-divider");
       div.appendChild(icon("fa-user-xmark"));
@@ -2758,8 +2562,6 @@
       socket.emit("dev grant mod", { label: r.value, level: Number(r.level) });
   }
 
-  // ── Reports tab (full mods + devs): reported users with quick actions ──
-  // Report reason categories, each with a color and icon for the board.
   const REPORT_CATS = {
     spam: { label: "Spam", color: "var(--blue)", icon: "fa-inbox" },
     harassment: {
@@ -2848,14 +2650,11 @@
       if (res != null) go(res.value, res.banRange);
     });
   }
-  // Discard a report: tell the server to clear it, then drop it locally right
-  // away so the card disappears without waiting for the round trip.
   function dismissReport(r) {
     socket.emit("staff dismiss report", { targetUserId: r.targetUserId });
     reportsList = reportsList.filter((x) => x.targetUserId !== r.targetUserId);
     renderReports();
   }
-  // One "IP block" button opens a duration picker, so the card stays uncluttered.
   function openReportBanMenu(r) {
     if (!window.StaffUI) return banReported(r, "24h");
     const durs = [
@@ -2955,8 +2754,6 @@
     });
   }
 
-  // Ban a client id directly. The id is the identifier shown on report,
-  // appeal, and ban cards, so it can be copied straight from those.
   function openBanIdDialog() {
     if (!window.StaffUI) return;
     StaffUI.prompt({
@@ -2999,8 +2796,6 @@
     });
   }
 
-  // Warn a reported user (works whether they are online or offline; the server
-  // delivers now or queues it for their next connect).
   async function warnReported(r) {
     if (!window.StaffUI)
       return socket.emit("staff warn user", { targetUserId: r.targetUserId });
@@ -3020,7 +2815,7 @@
         },
       ],
     });
-    if (msg == null) return; // cancelled
+    if (msg == null) return;
     socket.emit("staff warn user", {
       targetUserId: r.targetUserId,
       message: String(msg).trim(),
@@ -3054,7 +2849,6 @@
       const card = document.createElement("div");
       card.className = "report-card" + (hot ? " hot" : "");
 
-      // Header: avatar, name, reporter count, status, last-report time
       const head = document.createElement("div");
       head.className = "rc-head";
       const av = document.createElement("div");
@@ -3066,7 +2860,6 @@
       const idCol = document.createElement("div");
       idCol.className = "rc-id";
       idCol.appendChild(span("rc-kicker", "Reported user"));
-      // The reported user's name traces their activity in the Activity tab.
       const rNameNode = uref(r.name || "user", r.targetUserId);
       rNameNode.classList.add("nm");
       idCol.appendChild(rNameNode);
@@ -3096,7 +2889,6 @@
       if (r.last)
         meta.appendChild(span(null, "last report " + relTime(r.last)));
       idCol.appendChild(meta);
-      // Device id (all staff) and IP (dev-only), same mono line as the appeals card.
       if (r.targetDeviceId || r.ip) {
         const idLine = span("mono", "");
         if (r.targetDeviceId)
@@ -3112,7 +2904,6 @@
       head.appendChild(idCol);
       card.appendChild(head);
 
-      // Category summary tags, most-used first
       const catEntries = Object.entries(r.categories || {}).sort(
         (a, b) => b[1] - a[1],
       );
@@ -3133,9 +2924,6 @@
         card.appendChild(cats);
       }
 
-      // What the reported user had typed when they were reported (most recent
-      // snapshot). Saved at report time, so staff still see the offending text
-      // even after it was cleared or the user left.
       const typedSnap = (r.reasons || [])
         .map((x) => x.targetText)
         .find((t) => t && t.trim());
@@ -3153,8 +2941,6 @@
       typedBox.appendChild(typedTxt);
       card.appendChild(typedBox);
 
-      // "Who reported" header + one row per reporter, so it is unmistakable
-      // that the people listed here are the reporters, not the user above.
       const reasons = r.reasons || [];
       const logHead = document.createElement("div");
       logHead.className = "report-log-head";
@@ -3190,7 +2976,6 @@
       });
       card.appendChild(log);
 
-      // Footer actions
       const foot = document.createElement("div");
       foot.className = "rc-foot";
       const mkBtn = (label, faIcon, danger, fn) => {
@@ -3201,8 +2986,6 @@
         b.addEventListener("click", fn);
         return b;
       };
-      // Warning and kicking are junior-mod powers, so every staff level gets
-      // them here. Blocking and discarding are full-mod work.
       foot.appendChild(
         mkBtn("Warn", "fa-triangle-exclamation", false, () => warnReported(r)),
       );
@@ -3231,9 +3014,6 @@
         discard.title = "Clear this report as false or already handled";
         foot.appendChild(discard);
       }
-      // Discarding settles a report and says who settled it. Deleting is the
-      // other thing: the report should never have been here, so nothing about
-      // it is kept on either board.
       if (me && me.role === "dev") {
         const del = mkBtn("Delete", "fa-trash", true, () => deleteReport(r));
         del.title = "Remove this report entirely, leaving no record";
@@ -3261,7 +3041,6 @@
     socket.emit("staff delete report", { targetUserId: r.targetUserId });
   }
 
-  // ── Appeals tab (full mods + devs): ban appeals submitted on-site ──
   function appealStatusMeta(a) {
     if (a.status === "resolved") {
       if (a.resolution === "lifted")
@@ -3270,7 +3049,6 @@
     }
     return { badge: "warm", icon: "fa-scale-balanced", label: "OPEN" };
   }
-  // Human "ends in ..." for a future ban expiry timestamp.
   function untilLabel(ts) {
     const ms = (ts || 0) - Date.now();
     if (ms <= 0) return "ended";
@@ -3294,13 +3072,9 @@
   }
 
   // ── The appeal conversation ──────────────────────────────────────────────
-  // In a modal of its own. Inline in the card it was unusable: every message
-  // that arrived re-rendered the whole board, which moved the page under
-  // whoever was reading and threw away what they were typing. The modal owns
-  // its scroll position and its draft, and updates in place.
-  const appealDrafts = new Map(); // id -> half-typed reply
-  const appealReplyTo = new Map(); // id -> message being answered
-  let appealChat = null; // { id, ctrl, log, replyHost, input }
+  const appealDrafts = new Map();
+  const appealReplyTo = new Map();
+  let appealChat = null;
 
   function openAppealChat(id) {
     if (!window.StaffUI) return;
@@ -3340,8 +3114,6 @@
     return bits.join("  ·  ");
   }
 
-  // Redraw the open conversation from the current board data, keeping the
-  // reader where they were and the draft they were typing.
   function paintAppealChat() {
     if (!appealChat) return;
     const a = appealsList.find((x) => x.id === appealChat.id);
@@ -3414,7 +3186,6 @@
       const txt = document.createElement("div");
       txt.textContent = m.text || "";
       bub.appendChild(txt);
-      // Clicking a message answers it, the same as the reply button.
       if (a.status === "open" && viewerIsFullMod()) {
         bub.classList.add("clickable");
         bub.title = "Click to reply to this";
@@ -3434,7 +3205,6 @@
     });
     if (atBottom) log.scrollTop = log.scrollHeight;
 
-    // ── Reply bar + composer ──
     replyHost.textContent = "";
     foot.textContent = "";
     appealChat.input = null;
@@ -3450,8 +3220,6 @@
                 ". The ban stays in place.",
         ),
       );
-      // One moderator's call is not the last word. Anybody can put a declined
-      // appeal back on the table, including whoever declined it.
       if (a.resolution !== "lifted" && viewerIsFullMod()) {
         const acts = divc("apm-acts");
         const re = document.createElement("button");
@@ -3558,7 +3326,6 @@
     foot.appendChild(comp);
     appealChat.input = ta;
 
-    // The decisions, where the conversation is rather than back on the board.
     const acts = divc("apm-acts");
     const mk = (label, faIcon, cls, fn) => {
       const b = document.createElement("button");
@@ -3643,7 +3410,6 @@
         "appealcard" + (a.status === "resolved" ? " resolved" : ""),
       );
 
-      // Header: avatar, name (click to trace), status + still-blocked, time
       const head = divc("ap-head");
       const av = divc("avatar");
       av.style.background = a.status === "open" ? "var(--amber)" : "var(--line)";
@@ -3664,8 +3430,6 @@
       stb.appendChild(icon(sm.icon));
       stb.appendChild(document.createTextNode(" " + sm.label));
       meta.appendChild(stb);
-      // A second look is worth saying out loud, so nobody wonders why a
-      // decided appeal is open again.
       if (a.reopenedBy) {
         const re = span("rbadge warm");
         re.appendChild(icon("fa-rotate-left"));
@@ -3691,7 +3455,6 @@
       head.appendChild(idc);
       card.appendChild(head);
 
-      // Two boxes: the ban being contested, and the user's appeal message
       const grid = divc("ap-grid");
 
       const contest = divc("ap-box contest");
@@ -3721,9 +3484,6 @@
       contest.appendChild(cv);
       grid.appendChild(contest);
 
-      // The conversation lives in a modal, not in the card. Inline, every
-      // arriving message re-rendered the whole board under the reader and
-      // jumped the page; a modal owns its own scroll and updates in place.
       const chatBox = divc("ap-box ap-open");
       const cl2 = divc("lbl");
       cl2.appendChild(icon("fa-comments"));
@@ -3756,7 +3516,6 @@
       grid.appendChild(chatBox);
       card.appendChild(grid);
 
-      // Footer: resolution note (if any) + identity + actions
       const foot = divc("ap-foot");
       const info = divc("ap-info");
       if (a.status === "resolved") {
@@ -3769,8 +3528,6 @@
           ),
         );
       }
-      // Somebody closed the door on this person appealing again. Say so on
-      // the card, or the next moderator has no way of knowing.
       if (a.barId) {
         const b = span("ap-barred");
         b.appendChild(icon("fa-ban"));
@@ -3796,8 +3553,6 @@
       }
       foot.appendChild(info);
 
-      // Undoing one is dev-only and lives outside the open/resolved split,
-      // because a bar outlives the appeal that set it.
       if (a.barId && isDev) {
         const allow = document.createElement("button");
         allow.className = "btn sm";
@@ -3843,8 +3598,6 @@
           });
           actions.appendChild(lift);
         }
-        // Ending the chat is not a decision: it stops somebody flooding the
-        // thread while the appeal is still read and judged on its merits.
         const lock = document.createElement("button");
         lock.className = "btn sm";
         lock.appendChild(icon(a.locked ? "fa-lock-open" : "fa-lock"));
@@ -4058,8 +3811,6 @@
     });
   }
 
-  // ── Applications tab (full mods + devs) ──
-  // Status colour, badge tone, header icon, and avatar tint for one application.
   function appStatusMeta(status) {
     if (status === "approved")
       return {
@@ -4082,13 +3833,11 @@
       av: "var(--orange)",
     };
   }
-  // reviewedBy is stored as "dev:Label" / "mod:Label"; show just the label.
   function cleanReviewer(s) {
     s = String(s || "");
     const i = s.indexOf(":");
     return (i >= 0 ? s.slice(i + 1) : s) || s;
   }
-  // One labelled answer block (question + the applicant's answer).
   function qaBlock(ic, label, text) {
     const b = divc("qa");
     const q = divc("qa-q");
@@ -4100,7 +3849,6 @@
     b.appendChild(a);
     return b;
   }
-  // Generic Prev / Next pager (shared by the Applications list).
   function buildPager(page, pages, onGo) {
     const pager = divc("pager");
     const mk = (label, faIcon, atEnd, disabled, target) => {
@@ -4127,7 +3875,6 @@
     const sm = appStatusMeta(a.status);
     const card = divc("appcard " + sm.cls);
 
-    // Header: avatar, applicant name, status badge, applied-time
     const head = divc("ac-head");
     const av = divc("avatar");
     av.style.background = sm.av;
@@ -4143,9 +3890,6 @@
       document.createTextNode(" " + (a.status || "pending").toUpperCase()),
     );
     meta.appendChild(badge);
-    // Discord link. An applicant who has connected their Discord can be found
-    // in the Talkomatic server and given the site mod role, so this is worth
-    // seeing at a glance.
     const hasDiscord = !!(a.discord || a.discordId);
     const dbadge = span("rbadge " + (hasDiscord ? "on" : "off"));
     dbadge.appendChild(icon(hasDiscord ? "fa-check" : "fa-xmark"));
@@ -4167,7 +3911,6 @@
     head.appendChild(idc);
     card.appendChild(head);
 
-    // The two application answers, each clearly labelled
     const qa = divc("ac-qa");
     qa.appendChild(
       qaBlock(
@@ -4185,7 +3928,6 @@
     );
     card.appendChild(qa);
 
-    // Footer: review outcome + identity, then the action buttons
     const foot = divc("ac-foot");
     const info = divc("ac-info");
     if (a.status !== "pending" && (a.reviewedBy || a.reviewedAt || a.reason)) {
@@ -4213,8 +3955,6 @@
           span(null, a.claimed ? "Key claimed" : "Key pending claim"),
         );
     }
-    // Identity line: device id for all staff, raw IP only when the server sent
-    // one (dev-only), matching the reports board and audit feed.
     if (a.discord || a.discordId) {
       const bits = [];
       if (a.discord) bits.push("@" + a.discord);
@@ -4268,7 +4008,7 @@
             ],
             confirmText: "Approve",
           });
-          if (msg === null) return; // cancelled
+          if (msg === null) return;
         }
         socket.emit("mod application review", {
           id: a.id,
@@ -4313,8 +4053,6 @@
     return card;
   }
 
-  // Dev-only Close/Open button for the application intake. Mods see only the
-  // closed state reflected in the sub-line.
   function renderApplicationsToggle() {
     const btn = $("appsToggle");
     if (!btn) return;
@@ -4359,7 +4097,6 @@
       return;
     }
 
-    // Filter by the active status segment, then by the search box.
     let list = applicationsList.slice();
     if (appsFilter !== "all")
       list = list.filter((a) => (a.status || "pending") === appsFilter);
@@ -4408,11 +4145,8 @@
       );
   }
 
-  // ── Sessions tab (dev only): who is connected on which staff key ──
   let sessionData = { sessions: [], history: [] };
 
-  // Collapse an IPv6 address to its /64 network so one phone or router shows
-  // as a single line instead of a wall of rotating addresses. IPv4 stays as-is.
   function netKeyOf(ip) {
     const s = String(ip || "");
     if (s.indexOf(":") === -1) return { key: s, label: s, v6: false };
@@ -4426,14 +4160,10 @@
     return { key: "v6:" + prefix, label: prefix + "::/64", v6: true };
   }
 
-  // Group address entries ({ ip, last, count } objects or plain strings) by
-  // network, freshest network first.
   function groupNetworks(entries) {
     const groups = new Map();
     for (const e of entries) {
       const ip = typeof e === "string" ? e : e && e.ip;
-      // Non-devs receive the history entries without their addresses, so there
-      // is nothing to group; the count is shown instead.
       if (!ip) continue;
       const meta = typeof e === "string" ? {} : e;
       const nk = netKeyOf(ip);
@@ -4499,8 +4229,6 @@
     card.appendChild(top);
     const nets = divc("sess-nets");
     if (!groups.length) {
-      // Non-devs are not sent the addresses at all (they belong to other staff),
-      // so show the shape of it instead of an empty box.
       nets.appendChild(
         span(
           "cnt",
@@ -4550,8 +4278,6 @@
     } else {
       sessions.forEach((s) => {
         const groups = groupNetworks(s.ips || []);
-        // multiIp comes from the server, so the warning still works for a mod
-        // who is not sent the addresses themselves.
         const multiNet = groups.length ? groups.length > 1 : !!s.multiIp;
         const pill = span(
           "pill " + (multiNet ? "perm" : "live"),
@@ -4593,7 +4319,6 @@
     }
   }
 
-  // ── Tabs + sidebar ──
   function switchTab(name) {
     tab = name;
     document
@@ -4612,8 +4337,6 @@
     }
     if (name === "mods") {
       socket.emit("dev list mod keys");
-      // The roster also shows devs and online state, both derived from the
-      // sessions data, so refresh that too.
       socket.emit("dev get sessions");
     }
     if (name === "sessions") socket.emit("dev get sessions");
@@ -4632,16 +4355,11 @@
     b.style.display = unreadNotifs > 0 ? "" : "none";
   }
 
-  // Can this viewer act, not just look? Every one of these is re-checked on the
-  // server; this only decides whether it is worth showing the button.
   const viewerIsDev = () => !!(me && me.role === "dev");
   const viewerIsFullMod = () =>
     viewerIsDev() || !!(me && (me.modLevel || 2) >= 2);
-  // Site operations: the one reader the boards still name staff to.
   const viewerIsOps = () => !!(me && me.mainDev);
 
-  // A short line at the top of a board telling a junior what they are looking
-  // at and why the buttons are missing, rather than leaving them to guess.
   function readOnlyNote(panelId, text) {
     const panel = $(panelId);
     if (!panel) return;
@@ -4661,21 +4379,15 @@
   }
 
   function applyRoleGating() {
-    // Every board is readable by every staff level. What differs is what you
-    // can DO on it: the action buttons below are gated, and the server refuses
-    // anything above your level regardless. Raw IPs stay dev-only everywhere.
     document
       .querySelectorAll(".nav-item[data-dev], .nav-item[data-min2]")
       .forEach((n) => {
         n.style.display = "";
       });
-    // The inbox filter surfaces reports and mod-abuse flags; those are a full
-    // mod's job, so it stays where it was.
     document.querySelectorAll("#filterSeg [data-min2]").forEach((n) => {
       n.style.display = viewerIsFullMod() ? "" : "none";
     });
 
-    // Dev-only controls on otherwise-readable boards
     const devOnly = [
       ["grantMod", viewerIsDev()],
       ["appsToggle", viewerIsDev()],
@@ -4684,7 +4396,6 @@
       const el = $(id);
       if (el) el.style.display = ok ? "" : "none";
     });
-    // Placing a new block is a full-mod action
     ["banIpBtn", "banIdBtn"].forEach((id) => {
       const el = $(id);
       if (el) el.style.display = viewerIsFullMod() ? "" : "none";
@@ -4724,13 +4435,6 @@
     }
   }
 
-  // ── Socket wiring ──
-  // Ask for everything the moment we connect, so the tab badges show real
-  // counts straight away instead of sitting at 0 until each tab is opened.
-  // These used to run after the audit snapshot arrived and only for full mods,
-  // which meant juniors never got counts at all and everyone else waited on the
-  // largest payload on the page. Every one of these is readable by any staff
-  // level; the server redacts per role and refuses anything above it.
   function loadBoards() {
     [
       "dev list blocks",
@@ -4753,7 +4457,6 @@
     loadingEl.classList.add("hidden");
     deniedEl.classList.add("hidden");
     appEl.classList.remove("hidden");
-    // The server owns the week boundaries, so every dashboard agrees on them.
     if (Array.isArray(data && data.days) && data.days.length) {
       const wasReading = weekDays[dayIndex];
       weekDays = data.days;
@@ -4808,7 +4511,6 @@
       if (card) appendComment(card, e);
       return;
     }
-    // Buffer and flush on a timer so a flood of events can't thrash the DOM.
     pendingNew.push(e);
     scheduleFlush();
   });
@@ -4818,10 +4520,8 @@
   });
 
   socket.on("dev blocks", (list) => {
-    // Ordering happens in the renderer (grouped by person, newest first).
     bans = Array.isArray(list) ? list : [];
     renderBans();
-    // The history feed marks bans that are still in force, so refresh it too.
     renderBanHistory();
   });
 
@@ -4859,8 +4559,6 @@
   socket.on("staff appeals", (list) => {
     appealsList = Array.isArray(list) ? list : [];
     renderAppeals();
-    // An open conversation redraws in place rather than being torn down with
-    // the board underneath it.
     paintAppealChat();
   });
 
@@ -4874,7 +4572,6 @@
   socket.on("dev sessions", (data) => {
     sessionData = data || { sessions: [], history: [] };
     renderSessions();
-    // The moderators roster shows devs and online state from this data.
     renderMods();
   });
 
@@ -4924,14 +4621,6 @@
     appEl.classList.add("hidden");
     deniedEl.classList.remove("hidden");
   };
-  // Only an explicit refusal means "you are not staff". A slow snapshot used to
-  // trip a blind 4.5s timer and show the key prompt to moderators whose key was
-  // perfectly good, which is why some staff were asked for a key they already
-  // had. If the socket is connected we are simply waiting, so say so and keep
-  // waiting rather than claiming they have no access.
-  // Before the dashboard is up an error means "you are not staff". After it is,
-  // it is the server refusing the action just taken, and it used to go nowhere
-  // at all - the click simply did nothing. Say what it said.
   socket.on("error", (e) => {
     if (!authorized) return showDenied();
     const msg = (e && e.error && e.error.message) || (e && e.message) || null;
@@ -4943,7 +4632,6 @@
     if (authorized) return clearInterval(waitTimer);
     waited += 2500;
     if (!socket.connected) {
-      // Never got a connection at all: that is a real failure.
       if (waited >= 10000) {
         clearInterval(waitTimer);
         showDenied();
@@ -4958,7 +4646,6 @@
           : "Verifying your staff key.";
   }, 2500);
 
-  // ── Key entry (no console) ──
   let pendingStaffKey = null;
   async function openStaffKeyEntry() {
     if (!window.StaffUI) return;
@@ -5004,7 +4691,6 @@
     setTimeout(() => window.location.reload(), 1000);
   });
 
-  // ── Controls ──
   $("enterKeyBtn") &&
     $("enterKeyBtn").addEventListener("click", openStaffKeyEntry);
   $("navToggle").addEventListener("click", () =>
@@ -5025,7 +4711,6 @@
   $("banIpBtn") && $("banIpBtn").addEventListener("click", openBanIpDialog);
   $("banIdBtn") && $("banIdBtn").addEventListener("click", openBanIdDialog);
 
-  // Ban list: search + type filter
   let banSearchDebounce = null;
   $("banSearch") &&
     $("banSearch").addEventListener("input", () => {
@@ -5046,7 +4731,6 @@
     });
   });
 
-  // Ban history: search + bans/unbans filter
   let banHistDebounce = null;
   $("banHistSearch") &&
     $("banHistSearch").addEventListener("input", () => {
@@ -5067,7 +4751,6 @@
     });
   });
 
-  // Moderators: rank / activity filter
   document.querySelectorAll("#modsSeg button").forEach((btn) => {
     btn.addEventListener("click", () => {
       document
@@ -5107,7 +4790,6 @@
     $("suggestionsRefresh").addEventListener("click", () =>
       socket.emit("staff get suggestions"),
     );
-  // Applications: status segment + live search (own debounce, own page reset).
   document.querySelectorAll("#appsSeg button").forEach((btn) => {
     btn.addEventListener("click", () => {
       document
@@ -5153,16 +4835,11 @@
     });
   });
 
-  // Open the sidebar by default on wider screens.
   if (window.innerWidth > 860) document.body.classList.remove("nav-closed");
 
   // ── Rules (dev only) ──────────────────────────────────────────────────────
-  // Edits live in `rulesDraft` until Save, so a half-written rule is never on
-  // the lobby. Saving replaces the whole section, which makes a reorder, an
-  // edit and a delete the same write and removes any chance of the list on
-  // screen disagreeing with the list on disk.
   let rulesData = { community: [], mod: [] };
-  let rulesDraft = null; // array being edited, or null before first load
+  let rulesDraft = null;
   let rulesSection = "community";
   let rulesDirty = false;
 
@@ -5302,8 +4979,6 @@
   }
 
   function loadRulesSection() {
-    // Deep copy: the draft must not alias rulesData, or discarding an edit by
-    // reloading would have nothing to fall back to.
     rulesDraft = (rulesData[rulesSection] || []).map((r) => ({ ...r }));
     rulesDirty = false;
     renderRules();
@@ -5358,8 +5033,6 @@
   $("rulesSave") &&
     $("rulesSave").addEventListener("click", () => {
       if (!rulesDraft) return;
-      // A rule with no text at all is dropped rather than refused: it is
-      // almost always an "Add rule" somebody changed their mind about.
       const list = rulesDraft.filter(
         (r) => (r.title || "").trim() || (r.body || "").trim(),
       );
@@ -5388,10 +5061,6 @@
     });
 
   // ── Announcements ─────────────────────────────────────────────────────────
-  // Writing the one thing every person on the site is shown. The markdown
-  // renderer here is the SAME one the lobby card uses (announce.js), pasted
-  // rather than shared because the dashboard is a separate page with no module
-  // system - so the preview is the real thing, not an approximation of it.
   const anEsc = (s) =>
     String(s == null ? "" : s)
       .replace(/&/g, "&amp;")
@@ -5530,7 +5199,6 @@
       wrap.appendChild(e);
       return;
     }
-    // Only the newest live one is actually on screen for people.
     const showingId = (items.find((a) => a.live) || {}).id;
     items.forEach((a) => {
       const item = document.createElement("div");
@@ -5678,7 +5346,6 @@
         socket.emit("announcement edit", payload);
         return;
       }
-      // Posting shows it to everybody at once, so it asks first.
       const go = () => socket.emit("announcement post", payload);
       if (window.StaffUI)
         StaffUI.confirm({

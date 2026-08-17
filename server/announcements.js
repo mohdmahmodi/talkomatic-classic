@@ -1,18 +1,6 @@
 // server/announcements.js
 // Notices from the developers, shown to everybody as a full-screen card the
-// next time they open the lobby. Same flat-array JSON store as the suggestion
-// board, same tmp/rename write.
-//
-// The rules that matter:
-//   - only ONE announcement is ever "current": the newest live one. Showing a
-//     queue of them would train people to dismiss without reading.
-//   - "seen" is remembered by the browser, not here. The server says which
-//     announcement is current; the browser knows whether it has read that id.
-//     Nothing about a reader is stored, and there is no per-device table to
-//     grow forever.
-//   - reactions are keyed by device id so one browser is one reaction per
-//     emoji, and the emoji itself is validated: it is rendered as text on the
-//     client, but an unbounded string is still a way to bloat the file.
+// next time they open the lobby.
 
 const path = require("path");
 const fs = require("fs");
@@ -22,15 +10,15 @@ const { DATA_DIR } = require("./datadir");
 
 const STORE_PATH = path.join(DATA_DIR, "announcements.json");
 
-const MAX_KEPT = 200; // history for the dashboard
+const MAX_KEPT = 200;
 const MAX_TITLE = 120;
 const MAX_BODY = 4000;
-const MAX_REACTIONS_PER_POST = 24; // distinct emoji
-const MAX_EMOJI_LEN = 16; // a family emoji with joiners is genuinely this long
+const MAX_REACTIONS_PER_POST = 24;
+const MAX_EMOJI_LEN = 16;
 
 const KINDS = ["update", "notice", "alert"];
 
-let items = []; // oldest first
+let items = [];
 let seq = 0;
 let saveTimer = null;
 
@@ -103,7 +91,7 @@ function post({ kind, title, body, by, byRole }) {
     at: Date.now(),
     editedAt: null,
     live: true,
-    reactions: {}, // emoji -> { deviceId: ts }
+    reactions: {},
   };
   items.push(a);
   saveSoon();
@@ -127,8 +115,6 @@ function edit({ id, kind, title, body, by }) {
   return { ok: true };
 }
 
-// Taking one down leaves it in the history but stops it being current, so a
-// notice sent by mistake can be pulled without erasing the record of it.
 function setLive(id, live) {
   const a = get(id);
   if (!a) return false;
@@ -145,22 +131,13 @@ function remove(id) {
   return true;
 }
 
-// The newest live one. This is the only announcement anybody is ever shown.
 function current() {
   for (let i = items.length - 1; i >= 0; i--) if (items[i].live) return items[i];
   return null;
 }
 
-// A single skin-tone modifier, a joiner, a variation selector - an emoji is
-// several code points and a plain length check is not enough on its own. The
-// test is deliberately loose about WHICH emoji and strict about size and about
-// containing no plain letters, digits or punctuation, so this cannot become a
-// second chat.
 const EMOJI_ONLY_RE =
   /^[\p{Extended_Pictographic}\p{Emoji_Component}‍️⃣]+$/u;
-// Emoji_Component on its own is not enough: it covers the plain digits, so
-// "12" passed the shape test. A real emoji has a pictograph in it, or is a
-// keycap ("1 combining-enclosing-keycap").
 const HAS_SYMBOL_RE = /[\p{Extended_Pictographic}⃣]/u;
 
 function validEmoji(e) {
@@ -169,12 +146,10 @@ function validEmoji(e) {
   try {
     return EMOJI_ONLY_RE.test(s) && HAS_SYMBOL_RE.test(s);
   } catch (_) {
-    // No Unicode property escapes: fall back to "not ASCII and short".
     return !/[\x00-\x7f]/.test(s);
   }
 }
 
-// Toggles this device's reaction. Returns the new public counts, or null.
 function react({ id, deviceId, emoji }) {
   const a = get(id);
   if (!a || !deviceId) return null;
@@ -197,7 +172,6 @@ function react({ id, deviceId, emoji }) {
   return publicOne(a, deviceId);
 }
 
-// Counts, and whether THIS reader is one of them. Device ids never leave here.
 function reactionsFor(a, deviceId) {
   const out = [];
   for (const emoji in a.reactions) {
@@ -226,7 +200,6 @@ function publicOne(a, deviceId) {
   };
 }
 
-// Newest first, for the dashboard.
 function listFor(deviceId, limit = 50) {
   return items
     .slice()

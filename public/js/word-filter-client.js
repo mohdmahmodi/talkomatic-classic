@@ -1,16 +1,8 @@
 // ╔═══════════════════════════════════════════════════════════════════════════╗
-// ║  word-filter-client.js - Full browser port of server word-filter.js      ║
-// ║  v2.1.0 - June 2026 anniversary batch                                    ║
-// ║                                                                           ║
-// ║  IDENTICAL algorithm to the server filter (cross-newline scan, digit-    ║
-// ║  padding scan, doubled-letter scan, span gate, code-point indexing,      ║
-// ║  per-line cache). The ONLY differences are:                              ║
-// ║  • async init() with fetch + retry instead of fs.readFileSync            ║
-// ║  • a `ready` flag the room client checks before filtering                ║
-// ║                                                                           ║
-// ║  PARITY RULE: if you change the algorithm here, change word-filter.js    ║
-// ║  in the same commit, and vice versa.                                     ║
-// ╚═══════════════════════════════════════════════════════════════════════════╝
+// ║ word-filter-client.js - Full browser port of server word-filter.js ║ ║
+// v2.1.0 - June 2026 anniversary batch ║ ║ ║ ║ IDENTICAL algorithm to the
+// server filter (cross-newline scan, digit- ║ ║ padding scan, doubled-letter
+// scan, span gate, code-point indexing, ║ ║ per-line cache).
 
 class TrieNode {
   constructor() {
@@ -50,7 +42,6 @@ class ClientWordFilter {
     this.obfuscationMap = {};
     this.ready = false;
 
-    // Caches (see server file for rationale):
     this.cache = new Map();
     this.cacheSize = 1000;
     this.lineCache = new Map();
@@ -702,7 +693,7 @@ class ClientWordFilter {
     let runLength = 0;
 
     for (const char of text) {
-      const unitLen = char.length; // 1, or 2 for surrogate pairs
+      const unitLen = char.length;
 
       let lowerChar = char.toLowerCase();
       lowerChar = lowerChar.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -835,7 +826,7 @@ class ClientWordFilter {
       {},
       this.offensiveTrie,
       this.whitelistTrie,
-      false, // primary scan: no gate
+      false,
     );
 
     this.lineCache.set(line, ranges);
@@ -876,7 +867,6 @@ class ClientWordFilter {
 
     let ranges = [];
 
-    // ── PASS 1: per-line (cached) ──
     const lines = text.split(/\r?\n/);
     let offset = 0;
     for (const line of lines) {
@@ -884,10 +874,8 @@ class ClientWordFilter {
       for (const [s, e] of lineRanges) {
         ranges.push([s + offset, e + offset]);
       }
-      offset += line.length + 1; // +1 for the newline
+      offset += line.length + 1;
     }
-
-    // ── PASS 2: bypass-hardening variant scans (span-gated) ──
 
     if (lines.length > 1) {
       ranges.push(

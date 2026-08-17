@@ -1,31 +1,25 @@
 // server/modwatch.js
-// Lightweight, tunable mod-abuse detector. It keeps a short rolling log of each
-// mod key's recent privileged actions and raises a single staff notification
-// (full mods + devs) when the pattern looks like misuse: too many actions in 5
-// or 60 minutes, a lopsided share of kicks, hammering one user, or spraying
-// many users in a burst. It never auto-punishes; it just surfaces the pattern
-// with the mod's recent actions attached. In-memory only; resets on restart.
+// Lightweight, tunable mod-abuse detector.
 
 const audit = require("./audit");
 
 const SHORT_MS = 5 * 60 * 1000;
 const LONG_MS = 60 * 60 * 1000;
-const ALERT_COOLDOWN_MS = 10 * 60 * 1000; // at most one flag per key per cooldown
-const MAX_LOG = 60; // recent actions kept per key
+const ALERT_COOLDOWN_MS = 10 * 60 * 1000;
+const MAX_LOG = 60;
 const MAX_KEYS = 2000;
 
-// Thresholds, all tunable in one place.
 const THRESHOLDS = {
-  short5: 12, // more than this many actions in 5 min
-  long60: 60, // more than this many actions in 60 min
-  minForShare: 8, // need at least this many recent actions to judge kick share
-  kickShare: 0.7, // and this fraction of them being kicks
-  sameTarget: 4, // same user hit this many times in 5 min
-  distinctBurst: 6, // this many different users hit in 5 min
+  short5: 12,
+  long60: 60,
+  minForShare: 8,
+  kickShare: 0.7,
+  sameTarget: 4,
+  distinctBurst: 6,
 };
 
-const log = new Map(); // hash -> [{ at, action, target, kick }]
-const lastAlert = new Map(); // hash -> ts
+const log = new Map();
+const lastAlert = new Map();
 
 function isKick(action) {
   return /kick/i.test(action || "");
@@ -52,7 +46,6 @@ function evictOldest() {
   }
 }
 
-// Record one privileged action by a mod key and flag if the pattern trips.
 function record({ hash, label, role, action, target, room, ip }) {
   if (!hash) return;
   const now = Date.now();
@@ -110,10 +103,8 @@ function record({ hash, label, role, action, target, room, ip }) {
     label: who,
     text: `Possible mod abuse by ${who}: ${reasons.join("; ")}. Recent actions: ${recentList}.`,
     room: room || null,
-    ip: ip || null, // the mod's own address, dev-only
+    ip: ip || null,
     minLevel: 2,
-    // Read as a list rather than a paragraph: what tripped it, then what they
-    // actually did. The flag is a prompt to go and look, never a verdict.
     card: {
       target: who,
       targetRole: role || "mod",

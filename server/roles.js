@@ -1,10 +1,5 @@
 // server/roles.js
 // Staff key system: mod-key store, hash validation, and the action audit log.
-//
-// Dev key is a single SHA-256 hash in .env (CONFIG.DEV.KEY_HASH), owner-only,
-// restart-to-change. Mod keys live in mod-keys.json as { hash, label } records,
-// loaded at boot and mutable at runtime (devs grant/revoke without a restart).
-// Every privileged action appends one line to modlog.txt.
 
 const path = require("path");
 const fs = require("fs");
@@ -19,18 +14,11 @@ const MODLOG_PATH = path.join(DATA_DIR, "modlog.txt");
 const KEY_ACTIVITY_PATH = path.join(DATA_DIR, "key-activity.json");
 const FORMER_MODS_PATH = path.join(DATA_DIR, "former-mods.json");
 
-// In-memory mirror of mod-keys.json: [{ hash, label, level, grantedBy, grantedAt }]
 let modKeys = [];
 
-// Everyone whose key has been revoked, newest last. A removed moderator drops
-// out of the roster, but the fact that they were one - and why they stopped
-// being one - is kept.
 let formerMods = [];
 const FORMER_CAP = 300;
 
-// Which IPs each staff key has ever connected from, persisted so a leaked key
-// being used from a brand-new IP can be flagged even across restarts.
-// hash -> { label, role, ips: { ip: { first, last, count } } }
 let keyActivity = {};
 let keyActivitySaveTimer = null;
 
@@ -41,16 +29,10 @@ function hashKey(key) {
     .digest("hex");
 }
 
-// Mod keys carry a level: 1 = junior (limited), 2 = full. Keys written before
-// levels existed have no field; those are treated as full (2) so no existing
-// moderator is silently downgraded. Only an explicit 1 yields a junior key;
-// anything else resolves to full.
 function normalizeLevel(v) {
   return Math.floor(Number(v)) === 1 ? 1 : 2;
 }
 
-// Loaded synchronously at module require time so the socket middleware can
-// validate keys on the very first connection.
 function loadModKeys() {
   try {
     const raw = fs.readFileSync(MOD_KEYS_PATH, "utf8");
@@ -62,7 +44,6 @@ function loadModKeys() {
             hash: k.hash,
             label: String(k.label || "mod"),
             level: normalizeLevel(k.level),
-            // Who minted the key and when. Older keys predate this and stay null.
             grantedBy: k.grantedBy ? String(k.grantedBy) : null,
             grantedAt: typeof k.grantedAt === "number" ? k.grantedAt : null,
           }))
@@ -75,7 +56,6 @@ function loadModKeys() {
   return modKeys;
 }
 
-// Atomic write (tmp + rename) mirrors how rooms.json is persisted.
 async function saveModKeys() {
   const tmp = MOD_KEYS_PATH + ".tmp";
   await fsp.writeFile(tmp, JSON.stringify(modKeys, null, 2), "utf8");
@@ -113,14 +93,6 @@ async function saveFormerMods() {
   await fsp.rename(tmp, FORMER_MODS_PATH);
 }
 
-// Dev keys live in .env as DEV_KEY_HASH - a comma-separated list of
-// "<sha256hash>" or "<sha256hash>:Label" entries (owner-only, restart to
-// change). This supports multiple devs, each with a name for the audit log.
-//
-// MAIN_DEV_KEY_HASH is the same format for the key that carries the site
-// itself: uptime, error triage, and the raw server-side detail the health
-// checks are read against, on top of everything a dev key does. Its entries
-// load first, so a key named in both resolves to the higher one.
 let devKeys = [];
 
 function parseKeyList(raw, main) {
@@ -154,31 +126,12 @@ function isDevKey(key) {
   return !!getDevKey(key);
 }
 
-// Hashes + labels only - safe for an info panel.
 function listDevKeys() {
   return devKeys.map((d) => ({ hash: d.hash, label: d.label }));
 }
 
-// How an action reads to the person it landed on. Staff surfaces keep the real
-// label, because the team has to be able to hold each other to account; the
-// user gets the team, not the individual. A moderator who bans somebody should
-// not have to wonder whether that person will come looking for them, and the
-// name is the only thing that makes that possible.
-// One phrase for everyone on the team. Two of them told the reader which half
-// of it had acted, which is a smaller tell than a name and still a tell.
 const PUBLIC_STAFF = "the Talkomatic staff";
 
-// How a stored staff label reads to anybody who is not on the operations feed
-// - and that includes the rest of the team. A ban row, an appeal decision and
-// an activity line all say the team did it, not who.
-//
-// Two reasons, and the second is the one that decides it. A moderator who bans
-// somebody should not be identifiable to the person judging the appeal against
-// that ban, because a decision made about a colleague's call is not the same
-// decision as one made about the facts. And a name nobody can read is a name
-// nobody can pass on. Attribution is not lost: site operations reads every
-// record with the labels intact, which is where holding the team to account
-// actually happens.
 const TEAM_LABEL = "Talkomatic staff";
 
 function isDevLabel(label) {
@@ -189,8 +142,6 @@ function teamLabel(label) {
   return label ? TEAM_LABEL : label;
 }
 
-// The same, for the "dev:Label" / "mod:Label" form the review fields store.
-// The role prefix is kept so the badge still renders; only the name goes.
 function teamReviewer(value) {
   const s = String(value || "");
   if (!s) return value;
@@ -202,13 +153,27 @@ function publicStaffName(label) {
   return label ? PUBLIC_STAFF : null;
 }
 
+function stripStaffNames(text) {
+  if (!text || typeof text !== "string") return text;
+  let out = text;
+  const names = [
+    ...devKeys.map((d) => d.label),
+    ...modKeys.map((k) => k.label),
+    ...formerMods.map((f) => f.label),
+  ];
+  for (const name of names) {
+    if (!name || name.length < 2 || !out.includes(name)) continue;
+    out = out.split(name).join(TEAM_LABEL);
+  }
+  return out;
+}
+
 function getModKeyByPlain(key) {
   if (!key) return null;
   const h = hashKey(key);
   return modKeys.find((k) => k.hash === h) || null;
 }
 
-// Resolves a plaintext key to a role. Dev outranks mod.
 function validateKey(key) {
   const dk = getDevKey(key);
   if (dk) return { role: "dev", label: dk.label, hash: dk.hash };
@@ -223,13 +188,6 @@ function validateKey(key) {
   return { role: null, label: null, hash: null };
 }
 
-// Generates a new mod key. Only the hash is stored; the plaintext is returned
-// once for the dev to hand off and is never persisted.
-// New grants default to a junior (level 1) key - least privilege - unless the
-// caller asks for a full (level 2) key. (Note this differs from loadModKeys,
-// where a *missing* level means an old full key.)
-// `grantedBy` is a human label (the granting dev, or the reviewer who approved
-// an application) kept so the Moderators panel can show who made each mod.
 async function grantModKey(label, level, grantedBy) {
   const key = "mk_" + crypto.randomBytes(24).toString("hex");
   const entry = {
@@ -249,13 +207,6 @@ async function grantModKey(label, level, grantedBy) {
   return { key, hash: entry.hash, label: entry.label, level: entry.level };
 }
 
-// Somebody being given a key again keeps what is known about them. Their audit
-// record follows the label and survives a revoke on its own, but where the key
-// has been used from is stored per HASH, and a re-issued key is a new hash. So
-// a returning moderator arrived with an empty history: nothing on the key
-// activity panel, no last-seen, and a "connected from an address it has never
-// been used from before" alert about the address they have always used. The
-// old record stays where it is; this copies it onto the new key.
 function carryKeyActivity(label, newHash) {
   if (!label || !newHash || keyActivity[newHash]) return;
   let from = null;
@@ -277,9 +228,6 @@ function carryKeyActivity(label, newHash) {
   saveKeyActivitySoon();
 }
 
-// Removing a moderator writes a former-staff record: who they were, when the
-// key was minted, who pulled it and why. `reason` is what the panel asks the
-// developer for, and it is the only part of the record a human writes.
 async function revokeModKey(hash, opts) {
   const gone = modKeys.find((k) => k.hash === hash);
   if (!gone) return false;
@@ -308,9 +256,6 @@ async function revokeModKey(hash, opts) {
   return true;
 }
 
-// Former staff, newest first. `returned` marks somebody who has since been
-// given a key again - they are back on the live roster, so the panel does not
-// list them as gone.
 function listFormerMods(showAll) {
   const active = new Set(modKeys.map((k) => k.label));
   return formerMods
@@ -330,9 +275,6 @@ function listFormerMods(showAll) {
     }));
 }
 
-// Labels that belong to nobody on staff any more. Team views are a picture of
-// the current team, so these come off them - the work stays in the audit log
-// and in that person's record, which is what accountability needs.
 function formerLabels() {
   const active = new Set(modKeys.map((k) => k.label));
   for (const d of devKeys) active.add(d.label);
@@ -341,8 +283,6 @@ function formerLabels() {
   return out;
 }
 
-// Changes a mod key's level in place (dev-only promote/demote). Returns the new
-// level, or null if no key with that hash exists.
 async function setModLevel(hash, level) {
   const mk = modKeys.find((k) => k.hash === hash);
   if (!mk) return null;
@@ -351,9 +291,6 @@ async function setModLevel(hash, level) {
   return mk.level;
 }
 
-// Most recent time any IP connected on this key, from the persisted
-// key-activity log. Null when the key has never been used. Lets the Moderators
-// panel show how long a mod has been inactive without tracking sockets.
 function lastSeenForHash(hash) {
   const rec = keyActivity[hash];
   if (!rec || !rec.ips) return null;
@@ -365,21 +302,17 @@ function lastSeenForHash(hash) {
   return last || null;
 }
 
-// Hashes, levels, provenance, and last-seen - safe to send to the dev panel.
 function listModKeys(showAll) {
   return modKeys.map((k) => ({
     hash: k.hash,
     label: k.label,
     level: normalizeLevel(k.level),
-    // Who made them a moderator. A developer's name comes off here for the
-    // same reason it comes off the feed.
     grantedBy: showAll ? k.grantedBy || null : teamLabel(k.grantedBy || null),
     grantedAt: k.grantedAt || null,
     lastSeen: lastSeenForHash(k.hash),
   }));
 }
 
-// Appends one audit line. Best-effort; failures are logged but never throw.
 function modLog({ label, action, target, room } = {}) {
   const line =
     [
@@ -420,9 +353,6 @@ function saveKeyActivitySoon() {
   }, 2000);
 }
 
-// Records that a key (by hash) was just used from `ip`. Returns
-// { newIp } so the caller can raise an alert the first time a key is seen
-// from an address it has never connected from before.
 function recordKeyUse(hash, label, role, ip) {
   if (!hash || !ip) return { newIp: false };
   let rec = keyActivity[hash];
@@ -442,7 +372,6 @@ function recordKeyUse(hash, label, role, ip) {
   return { newIp };
 }
 
-// Serializable snapshot of every key's known IPs, newest IP first.
 function getKeyActivity() {
   return Object.entries(keyActivity).map(([hash, r]) => ({
     hash,
@@ -471,6 +400,7 @@ module.exports = {
   isDevLabel,
   teamLabel,
   teamReviewer,
+  stripStaffNames,
   getModKeyByPlain,
   validateKey,
   grantModKey,

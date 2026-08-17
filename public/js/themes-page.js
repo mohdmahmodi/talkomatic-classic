@@ -1,10 +1,7 @@
 // public/js/themes-page.js
 // The Themes library page: curated featured themes (public/themes/
-// featured.json, edited by hand) on top, community themes (published from the
-// visual editor via /api/v1/themes) below. Cards expand to show the color
-// palette and a small preview rendered in the theme's own colors, and Apply
-// writes the theme to this device (keeping any custom CSS the user already
-// has). All user-authored text is escaped before it touches the DOM.
+// featured.json, edited by hand) on top, community themes (published from
+// the visual editor via /api/v1/themes) below.
 (function () {
   "use strict";
 
@@ -74,7 +71,6 @@
     if (window.ThemeEngine) window.ThemeEngine.revert();
   }
 
-  // Small live preview rendered in the theme's own colors
   function miniPreview(state) {
     var mini = el("div", "mini");
     mini.style.background = tok(state, "bg");

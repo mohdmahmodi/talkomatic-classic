@@ -1,12 +1,5 @@
 // server/identity.js
 // Durable per-browser identity + lightweight activity tracking.
-//
-// The client keeps a random device id (localStorage + cookie + IndexedDB) and
-// sends it on connect. This is NOT a secret and never gates a privileged
-// action - it only powers "active vs new" checks, where the
-// real defense is that faking an *active* identity takes real elapsed calendar
-// time and sustained presence, not just minting a new id. Stored compactly,
-// pruned, and capped so it never clutters the server.
 
 const path = require("path");
 const fs = require("fs");
@@ -16,22 +9,17 @@ const { DATA_DIR } = require("./datadir");
 
 const STORE_PATH = path.join(DATA_DIR, "identity.json");
 
-// "Active" thresholds - tunable. A device is active once it has been seen on
-// at least 2 distinct days, accumulated >= 15 minutes of presence, and shown
-// >= 10 activity ticks (typed / participated). Cheap for a real returning user
-// to meet; expensive to fake at scale because it needs real calendar time.
 const ACTIVE_DAYS = 2;
 const ACTIVE_SEC = 15 * 60;
 const ACTIVE_ACTS = 10;
 
-const MAX_DEVICES = 50000; // hard cap on stored devices
-const MAX_IPS = 8; // ips kept per device
-const MAX_DAYS = 90; // distinct-day entries kept per device
-const SESSION_CAP_SEC = 2 * 60 * 60; // count at most 2h from one session
-const TOTAL_SEC_CAP = 100 * 24 * 60 * 60; // never store more than ~100 days
-const PRUNE_AFTER_MS = 45 * 24 * 60 * 60 * 1000; // drop devices unseen 45d
+const MAX_DEVICES = 50000;
+const MAX_IPS = 8;
+const MAX_DAYS = 90;
+const SESSION_CAP_SEC = 2 * 60 * 60;
+const TOTAL_SEC_CAP = 100 * 24 * 60 * 60;
+const PRUNE_AFTER_MS = 45 * 24 * 60 * 60 * 1000;
 
-// deviceId -> { first, last, days:[YYYY-MM-DD], sec, acts, ips:{ip:count}, name }
 let store = {};
 let saveTimer = null;
 let dirty = false;
@@ -48,7 +36,6 @@ function load() {
   }
 }
 
-// Atomic write (tmp + rename), debounced, mirrors the other JSON stores.
 function saveSoon() {
   dirty = true;
   if (saveTimer) return;
@@ -72,7 +59,7 @@ function validId(id) {
 }
 
 function today() {
-  return new Date().toISOString().slice(0, 10); // UTC YYYY-MM-DD
+  return new Date().toISOString().slice(0, 10);
 }
 
 function rec(id) {
@@ -113,7 +100,6 @@ function addIp(r, ip) {
   }
 }
 
-// Record a connection: presence for today + the connecting ip.
 function touch(id, ip, name, loc) {
   if (!validId(id)) return;
   const r = rec(id);
@@ -125,7 +111,6 @@ function touch(id, ip, name, loc) {
   saveSoon();
 }
 
-// Accumulate engaged time from one session (capped per session and overall).
 function addTime(id, ms) {
   if (!validId(id) || !(ms > 0)) return;
   const r = store[id];
@@ -135,7 +120,6 @@ function addTime(id, ms) {
   saveSoon();
 }
 
-// A participation tick (the caller throttles this, e.g. once per 30s).
 function tick(id, name, loc) {
   if (!validId(id)) return;
   const r = rec(id);
@@ -147,8 +131,6 @@ function tick(id, name, loc) {
   saveSoon();
 }
 
-// Update just the display name + location (on sign-in or rename) so anything
-// that shows this device (staff surfaces, records) stays current.
 function setName(id, name, loc) {
   if (!validId(id) || !store[id]) return;
   const r = store[id];
@@ -176,8 +158,6 @@ function getNote(id) {
   return r && typeof r.note === "string" && r.note ? r.note : null;
 }
 
-// Staff can turn a device's profile picture off. Stored here (not on the
-// session) so clearing cookies does not bring the picture back.
 function setPfpBlocked(id, blocked) {
   if (!validId(id)) return false;
   const r = rec(id);
@@ -205,7 +185,6 @@ function isActive(id) {
   );
 }
 
-// Compact, non-sensitive snapshot for the client (new-vs-active display).
 function summary(id) {
   const r = store[id];
   const need = {
@@ -238,9 +217,6 @@ function getRecord(id) {
   return store[id] || null;
 }
 
-// Devices whose recorded IPs match a predicate, newest first. Used to show which
-// accounts sit behind a banned IP or range. Only devices that carried a deviceId
-// are recorded, so a fresh IP with no history returns nothing.
 function devicesMatching(pred, limit = 25) {
   const out = [];
   for (const id of Object.keys(store)) {
@@ -259,12 +235,8 @@ function devicesMatching(pred, limit = 25) {
   return out.slice(0, limit);
 }
 
-// Bucket every device by which blocklist keys cover its addresses, in a single
-// pass over the store. The ban list used to call devicesMatching() once per
-// block, so a store of a few thousand devices meant rescanning it twenty-odd
-// times on every redraw. `covering(ip, prepared)` comes from ipban.
 function devicesByKeys(prepared, covering, limit = 25) {
-  const out = new Map(); // block key -> [{ id, name, ips, last }]
+  const out = new Map();
   if (!prepared) return out;
   for (const id of Object.keys(store)) {
     const r = store[id];
@@ -304,8 +276,6 @@ function prune() {
   }
 }
 
-// Synchronous write for a clean shutdown, so the last few seconds of activity
-// and name changes survive a restart even inside the debounce window.
 function flushSync() {
   try {
     prune();

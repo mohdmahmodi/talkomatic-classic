@@ -1,13 +1,6 @@
-// public/js/theme-editor.js  (v2.1)
-// Visual theme editor drawer, scoped to the page it is opened on: the lobby
-// editor styles the lobby, the room editor (Apps > Theme Editor) styles
-// rooms. Color pickers, shape sliders, effect styles (glass / neo-brutal /
-// soft), Google fonts, staff-only badge knobs, and an Advanced section that
-// ends in a raw custom CSS box. Everything previews live. On phones the
-// editor becomes a bottom sheet so the page stays visible above it, and the
-// eye button peeks at the page full-screen while held. The editor chrome
-// keeps fixed classic colors on purpose so it never becomes unusable
-// mid-experiment.
+// public/js/theme-editor.js (v2.1) Visual theme editor drawer, scoped to the
+// page it is opened on: the lobby editor styles the lobby, the room editor
+// (Apps > Theme Editor) styles rooms.
 (function () {
   "use strict";
   if (!window.ThemeEngine) return;
@@ -168,7 +161,6 @@
 
     drawer = el("div", "tked-drawer");
 
-    // Header with hold-to-peek
     var head = el("div", "tked-head");
     var headT = el("div", "tked-head-t");
     headT.appendChild(
@@ -194,7 +186,6 @@
 
     var body = el("div", "tked-body");
 
-    // Presets
     var secPresets = section(body, "fa-wand-magic-sparkles", "Quick start");
     var presets = el("div", "tked-presets");
     Object.keys(PRESETS).forEach(function (name) {
@@ -209,7 +200,6 @@
     });
     secPresets.appendChild(presets);
 
-    // Effect style
     var secFx = section(body, "fa-layer-group", "Effect style");
     var fxRow = el("div", "tked-row");
     var fxLabels = el("div", "tked-labels");
@@ -233,7 +223,6 @@
     fxRow.appendChild(effectSel);
     secFx.appendChild(fxRow);
 
-    // Fonts
     var secFonts = section(body, "fa-font", "Fonts");
     (E.FONT_SLOTS[PAGE] || []).forEach(function (slot) {
       var row = el("div", "tked-row");
@@ -257,7 +246,6 @@
       secFonts.appendChild(row);
     });
 
-    // Basic token sections, one card per group
     var groupIcons = {
       Colors: "fa-palette",
       Page: "fa-display",
@@ -270,7 +258,6 @@
     };
     buildGroups(body, groupIcons, function (t) { return !t.adv; });
 
-    // Advanced
     var advToggle = el("button", "tked-adv-toggle", "Advanced options");
     var advWrap = el("div");
     advWrap.style.display = "none";
@@ -297,7 +284,6 @@
     body.appendChild(advToggle);
     body.appendChild(advWrap);
 
-    // Copy look across pages
     var copyBtn = el(
       "button",
       "tked-adv-toggle",
@@ -309,7 +295,6 @@
     });
     body.appendChild(copyBtn);
 
-    // Share JSON area
     ioArea = el("div", "tked-io");
     var ta = document.createElement("textarea");
     ta.spellcheck = false;
@@ -344,7 +329,6 @@
     ioArea.appendChild(ioRow);
     ioArea._ta = ta;
 
-    // Footer actions
     var foot = el("div", "tked-foot");
     var save = el("button", "tked-save");
     save.innerHTML = '<i class="fas fa-check"></i> Save theme';
@@ -509,7 +493,7 @@
       fields = { title: title, desc: "" };
     }
     var state = clone(working);
-    delete state.css; // custom CSS never ships in public themes
+    delete state.css;
     try {
       var res = await fetch("/api/v1/themes", {
         method: "POST",

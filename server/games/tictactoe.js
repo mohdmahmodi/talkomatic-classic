@@ -10,8 +10,6 @@ const LINES = [
 const MARKS = ["X", "O"];
 
 function create(players, opts) {
-  // Alternate who opens between matches at the same table so holding a seat
-  // is not a standing advantage.
   const first = (opts && opts.matchNumber ? opts.matchNumber : 0) % 2;
   return {
     board: Array(9).fill(null),
@@ -72,7 +70,6 @@ function winningLine(board) {
   return null;
 }
 
-// Played for a player who ran their clock out, so a table keeps moving.
 function timeoutMove(state) {
   const open = [];
   for (let i = 0; i < 9; i++) if (!state.board[i]) open.push(i);

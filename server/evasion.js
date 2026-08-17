@@ -1,30 +1,14 @@
 // server/evasion.js
-// Ban-evasion watch. Addresses are not on the dashboard, so "is this the
-// person we banned last night, back on a fresh browser?" has to be answered by
-// the server instead of by eye. It asks two questions of every connection that
-// gets in:
-//
-//   - has this browser been here before from an address that is blocked now?
-//   - is this address one a currently-blocked identity was last seen on?
-//
-// Neither of them bans anybody. A shared house, a phone handed to a sibling,
-// and a carrier reassigning an address all look exactly like evasion from
-// outside, so every signal is a prompt for a human to go and look. A wrong
-// automatic ban is worse than a missed one, and staff already have the tools.
+// Ban-evasion watch.
 
 const { state } = require("./state");
 const ipban = require("./ipban");
 const identity = require("./identity");
 const audit = require("./audit");
 
-// One alert per browser per hour. A determined evader reconnects constantly,
-// and a queue with the same card in it forty times is a queue nobody reads.
 const ALERT_COOLDOWN_MS = 60 * 60 * 1000;
-const recentAlerts = new Map(); // deviceId -> ts
+const recentAlerts = new Map();
 
-// The active blocklist, parsed once and reused. Rebuilt on a timer rather than
-// on every write: this sits on the connection path, and a signal that is up to
-// a minute stale is still a signal.
 const CACHE_MS = 60 * 1000;
 let cache = null;
 
@@ -32,8 +16,6 @@ function snapshot() {
   const now = Date.now();
   if (cache && now - cache.at < CACHE_MS) return cache;
   const keys = [];
-  // Address -> the blocked identity that has used it. Built from the device id
-  // each block carries, so an identifier-only ban still has addresses behind it.
   const seenIps = new Map();
   for (const [key, b] of state.blockedIPs) {
     if (!ipban.isActiveBlock(b)) continue;
@@ -51,8 +33,6 @@ function snapshot() {
   return cache;
 }
 
-// Called for a connection that was NOT blocked. Returns the signal it raised,
-// or null when there is nothing to say.
 function check({ deviceId, ip, username }) {
   if (!deviceId && !ip) return null;
   if (!state.blockedIPs.size) return null;
@@ -62,12 +42,11 @@ function check({ deviceId, ip, username }) {
   const snap = snapshot();
   let signal = null;
 
-  // This browser's own history, against the blocks in force now.
   if (deviceId) {
     const rec = identity.getRecord(deviceId);
     const known = rec && rec.ips ? Object.keys(rec.ips) : [];
     for (const seen of known) {
-      if (seen === ip) continue; // they would not be here if it were blocked
+      if (seen === ip) continue;
       if (ipban.keysCovering(seen, snap.prepared).length) {
         signal = {
           kind: "history",
@@ -78,7 +57,6 @@ function check({ deviceId, ip, username }) {
     }
   }
 
-  // The other direction: a blocked identity has used this address.
   if (!signal && ip) {
     const owner = snap.seenIps.get(ip);
     if (owner && owner.did !== deviceId)
@@ -114,8 +92,6 @@ function check({ deviceId, ip, username }) {
   return signal;
 }
 
-// The blocklist changed under us; the next check rebuilds rather than waiting
-// out the timer. Used when a ban is placed or lifted.
 function invalidate() {
   cache = null;
 }

@@ -1,7 +1,6 @@
 // server/warnings.js
-// Pending staff warnings for users who are offline, keyed by the durable device
-// id and delivered on their next connect so a warning is never lost. Persisted
-// to warnings.json; load() tolerates old/missing fields (migrates forward).
+// Pending staff warnings for users who are offline, keyed by the durable
+// device id and delivered on their next connect so a warning is never lost.
 
 const path = require("path");
 const fs = require("fs");
@@ -11,9 +10,9 @@ const { DATA_DIR } = require("./datadir");
 
 const STORE_PATH = path.join(DATA_DIR, "warnings.json");
 const MAX_PER_DEVICE = 5;
-const TTL = 30 * 24 * 60 * 60 * 1000; // drop undelivered after 30 days
+const TTL = 30 * 24 * 60 * 60 * 1000;
 
-let store = {}; // deviceId -> [{ message, by, at }]
+let store = {};
 let saveTimer = null;
 
 function load() {
@@ -50,7 +49,6 @@ function flushSync() {
   }
 }
 
-// Queue a warning for delivery on the device's next connect.
 function queue(deviceId, message, by) {
   if (!deviceId || !message) return;
   const arr = store[deviceId] || (store[deviceId] = []);
@@ -63,7 +61,6 @@ function queue(deviceId, message, by) {
   saveSoon();
 }
 
-// Return and clear a device's pending (non-expired) warnings.
 function takeFor(deviceId) {
   if (!deviceId || !store[deviceId]) return [];
   const now = Date.now();

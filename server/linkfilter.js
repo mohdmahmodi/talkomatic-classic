@@ -1,7 +1,5 @@
 // server/linkfilter.js
-// Links are not shareable on Talkomatic. This is the one place that decides
-// what counts as one, for every surface that has to take them out (room
-// textboxes, the board, the games feed) or turn them away (names).
+// Links are not shareable on Talkomatic.
 
 const SKIP =
   /[\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u3164\ufeff\uffa0\u180b-\u180e\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufe00-\ufe0f]/;
@@ -15,9 +13,6 @@ const FOLD = {
   α: "a", ε: "e", ι: "i", κ: "k", ν: "v", ο: "o", ρ: "p", τ: "t", υ: "u",
 };
 
-// Returns the scanned form plus map[i] = index in `value` of scanned char i,
-// so a hit resolves back to the span the person actually typed. The original
-// is never rewritten.
 function normalize(value) {
   let text = "";
   const map = [];
@@ -42,8 +37,6 @@ function normalize(value) {
   return { text, map };
 }
 
-// Read on its own. Anything not here needs a scheme, a leading www, a port or
-// a path before it is treated as an address, so ordinary sentences survive.
 const TLD = new Set(
   (
     "ac ad ae af ag ai al ao aq ar au aw ax az ba bb bd bf bg bh bi bj bm " +
@@ -92,13 +85,10 @@ const LINK = new RegExp(
   "gi",
 );
 
-// Leave the sentence its own punctuation.
 const TRAILING = /[.,!?;:)\]}'"]+$/;
 
 const DEFAULT_LABEL = "[link removed]";
 
-// Cheap gate. This sits on the room broadcast path, once per batch of
-// keystrokes per speaker, so ordinary chat must not reach the pattern.
 function looksLikeLink(value) {
   return (
     typeof value === "string" &&
@@ -111,7 +101,6 @@ function looksLikeLink(value) {
   );
 }
 
-// Ranges into the original string, [start, end).
 function findRanges(value) {
   const ranges = [];
   if (!looksLikeLink(value)) return ranges;
@@ -137,8 +126,6 @@ function findRanges(value) {
   return ranges;
 }
 
-// Replaces every link in `value` with `label`. Non-strings and strings without
-// one come back untouched, so a nullable field can be passed straight in.
 function redact(value, label) {
   const ranges = findRanges(value);
   if (!ranges.length) return value;
@@ -153,9 +140,6 @@ function redact(value, label) {
   return out + value.slice(last);
 }
 
-// For inputs that are refused rather than rewritten. A username or a room name
-// cannot be shown as a placeholder - the roster and the lobby have to stay
-// readable - so those are turned away at the door instead.
 function containsLink(value) {
   return findRanges(value).length > 0;
 }

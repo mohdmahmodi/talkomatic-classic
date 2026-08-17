@@ -1,16 +1,13 @@
 // Themes.js - Polished version with uploaded theme saving
-// =======================================================
 
 // DOM Elements
 const curatedContent = document.getElementById("curatedContent");
 const importContent = document.getElementById("importContent");
 const themeGrid = document.getElementById("themeGrid");
 
-// Navigation buttons
 const curatedThemesButton = document.getElementById("curatedThemesButton");
 const importThemeButton = document.getElementById("importThemeButton");
 
-// Theme application elements
 const quickImportInput = document.getElementById("quickImportInput");
 const quickApplyButton = document.getElementById("quickApplyButton");
 const importThemeInput = document.getElementById("importThemeInput");
@@ -20,22 +17,18 @@ const importThumbnailInput = document.getElementById("importThumbnailInput");
 const thumbnailPreview = document.getElementById("thumbnailPreview");
 const removeThumbnail = document.getElementById("removeThumbnail");
 
-// Modal elements
 const themeModal = document.getElementById("themeModal");
 const modalThemeNameInput = document.getElementById("modalThemeNameInput");
 const modalCancelButton = document.getElementById("modalCancelButton");
 const modalSaveButton = document.getElementById("modalSaveButton");
 
-// Search functionality
 const searchInput = document.getElementById("searchTheme");
 
-// Theme content storage
 let quickThemeContent = "";
 let importThemeContent = "";
 let importThumbnailContent = "";
 let pendingSaveData = null;
 
-// Configure toastr notifications
 toastr.options = {
   closeButton: true,
   debug: false,
@@ -54,7 +47,6 @@ toastr.options = {
 };
 
 // =================================================================
-// IndexedDB-based Management for Uploaded Themes
 // =================================================================
 
 let dbPromise;
@@ -72,18 +64,12 @@ async function initDB() {
   });
 }
 
-/**  
- * Get uploaded themes from indexedDB  
- */
 async function getUploadedThemes() {
   const db = await dbPromise;
   return (await db.getAllFromIndex('themes', 'by-date'))
     .sort((a, b) => b.dateAdded.localeCompare(a.dateAdded));
 }
 
-/**  
- * Add a new uploaded theme  
- */
 async function addUploadedTheme(name, content, thumbnail = "") {
   const db = await dbPromise;
   const theme = {
@@ -97,18 +83,12 @@ async function addUploadedTheme(name, content, thumbnail = "") {
   return theme;
 }
 
-/**
- * Delete an uploaded theme
- */
 async function deleteUploadedTheme(id) {
   const db = await dbPromise;
   await db.delete('themes', id);
 }
 
 
-/**
- * Save the current theme into IndexedDB
- */
 async function setCurrentTheme(name, content) {
   const db = await dbPromise;
   if (!db.objectStoreNames.contains('settings')) {
@@ -123,21 +103,14 @@ async function setCurrentTheme(name, content) {
   });
 }
 
-/**
- * Retrieve the current theme from IndexedDB
- */
 async function getCurrentTheme() {
   const db = await dbPromise;
   return await db.get('settings', 'currentTheme');
 }
 
 // =================================================================
-// Theme Display Functions
 // =================================================================
 
-/**
- * Create a theme card element
- */
 function createThemeCard(theme) {
   const card = document.createElement("div");
   card.className = "theme-card";
@@ -171,20 +144,14 @@ function createThemeCard(theme) {
   return card;
 }
 
-/**
- * Render all themes in the grid
- */
 async function renderThemes() {
-  // Clear existing uploaded themes but keep curated ones
   const curatedCards = themeGrid.querySelectorAll(
     ".theme-card:not([data-uploaded-id])"
   );
   themeGrid.innerHTML = "";
 
-  // Re-add curated themes
   curatedCards.forEach((card) => themeGrid.appendChild(card));
 
-  // Add uploaded themes
   const uploadedThemes = await getUploadedThemes();
   uploadedThemes.forEach((t) => {
     const card = createThemeCard({ type: 'uploaded', ...t });
@@ -193,12 +160,8 @@ async function renderThemes() {
 }
 
 // =================================================================
-// Navigation Functions
 // =================================================================
 
-/**
- * Switch to curated themes view
- */
 function showCuratedThemes() {
   curatedContent.style.display = "block";
   importContent.style.display = "none";
@@ -207,9 +170,6 @@ function showCuratedThemes() {
   importThemeButton.classList.remove("active");
 }
 
-/**
- * Switch to import theme view
- */
 function showImportThemes() {
   curatedContent.style.display = "none";
   importContent.style.display = "block";
@@ -219,12 +179,8 @@ function showImportThemes() {
 }
 
 // =================================================================
-// Theme Application Functions
 // =================================================================
 
-/**
- * Apply a theme to localStorage
- */
 async function applyTheme(themeContent, themeName = "theme") {
   try {
     await setCurrentTheme(themeName, themeContent);
@@ -238,9 +194,6 @@ async function applyTheme(themeContent, themeName = "theme") {
   }
 }
 
-/**
- * Apply a curated theme
- */
 async function applyCuratedTheme(filename, themeName, cardElement) {
   try {
     cardElement.style.opacity = "0.7";
@@ -258,7 +211,6 @@ async function applyCuratedTheme(filename, themeName, cardElement) {
       await applyTheme(themeContent, themeName);
     }
 
-    // Visual feedback
     cardElement.animate(
       [
         {
@@ -284,9 +236,6 @@ async function applyCuratedTheme(filename, themeName, cardElement) {
   }
 }
 
-/**
- * Apply an uploaded theme
- */
 async function applyUploadedTheme(themeId, cardElement) {
   const themes = await getUploadedThemes();
   const theme = themes.find((t) => t.id === themeId);
@@ -295,7 +244,6 @@ async function applyUploadedTheme(themeId, cardElement) {
     cardElement.style.opacity = "0.7";
     await applyTheme(theme.content, theme.name);
 
-    // Visual feedback
     cardElement.animate(
       [
         {
@@ -318,9 +266,6 @@ async function applyUploadedTheme(themeId, cardElement) {
   }
 }
 
-/**
- * Read file content from file input
- */
 function readFileContent(file) {
   return new Promise((resolve, reject) => {
     if (!file) {
@@ -346,12 +291,8 @@ function readFileContent(file) {
 }
 
 // =================================================================
-// Modal Functions
 // =================================================================
 
-/**
- * Show theme naming modal
- */
 function showThemeModal(themeContent, defaultName = "") {
   pendingSaveData = { content: themeContent };
   modalThemeNameInput.value = defaultName;
@@ -359,18 +300,12 @@ function showThemeModal(themeContent, defaultName = "") {
   modalThemeNameInput.focus();
 }
 
-/**
- * Hide theme naming modal
- */
 function hideThemeModal() {
   themeModal.classList.remove("show");
   pendingSaveData = null;
   modalThemeNameInput.value = "";
 }
 
-/**
- * Save theme from modal
- */
 async function saveThemeFromModal() {
   const themeName = modalThemeNameInput.value.trim();
 
@@ -391,14 +326,11 @@ async function saveThemeFromModal() {
 }
 
 // =================================================================
-// Event Listeners
 // =================================================================
 
-// Navigation
 curatedThemesButton.addEventListener("click", showCuratedThemes);
 importThemeButton.addEventListener("click", showImportThemes);
 
-// Quick import
 quickImportInput.addEventListener("change", async (event) => {
   const file = event.target.files[0];
 
@@ -421,7 +353,6 @@ quickApplyButton.addEventListener("click", () => {
       quickImportInput.files[0]?.name.replace(".css", "") || "Quick Theme";
     showThemeModal(quickThemeContent, fileName);
 
-    // Reset form
     quickImportInput.value = "";
     quickThemeContent = "";
     quickApplyButton.disabled = true;
@@ -429,7 +360,6 @@ quickApplyButton.addEventListener("click", () => {
   }
 });
 
-// Import theme section
 importThemeInput.addEventListener("change", async (event) => {
   const file = event.target.files[0];
 
@@ -501,7 +431,6 @@ importApplyButton.addEventListener("click", () => {
   }
 });
 
-// Modal events
 modalCancelButton.addEventListener("click", hideThemeModal);
 modalSaveButton.addEventListener("click", saveThemeFromModal);
 
@@ -513,14 +442,12 @@ modalThemeNameInput.addEventListener("keypress", (event) => {
   }
 });
 
-// Close modal on background click
 themeModal.addEventListener("click", (event) => {
   if (event.target === themeModal) {
     hideThemeModal();
   }
 });
 
-// Search functionality
 searchInput.addEventListener("input", (event) => {
   const searchTerm = event.target.value.toLowerCase().trim();
   const themeCards = document.querySelectorAll(".theme-card");
@@ -545,17 +472,14 @@ searchInput.addEventListener("input", (event) => {
   }
 });
 
-// Theme card clicks
 document.addEventListener("click", (event) => {
   const themeCard = event.target.closest(".theme-card");
 
   if (themeCard && curatedContent.style.display !== "none") {
-    // Handle uploaded theme
     if (themeCard.dataset.uploadedId) {
       const themeId = parseInt(themeCard.dataset.uploadedId);
       applyUploadedTheme(themeId, themeCard);
     }
-    // Handle curated theme
     else if (themeCard.dataset.file !== undefined) {
       const filename = themeCard.dataset.file;
       const themeName =
@@ -565,7 +489,6 @@ document.addEventListener("click", (event) => {
   }
 });
 
-// Delete uploaded themes (right-click context)
 document.addEventListener("contextmenu", (event) => {
   const themeCard = event.target.closest(".theme-card");
 
@@ -584,7 +507,6 @@ document.addEventListener("contextmenu", (event) => {
 });
 
 // =================================================================
-// Initialization
 // =================================================================
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -594,7 +516,6 @@ document.addEventListener("DOMContentLoaded", () => {
     updateImportButton();
   });
 
-  // Welcome message
   setTimeout(() => {
     toastr.info(
       "Choose a theme to customize your Talkomatic experience!",

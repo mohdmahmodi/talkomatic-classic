@@ -1,15 +1,6 @@
 // server/reports.js
 // Tally of user reports so staff can see how many distinct people reported
-// someone, and why. Persisted to disk so the board survives a restart; the
-// individual reports also flow into the audit feed for the permanent record.
-// "distinct" counts unique reporters by device, so one person spamming the
-// report button cannot inflate the number.
-//
-// Each report also remembers the target's last-known IP, device id, and role
-// (captured while they were online). That lets staff act on a reported user
-// from the board even after they disconnect, without ever exposing the raw IP
-// to a moderator (the server resolves it). The role is kept so the staff
-// hierarchy still holds when the target is offline and we cannot read it live.
+// someone, and why.
 
 const path = require("path");
 const fs = require("fs");
@@ -19,11 +10,11 @@ const { DATA_DIR } = require("./datadir");
 
 const STORE_PATH = path.join(DATA_DIR, "reports.json");
 
-const WINDOW_MS = 7 * 24 * 60 * 60 * 1000; // keep a target's reports for 7 days
+const WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_TARGETS = 5000;
 const MAX_PER_TARGET = 100;
 
-let byTarget = new Map(); // targetKey -> [{ byDeviceId, byName, category, reason, at, targetIp, targetDeviceId, targetRole, targetText }]
+let byTarget = new Map();
 let saveTimer = null;
 let dirty = false;
 
@@ -43,7 +34,6 @@ function load() {
   }
 }
 
-// Atomic write (tmp + rename), debounced, mirrors the other JSON stores.
 function saveSoon() {
   dirty = true;
   if (saveTimer) return;
@@ -61,8 +51,6 @@ function saveSoon() {
   }, 3000);
 }
 
-// Synchronous write for a clean shutdown, so a report filed seconds before a
-// restart is not lost inside the debounce window.
 function flushSync() {
   try {
     const tmp = STORE_PATH + ".tmp";
@@ -95,7 +83,6 @@ function distinctReporters(list) {
   return ids.size + (anon > 0 ? 1 : 0);
 }
 
-// Record a report and return { total, distinct } for the target.
 function add({
   targetKey,
   targetName,
@@ -125,8 +112,6 @@ function add({
     targetIp: targetIp || null,
     targetDeviceId: targetDeviceId || null,
     targetRole: targetRole || null,
-    // What the reported user had typed in their chat box at report time, so
-    // staff can see the offending text even after it is cleared or they leave.
     targetText: targetText || null,
   });
   if (arr.length > MAX_PER_TARGET) arr.splice(0, arr.length - MAX_PER_TARGET);
@@ -136,14 +121,10 @@ function add({
   return { total: list.length, distinct: distinctReporters(list) };
 }
 
-// All recent reports against one target (for a dashboard drill-down).
 function forTarget(targetKey) {
   return (byTarget.get(targetKey) || []).slice();
 }
 
-// The most recent IP, device id, name, and role we ever captured for a target,
-// so staff can act on them once they go offline. Each field is taken from the
-// newest report that carries it.
 function lastKnown(targetKey) {
   const arr = byTarget.get(targetKey);
   if (!arr || !arr.length) return null;
@@ -161,14 +142,12 @@ function lastKnown(targetKey) {
   return { ip, deviceId, name, role };
 }
 
-// Drop every report against one target (staff discarded it as false/handled).
 function clear(targetKey) {
   const had = byTarget.delete(targetKey);
   if (had) saveSoon();
   return had;
 }
 
-// Compact per-target summary, most-reported first (for a dashboard view).
 function summary() {
   const out = [];
   for (const [targetKey, arr] of byTarget) {
@@ -189,7 +168,6 @@ function summary() {
 
 load();
 
-// Is this user currently on the reports board (for live dashboard refreshes)?
 function isTarget(targetKey) {
   return !!targetKey && byTarget.has(targetKey);
 }

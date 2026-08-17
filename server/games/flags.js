@@ -1,22 +1,7 @@
 // server/games/flags.js
 // The country list behind Guess the Flag.
-//
-// Deliberately NOT the whole of flagcdn's codes.json. That file carries the 50
-// U.S. states, the EU and UN, and a handful of uninhabited territories nobody
-// could reasonably name (Bouvet Island, Heard Island, the French Southern
-// Lands). A quiz you cannot win is not a game, so this is world countries and
-// the territories people actually recognise.
-//
-// Each entry is [code, name, tier, ...aliases]:
-//   tier 1  everyone knows it
-//   tier 2  you would know it if you thought about it
-//   tier 3  for the people who like flags
-// Aliases exist because "Ivory Coast", "UK", "USA", "Holland" and "Burma" are
-// what people actually type, and refusing them is the fastest way to make the
-// game feel rigged.
 
 const RAW = [
-  // ── Tier 1: the ones almost anybody can name ──
   ["us", "United States", 1, "usa", "america", "united states of america", "u s a"],
   ["gb", "United Kingdom", 1, "uk", "britain", "great britain", "england"],
   ["fr", "France", 1],
@@ -67,7 +52,6 @@ const RAW = [
   ["co", "Colombia", 1],
   ["pe", "Peru", 1],
 
-  // ── Tier 2: familiar, if you stop and think ──
   ["af", "Afghanistan", 2],
   ["al", "Albania", 2],
   ["dz", "Algeria", 2],
@@ -145,7 +129,6 @@ const RAW = [
   ["ci", "Ivory Coast", 2, "cote d ivoire", "côte d'ivoire", "cote divoire"],
   ["cd", "DR Congo", 2, "democratic republic of the congo", "congo kinshasa", "drc", "zaire"],
 
-  // ── Tier 3: for the people who like flags ──
   ["ad", "Andorra", 3],
   ["ag", "Antigua and Barbuda", 3, "antigua"],
   ["bs", "Bahamas", 3],
@@ -243,13 +226,10 @@ const COUNTRIES = RAW.map(([code, name, tier, ...aliases]) => ({
 
 const BY_CODE = new Map(COUNTRIES.map((c) => [c.code, c]));
 
-// Fold a typed guess down to something comparable: no case, no accents, no
-// punctuation, no "the". Somebody typing "The Bahamas" or "Cote d'Ivoire"
-// meant the right country and the game should say so.
 function normalize(text) {
   return String(text || "")
     .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "") // strip combining accents
+    .replace(/[̀-ͯ]/g, "")
     .toLowerCase()
     .replace(/&/g, " and ")
     .replace(/[^a-z0-9]+/g, " ")
@@ -258,21 +238,15 @@ function normalize(text) {
     .trim();
 }
 
-// Every spelling that should be accepted for one country.
 function keysFor(c) {
   const out = new Set([normalize(c.name)]);
   for (const a of c.aliases) out.add(normalize(a));
   return [...out].filter(Boolean);
 }
 
-const ANSWERS = new Map(); // normalized guess -> code
+const ANSWERS = new Map();
 for (const c of COUNTRIES) for (const k of keysFor(c)) if (!ANSWERS.has(k)) ANSWERS.set(k, c.code);
 
-// Edit distance, but it gives up as soon as it passes `max`. Country names are
-// short and this runs against the whole list on every guess, so bailing early
-// matters more than knowing exactly how wrong a wild guess was.
-// Counts a swapped pair of letters as one mistake, not two, because typing
-// "Portgual" for Portugal is one slip of the fingers and everybody does it.
 function within(a, b, max) {
   if (a === b) return 0;
   if (Math.abs(a.length - b.length) > max) return max + 1;
@@ -290,27 +264,21 @@ function within(a, b, max) {
         rows[i - 1][j - 1] + cost,
       );
       if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1])
-        v = Math.min(v, rows[i - 2][j - 2] + 1); // the two letters were swapped
+        v = Math.min(v, rows[i - 2][j - 2] + 1);
       rows[i][j] = v;
       if (v < best) best = v;
     }
-    if (best > max) return max + 1; // no route back under the limit
+    if (best > max) return max + 1;
   }
   return rows[a.length][b.length];
 }
 
-// How wrong a spelling is allowed to be. Short names get no slack at all:
-// Chad, Chile, Cuba, Iran and Iraq are close enough to each other already.
-// Longer names get more, which is safe rather than sloppy: a guess is only
-// accepted when exactly one country is in range, so widening the net can make
-// a guess ambiguous but can never hand it to the wrong country.
 function slackFor(len) {
   if (len < 6) return 0;
   if (len < 9) return 1;
   return 2;
 }
 
-// Every country the guess could plausibly have meant.
 function nearCodes(k) {
   const slack = slackFor(k.length);
   if (!slack) return [];
@@ -322,20 +290,15 @@ function nearCodes(k) {
   return [...hits];
 }
 
-// A guess counts if it is the country's name or one of its aliases, or if it
-// is a misspelling that could only have meant this country. "Argeintina" is
-// obviously Argentina and refusing it just feels rigged; "Irap" could be Iran
-// or Iraq, so that one is not given away.
 function matches(guess, code) {
   const k = normalize(guess);
   if (!k) return false;
   if (ANSWERS.get(k) === code) return true;
-  if (ANSWERS.has(k)) return false; // they named a different country exactly
+  if (ANSWERS.has(k)) return false;
   const near = nearCodes(k);
   return near.length === 1 && near[0] === code;
 }
 
-// Nearly this country, but too close to something else to hand it over.
 function isNearMiss(guess, code) {
   const k = normalize(guess);
   if (!k || ANSWERS.has(k)) return false;
@@ -343,8 +306,6 @@ function isNearMiss(guess, code) {
   return near.length > 1 && near.includes(code);
 }
 
-// Did they name a real country, just not this one? Used to tell somebody they
-// guessed a country rather than typed nonsense, without saying which.
 function isAnyCountry(guess) {
   const k = normalize(guess);
   return !!k && ANSWERS.has(k);

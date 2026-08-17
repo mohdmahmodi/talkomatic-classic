@@ -1,15 +1,5 @@
 // public/js/desk.js
-// The Desk - staff chat and shift console, mounted on every page. The page's
-// own script calls TalkoDesk.init(socket); the Desk then asks the server
-// "desk hello" and only builds any interface at all if the server answers,
-// so a normal user's page never shows a trace of it.
-//
-// Layout is the familiar messenger shape: channels down the left, the
-// conversation in the middle, who-is-on down the right. On a phone the rails
-// become drawers and the panel takes the whole screen.
-//
-// Everything user-authored is rendered with textContent. No innerHTML ever
-// touches message text, names, room names, or notes.
+// The Desk - staff chat and shift console, mounted on every page.
 
 (function () {
   "use strict";
@@ -17,13 +7,13 @@
 
   // ── State ─────────────────────────────────────────────────────────────────
   let socket = null;
-  let me = null; // { label, role, level, alias }
-  let channels = []; // [{key, name, desc, restricted}]
-  let threads = []; // thread summaries
-  let unread = {}; // key -> { n, mentions }
+  let me = null;
+  let channels = [];
+  let threads = [];
+  let unread = {};
   let presence = { staff: [], rooms: [] };
-  let view = { kind: "channel", key: "floor" }; // or kind:"thread"
-  let mode = "chat"; // chat | inspector | search
+  let view = { kind: "channel", key: "floor" };
+  let mode = "chat";
   let inspectorRoom = null;
   let searchHits = null;
   let panelOpen = false;
@@ -32,12 +22,11 @@
   let soundOn = localStorage.getItem("talkomatic_deskSound") === "1";
   let audioCtx = null;
   let readTimer = null;
-  // /desk.html: the Desk owns the whole window - no pill, no close button.
   let pageMode = false;
-  const drafts = new Map(); // key -> composer text not yet sent
-  const caches = new Map(); // key -> { messages, hasMore, loaded, detached, newWhile }
+  const drafts = new Map();
+  const caches = new Map();
 
-  const els = {}; // pill, badge, panel, rail, main, side, list, composer...
+  const els = {};
 
   // ── Tiny DOM helpers ──────────────────────────────────────────────────────
   function el(tag, cls, text) {
@@ -104,22 +93,13 @@
   const rankName = (r) =>
     r === "dev" ? "DEV" : r === "l2" ? "MOD L2" : "MOD L1";
 
-  // First visible character of a name, without splitting a surrogate pair -
-  // charAt(0) turns fancy unicode names into broken squares.
   function initialOf(name) {
     const c = Array.from(String(name || "?").trim())[0];
     return (c || "?").toUpperCase();
   }
 
-  // Discord avatar URL, rebuilt from the validated snowflake + hash the
-  // server stores - same rule as the rooms, never a raw URL from data.
   const PFP_ID_RE = /^\d{17,20}$/;
   const PFP_HASH_RE = /^(?:a_)?[a-f0-9]{32}$/i;
-  // The same builder the lobby and the rooms use, character for character.
-  // The Desk had its own, and it was wrong twice: it only read `id` (the
-  // stored shape is sometimes `discordId`, which is why some people had no
-  // picture here but did in rooms), and it dropped `animated`, which is why
-  // the animated ones were showing as a still frame.
   function avatarUrl(av, size) {
     if (!av) return null;
     const id = av.discordId || av.id;
@@ -136,12 +116,7 @@
     );
   }
 
-  // Everybody's picture, remembered by staff label. Payloads disagree about
-  // who carries one: presence rows have it, offline roster rows never do, and
-  // an old message carries whatever was true when it was sent. Rendering
-  // straight from whichever payload happened to arrive is why faces came and
-  // went. Once seen, a picture is used everywhere that person appears.
-  const avatarMemory = new Map(); // lowercase label -> avatar
+  const avatarMemory = new Map();
 
   function rememberAvatar(label, av) {
     if (!label || !av || !avatarUrl(av)) return;
@@ -157,13 +132,6 @@
     return avatarMemory.get(String(person.label || "").toLowerCase()) || null;
   }
 
-  // The round face next to a message or presence row: their picture when they
-  // have one, their initial when they do not.
-  // Pictures that have loaded at least once. The panel re-renders constantly -
-  // every presence tick rebuilds the side pane - and each rebuild asks the CDN
-  // for the picture again. One hiccup used to replace it with a letter for the
-  // rest of the session, which is why faces kept vanishing. A URL that has
-  // worked before gets one retry before giving up.
   const avatarSeen = new Set();
 
   function faceEl(author, cls) {
@@ -171,16 +139,10 @@
       "span",
       "dk-av " + (cls || "") + " " + (rankOf(author) || ""),
     );
-    // The initial is ALWAYS there, underneath. The picture sits on top of it,
-    // so a slow or failed load shows a letter rather than an empty circle, and
-    // nothing has to be swapped in later.
     wrap.appendChild(el("span", "dk-av-i", initialOf(author && author.label)));
-    // Their last known picture, not just whatever this payload carried.
     const url = avatarUrl(avatarFor(author), 64);
     if (!url) return wrap;
     const img = document.createElement("img");
-    // Not lazy: these are 26px and live in lists that re-render under the
-    // scroll position, where a deferred load often never happens at all.
     img.loading = "eager";
     img.decoding = "async";
     img.referrerPolicy = "no-referrer";
@@ -188,14 +150,9 @@
     let retried = false;
     img.addEventListener("load", () => {
       avatarSeen.add(url);
-      // Arrived: drop the letter. Leaving it under a transparent avatar is
-      // what put an initial inside somebody's picture.
       wrap.classList.add("has-pic");
     });
     img.addEventListener("error", () => {
-      // A picture that has loaded before gets one retry: a single CDN hiccup
-      // used to drop somebody's face for the rest of the session. One that has
-      // never loaded is simply gone, and the letter underneath shows through.
       if (avatarSeen.has(url) && !retried) {
         retried = true;
         setTimeout(() => {
@@ -204,7 +161,7 @@
         return;
       }
       img.remove();
-      wrap.classList.remove("has-pic"); // letter comes back
+      wrap.classList.remove("has-pic");
     });
     img.src = url;
     wrap.appendChild(img);
@@ -212,19 +169,12 @@
   }
 
   // ── Names: #channels and @people ──────────────────────────────────────────
-  // Both are written the same way you write them anywhere else, and both are
-  // matched against a known list rather than a pattern - staff labels can have
-  // spaces and punctuation in them, so "anything after an @" would guess wrong
-  // more often than it guessed right.
-  let nameIndex = null; // { re, people: Map(lowercase label -> person) }
+  let nameIndex = null;
 
   function forgetNames() {
     nameIndex = null;
   }
 
-  // Anything that arrives with a picture on it teaches the memory. Called on
-  // every presence tick, roster push and message, so a face only has to be
-  // seen once to keep showing up.
   function learnAvatars(list) {
     for (const s of list || []) if (s && s.label) rememberAvatar(s.label, s.avatar);
   }
@@ -236,9 +186,6 @@
     return t ? t.title : "the Desk";
   }
 
-  // Everyone who can be mentioned: the whole team from the roster, with
-  // whoever is on right now folded in so the list is right even before the
-  // roster lands.
   function mentionPeople() {
     const by = new Map();
     const add = (s, online) => {
@@ -267,10 +214,6 @@
     );
   }
 
-  // Group mentions: one @ instead of eight names. Exclusive by design -
-  // "@L2 mods" is the full mods, not the developers as well; somebody after a
-  // developer says "@devs" and somebody after the lot says "@everyone". The
-  // server keeps the same table and decides who is actually reached.
   const MENTION_GROUPS = [
     {
       key: "everyone",
@@ -278,8 +221,6 @@
       name: "@everyone",
       tokens: ["everyone", "all"],
       desc: "Everybody holding a staff key",
-      // Symmetric glyphs only in these chips: a bullhorn points right and its
-      // weight sits left, so it reads as badly centred however it is boxed.
       icon: "fa-users",
     },
     {
@@ -320,17 +261,12 @@
     if (key === "l1") return role !== "dev" && (level || 2) === 1;
     return false;
   }
-  // How many people a group actually reaches, so the palette can say so
-  // before you send it rather than after.
   function groupReach(key) {
     const people = mentionPeople();
     const hit = people.filter((p) => inGroup(key, p.role, p.level));
     return { n: hit.length, on: hit.filter((p) => p.online).length };
   }
 
-  // Places that behave like a channel when you write them, but are not on the
-  // server: the guide is a page, not a conversation, and pointing somebody at
-  // it should work the same way as pointing at #floor.
   const VIRTUAL_CHANNELS = [
     {
       key: "$guide",
@@ -358,8 +294,6 @@
     const alt = (arr, sigil) => {
       const list = arr.filter(Boolean);
       if (!list.length) return null;
-      // Longest first, so "#floorplan" is never matched as "#floor", and
-      // "@l2 mods" is never matched as "@l2" with "mods" left dangling.
       return (
         sigil +
         "(?:" +
@@ -421,8 +355,6 @@
     const nm = token.slice(1);
     const g = GROUP_BY_TOKEN.get(nm.toLowerCase());
     if (g) {
-      // A group reads as a group: it is not one person's name, and whether it
-      // is aimed at you is the first thing you want to know.
       const hits = inGroup(g.key, myRole(), myLevel());
       const s = el("span", "dk-ment group" + (hits ? " self" : ""), "@" + nm);
       const reach = groupReach(g.key);
@@ -448,9 +380,6 @@
     return s;
   }
 
-  // #channels and @names picked out of a run of plain text. Everything that is
-  // not a known name stays a text node, so nothing user-authored is ever
-  // parsed as markup.
   function namesInto(parent, text) {
     const re = names().re;
     if (!re || !text) {
@@ -465,7 +394,6 @@
       const tok = m[0];
       const before = at > 0 ? text[at - 1] : "";
       const after = text[at + tok.length] || "";
-      // Not a name in the middle of a word, an email, or another token.
       if (/[\w@#]/.test(before) || /[\w]/.test(after)) continue;
       if (at > last)
         parent.appendChild(document.createTextNode(text.slice(last, at)));
@@ -477,19 +405,12 @@
   }
 
   // ── Emotes ────────────────────────────────────────────────────────────────
-  // The same set the rooms use, from the same file, written the same way: a
-  // code between colons. Fetched once, the first time a staff member opens the
-  // Desk, so a page belonging to anybody else never asks for it.
   const EMOTE_BASE =
     "https://raw.githubusercontent.com/ZackiBoiz/Multiplayer-Piano-Optimizations/refs/heads/main/emotes";
   const EMOTE_EXT = /^(?:png|gif|webp|jpe?g|avif|heif|tiff|bmp|svg)$/i;
-  let emotes = {}; // code -> url
+  let emotes = {};
   let emotesAsked = false;
 
-  // meta.jsonc is JSON with comments in it, and a comment of "*" is how the
-  // file marks an emote that is not meant to be offered. Both are read the
-  // same way the room client reads them, so the two never disagree about
-  // which codes exist.
   function parseEmoteMeta(src) {
     const out = {};
     const body = String(src).replace(/\/\*[\s\S]*?\*\//g, "");
@@ -521,14 +442,10 @@
       });
       if (!resp.ok) throw new Error("HTTP " + resp.status);
       const next = parseEmoteMeta(await resp.text());
-      // Only a non-empty answer counts: a blank one would turn every emote in
-      // the channel back into the text it was typed as.
       if (!Object.keys(next).length) return;
       emotes = next;
       if (panelOpen && mode === "chat") renderMessages(true);
     } catch (_) {
-      // A GitHub blip is not worth saying anything about. The codes stay as
-      // typed, and the next page load asks again.
     }
   }
 
@@ -544,29 +461,19 @@
   }
 
   // ── Markdown, the small useful half of it ─────────────────────────────────
-  // `code`, **bold**, __bold__, ~~strike~~, *italic*, _italic_, links, bullet
-  // lists and ``` blocks. Deliberately not a markdown engine: no HTML is ever
-  // parsed, every leaf is a text node, and anything that does not match a rule
-  // is left exactly as it was typed.
   const MD_SRC =
-    "(`+)([\\s\\S]+?)\\1" + // 1,2 code span
-    "|\\*\\*([\\s\\S]+?)\\*\\*" + // 3 bold
-    "|__([\\s\\S]+?)__" + // 4 bold
-    "|~~([\\s\\S]+?)~~" + // 5 strike
-    "|\\*([^*\\n]+?)\\*" + // 6 italic
-    "|_([^_\\n]+?)_" + // 7 italic
-    "|(https?:\\/\\/[^\\s<>]+)" + // 8 link
-    // 9 emote. Here rather than in a pass of its own so it competes with the
-    // emphasis rules on position: ":kappa_pride: :some_thing:" starts with a
-    // colon, so it is claimed as two emotes instead of one stray italic run
-    // between the two underscores.
-    "|:([A-Za-z0-9_.-]{1,40}):"; // 9 emote
+    "(`+)([\\s\\S]+?)\\1" +
+    "|\\*\\*([\\s\\S]+?)\\*\\*" +
+    "|__([\\s\\S]+?)__" +
+    "|~~([\\s\\S]+?)~~" +
+    "|\\*([^*\\n]+?)\\*" +
+    "|_([^_\\n]+?)_" +
+    "|(https?:\\/\\/[^\\s<>]+)" +
+    "|:([A-Za-z0-9_.-]{1,40}):";
 
-  // Trailing punctuation is nearly always the sentence, not the address.
   function trimUrl(u) {
     let end = u.length;
     while (end > 0 && /[.,!?;:'"]/.test(u[end - 1])) end--;
-    // Keep a closing bracket only when the address opened one.
     while (
       end > 0 &&
       u[end - 1] === ")" &&
@@ -584,24 +491,14 @@
     a.textContent = url.length > 70 ? url.slice(0, 67) + "..." : url;
     a.title = url;
     a.target = "_blank";
-    // Staff chat is not a place to leak a referrer or hand a tab opener out.
     a.rel = "noopener noreferrer nofollow";
     a.addEventListener("click", (e) => e.stopPropagation());
     return a;
   }
 
   // ── Pictures ──────────────────────────────────────────────────────────────
-  // A link to a picture shows the picture. Only in staff chat, where everybody
-  // posting has a key: an appeal thread still shows the banned user's links as
-  // links, because loading whatever they name would fetch it from the reader's
-  // own connection.
-  //
-  // SVG is deliberately not on the list: it is a document, not a picture, and
-  // it stays a link you have to choose to open. Nor is plain http, which the
-  // page's own CSP (img-src https:) would refuse anyway - better a working
-  // link than a broken frame.
   const IMG_EXT = /\.(?:png|jpe?g|jfif|gif|apng|webp|avif|bmp)$/i;
-  const MAX_SHOTS = 4; // per message
+  const MAX_SHOTS = 4;
 
   function imageUrl(u) {
     let url;
@@ -611,15 +508,10 @@
       return null;
     }
     if (url.protocol !== "https:") return null;
-    // The extension is read off the path, so an address that carries its size
-    // in a query string ("...red-apple.jpg?s=612x612&w=0") still counts.
     if (!IMG_EXT.test(url.pathname)) return null;
     return url.href;
   }
 
-  // Every picture named in a message, and whatever text is left once they are
-  // taken out - a message that is nothing but a link to a picture should show
-  // the picture rather than the address of it.
   function imagesIn(text) {
     const src = String(text || "");
     const re = /https?:\/\/[^\s<>]+/g;
@@ -649,9 +541,6 @@
       img.decoding = "async";
       img.referrerPolicy = "no-referrer";
       img.alt = "";
-      // An address that no longer serves a picture leaves nothing behind: the
-      // link is still in the message above, which is all a grey box was ever
-      // going to tell you.
       img.addEventListener("error", () => b.remove());
       img.src = url;
       b.appendChild(img);
@@ -676,7 +565,6 @@
 
   function openShot(url) {
     if (!els.panel) return;
-    // Rebuilt if the panel it belonged to has been torn down since.
     if (!els.shot || els.shot.parentNode !== els.panel) {
       els.shot = el("div", "dk-lb");
       els.shot.addEventListener("click", (e) => {
@@ -709,15 +597,12 @@
 
   function inlineInto(parent, text) {
     if (!text) return;
-    // A fresh regex per call: this recurses into emphasis, and a shared
-    // lastIndex across those levels would eat text.
     const re = new RegExp(MD_SRC, "g");
     let last = 0;
     let m;
     while ((m = re.exec(text))) {
       const at = m.index;
       const before = at > 0 ? text[at - 1] : "";
-      // snake_case and file_names are not italics.
       if (
         m[7] != null &&
         (/\w/.test(before) || /\w/.test(text[re.lastIndex] || ""))
@@ -745,7 +630,6 @@
         last = at + url.length;
         re.lastIndex = last;
       } else if (m[9] != null) {
-        // A code nobody has an image for is just something somebody typed.
         if (emotes[m[9]]) parent.appendChild(emoteImg(m[9]));
         else parent.appendChild(document.createTextNode(m[0]));
       }
@@ -753,7 +637,6 @@
     if (last < text.length) namesInto(parent, text.slice(last));
   }
 
-  // Block level: fenced code, bullet lists, and paragraphs of lines.
   function textEl(text, cls) {
     const wrap = el("span", cls || "dk-mtext");
     const src = String(text == null ? "" : text);
@@ -778,7 +661,7 @@
         i++;
         while (i < lines.length && !/^\s*```/.test(lines[i]))
           buf.push(lines[i++]);
-        i++; // the closing fence, if it is there
+        i++;
         const pre = el("pre", "dk-code-bl");
         pre.textContent = buf.join("\n");
         wrap.appendChild(pre);
@@ -804,8 +687,6 @@
   }
 
   // ── Sounds and toasts ─────────────────────────────────────────────────────
-  // The beep only ever fires after the user has interacted with the Desk, so
-  // it can never hit an autoplay block or surprise a fresh page.
   function beep() {
     if (!soundOn) return;
     try {
@@ -822,9 +703,6 @@
     } catch (_) {}
   }
 
-  // One question, one answer. Uses the themed StaffUI prompt when the page
-  // has it (all three pages do) and falls back to the native one otherwise,
-  // so the Desk never depends on another script being healthy.
   function ask(opts, cb) {
     if (window.StaffUI && window.StaffUI.prompt) {
       window.StaffUI.prompt({
@@ -865,9 +743,6 @@
         messages: [],
         hasMore: false,
         loaded: false,
-        // A search jump shows an old window of the conversation. While it is
-        // up, live messages are counted instead of appended, so the reader is
-        // never teleported and the window never grows gaps.
         detached: false,
         newWhile: 0,
       });
@@ -918,12 +793,7 @@
       n += unread[k].n || 0;
       loud += unread[k].mentions || 0;
     }
-    // Red is reserved for #help. Everything else - ordinary talk, even a
-    // mention - stays the usual orange, so red on the dock button means one
-    // thing only: somebody in a room is waiting for staff.
     let help = (unread.help && unread.help.n) || 0;
-    // An unclaimed call for backup keeps it red until somebody takes it, even
-    // after the card itself has been read.
     for (const m of cacheFor("help").messages)
       if (m.ping && (m.ping.status === "open" || m.ping.status === "waiting"))
         help++;
@@ -936,10 +806,7 @@
       els.badge.style.display = t.n ? "" : "none";
       els.badge.classList.toggle("loud", t.help > 0);
     }
-    // The button itself carries the alarm too: a bare count can be missed on a
-    // busy page, an outlined red button cannot.
     if (els.pill) els.pill.classList.toggle("urgent", t.help > 0);
-    // The pop-out window has no pill, so the unread count lives in its title.
     if (pageMode)
       document.title =
         (t.n ? "(" + (t.n > 99 ? "99+" : t.n) + ") " : "") +
@@ -968,16 +835,11 @@
         };
       mount();
       renderBadges();
-      // The whole team, up front: "@" has to be able to offer somebody who is
-      // not on right now, which is exactly when you most need to leave them a
-      // message.
       socket.emit("desk roster");
       if (pageMode && !panelOpen) setOpen(true);
       else if (panelOpen) {
         renderAll();
         loadView(true);
-        // A reconnect can land while the inspector is up; its snapshot is
-        // stale by definition, so ask for the room again.
         if (mode === "inspector" && inspectorRoom)
           socket.emit("desk room info", { roomId: inspectorRoom.roomId });
       }
@@ -989,8 +851,6 @@
       const c = cacheFor(d.key);
       let change;
       if (c.detached && !d.updated) {
-        // Reading an old window: count it instead of appending, and let the
-        // "back to the latest" button carry the number.
         c.newWhile++;
         change = "held";
       } else {
@@ -1007,7 +867,7 @@
           beep();
           if (els.pill) {
             els.pill.classList.remove("nudge");
-            void els.pill.offsetWidth; // restart the animation
+            void els.pill.offsetWidth;
             els.pill.classList.add("nudge");
           }
         }
@@ -1030,8 +890,6 @@
       }
     });
 
-    // The server swept old queue cards. Drop them here too rather than leaving
-    // a tray that only empties on reload.
     socket.on("desk drop", (d) => {
       if (!d || !d.key || !Array.isArray(d.ids) || !d.ids.length) return;
       const gone = new Set(d.ids);
@@ -1049,7 +907,7 @@
     socket.on("desk threads", (d) => {
       threads = (d && d.threads) || [];
       if (view.kind === "thread" && !threads.some((t) => t.id === view.key)) {
-        view = { kind: "channel", key: "floor" }; // it was deleted under us
+        view = { kind: "channel", key: "floor" };
         if (panelOpen) loadView(true);
       }
       if (els.rail) renderRail();
@@ -1064,7 +922,6 @@
       learnAvatars((d.messages || []).map((m) => m.author).filter(Boolean));
       const c = cacheFor(d.key);
       if (d.around != null) {
-        // A window centred on a search hit.
         c.messages = d.messages || [];
         c.loaded = true;
         c.detached = !!d.hasMoreNewer;
@@ -1116,13 +973,9 @@
       if (panelOpen && mode === "team") renderTeam();
     });
 
-    // A record we asked for. The dashboard listens for this too, so only take
-    // it when the Desk is the one waiting.
     socket.on("staff mod history", (h) => {
       if (!h || !recordFor || !recordFor.loading) return;
       if ((h.label || "") !== recordFor.label) return;
-      // The reply says what they have done, not what they hold, so the rank we
-      // already knew has to survive it.
       recordFor = Object.assign({}, h, {
         loading: false,
         role: recordFor.role,
@@ -1131,7 +984,6 @@
       showRecord();
     });
 
-    // The appeal being read, pushed whenever either side says anything.
     socket.on("staff appeal", (d) => {
       if (!d || !d.id) return;
       if (!appeal || appeal.id !== d.id) return;
@@ -1139,8 +991,6 @@
       if (panelOpen && mode === "appeal") renderAppeal();
     });
 
-    // Somebody wrote your name. The badge and the beep already happened on the
-    // message itself; this is the line that says where to look.
     socket.on("desk mention", (d) => {
       if (!d || !panelOpen) return;
       const g = d.group && GROUP_BY_TOKEN.get(d.group);
@@ -1153,10 +1003,6 @@
       );
     });
 
-    // Sent straight back to whoever wrote the mention: who got it now, and who
-    // is off and will get it when they return. A ping is never silently lost,
-    // and a group says how many people it actually reached rather than letting
-    // you assume it woke the whole team.
     socket.on("desk mention receipt", (d) => {
       if (!d) return;
       const off = Array.isArray(d.offline) ? d.offline : [];
@@ -1198,14 +1044,10 @@
     socket.on("staff action result", (d) => {
       if (!d || !panelOpen) return;
       if (d.ok) toast(d.action + " done.");
-      // The room may have changed under the inspector; ask again.
       if (mode === "inspector" && inspectorRoom)
         socket.emit("desk room info", { roomId: inspectorRoom.roomId });
     });
 
-    // A failed action must never fail silently - not from the inspector, and
-    // not from a slash command. Say what the server said, and refresh the
-    // room snapshot if one is up.
     socket.on("error", (d) => {
       if (!panelOpen) return;
       const fromCommand = Date.now() - lastCommandAt < 6000;
@@ -1216,7 +1058,6 @@
         socket.emit("desk room info", { roomId: inspectorRoom.roomId });
     });
 
-    // A revoked key must lose the Desk instantly, not at next reload.
     socket.on("staff revoked", () => teardown());
 
     socket.on("connect", () => socket.emit("desk hello"));
@@ -1250,12 +1091,8 @@
     }
     mounted = true;
     injectCss();
-    // Only ever from here: mount runs once the server has confirmed a staff
-    // key, so nobody else's page fetches the emote list.
     loadEmotes();
     if (pageMode) {
-      // Its own window: the Desk IS the page. The sign-in gate goes away the
-      // moment the server has confirmed a staff key.
       const gate = document.getElementById("deskGate");
       if (gate) gate.remove();
     } else {
@@ -1266,9 +1103,6 @@
   }
 
   // ── The dock button ───────────────────────────────────────────────────────
-  // Bottom left by default, but hold it and it goes wherever you want. Every
-  // page has something different in its corners, so the only workable answer
-  // is to let whoever is looking at it move it out of the way.
   const PILL_KEY = "talkomatic_deskPill";
 
   function clampPill(x, y) {
@@ -1319,7 +1153,6 @@
     });
     pill.addEventListener("pointermove", (e) => {
       if (!drag) return;
-      // A few pixels of slop, so a shaky click is still a click.
       if (
         !drag.moved &&
         Math.abs(e.clientX - drag.sx) < 4 &&
@@ -1340,8 +1173,6 @@
       try {
         localStorage.setItem(PILL_KEY, JSON.stringify({ x: r.left, y: r.top }));
       } catch (_) {}
-      // Swallow the click this drag is about to fire, so letting go of the
-      // button does not also open the panel.
       pill.addEventListener("click", (e) => e.stopImmediatePropagation(), {
         capture: true,
         once: true,
@@ -1349,7 +1180,6 @@
     };
     pill.addEventListener("pointerup", done);
     pill.addEventListener("pointercancel", done);
-    // A smaller window must not strand it off-screen.
     window.addEventListener("resize", () => {
       if (!els.pill || !els.pill.style.left) return;
       const r = els.pill.getBoundingClientRect();
@@ -1374,8 +1204,6 @@
     els.badge = badge;
     restorePill();
     makePillDraggable(pill);
-    // Quiet pages get no message traffic to trigger a badge pass, so re-check
-    // the corner a couple of times while the page finishes signing in.
     setTimeout(renderBadges, 2500);
     setTimeout(renderBadges, 8000);
   }
@@ -1386,7 +1214,6 @@
     panel.setAttribute("aria-label", "The Desk - staff chat");
     panel.style.display = "none";
 
-    // ── Header ──
     const head = el("div", "dk-head");
     const burger = btn("dk-hbtn dk-burger", null, "fa-bars", "Channels");
     burger.addEventListener("click", () => panel.classList.toggle("rail-open"));
@@ -1468,8 +1295,6 @@
     head.appendChild(sound);
 
     if (!pageMode) {
-      // Tear the Desk off into its own window, for a second monitor or just
-      // to keep it up while moving between pages.
       const pop = btn(
         "dk-hbtn dk-popbtn",
         null,
@@ -1488,7 +1313,6 @@
     }
     panel.appendChild(head);
 
-    // ── Body: rail / main / side ──
     const body = el("div", "dk-body");
     els.rail = el("nav", "dk-rail");
     els.rail.setAttribute("aria-label", "Channels and threads");
@@ -1501,7 +1325,6 @@
     els.side.setAttribute("aria-label", "Who is on");
     body.appendChild(els.side);
 
-    // Tapping the dimmed area closes whichever drawer is open (mobile).
     const scrim = el("div", "dk-scrim");
     scrim.addEventListener("click", () =>
       panel.classList.remove("rail-open", "side-open"),
@@ -1514,8 +1337,6 @@
 
     document.addEventListener("keydown", (e) => {
       if (e.key !== "Escape") return;
-      // Whatever is on top takes the key first, rather than closing the whole
-      // Desk out from under itself.
       if (shotOpen()) return closeShot();
       if (reactPickerOpen()) return closeReactPicker();
       if (panelOpen && !pageMode) setOpen(false);
@@ -1530,14 +1351,9 @@
   }
 
   // ── Placement: centred by default, then wherever you drag it ─────────────
-  // The panel remembers its spot and size per browser. On a phone it always
-  // fills the screen and none of this applies.
   const RECT_KEY = "talkomatic_deskRect";
   const onDesktop = () => window.innerWidth > 760 && !pageMode;
 
-  // Set while the code is positioning the panel itself. The resize observer
-  // fires during that, and during the browser's first layout pass, and a save
-  // from either would store a half built rectangle over the real one.
   let placing = 0;
 
   function placePanel(x, y, w, h) {
@@ -1562,7 +1378,7 @@
     const p = els.panel;
     if (!p || !onDesktop() || !panelOpen) return;
     const r = p.getBoundingClientRect();
-    if (r.width < 200 || r.height < 200) return; // mid layout, not a real size
+    if (r.width < 200 || r.height < 200) return;
     try {
       localStorage.setItem(
         RECT_KEY,
@@ -1624,9 +1440,6 @@
     head.addEventListener("pointerup", done);
     head.addEventListener("pointercancel", done);
 
-    // The native resize handle changes width and height; remember it, but
-    // only when the change came from the user rather than from our own
-    // placement or the browser's first layout pass.
     let t = null;
     try {
       new ResizeObserver(() => {
@@ -1637,8 +1450,6 @@
       }).observe(panel);
     } catch (_) {}
 
-    // Crossing the phone breakpoint: inline position must not fight the
-    // full-screen layout, so it is dropped and restored on the way back.
     window.addEventListener("resize", () => {
       if (!panelOpen) return;
       if (window.innerWidth <= 760) clearInlineRect();
@@ -1647,7 +1458,7 @@
   }
 
   function setOpen(on) {
-    if (pageMode && !on) return; // the window's own close button does this
+    if (pageMode && !on) return;
     panelOpen = !!on;
     if (!els.panel) return;
     els.panel.style.display = panelOpen ? "" : "none";
@@ -1666,7 +1477,7 @@
   function openView(v) {
     view = v;
     mode = "chat";
-    replyTo = null; // a reply armed in one channel must not fire in another
+    replyTo = null;
     if (els.panel) els.panel.classList.remove("rail-open", "side-open");
     renderAll();
     loadView();
@@ -1767,7 +1578,6 @@
         for (const t of archived) rail.appendChild(threadRow(t, true));
     }
 
-    // Not channels: places to look rather than places to talk.
     rail.appendChild(el("div", "dk-rail-h", "Look up"));
     const team = el("button", "dk-chan" + (mode === "team" ? " on" : ""));
     team.type = "button";
@@ -1785,7 +1595,6 @@
     help.addEventListener("click", openHelp);
     rail.appendChild(help);
 
-    // Decision made out loud, not buried: moderators know devs can read it all.
     rail.appendChild(
       el(
         "div",
@@ -1883,9 +1692,6 @@
 
     els.list = el("div", "dk-msgs");
     els.list.setAttribute("aria-live", "polite");
-    // Reading back through something while the room is busy: the moment you
-    // scroll away from the bottom, new arrivals stop yanking you down and are
-    // counted on a bar instead.
     els.list.addEventListener("scroll", () => {
       if (nearBottom() && missed) clearMissed();
     });
@@ -1906,9 +1712,6 @@
     els.jump.appendChild(jumpBtn);
     main.appendChild(els.jump);
 
-    // ── Composer ──
-    // Some channels are written by the server. Rather than show a box that
-    // refuses everything typed into it, say so and stop.
     if (ch && ch.readonly) {
       els.replyBar = null;
       els.palette = null;
@@ -1917,8 +1720,6 @@
       els.composer = null;
       els.sizeTa = null;
       els.announceForm = null;
-      // #announce is the exception: it is read-only as a chat, but a dev
-      // writes NOTICES into it. Everything else here really is server-written.
       if (viewKey() === "announce" && isDev()) {
         main.appendChild(buildAnnounceComposer());
       } else {
@@ -1947,8 +1748,6 @@
     els.palette.style.display = "none";
     main.appendChild(els.palette);
 
-    // The picker sits between the list above the box and the box itself, so
-    // whichever one is up, the box never moves under your hands.
     els.emotes = el("div", "dk-empanel");
     els.emotes.style.display = "none";
     main.appendChild(els.emotes);
@@ -1971,8 +1770,6 @@
     );
     emoteBtn.addEventListener("click", () => toggleEmotePicker());
     const send = btn("dk-send", null, "fa-paper-plane", "Send");
-    // One line tall until the text needs more, then it grows to a cap. The
-    // reset to "auto" first is what lets it shrink again on delete.
     const sizeTa = () => {
       ta.style.height = "auto";
       ta.style.height = Math.max(38, Math.min(ta.scrollHeight, 120)) + "px";
@@ -1982,7 +1779,6 @@
     const doSend = () => {
       const text = ta.value.trim();
       if (!text) return;
-      // A leading slash is a command, not a message.
       if (text.startsWith("/")) {
         drafts.delete(viewKey());
         ta.value = "";
@@ -2005,8 +1801,6 @@
       ta.focus();
     };
     ta.addEventListener("keydown", (e) => {
-      // While the list above the box is up it owns the arrows, Tab, and - for
-      // names, where there is always something highlighted - Enter.
       if (paletteOpen()) {
         if (e.key === "ArrowDown" || e.key === "ArrowUp") {
           e.preventDefault();
@@ -2044,15 +1838,11 @@
       }
     });
     ta.addEventListener("input", () => {
-      // Half-typed messages follow you between channels and page loads within
-      // the session, instead of vanishing on every switch.
       if (ta.value) drafts.set(viewKey(), ta.value);
       else drafts.delete(viewKey());
       sizeTa();
       updatePalette(ta);
     });
-    // Moving the caret with the mouse or the arrows can land it on a half
-    // typed name, or take it off one.
     ta.addEventListener("click", () => updatePalette(ta));
     ta.addEventListener("keyup", (e) => {
       if (
@@ -2086,9 +1876,6 @@
     return l && l.scrollHeight - l.scrollTop - l.clientHeight < 120;
   }
 
-  // How many messages have landed since you scrolled away from the bottom.
-  // Only ever counts what arrived while you were reading something above:
-  // scrolling back down, or switching view, clears it.
   let missed = 0;
   function renderJump() {
     if (!els.jump || !els.jumpText) return;
@@ -2109,7 +1896,6 @@
   function renderMessages(keepScroll) {
     const list = els.list;
     if (!list) return;
-    // The message it was anchored to is about to be replaced.
     closeReactPicker();
     const c = cacheFor(viewKey());
     const prevHeight = list.scrollHeight;
@@ -2145,8 +1931,6 @@
       prev = m;
     }
 
-    // Looking at an old window after a search jump: the way home is explicit,
-    // and it carries the count of what has happened since.
     els.newer = null;
     if (c.detached) {
       const newer = btn(
@@ -2172,8 +1956,6 @@
     renderJump();
   }
 
-  // Scroll to the message nearest a timestamp and flash it - the landing half
-  // of a search jump.
   function flashNear(ts) {
     const c = cacheFor(viewKey());
     if (!c.messages.length || !els.list) return;
@@ -2200,7 +1982,6 @@
     if (stick) {
       list.scrollTop = list.scrollHeight;
     } else {
-      // Reading above: say how much has come in rather than moving the page.
       missed++;
       renderJump();
     }
@@ -2218,12 +1999,6 @@
   }
 
   // ── Queue cards ───────────────────────────────────────────────────────────
-  // #queues is a working tray, not a log. Every card says what happened in
-  // fields rather than a paragraph, and carries the buttons you would have
-  // gone to the dashboard for. The buttons fire the SAME staff events the
-  // dashboard fires, so every permission check stays on the server - and
-  // because the server stamps the card from its own action log, handling
-  // something anywhere marks it handled here, whoever did it and wherever.
   const QICON = {
     report: "fa-flag",
     appeal: "fa-scale-balanced",
@@ -2330,8 +2105,6 @@
           ),
         );
       if (chips.childNodes.length) b.appendChild(chips);
-      // Newer posts carry a title AND a body; the oldest carry only a body,
-      // which is why the title field is skipped rather than left blank.
       if (c.target) b.appendChild(qField("Title", c.target));
       if (c.reason)
         b.appendChild(
@@ -2364,8 +2137,6 @@
     return b;
   }
 
-  // The duration picker the dashboard uses, so a block from here is the same
-  // decision it is there.
   function pickDuration(title, then) {
     const durs = [
       { label: "1 hour", value: "1h" },
@@ -2399,9 +2170,6 @@
       const b = btn("dk-minib" + (cls ? " " + cls : ""), label, fa);
       b.addEventListener("click", (e) => {
         e.stopPropagation();
-        // Same window a slash command opens: whatever the server says about
-        // this - "they already left", "not your call" - has to reach the
-        // person who pressed the button.
         lastCommandAt = Date.now();
         fn();
       });
@@ -2501,8 +2269,6 @@
     }
 
     if (kind === "appeal" && c.itemId) {
-      // An appeal is a conversation, so the card opens it rather than asking
-      // for a verdict on one paragraph.
       add("Open the chat", "fa-comments", "primary", () =>
         openAppeal(c.itemId),
       );
@@ -2517,9 +2283,6 @@
     }
 
     if (kind === "suggestion" && c.itemId) {
-      // The board's own events, not the old dashboard one, so a decision made
-      // here is the same decision made there: the tag on the post changes for
-      // everybody and the card gets stamped by the same hook.
       const setStatus = (status) =>
         socket.emit("board status", { id: c.itemId, status });
       add("Approve", "fa-check", "primary", () => setStatus("approved"));
@@ -2593,8 +2356,6 @@
   }
 
   // ── The daily summary ─────────────────────────────────────────────────────
-  // Nobody types in #stats, so the server's post does not have to pretend to
-  // be a message. One headline, then the numbers as numbers.
   function statsCard(m) {
     const s = m.stats || {};
     const r = el("div", "dk-st");
@@ -2607,9 +2368,6 @@
     t.title = new Date(m.ts).toLocaleString();
     head.appendChild(t);
     r.appendChild(head);
-    // The card is posted the moment the day rolls over, so it lands under
-    // today's divider while the date on it is the day it is about. Saying so
-    // costs one line and stops the double-take.
     r.appendChild(
       el("div", "dk-st-sub", "That whole day, midnight to midnight."),
     );
@@ -2625,11 +2383,6 @@
       c.appendChild(el("div", "dk-st-s", hint));
       grid.appendChild(c);
     };
-    // Every number says what it counts, in full. "93 people stopped by" and
-    // "45 on at the busiest" sat next to each other reading like two counts of
-    // the same thing, and "staff actions" did not say whose or what.
-    // "1 calls for backup" reads like a bug in the counting, so the labels
-    // agree with their numbers too.
     const p = (n, one, many) => (n === 1 ? one : many);
     tile(
       s.visitors || 0,
@@ -2674,14 +2427,8 @@
     return r;
   }
 
-  // One message row. `prev` decides whether the author header repeats.
   // ── Virtual channel rows ──────────────────────────────────────────────────
-  // #activity, #bans and #announce are live views onto the audit log, the ban
-  // history and the announcements store. The server decides what each reader
-  // is allowed to see; this only draws it.
 
-  // Which family an action belongs to, for the colour down the left edge. The
-  // same grouping the dashboard uses, so the two read alike.
   const ACT_HEAVY = /^(ban|kick\+ban|ip block|unblock ip|lift ban|nuke)/;
   const ACT_USER = /^(kick|warn|wipe buffer|rename|freeze|unfreeze|reset location|turn pfp off|allow pfp|piano)/;
 
@@ -2692,8 +2439,6 @@
     return "";
   }
 
-  // "user:Name(id)" / "room:Name(id)" -> just the name, which is all a feed
-  // needs. Names contain brackets, so anchor on the LAST one.
   function tagName(tag) {
     const s = String(tag || "");
     const body = /^(user|room):/.test(s) ? s.slice(s.indexOf(":") + 1) : s;
@@ -2781,8 +2526,6 @@
     const line = el("div", "dk-act-line");
     line.appendChild(el("span", "dk-act-verb", unban ? "Unblocked" : "Blocked"));
     line.appendChild(el("span", "dk-act-who", b.name || "a user"));
-    // The address is dev-only and simply absent otherwise; the kind still says
-    // what sort of block it was.
     if (b.ip)
       line.appendChild(el("span", "dk-act-target mono", String(b.ip).replace(/^id:/, "id ")));
     else if (b.kind)
@@ -2802,9 +2545,6 @@
     return r;
   }
 
-  // The same block-level markdown the lobby card and the dashboard render, so
-  // what a dev previews here is what people are actually shown. Escaped first;
-  // the only HTML that appears is HTML this emits.
   function dkEsc(s) {
     return String(s == null ? "" : s)
       .replace(/&/g, "&amp;")
@@ -2939,8 +2679,6 @@
     rowTop.appendChild(title);
     wrap.appendChild(rowTop);
 
-    // Who it reads as being from. A notice usually speaks for the team rather
-    // than whoever typed it, so this is free text and defaults to your label.
     const from = document.createElement("input");
     from.className = "dk-an-from-in";
     from.type = "text";
@@ -3028,9 +2766,6 @@
     return wrap;
   }
 
-  // Writing or editing a notice, from inside the Desk. Posts through the same
-  // dev-gated events the dashboard uses, so the permission check is literally
-  // the same code and cannot drift.
   function openAnnounceComposer(existing) {
     if (!isDev()) return;
     const wrap = els.announceForm;
@@ -3089,7 +2824,6 @@
       r.appendChild(rr);
     }
 
-    // Dev-only, and the server re-checks every one of these anyway.
     if (isDev()) {
       const acts = el("div", "dk-q-acts");
       const add = (label, fa, cls, fn) => {
@@ -3148,7 +2882,7 @@
       prev.author.role === m.author.role &&
       m.ts - prev.ts < 5 * 60 * 1000 &&
       !prev.deletedAt &&
-      !m.reply; // a reply always shows who is answering whom
+      !m.reply;
 
     const mention =
       m.mention ||
@@ -3162,8 +2896,6 @@
     );
     r.dataset.id = m.id;
 
-    // The quote above a reply: who it answers and what they said. Clicking it
-    // walks up the chain to the original.
     if (m.reply) {
       const q = el("button", "dk-quote");
       q.type = "button";
@@ -3185,7 +2917,6 @@
             return;
           }
         }
-        // The original scrolled out of the loaded window: fetch around it.
         socket.emit("desk history", { key: viewKey(), around: m.reply.ts });
       });
       r.appendChild(q);
@@ -3193,7 +2924,6 @@
 
     if (!grouped) {
       const rank = rankOf(m.author);
-      // Face and name both open that person's record.
       const openRec = (e) => {
         e.stopPropagation();
         openRecord(m.author.label, m.author.role, m.author.level);
@@ -3225,8 +2955,6 @@
       );
     } else {
       const shots = imagesIn(m.text);
-      // "here is the proof <link>" keeps the sentence and shows the picture
-      // under it. A message that is only the link shows only the picture.
       if (!shots.urls.length || shots.rest) body.appendChild(textEl(m.text));
       if (m.editedAt) {
         const e = el("span", "dk-edited", "(edited)");
@@ -3235,7 +2963,6 @@
       }
       if (shots.urls.length) body.appendChild(imageBlock(shots.urls));
     }
-    // A dev can always read what a message used to say.
     if (me && me.role === "dev" && m.history && m.history.length) {
       const h = el("button", "dk-hist");
       h.type = "button";
@@ -3261,23 +2988,14 @@
     if (!m.deletedAt && m.reactions && m.reactions.length)
       r.appendChild(reactionBar(m));
 
-    // Clicking the message answers it. The reply button is still there, but
-    // aiming at a 20px icon to say "this one" was the slow way round.
-    // On touch this also brings up the tool row, which stays hidden until a
-    // message is tapped so a dev scrolling the floor is not looking at a
-    // column of bins.
     r.addEventListener("click", (e) => {
       if (e.target.closest("button, textarea, a, input, .dk-editbox")) return;
-      // Highlighting a line to copy it ends in a click, and that is not
-      // somebody asking to reply to it.
       const sel = window.getSelection && window.getSelection();
       if (sel && String(sel).trim()) return;
       r.classList.add("tools");
       if (!m.deletedAt) startReply(m);
     });
 
-    // Every message can be reacted to and replied to; your own can be edited
-    // for five minutes and deleted; a dev can delete anything.
     const own =
       me &&
       m.author &&
@@ -3318,15 +3036,11 @@
   }
 
   // ── Reactions ─────────────────────────────────────────────────────────────
-  // The quick set, in the order they are offered. It must match REACTIONS in
-  // server/staffchat.js, which is what refuses anything else. Beyond these,
-  // any room emote can be used, written as its ":code:".
   const REACTIONS = [
     "👍", "👎", "✅", "❌", "👀", "🔥", "❤️", "😂", "🎉", "🤔", "⚠️", "🚨",
   ];
   const REACTION_CODE = /^:([A-Za-z0-9_.-]{1,40}):$/;
 
-  // A reaction is drawn as whatever it is: a room emote, or the character.
   function reactionFace(e) {
     const m = REACTION_CODE.exec(e);
     if (m && emotes[m[1]]) return emoteImg(m[1], "rx");
@@ -3345,8 +3059,6 @@
       b.type = "button";
       b.appendChild(reactionFace(r.e));
       b.appendChild(el("span", "dk-rx-n", String(r.n)));
-      // Who is behind a number matters on a small team - agreeing with
-      // something is a position, and it should be attributable.
       b.title =
         (r.who || []).join(", ") + (r.me ? " - press again to take yours back" : "");
       b.addEventListener("click", (ev) => {
@@ -3373,9 +3085,6 @@
 
   const reactPickerOpen = () => !!els.react;
 
-  // Anchored to whatever was pressed, and drawn on the panel rather than
-  // inside the message, so the last message in a channel does not open a
-  // picker that the scroll box cuts in half.
   function openReactPicker(anchor, m) {
     closeReactPicker();
     if (!els.panel) return;
@@ -3396,8 +3105,6 @@
     }
     pop.appendChild(quick);
 
-    // The room emotes underneath, the same list and the same search the
-    // composer's picker uses.
     const search = el("input", "dk-emsearch");
     search.type = "text";
     search.placeholder = "Search emotes";
@@ -3410,7 +3117,6 @@
     pop.appendChild(search);
     pop.appendChild(grid);
     paintEmoteGrid(grid, "", pick);
-    // Nothing inside the picker counts as a click on the message underneath.
     pop.addEventListener("click", (ev) => ev.stopPropagation());
     els.panel.appendChild(pop);
 
@@ -3421,7 +3127,6 @@
     if (left + pop.offsetWidth > pr.width - 8)
       left = pr.width - pop.offsetWidth - 8;
     if (left < 8) left = 8;
-    // No room below: open upwards instead of hanging off the bottom.
     if (top + pop.offsetHeight > pr.height - 8)
       top = ar.top - pr.top - pop.offsetHeight - 6;
     if (top < 8) top = 8;
@@ -3429,16 +3134,13 @@
     pop.style.top = Math.round(top) + "px";
     search.focus();
 
-    // The next click anywhere else puts it away.
     setTimeout(
       () => document.addEventListener("click", closeReactPicker, { once: true }),
       0,
     );
   }
 
-  // Arm the composer to answer a specific message. The bar above the box says
-  // so, and sending carries the link.
-  let replyTo = null; // { id, label, text }
+  let replyTo = null;
   function startReply(m) {
     replyTo = {
       id: m.id,
@@ -3498,7 +3200,6 @@
     ta.focus();
   }
 
-  // Destructive buttons ask once, inline: first tap arms, second confirms.
   function armTwice(b, label, fn) {
     let armed = false;
     let timer = null;
@@ -3613,8 +3314,6 @@
     insp.addEventListener("click", () => openInspector(p.roomId));
     bar.appendChild(insp);
     const join = btn("dk-minib", "Join", "fa-door-open");
-    // The live room list knows how full it is; the card only knows how many
-    // were in it when the ping went up.
     join.addEventListener("click", () =>
       enterRoom(
         (presence.rooms || []).find((x) => x.id === p.roomId) || {
@@ -3634,9 +3333,6 @@
   }
 
   // ── Side pane: who is on, and the room map ────────────────────────────────
-  // Two lines per person, one line per room. The detail lives in tooltips,
-  // so the pane reads at a glance instead of scrolling forever.
-  // Room types, in the same words the lobby uses.
   const ROOM_TYPE = {
     public: {
       cls: "pub",
@@ -3682,12 +3378,8 @@
   const rankKey = (s) =>
     s.role === "dev" ? "dev" : (s.level || 2) >= 2 ? "l2" : "l1";
 
-  // One row for a person. The rank is carried by the group heading above
-  // them, so it is not repeated on every line.
   function staffRow(s, offline) {
     const row = el("div", "dk-staff" + (offline ? " off" : ""));
-    // The whole identity opens their record: the picture and the name are the
-    // two things people actually aim at.
     const open = (e) => {
       e.stopPropagation();
       openRecord(s.label, s.role, s.level);
@@ -3716,7 +3408,6 @@
         : "nothing on record yet"
       : (differs ? 'as "' + s.alias + '", ' : "") + locLine(s);
     const subEl = el("div", "dk-staff-l", sub);
-    // The full story on hover, however many tabs they have open.
     subEl.title =
       (s.alias ? 'Appearing as "' + s.alias + '"\n' : "") +
       (s.locations || []).map(locText).join("\n");
@@ -3725,9 +3416,6 @@
     return row;
   }
 
-  // Devs, then full mods, then juniors, each under their own heading. Twelve
-  // people each wearing their own rank chip was a column of noise; the rank
-  // only needs saying once.
   function byRank(list) {
     return [
       {
@@ -3774,9 +3462,6 @@
       el("div", "dk-side-h", "Rooms - " + presence.rooms.length),
     );
     for (const room of presence.rooms.slice(0, 20)) {
-      // Three lines, all of them saying what they mean. The old card had a
-      // bare icon and a bare number in the corner and you had to already know
-      // that they meant "public" and "how many are in it".
       const card = el("div", "dk-room");
       const t = ROOM_TYPE[room.type] || ROOM_TYPE.public;
       const full = !!room.cap && room.n >= room.cap;
@@ -3800,7 +3485,6 @@
       top.appendChild(count);
       card.appendChild(top);
 
-      // Every tag is a word, not a symbol you have to have been taught.
       const tags = el("div", "dk-room-tags");
       const tag = (text, cls, fa, title) => {
         const s = el("span", "dk-rtag" + (cls ? " " + cls : ""));
@@ -3854,9 +3538,6 @@
     encodeURIComponent(id) +
     (watch ? "&spectate=1" : "");
 
-  // Walking into a full room is allowed - staff bypass the limit - but it
-  // makes the room 6 of 5 for everybody in it, and watching does the same job
-  // without taking a seat. So the full case asks first, and leads with watch.
   function enterRoom(room) {
     const id = room && (room.id || room.roomId);
     if (!id) return;
@@ -3907,9 +3588,6 @@
   }
 
   // ── Room inspector ────────────────────────────────────────────────────────
-  // See into a room and act without joining it. The buttons reuse the same
-  // staff events the dashboard fires, so every permission check stays where
-  // it already lives - on the server.
   function openInspector(roomId) {
     if (!roomId) return;
     mode = "inspector";
@@ -3993,8 +3671,6 @@
         if (u.location) head.appendChild(el("span", "dk-occ-l", u.location));
         row.appendChild(head);
 
-        // Staff rows get no action buttons; the server refuses anyway, this
-        // just keeps the interface honest about it.
         if (!u.isDev && !u.isMod) {
           const acts = el("div", "dk-occ-b");
           const warn = btn("dk-minib", "Warn", "fa-triangle-exclamation");
@@ -4038,29 +3714,16 @@
   }
 
   // ── The team ──────────────────────────────────────────────────────────────
-  // Everyone who holds a key, on or off, so you can see at a glance whether
-  // there is anybody to hand something to.
   let roster = null;
 
   // ── One appeal, as a conversation ─────────────────────────────────────────
-  // The same thread the dashboard shows and the banned user is typing into.
-  // Opened from the #queues card, because deciding a ban without being able to
-  // ask a question is how bad bans stay in place.
-  let appeal = null; // the open appeal, live-updated by the server
+  let appeal = null;
   const appealDraft = new Map();
   let appealReply = null;
 
   // ── One staff member's record, from anywhere ──────────────────────────────
-  // Clicking a name or a face on the Desk asks the server the same question
-  // the dashboard asks, and shows the answer in place. The Desk is on every
-  // page, so this is usually the fastest way to check who somebody is before
-  // handing them something.
-  let recordFor = null; // { label, role, level }
+  let recordFor = null;
 
-  // What level somebody holds, from whoever on the Desk happens to know: the
-  // presence rows, the roster, the message that was clicked. The server's
-  // record reply carries their actions, not their rank, so without this every
-  // record card called everybody a full mod - devs and juniors included.
   function levelFor(label, fallback) {
     const want = String(label || "").toLowerCase();
     if (!want) return fallback;
@@ -4167,11 +3830,6 @@
     if (els.record) els.record.style.display = "none";
   }
 
-  // One appeal's conversation, drawn into `host`. Bubbles, not rows: the
-  // banned person on the left, staff on the right, so who is answering whom is
-  // readable without stopping to read a name. Several moderators in one thread
-  // is the case that used to get confusing, so every staff message carries its
-  // own face and name, and only repeats them when the speaker changes.
   function appealThread(host, a) {
     const msgs = (a.messages || []).slice();
     if (!msgs.length) {
@@ -4187,7 +3845,6 @@
         continue;
       }
       const mine = m.from === "staff";
-      // Two messages group when the same person sends them close together.
       const key = mine ? "staff:" + (m.by || "?") : "user";
       const grouped = key === lastKey && m.ts - lastTs < 5 * 60 * 1000;
       lastKey = key;
@@ -4198,21 +3855,14 @@
         "dk-ap-m " + (mine ? "staff" : "user") + (grouped ? " grouped" : ""),
       );
 
-      // The face column. Empty on a grouped message so a run from one person
-      // reads as one block rather than a column of repeated pictures.
       const gutter = el("div", "dk-ap-gut");
       if (!grouped) {
         if (mine) {
-          // faceEl falls back to the remembered picture, so a moderator whose
-          // message predates their avatar still shows the face you know them
-          // by across the rest of the Desk.
           rememberAvatar(m.by, m.avatar);
           const f = faceEl(
             { label: m.by, role: m.role, level: m.level, avatar: m.avatar },
             "sm",
           );
-          // Clicking a moderator opens their record, the same as anywhere else
-          // on the Desk.
           f.classList.add("clickable");
           f.title = "Open " + (m.by || "their") + "'s record";
           f.addEventListener("click", (e) => {
@@ -4267,8 +3917,6 @@
           ),
         );
       b.appendChild(textEl(m.text, "dk-ap-txt"));
-      // Clicking a message is the quick way to answer it: it arms the reply
-      // exactly as the reply button does.
       if (a.status === "open") {
         b.classList.add("clickable");
         b.title = "Click to reply to this";
@@ -4278,8 +3926,6 @@
             by: mine ? m.by || "Staff" : a.name || "Them",
             text: String(m.text || "").slice(0, 90),
           };
-          // Just the bar, not the view: rebuilding would take the box away
-          // from you at the moment you asked to write in it.
           paintAppealReplyBar();
           if (appealView && appealView.composer) appealView.composer.focus();
         });
@@ -4299,13 +3945,7 @@
     renderAll();
   }
 
-  // What the appeal view is currently built for. Rebuilding it wholesale on
-  // every incoming message is what used to take the keyboard away mid-sentence
-  // - and after your own message too, since the server echoes it straight back.
-  // So the view is only rebuilt when the CONTROLS would change; a new message
-  // repaints the conversation alone and leaves the box you are typing in
-  // exactly where it was, caret and all.
-  let appealView = null; // { sig, body, replyBar, composer }
+  let appealView = null;
 
   function appealSig(a) {
     return [
@@ -4318,8 +3958,6 @@
     ].join("|");
   }
 
-  // The conversation, repainted in place. Stays put if you have scrolled up to
-  // read something; follows the newest line if you were already at the bottom.
   function paintAppealBody(a) {
     const body = appealView && appealView.body;
     if (!body || !body.isConnected) return;
@@ -4355,7 +3993,6 @@
     rb.appendChild(x);
   }
 
-  // What they are contesting, so a decision is not made blind.
   function appealBanHead(a) {
     const head = el("div", "dk-ap-ban");
     head.appendChild(icon("fa-ban"));
@@ -4380,7 +4017,6 @@
     if (!main) return;
     const a = appeal || {};
 
-    // Same appeal, same controls: only the conversation can have changed.
     if (
       appealView &&
       appealView.sig === appealSig(a) &&
@@ -4429,7 +4065,6 @@
     body.appendChild(appealBanHead(a));
     appealThread(body, a);
     main.appendChild(body);
-    // Land on the newest line without animating past the whole history.
     requestAnimationFrame(() => {
       body.scrollTop = body.scrollHeight;
     });
@@ -4446,7 +4081,6 @@
               ". The ban stays in place.",
         ),
       );
-      // Anybody can ask for a second look, including whoever declined it.
       if (a.resolution !== "lifted" && isFullMod()) {
         const acts = el("div", "dk-ap-acts");
         const re = btn("dk-minib", "Reopen this appeal", "fa-rotate-left");
@@ -4474,8 +4108,6 @@
       return;
     }
 
-    // Built once and filled as needed, so arming a reply never disturbs the
-    // box underneath it.
     const replyBar = el("div", "dk-replybar");
     replyBar.style.display = "none";
     main.appendChild(replyBar);
@@ -4501,8 +4133,6 @@
       appealReply = null;
       ta.value = "";
       paintAppealReplyBar();
-      // You are still in the box. Sending one message should not cost you a
-      // click before you can write the next.
       ta.focus();
     };
     ta.addEventListener("keydown", (e) => {
@@ -4517,12 +4147,9 @@
     comp.appendChild(sendBtn);
     main.appendChild(comp);
 
-    // Everything a repaint needs to leave alone.
     appealView = { sig: appealSig(a), body, replyBar, composer: ta };
     paintAppealReplyBar();
 
-    // The decision, and the way to stop somebody flooding the thread while it
-    // is still being made.
     const acts = el("div", "dk-ap-acts");
     const lock = btn(
       "dk-minib",
@@ -4544,8 +4171,6 @@
       acts.appendChild(lift);
     }
     const decline = btn("dk-minib danger", "Decline", "fa-xmark");
-    // Not ask(): declining carries a second decision, and ask() is a
-    // one-field helper.
     decline.addEventListener("click", () => {
       if (!window.StaffUI || !window.StaffUI.prompt)
         return socket.emit("staff resolve appeal", { id: a.id, decision: "dismiss" });
@@ -4634,8 +4259,6 @@
       return;
     }
 
-    // Same shape as the side panel: on or off first, then grouped by rank
-    // with the rank said once at the top of each group.
     const section = (label, rows, offline) => {
       if (!rows.length) return;
       body.appendChild(el("div", "dk-side-h", label));
@@ -4675,9 +4298,6 @@
     renderAll();
   }
 
-  // The guide. Written as data so it stays one place to edit, and rendered
-  // through the same message renderer as chat - so every #channel and @name in
-  // it is a real link, and the formatting examples show themselves working.
   const HELP = [
     {
       icon: "fa-comments",
@@ -4803,7 +4423,6 @@
 
     const body = el("div", "dk-msgs dk-help");
 
-    // One line at the top that says what to do with this page.
     const hero = el("div", "dk-help-hero");
     hero.appendChild(icon("fa-book-open"));
     const ht = el("div", "dk-help-hero-t");
@@ -4825,8 +4444,6 @@
       head.appendChild(ic);
       head.appendChild(el("h3", "dk-help-h", s.h));
       sec.appendChild(head);
-      // Through the message renderer, so the channels in the guide are real
-      // links and the formatting examples demonstrate themselves.
       for (const p of s.p || []) {
         const para = el("p", "dk-help-p");
         inlineInto(para, p);
@@ -4910,8 +4527,6 @@
     main.appendChild(list);
   }
 
-  // Open the place a search hit lives, landed right on the moment it was
-  // said, with the message flashed so the eye finds it.
   function jumpTo(key, ts) {
     view = key.startsWith("t")
       ? { kind: "thread", key }
@@ -4925,9 +4540,6 @@
   }
 
   // ── Slash commands ────────────────────────────────────────────────────────
-  // Typed straight into the composer. Every command fires the same staff
-  // event a button would, so the server's permission gates decide everything;
-  // the composer only saves the walk to the right screen.
   const COMMANDS = [
     {
       name: "warn",
@@ -4982,7 +4594,6 @@
   const DURATIONS = ["1h", "24h", "7d", "permanent"];
   let lastCommandAt = 0;
 
-  // Multi-word names go in quotes: /warn "sasha was here" stop that.
   function splitTarget(rest) {
     rest = rest.trim();
     if (rest.startsWith('"')) {
@@ -5012,7 +4623,6 @@
     });
   }
 
-  // Turn what they typed into one connected user, or say plainly why not.
   async function targetUser(q) {
     if (!q) {
       toast("Say who: a name, or a user id. Quotes for names with spaces.");
@@ -5186,9 +4796,6 @@
   }
 
   // ── The help bot ──────────────────────────────────────────────────────────
-  // Ask in plain words and it points at the command. It answers only to you,
-  // in the channel you are looking at, and is never sent to anybody else or
-  // saved: it is a hint, not a message.
   const BOT_TOPICS = [
     {
       words: ["ban", "block", "ip", "blacklist", "banned"],
@@ -5274,7 +4881,6 @@
     botSay(best.say, best.cmds);
   }
 
-  // A message only you can see, in the channel you are in.
   function botSay(text, cmdNames) {
     if (!els.list) return;
     const r = el("div", "dk-bot");
@@ -5315,9 +4921,6 @@
   }
 
   // ── The list above the composer ───────────────────────────────────────────
-  // Three things can fill it and only one is ever up: a slash command, a
-  // channel after "#", or a person after "@". Nothing in here sends anything
-  // or runs anything - it only ever writes into the box.
   let palette = { rows: [], idx: -1, kind: null };
 
   const paletteOpen = () =>
@@ -5356,7 +4959,6 @@
     if (row) row.apply();
   }
 
-  // Swap the half-typed token under the caret for the finished one.
   function applyToken(ta, start, end, insert) {
     const v = ta.value;
     ta.value = v.slice(0, start) + insert + v.slice(end);
@@ -5380,16 +4982,12 @@
     paintPalette();
   }
 
-  // What is being typed at the caret decides which list appears.
   function updatePalette(ta) {
     if (!ta || !els.palette) return;
     const v = ta.value;
     const caret = ta.selectionStart == null ? v.length : ta.selectionStart;
     const head = v.slice(0, caret);
-    // A slash only ever means a command at the very start of the box.
     if (v.startsWith("/") && !/\s/.test(head)) return showCommands(head, ta);
-    // ":ka" - a colon and at least two letters, the way it works everywhere
-    // else. One letter would put a list up on every "10:3" and "note: ".
     const em = /(^|[\s(]):([A-Za-z0-9_.-]{2,40})$/.exec(head);
     if (em)
       return showEmotes(
@@ -5427,15 +5025,11 @@
       node.addEventListener("click", apply);
       return { node, apply };
     });
-    // Nothing is highlighted, so Enter still runs what has been typed rather
-    // than completing it - the way the palette has always behaved.
     openPalette("cmd", rows, -1);
   }
 
   function showChannels(q, start, end, ta) {
     const score = (c) => (c.name.toLowerCase().startsWith(q) ? 0 : 1);
-    // The guide is written the same way a channel is, so it is offered here
-    // the same way too.
     const all = channels.concat(VIRTUAL_CHANNELS);
     const hits = all
       .filter(
@@ -5466,8 +5060,6 @@
     openPalette("chan", rows, 0);
   }
 
-  // Typing a colon and a couple of letters. Two before it opens, so an
-  // ordinary colon in the middle of a sentence does not put a list up.
   function showEmotes(q, start, end, ta) {
     const codes = Object.keys(emotes);
     if (!codes.length) return hidePalette();
@@ -5497,8 +5089,6 @@
   }
 
   // ── The emote picker ──────────────────────────────────────────────────────
-  // For when you know the face and not the word. Same list as the palette,
-  // laid out as a grid with a box to narrow it down.
   const emotePickerOpen = () =>
     !!(els.emotes && els.emotes.style.display !== "none");
 
@@ -5510,8 +5100,6 @@
     applyToken(box, at, to, ":" + code + ": ");
   }
 
-  // `pick` is what an emote is for here: writing it into the composer by
-  // default, or putting it on a message when the reaction picker borrows this.
   function paintEmoteGrid(grid, q, pick) {
     grid.textContent = "";
     const want = String(q || "").toLowerCase();
@@ -5585,8 +5173,6 @@
       .sort((a, b) => score(a) - score(b))
       .slice(0, 8);
 
-    // Groups first: they are the shortcut, and burying them under a list of
-    // names is how nobody ever finds them.
     const groups = MENTION_GROUPS.filter(
       (g) =>
         !q ||
@@ -5629,8 +5215,6 @@
       node.appendChild(faceEl(p, "sm"));
       const mid = el("span", "dk-pick-mid");
       mid.appendChild(el("span", "dk-pick-n", p.label));
-      // Whether they are here changes what the mention does, so it is said
-      // before the name is picked, not after.
       mid.appendChild(
         el(
           "span",
@@ -5650,9 +5234,6 @@
   }
 
   // ── Styles ────────────────────────────────────────────────────────────────
-  // Talkomatic's staff palette throughout: the same blacks, the same #ff9800,
-  // the same role colors the dashboard uses. Fonts inherit from the page so
-  // the Desk matches wherever it is mounted.
   function injectCss() {
     if (document.getElementById("dk-css")) return;
     const s = document.createElement("style");
@@ -6466,10 +6047,6 @@ button.dk-chan:focus-visible,button.dk-thread:focus-visible,.dk-minib:focus-visi
     document.head.appendChild(s);
   }
 
-  // /desk.html carries data-desk-page on its body and no client script of its
-  // own, so the Desk builds its own socket there. The keys come from the same
-  // localStorage the other pages use; without one, the server stays silent
-  // and the page keeps its sign-in note.
   document.addEventListener("DOMContentLoaded", () => {
     if (!document.body || document.body.dataset.deskPage !== "1") return;
     pageMode = true;
@@ -6481,9 +6058,6 @@ button.dk-chan:focus-visible,button.dk-thread:focus-visible,.dk-minib:focus-visi
         auth: {
           devKey: localStorage.getItem("talkomatic_devKey") || undefined,
           modKey: localStorage.getItem("talkomatic_modKey") || undefined,
-          // The same device id the lobby and the rooms send. The key watch
-          // counts people by it, so a Desk tab that left it out used to look
-          // like a second person holding the same key.
           deviceId:
             (window.TalkomaticIdentity && window.TalkomaticIdentity.deviceId) ||
             undefined,

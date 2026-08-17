@@ -1,13 +1,8 @@
 // server/games/socket.js
-// Socket surface for the game floor. Every handler resolves the caller from
-// the session and their current room, so nothing here trusts a client-supplied
-// user or room id.
+// Socket surface for the game floor.
 
 const floor = require("./index");
 
-// Drawing bypasses the generic socket limiter the same way piano notes do,
-// so it carries its own cap: this many messages a second, each a small batch
-// of segments.
 const DRAW_MSGS_PER_SEC = 50;
 const DRAW_SEGMENTS_PER_MSG = 40;
 
@@ -17,7 +12,6 @@ function who(socket) {
   return { userId: sess.userId, username: sess.username || "Someone" };
 }
 
-// One counter per stream, so two streams never eat each other's budget.
 function allowed(socket, key, perSec) {
   const now = Date.now();
   const w = "_w" + key;
@@ -41,7 +35,7 @@ function register(socket, safe) {
     safe(async (data) => {
       const u = who(socket);
       if (!u) return;
-      if (socket.spectating) return; // room spectators are read-only
+      if (socket.spectating) return;
       const out = await fn(u, data || {});
       if (out && out.err) fail(out.err);
     });
@@ -65,7 +59,6 @@ function register(socket, safe) {
     act((u, d) => floor.queueLeave(socket.roomId, u.userId, String(d.type || ""))),
   );
 
-  // A watcher putting their hand up for a seat when this round ends.
   socket.on(
     "games play next",
     act((u, d) =>
@@ -92,8 +85,6 @@ function register(socket, safe) {
         String(d.tableId || ""),
         d.move || {},
       );
-      // The guessing games want a private yes/no rather than a board
-      // update everyone can read.
       if (out && out.ok && (out.accepted || out.correct !== undefined)) {
         socket.emit("games feedback", {
           tableId: d.tableId,
@@ -101,7 +92,6 @@ function register(socket, safe) {
           pts: out.pts || 0,
           correct: out.correct === true,
           close: out.close === true,
-          // A real country, just not this one. Never says which.
           known: out.known === true,
         });
       }
@@ -109,8 +99,6 @@ function register(socket, safe) {
     }),
   );
 
-  // Strokes come in batches on their own event so the shared limiter does not
-  // chop a line in half mid-drag.
   socket.on(
     "games draw",
     safe(async (data) => {
@@ -139,7 +127,6 @@ function register(socket, safe) {
     }),
   );
 
-  // Watchers throwing an emoji at the board. Players can too.
   socket.on(
     "games cheer",
     act((u, d) =>
@@ -183,8 +170,6 @@ function register(socket, safe) {
     ),
   );
 
-  // Per-game chat. Spectators can talk to the people playing, which is most of
-  // the point of watching.
   socket.on(
     "games chat",
     act((u, d) =>

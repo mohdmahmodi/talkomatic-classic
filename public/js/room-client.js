@@ -1,12 +1,10 @@
 // public/js/room-client.js
-// Talkomatic chat room client: real-time diff-based chat, emote system,
-// word filter integration, vote-kick UI, link safety, dev mode UI, layout.
+// Talkomatic chat room client: real-time diff-based chat, emote system, word
+// filter integration, vote-kick UI, link safety, dev mode UI, layout.
 
 // ── 1. CONSTANTS & STATE ────────────────────────────────────────────────────
 
-// Staff mode: pass dev/mod keys from localStorage in socket auth
 const socket = io({
-  // WebSocket only, matching the server. No long-poll handshake first.
   transports: ["websocket"],
   upgrade: false,
   auth: {
@@ -19,11 +17,8 @@ const socket = io({
 });
 
 window.socket = socket;
-// On a server restart, show an "updating" notice and reconnect in place (the
-// reconnect handler below rejoins the room) instead of bouncing to the lobby.
 if (window.TalkomaticConnection)
   window.TalkomaticConnection.attach(socket, { rejoinInPlace: true });
-// The Desk (staff chat) rides the same socket; it stays dormant for non-staff.
 if (window.TalkoDesk) window.TalkoDesk.init(socket);
 
 let currentUsername = "";
@@ -31,8 +26,6 @@ let currentLocation = "";
 let currentRoomId = "";
 let currentUserId = "";
 
-// Mirrors isGuestName in server/state.js - keep the two in step. Names are
-// picked in the lobby now, so a room never invents one for an arrival.
 function isGuestUsername(name) {
   if (typeof name !== "string") return true;
   const n = name.trim();
@@ -41,42 +34,26 @@ function isGuestUsername(name) {
     /^guest[\s._-]*[0-9a-f]*$/i.test(n) || /^(anonymous|someone|unknown)$/i.test(n)
   );
 }
-// New rooms are made vertical (side-by-side columns), so that is what to
-// assume before the server has said anything. Rooms made before the lobby
-// stopped asking still carry their own layout, and it arrives with the room
-// data below.
 let currentRoomLayout = "vertical";
-// Desktop-only, client-side view override. When set it wins over the room's
-// layout for THIS user's screen only; the server is never told, so nobody
-// else is affected and incoming room updates never clobber it. Null means
-// "follow the room's layout".
 let userLayoutPreference = null;
 let currentRoomName = "";
 let currentRoomCreatedAt = 0;
 let lastSentMessage = "";
 let chatInput = null;
-// Socket protocol this client speaks. Must match CONFIG.VERSIONS.PROTOCOL on
-// the server; on a mismatch after a deploy the client reloads once to pick up
-// new code. Bump both together only when a message shape changes.
 const CLIENT_PROTOCOL = 1;
-// Text the user had typed when the socket dropped, captured at reconnect time
-// so a server restart (which forgets live buffers) can re-push it on rejoin.
 let pendingRestoreText = null;
 let talkoboardInstance = null;
 let pianoInstance = null;
 
-// Dev mode state
 let currentUserIsDev = false;
 let currentUserIsVanished = false;
 let currentUserIsHidden = false;
 
-// Mod / staff state
 let currentUserIsMod = false;
-let currentUserModLevel = 0; // 0 = not a mod, 1 = junior, 2 = full
+let currentUserModLevel = 0;
 let isSpectating = false;
 const isStaff = () => currentUserIsDev || currentUserIsMod;
 
-// The user's own raw (unfiltered) text and whether the display is filtered
 let selfRawText = "";
 let selfIsFiltered = false;
 
@@ -86,11 +63,8 @@ const storedMessagesForMutedUsers = new Map();
 
 const MAX_MESSAGE_LENGTH = 5000;
 
-// Client-side mirror of the server's MIN_USERS_FOR_VOTING, used for UI
-// cleanup only; the server remains the authority on votes
 const MIN_USERS_FOR_VOTING = 3;
 
-// Last vote state from the server, re-rendered after local DOM changes
 let currentVotes = {};
 
 const ERROR_CODES = {
@@ -117,9 +91,6 @@ function hasEmote(code) {
   return Object.prototype.hasOwnProperty.call(emoteList, code);
 }
 
-// Filters text in segments around valid :code: emote tokens so emote codes
-// containing filtered substrings still render instead of becoming asterisks.
-// Unknown ":notanemote:" tokens are plain text and stay filterable.
 function filterTextPreservingEmotes(text) {
   if (!text.includes(":") && !text.includes(";")) {
     return clientWordFilter.filterText(text);
@@ -156,9 +127,6 @@ function applyWordFilter(text) {
   return filterTextPreservingEmotes(text);
 }
 
-// Anything else on the page that renders somebody else's words (the mini games
-// panel, for one) goes through here, so one toggle covers the whole site
-// instead of each panel deciding on its own.
 const filterWatchers = new Set();
 window.TalkomaticFilter = {
   enabled: () => wordFilterEnabled,
@@ -173,7 +141,6 @@ function notifyFilterWatchers() {
     try {
       fn(wordFilterEnabled);
     } catch (_) {
-      /* one bad listener must not stop the rest */
     }
   }
 }
@@ -343,13 +310,10 @@ function toggleMute() {
   updateMuteIcon();
 }
 
-// Somebody typed your name in this room. One nudge per person per minute is
-// enforced server side, so this can just show it.
 socket.on("room mention", (data) => {
   const by = (data && data.by) || "Someone";
   playJoinSound();
   if (window.toastr) toastr.info(by + " mentioned you");
-  // Blink it into the tab title for anyone looking at another window.
   if (document.hidden) {
     const original = document.title;
     document.title = by + " mentioned you";
@@ -369,8 +333,6 @@ function updateMuteIcon() {
 
 // ── 5. CONTENTEDITABLE UTILITIES ────────────────────────────────────────────
 
-// Extracts plain text from the contenteditable, converting emote <img>
-// elements back to their :code: tokens and DIVs/BRs to newlines
 function getPlainText(element) {
   if (!element) return "";
   function extract(node) {
@@ -413,8 +375,6 @@ function placeCursorAtEnd(el) {
   } catch { }
 }
 
-// Returns the caret position as a plain-text offset (emotes count as the
-// length of their :code: token)
 function getCursorPosition(element) {
   if (!element) return 0;
   try {
@@ -449,7 +409,6 @@ function getCursorPosition(element) {
   }
 }
 
-// Restores the caret to a plain-text offset
 function setCursorPosition(element, position) {
   if (!element) return;
   try {
@@ -505,7 +464,6 @@ function setCursorPosition(element, position) {
   }
 }
 
-// Computes a minimal diff between two strings for the chat update protocol
 function getDiff(oldStr, newStr) {
   if (oldStr === newStr) return null;
   if (newStr.startsWith(oldStr))
@@ -538,9 +496,6 @@ async function loadEmotes() {
   const BASE =
     "https://raw.githubusercontent.com/ZackiBoiz/Multiplayer-Piano-Optimizations/refs/heads/main/emotes";
   try {
-    // referrerPolicy: no-referrer silences the cross-site referrer warning and
-    // sends nothing about our origin. signal: a hard timeout so a slow/hung
-    // GitHub never stalls the caller (this runs during room init).
     const resp = await fetch(`${BASE}/meta.jsonc?_=${Date.now()}`, {
       referrerPolicy: "no-referrer",
       signal: AbortSignal.timeout(8000),
@@ -558,19 +513,14 @@ async function loadEmotes() {
         )
         .map(([name, ext]) => [name, `${BASE}/assets/${name}.${ext}`]),
     );
-    // Only swap in a non-empty set, so a valid-but-empty response can't blank
-    // emotes either.
     if (Object.keys(next).length) emoteList = next;
     console.log("Emotes loaded:", Object.keys(emoteList).length);
   } catch (err) {
-    // A transient failure (GitHub blip, timeout, rate-limit, offline) must NOT
-    // wipe emotes we already have - keep the last good set instead of dropping
-    // every emote to plain text.
     console.error("Error loading emotes:", err);
   }
 }
 
-function parseJSONC(input, filteredTags = ["*"]) { // "*" represents unwanted, not wildcard
+function parseJSONC(input, filteredTags = ["*"]) {
   const json = stripJSONC(input, filteredTags);
   return JSON.parse(json);
 }
@@ -717,7 +667,6 @@ function createEmoteNode(emoteCode, isOverlay = false) {
   img.referrerPolicy = "no-referrer";
   img.src = emoteList[emoteCode];
   img.alt = isOverlay ? `;${emoteCode};` : `:${emoteCode}:`;
-  // img.title = img.alt;
   img.className = isOverlay ? "emote emote-overlay" : "emote";
   img.dataset.emoteCode = emoteCode;
   if (isOverlay) img.dataset.emoteOverlay = "true";
@@ -821,9 +770,6 @@ function replaceEmotes(element) {
   }
 }
 
-// Finds the ":prefix" being typed at the caret. Handles element-node caret
-// positions (where the caret lands right after an emote <img> insertion) by
-// stepping into the text node immediately before the caret.
 function findEmoteAtCursor() {
   if (!chatInput || document.activeElement !== chatInput) return null;
   const sel = window.getSelection();
@@ -839,7 +785,7 @@ function findEmoteAtCursor() {
       node = prev;
       offset = prev.textContent.length;
     } else {
-      return null; // caret sits after an <img>/<br>, nothing to complete
+      return null;
     }
   }
 
@@ -896,7 +842,7 @@ function buildHighlightedText(text, positions, contiguousStart = null, contiguou
 
   for (let i = 0; i < text.length; i++) {
     const ch = escapeHtml(text[i]);
-    if (contiguousStart !== null && contiguousEnd !== null) { // cleaner highlighting than a <strong> on every char
+    if (contiguousStart !== null && contiguousEnd !== null) {
       if (i === contiguousStart) out += "<strong style='color: #ff9800'>";
       out += ch;
       if (i === contiguousEnd - 1) out += "</strong>";
@@ -947,7 +893,7 @@ function getEmoteAutocompleteMatches(prefix) {
     }
   }
 
-  results.sort((a, b) => { // sorting by buckets
+  results.sort((a, b) => {
     return a.bucket - b.bucket ||
       a.code.length - b.code.length ||
       a.code.localeCompare(b.code)
@@ -1095,9 +1041,6 @@ function updateSelectedEmote() {
     });
 }
 
-// Guarantees the caret lives inside a TEXT node after an insertHTML, so the
-// next ":" the user types is found by findEmoteAtCursor(). Empty text nodes
-// are invisible and ignored by getPlainText().
 function ensureCaretInTextNode() {
   try {
     const sel = window.getSelection();
@@ -1112,7 +1055,6 @@ function ensureCaretInTextNode() {
     sel.removeAllRanges();
     sel.addRange(range);
   } catch {
-    // non-fatal: autocomplete will simply skip this position
   }
 }
 
@@ -1262,7 +1204,6 @@ function insertEmote(emoteCode, emoteInfo, options = {}) {
   }, 10);
 }
 
-// Re-render the chat box from selfRawText.
 function renderChatInputFromRaw() {
   if (!chatInput) return;
   const display =
@@ -1275,8 +1216,6 @@ function renderChatInputFromRaw() {
   placeCursorAtEnd(chatInput);
 }
 
-// Reads the input, reconstructs the raw text if the display is filtered,
-// and sends a diff to the server
 function updateSentMessage() {
   if (!chatInput) return;
   try {
@@ -1305,8 +1244,6 @@ function updateSentMessage() {
   }
 }
 
-// Maps an edit made on the FILTERED display back onto the RAW text by
-// finding the common prefix/suffix and splicing the inserted region
 function reconstructRawText(prevFiltered, currentDisplay, prevRaw) {
   if (prevFiltered === currentDisplay) return prevRaw;
 
@@ -1334,7 +1271,6 @@ function reconstructRawText(prevFiltered, currentDisplay, prevRaw) {
   return prevRaw.slice(0, start) + inserted + prevRaw.slice(prevEnd + 1);
 }
 
-// Re-renders the user's own input with the filter applied
 function applySelfFilter() {
   if (!chatInput) return;
 
@@ -1361,7 +1297,7 @@ function applySelfFilter() {
 
 
 const EMOTE_IMAGE_PLACEHOLDER =
-  "data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA="; // blank
+  "data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA=";
 
 function isEmoteImageVisible(img, container) {
   if (!img || !container) return false;
@@ -1370,7 +1306,7 @@ function isEmoteImageVisible(img, container) {
 
   return (
     itemRect.bottom > containerRect.top &&
-    itemRect.top < containerRect.bottom + containerRect.height && // be lenient and lazy-load emotes that are just out of reach (seamless)
+    itemRect.top < containerRect.bottom + containerRect.height &&
     itemRect.right > containerRect.left &&
     itemRect.left < containerRect.right
   );
@@ -1388,8 +1324,6 @@ function hydrateVisibleEmoteImages(dropdown) {
   });
 }
 
-// Builds the Emoticons button beside .room-type (wrapped in a group so the
-// room type display is never replaced) and the emote picker dropdown
 function createEmotesDropdown() {
   if (document.getElementById("emotesButton")) return;
 
@@ -1432,9 +1366,6 @@ function createEmotesDropdown() {
   const list = document.createElement("div");
   list.className = "emotes-dropdown-list";
 
-  // Emotes load asynchronously, so the picker can be built before they arrive.
-  // Fill it from the current emoteList now and refresh on open, so it never
-  // stays empty just because it was created too early.
   const fillList = () => {
     list.textContent = "";
     Object.entries(emoteList).forEach(([code, url]) => {
@@ -1694,8 +1625,6 @@ function openPiano() {
     showErrorModal("You must be in a room to use the Piano.");
     return;
   }
-  // If a cached page loaded before piano-client.js shipped, the class is
-  // missing - tell the user to refresh instead of silently doing nothing.
   if (typeof Piano === "undefined") {
     showErrorModal(
       "The Piano is still loading. Please refresh the page and try again.",
@@ -1720,9 +1649,6 @@ function openPiano() {
 
 // ── 9. VOTING UI ────────────────────────────────────────────────────────────
 
-// Renders vote counters and button states. Below MIN_USERS_FOR_VOTING all
-// counters are removed and highlights cleared (matching server behavior).
-// Counters at 0 votes are removed instead of lingering.
 function updateVotesUI(votes) {
   currentVotes = votes || {};
   const rows = document.querySelectorAll(".chat-row");
@@ -1735,8 +1661,6 @@ function updateVotesUI(votes) {
       ? Object.values(currentVotes).filter((v) => v === uid).length
       : 0;
 
-    // Own row: the votes-against-me counter. Click it to see who voted against
-    // you (the server already sends the voter->target map; we just surface it).
     if (uid === currentUserId) {
       let counter = row.querySelector(".votes-counter");
       if (!votingActive || count === 0) {
@@ -1760,13 +1684,11 @@ function updateVotesUI(votes) {
             showDislikersPopover(counter, dislikerNames());
           }
         };
-        // Keep an open popover in sync as the tally changes.
         if (document.getElementById("dislikersPopover"))
           showDislikersPopover(counter, dislikerNames());
       }
     }
 
-    // Other rows: the vote button
     if (voteBtn) {
       voteBtn.innerHTML = `\uD83D\uDC4E ${count}`;
       voteBtn.classList.toggle(
@@ -1778,10 +1700,6 @@ function updateVotesUI(votes) {
 }
 
 // ── Who disliked you ────────────────────────────────────────────────────────
-// The server already sends the full voter->target map (filtered for visibility);
-// the client just surfaces it. Resolve the people who voted against you to their
-// display names. Anyone who has since left (or is hidden from you) falls back to
-// a generic label.
 function dislikerNames() {
   const nameById = {};
   document.querySelectorAll(".chat-row").forEach((row) => {
@@ -1831,8 +1749,6 @@ function showDislikersPopover(anchorEl, names) {
     pop.appendChild(item);
   });
 
-  // Fixed position next to the counter so the room layout's overflow can't clip
-  // it, and so it stays put if rows reflow underneath.
   document.body.appendChild(pop);
   const r = anchorEl.getBoundingClientRect();
   const pw = pop.offsetWidth;
@@ -1845,7 +1761,6 @@ function showDislikersPopover(anchorEl, names) {
   pop.style.top = top + "px";
   pop.style.left = left + "px";
 
-  // Defer so the opening click doesn't immediately count as an outside click.
   setTimeout(
     () => document.addEventListener("click", onDislikersOutsideClick, true),
     0,
@@ -1857,9 +1772,6 @@ function adjustVoteButtonVisibility() {
   document.querySelectorAll(".chat-row").forEach((row) => {
     const btn = row.querySelector(".vote-button");
     if (!btn) return;
-    // Staff are immune to vote-kick (the server ignores votes against them).
-    // Only hide the button for VISIBLY staff users; hiding it for hidden
-    // staff would reveal them, so theirs stays (the vote just does nothing).
     const isVisibleStaff =
       row.classList.contains("dev-user") || !!row.querySelector(".mod-badge");
     btn.style.display =
@@ -1889,8 +1801,6 @@ function adjustMuteButtonVisibility() {
 
 // ── 10. CHAT PROCESSING ─────────────────────────────────────────────────────
 
-// Renders another user's message: filter, then emotes. Nothing here turns text
-// into a link - links are not shareable, so there is never one to highlight.
 function renderOtherUserMessage(element, rawMessage) {
   if (!element) return;
   element.dataset.rawText = rawMessage;
@@ -1987,12 +1897,9 @@ function displayChatMessage(data) {
 }
 
 // ── 11. LINK SAFETY ─────────────────────────────────────────────────────────
-// Links are not shareable on Talkomatic, so there is nothing for the client to
-// highlight, warn about, or open.
 
 // ── 12. DEV MODE: Confetti & Navbar Controls ────────────────────────────────
 
-// Self-contained confetti burst shown when a dev joins
 function triggerDevConfetti() {
   const container = document.createElement("div");
   container.style.cssText =
@@ -2108,14 +2015,11 @@ function applyDevAppearanceToRow(row, user) {
   const ci = row.querySelector(".chat-input");
   if (!info || !ci) return;
 
-  // A dev viewer sees concealed staff (hidden/vanished) with their badge, but
-  // never the loud flair, plus a marker. Other viewers behave as before.
   const devSeesConcealed = currentUserIsDev && user.id !== currentUserId;
   const crown = info.querySelector(".dev-crown");
   const loudDev = !!user.isDev && !user.isHidden;
   const showCrown = !!user.isDev && (!user.isHidden || devSeesConcealed);
 
-  // Loud mod flair follows the same hide rule as the dev flair, keyed to rank.
   const loudMod = !!user.isMod && !user.isDev && !user.isHidden;
   const modRowClass =
     loudMod && (user.modLevel || 2) >= 2
@@ -2160,7 +2064,6 @@ function applyDevAppearanceToRow(row, user) {
     crown.remove();
   }
 
-  // Mod badge (distinct from the dev crown), toggled by hide state
   const modBadge = info.querySelector(".mod-badge");
   const showModFlair =
     !!user.isMod && !user.isDev && (!user.isHidden || devSeesConcealed);
@@ -2174,7 +2077,6 @@ function applyDevAppearanceToRow(row, user) {
     modBadge.remove();
   }
 
-  // Dev-only marker showing this staffer is hidden/vanished from normal users.
   const marker = info.querySelector(".staff-concealed-marker");
   const showMarker =
     devSeesConcealed &&
@@ -2273,9 +2175,6 @@ function createDevHideToggle() {
   else navRight.appendChild(button);
 }
 
-// Dev-only overlay showing per-user context (IP) in the room, toggleable so it
-// never has to crowd the chat. Mods can act on users (kick / ban / IP-block)
-// but never see raw IP addresses.
 let devShowIP = localStorage.getItem("talkomatic_devShowIP") !== "false";
 function renderDevContext() {
   if (!currentUserIsDev) return;
@@ -2306,9 +2205,6 @@ socket.on("dev context", (ctx) => {
   renderDevContext();
 });
 
-// Update a still-open Staff panel item's label in place. The panel keeps items
-// open after a click, so a toggle's label would otherwise stay stale until the
-// panel is reopened.
 function setStaffItemLabel(id, label) {
   const item = document.getElementById(id);
   if (!item) return;
@@ -2328,8 +2224,6 @@ socket.on("dev vanish status", (data) => {
 
 socket.on("dev hide status", (data) => {
   currentUserIsHidden = !!data?.isHidden;
-  // Persist the choice so it survives refreshes and restarts: it is re-applied
-  // on every room join below (the server session alone loses it on a restart).
   try {
     localStorage.setItem(
       "talkomatic_devHidden",
@@ -2348,8 +2242,6 @@ socket.on("dev hide status", (data) => {
 
 // ── 13. ROOM UI ─────────────────────────────────────────────────────────────
 
-// Small device-type indicator shown at the left of each user row. Derived from
-// the user agent on the server, purely cosmetic.
 const DEVICE_META = {
   desktop: { icon: "fas fa-desktop", title: "Desktop" },
   mobile: { icon: "fas fa-mobile-screen-button", title: "Mobile" },
@@ -2361,7 +2253,7 @@ const DEVICE_META = {
   watch: { icon: "fas fa-clock", title: "Watch" },
   ereader: { icon: "fas fa-book-atlas", title: "E-Reader" },
   car: { icon: "fas fa-car", title: "Car" },
-  raspi: { icon: "fab fa-raspberry-pi", title: "Raspberry Pi" }, // this uses fab instead of fas
+  raspi: { icon: "fab fa-raspberry-pi", title: "Raspberry Pi" },
   projector: { icon: "fas fa-film", title: "Projector" },
   refrigerator: { icon: "fas fa-snowflake", title: "Refrigerator" },
   bot: { icon: "fas fa-robot", title: "Bot" },
@@ -2391,13 +2283,8 @@ function createUserRow(user, container) {
   row.dataset.userId = user.id;
   row.dataset.username = user.username || "";
 
-  // A dev viewer always gets to see who is staff, even staff who are hidden or
-  // vanished from normal users (the server only sends those flags to devs). The
-  // loud row styling stays off for concealed staff - just the badge + a marker.
   const devSeesConcealed = currentUserIsDev && user.id !== currentUserId;
 
-  // Rank flair on the row itself: dev red, full mod (L2) blue, junior mod (L1)
-  // purple. Hidden staff get no loud styling, same rule as the dev crown.
   if (user.isDev && !user.isHidden) {
     row.classList.add("dev-user");
   } else if (user.isMod && !user.isDev && !user.isHidden) {
@@ -2430,7 +2317,6 @@ function createUserRow(user, container) {
     info.appendChild(createBotBadge(user.botOwner));
   }
 
-  // Dev-only marker telling the dev this staffer is hidden/vanished to others.
   if (devSeesConcealed && (user.isDev || user.isMod) && (user.isHidden || user.isVanished)) {
     info.appendChild(makeStaffConcealedMarker(user));
   }
@@ -2452,7 +2338,6 @@ function createUserRow(user, container) {
   nameEl.textContent = `${user.username} / ${user.location}`;
   info.appendChild(nameEl);
 
-  // Mute button
   const muteBtn = document.createElement("button");
   muteBtn.className = "mute-button";
   muteBtn.innerHTML = "\uD83D\uDD0A";
@@ -2478,7 +2363,6 @@ function createUserRow(user, container) {
     }
   });
 
-  // Vote button
   const voteBtn = document.createElement("button");
   voteBtn.className = "vote-button";
   voteBtn.innerHTML = "\uD83D\uDC4E 0";
@@ -2492,15 +2376,6 @@ function createUserRow(user, container) {
   info.appendChild(muteBtn);
   info.appendChild(voteBtn);
 
-  // Staff actions button (dev + mod, not on yourself). Shown while spectating
-  // too, so staff can moderate a room they're only watching. Opens the per-user
-  // staff menu (kick/ban, IP block, wipe, warn, rename, freeze). The server
-  // re-checks role and hierarchy on every action.
-  //
-  // Only show it when this staff member could actually act on the target:
-  // mods act on normal users only, devs on anyone but other devs. Hidden staff
-  // read as normal here so the gear still shows for them (the server silently
-  // rejects out-of-hierarchy actions), which avoids revealing who they are.
   const targetVisibleRole =
     user.isDev && !user.isHidden
       ? "dev"
@@ -2526,14 +2401,12 @@ function createUserRow(user, container) {
     if (user.id !== currentUserId && canActOnTarget) {
       const staffBtn = document.createElement("button");
       staffBtn.className = "staff-action-button";
-      staffBtn.innerHTML = '<i class="fas fa-gear"></i>'; // gear
+      staffBtn.innerHTML = '<i class="fas fa-gear"></i>';
       staffBtn.title = "Staff actions";
       staffBtn.addEventListener("click", () => openUserStaffMenu(user));
       info.appendChild(staffBtn);
     }
   }
-  // Report flag is available to everyone (staff included) on other users' rows,
-  // so anyone can flag a problem user, a bad room, or even a misbehaving mod.
   if (user.id !== currentUserId) {
     const reportBtn = document.createElement("button");
     reportBtn.className = "report-button";
@@ -2543,7 +2416,6 @@ function createUserRow(user, container) {
     info.appendChild(reportBtn);
   }
 
-  // Chat input wrapper + contenteditable
   const wrapper = document.createElement("div");
   wrapper.className = "chat-input-wrapper";
   wrapper.style.cssText = "position:relative;width:100%;height:100%";
@@ -2587,9 +2459,6 @@ function createUserRow(user, container) {
       } else hideAutocomplete();
       const text = getPlainText(div);
       if (/[;:]/.test(text)) replaceEmotes(div);
-      // Staff typing @mod/@dev raises a Desk ping server-side. A normal user
-      // copying what they saw gets pointed at the tool that actually reaches
-      // staff, instead of being silently ignored.
       if (
         !currentUserIsDev &&
         !currentUserIsMod &&
@@ -2618,9 +2487,6 @@ function createUserRow(user, container) {
         }
       }
 
-      // Ctrl/Cmd + Backspace or Delete with a selection (e.g. after Ctrl+A)
-      // can leave text behind in contenteditable, so clear the selection
-      // ourselves and sync. A collapsed cursor keeps the normal word-delete.
       if (
         (e.ctrlKey || e.metaKey) &&
         (e.key === "Backspace" || e.key === "Delete")
@@ -2668,12 +2534,6 @@ function updateRoomUI(roomData) {
   if (!container) return;
   chatInput = null;
 
-  // Defensive self-row guard. If a server-side race dropped our own membership
-  // from this frame's user list, render our editable row anyway from what we
-  // already know about ourselves - otherwise a self-less "room joined" leaves
-  // the user with no textbox until a manual refresh. Mirrors the self-row
-  // protection the "room update" handler already applies. Never for spectators
-  // (read-only, no own row).
   let users =
     roomData.users && Array.isArray(roomData.users) ? roomData.users : [];
   if (
@@ -2696,16 +2556,10 @@ function updateRoomUI(roomData) {
     ];
   }
 
-  // Build every row off-DOM, then swap them in as one operation. Appending rows
-  // one at a time into the live container makes slower/older devices paint the
-  // half-built room (and reflow per row), which reads as a join/spectate
-  // flicker. A single fragment swap removes that intermediate state.
   const frag = document.createDocumentFragment();
   users.forEach((u) => createUserRow(u, frag));
   while (container.firstChild) container.removeChild(container.firstChild);
   container.appendChild(frag);
-  // createUserRow's own visibility passes ran against the off-DOM fragment, so
-  // re-run them now that the rows are live.
   adjustVoteButtonVisibility();
   adjustMuteButtonVisibility();
   adjustLayout();
@@ -2740,7 +2594,6 @@ function updateRoomInfo(data) {
   if (uptimeEl) uptimeEl.textContent = msToTime(Date.now() - data.createdAt);
   if (idEl) idEl.textContent = `Room ID: ${data.roomId || currentRoomId}`;
 
-  // "room joined" sends roomType, "room update" sends type
   const roomType = data.roomType || data.type;
   if (typeEl && roomType) {
     typeEl.textContent = `${getRoomTypeDisplay(roomType) || "Public"} room`;
@@ -2804,10 +2657,6 @@ function isMobile() {
   return window.innerWidth <= 768;
 }
 
-// On mobile, the collapsing URL bar and on-screen keyboard change
-// visualViewport.height without a matching change to window.innerHeight,
-// which left a dead white strip at the bottom. Desktop is unchanged since
-// the two values match there.
 function getAvailableViewportHeight() {
   if (
     window.visualViewport &&
@@ -2830,14 +2679,10 @@ function adjustLayout() {
     activeUserId = activeEl.closest(".chat-row")?.dataset.userId;
   }
 
-  // Mobile is always horizontal. On desktop the user's local toggle (if they
-  // flipped it) wins over the room's layout; otherwise the room's layout is used.
   const layout = isMobile()
     ? "horizontal"
     : userLayoutPreference || currentRoomLayout;
 
-  // Reset styles that only the crowd grid sets, so the <=5 layouts below are
-  // never affected by a previous larger headcount.
   container.style.flexWrap = "";
   container.style.alignContent = "";
   container.style.height = "";
@@ -2845,16 +2690,10 @@ function adjustLayout() {
   rows.forEach((row) => (row.style.flex = ""));
 
   if (rows.length > 5) {
-    // Crowd mode: balanced grid (columns x rows) that fills the room. Column
-    // count follows the layout preference and the available width; it only
-    // scrolls if cells would otherwise get too short. The <=5 cases are
-    // left exactly as they were.
     container.style.flexDirection = "row";
     container.style.flexWrap = "wrap";
     container.style.alignContent = "flex-start";
-    const GAP = 5; // matches the .chat-container gap
-    // Use the container's REAL inner box (its flex height already excludes the
-    // navbars and the invite bar below it) so the bottom row is never clipped.
+    const GAP = 5;
     const cs = getComputedStyle(container);
     const hpad =
       (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
@@ -2871,7 +2710,7 @@ function adjustLayout() {
     const cellH = Math.max(120, idealH);
     const scroll = cellH > idealH;
     container.style.overflowY = scroll ? "auto" : "hidden";
-    if (scroll) cw -= 16; // leave room for the scrollbar
+    if (scroll) cw -= 16;
     const cellW = Math.floor((cw - (cols - 1) * GAP) / cols);
     rows.forEach((row) => {
       row.style.flex = "0 0 auto";
@@ -2910,10 +2749,6 @@ function adjustLayout() {
     });
   }
 
-  // Don't touch room-chat focus while the Talkoboard is open. The board and its
-  // own chat box own focus then, so refocusing the hidden room input here would
-  // yank focus away mid-type (which is what a join/leave was doing to the
-  // Talkoboard chat box).
   if (activeUserId && !talkoboardInstance?.isOpen) {
     const el = document.querySelector(
       `.chat-row[data-user-id="${activeUserId}"] .chat-input`,
@@ -2924,10 +2759,6 @@ function adjustLayout() {
   refreshLayoutToggle();
 }
 
-// The layout toggle only makes sense on desktop in a small room. Past 5 users
-// the room switches to the crowd grid, so the toggle is removed; it comes back
-// the moment the room drops to 5 or fewer. Also keeps the icon and tooltip in
-// sync with whichever layout is actually on screen.
 function refreshLayoutToggle() {
   const btn = document.getElementById("layoutToggle");
   if (!btn) return;
@@ -2945,8 +2776,6 @@ function refreshLayoutToggle() {
     : "Layout: Vertical (click to switch to horizontal)";
 }
 
-// Flip this user's local view between horizontal and vertical, then re-render.
-// Purely client-side: no socket event, so only this screen changes.
 function toggleRoomLayout() {
   const current = userLayoutPreference || currentRoomLayout;
   userLayoutPreference = current === "horizontal" ? "vertical" : "horizontal";
@@ -2956,8 +2785,6 @@ function toggleRoomLayout() {
 function handleViewportChange() {
   const vp = document.querySelector("meta[name=viewport]");
   if (window.visualViewport) {
-    // -1 tolerates sub-pixel rounding so the keyboard branch only fires
-    // when the keyboard or URL bar is genuinely eating space
     if (window.visualViewport.height < window.innerHeight - 1) {
       if (vp)
         vp.setAttribute(
@@ -2967,7 +2794,6 @@ function handleViewportChange() {
       document.body.style.height = `${window.visualViewport.height}px`;
     } else {
       if (vp) vp.setAttribute("content", "width=device-width, initial-scale=1");
-      // Clear the inline override so the dvh rule applies instead
       document.body.style.height = "";
     }
   }
@@ -2979,11 +2805,10 @@ function handleViewportChange() {
 function generateInviteLink() {
   const url = new URL(window.location.href);
   url.searchParams.set("roomId", currentRoomId);
-  url.searchParams.delete("accessCode"); // never leak codes in invite links
+  url.searchParams.delete("accessCode");
   return url.href;
 }
 
-// No-op until a room has been joined, so an empty roomId never renders
 function updateInviteLink() {
   const el = document.getElementById("inviteLink");
   const copyBtn = document.getElementById("copyInviteLink");
@@ -3023,7 +2848,7 @@ function updateTimeLabels() {
 function msToTime(duration) {
   const seconds = parseInt((duration / 1000) % 60),
     minutes = parseInt((duration / (1000 * 60)) % 60),
-    hours = parseInt((duration / (1000 * 60 * 60))); // no modulo here. max res is hrs
+    hours = parseInt((duration / (1000 * 60 * 60)));
 
   return (hours > 0 ? hours + ":" : "") + String(minutes).padStart(2, "0") + ":" + String(seconds).padStart(2, "0");
 }
@@ -3054,10 +2879,6 @@ socket.on("room full", () => {
 });
 
 socket.on("room joined", (data) => {
-  // Protocol gate: if the server speaks a different message version than the JS
-  // we are running, a breaking deploy happened under us. Reload once (guarded
-  // so a stale cache can't loop) to pick up the matching client. A matching
-  // protocol means the restart is invisible and we just rejoin below.
   if (data.protocol != null && data.protocol !== CLIENT_PROTOCOL) {
     if (!sessionStorage.getItem("tkProtoReload")) {
       sessionStorage.setItem("tkProtoReload", "1");
@@ -3090,8 +2911,6 @@ socket.on("room joined", (data) => {
   updateInviteLink();
   createEmotesDropdown();
 
-  // Appearance controls (hide/vanish/color) now live inside the Staff panel,
-  // so the navbar only gains a single "Staff" button - keeps mobile tidy.
   if (currentUserIsDev) {
     if (!currentUserIsHidden) triggerDevConfetti();
     const savedColor = localStorage.getItem("talkomatic_devColor");
@@ -3101,10 +2920,6 @@ socket.on("room joined", (data) => {
     }
   }
 
-  // Re-apply the saved hide-flair preference for staff (dev or mod). The server
-  // restores it from the session when it can, but a restart wipes the session,
-  // so we re-assert from localStorage on every join. The server confirms via
-  // "dev hide status", which fixes the row, button, and re-saves the choice.
   if (currentUserIsDev || currentUserIsMod) {
     const savedHidden = localStorage.getItem("talkomatic_devHidden");
     if (savedHidden === "1" && !currentUserIsHidden) {
@@ -3119,11 +2934,6 @@ socket.on("room joined", (data) => {
 
   renderDevContext();
 
-  // After a server restart we rejoin a room the server rehydrated from disk,
-  // but our typed text only lived in memory and is gone server-side (and
-  // updateCurrentMessages just blanked our row). Re-render it locally and push
-  // it back so the whole room sees it again. pendingRestoreText was captured at
-  // reconnect time, before this handler ran.
   if (pendingRestoreText) {
     const restore = pendingRestoreText;
     pendingRestoreText = null;
@@ -3135,7 +2945,6 @@ socket.on("room joined", (data) => {
     }
   }
 
-  // Back in the room for real, so close any reconnect/updating overlay.
   if (window.TalkomaticConnection) window.TalkomaticConnection.recovered();
 
   setTimeout(() => {
@@ -3164,17 +2973,12 @@ socket.on("user joined", (data) => {
       updateRoomInfo(data);
       playJoinSound();
 
-      // A new join can cross the voting threshold
       updateVotesUI(currentVotes);
 
-      // Confetti only on the dev's own screen
       if (data.isDev && !data.isHidden && currentUserIsDev) {
         triggerDevConfetti();
       }
     }
-    // No explicit refocus here: adjustLayout() already restores focus to the
-    // chat input only when it was active, so a join never steals focus from a
-    // dev's open modal (or pops the mobile keyboard when you're not typing).
   }
 });
 
@@ -3186,7 +2990,6 @@ socket.on("user left", (userId) => {
       adjustLayout();
       playLeaveSound();
 
-      // Dropping below the voting minimum must clean up vote UI immediately
       adjustVoteButtonVisibility();
       updateVotesUI(currentVotes);
     }
@@ -3233,7 +3036,6 @@ socket.on("room update", (roomData) => {
       r.remove();
   });
 
-  // Refresh dev appearance on existing rows
   if (roomData.users) {
     roomData.users.forEach((u) => {
       const row = document.querySelector(`.chat-row[data-user-id="${u.id}"]`);
@@ -3251,9 +3053,6 @@ socket.on("room update", (roomData) => {
     );
     if (!ci) return;
     if (uid === currentUserId) {
-      // If you're actively typing in your own box, leave it completely alone.
-      // Rebuilding the DOM here is what was jumping the caret when someone
-      // joined. Your local input is already the source of truth.
       const typingHere =
         activeEl?.classList.contains("chat-input") &&
         activeEl.closest(".chat-row")?.dataset.userId === uid;
@@ -3272,7 +3071,6 @@ socket.on("room update", (roomData) => {
     }
   });
 
-  // Re-render vote UI after the row set may have changed
   adjustVoteButtonVisibility();
   updateVotesUI(roomData.votes || currentVotes);
   adjustLayout();
@@ -3324,8 +3122,6 @@ socket.on("dev kick success", (data) => {
 
 // ── 17. INITIALIZATION ──────────────────────────────────────────────────────
 
-// Discord avatar helpers (mirror of the lobby's): the URL is only ever built
-// from a validated snowflake id + CDN hash, never taken from data directly.
 const PFP_ID_RE = /^\d{17,20}$/;
 const PFP_HASH_RE = /^(?:a_)?[a-f0-9]{32}$/i;
 
@@ -3350,24 +3146,12 @@ function storedAvatar() {
 }
 
 function joinRoom(roomId, accessCode = null) {
-  // Re-announce identity from this browser before joining. "join room" carries
-  // no name and trusts the server session, but the session is in-memory: a
-  // server restart wipes it (the signed cookie survives, its data does not), so
-  // a plain join after a restart - or any full page load with a lost session,
-  // such as a hard refresh or the reload after being granted mod - would land
-  // as "Anonymous" / "On The Web". The lobby self-heals from localStorage the
-  // same way; the room page must too. Mirrors the reconnect path: announce,
-  // then join once the sign-in is acknowledged (with a timeout fallback so a
-  // missed ack never strands the join).
   const uname = currentUsername || localStorage.getItem("talkomaticUsername");
   const uloc =
     currentLocation ||
     localStorage.getItem("talkomaticLocation") ||
     "On The Web";
 
-  // No saved identity (first visit via a direct link), or one left over from
-  // when the lobby handed out guest names. The server refuses either, so send
-  // them to the lobby to pick a name rather than let the join fail there.
   if (!uname || isGuestUsername(uname)) {
     if (uname) localStorage.removeItem("talkomaticUsername");
     showInfoModal("Choose a username in the lobby first.", () => {
@@ -3396,18 +3180,6 @@ function joinRoom(roomId, accessCode = null) {
   else socket.once("connect", announceThenJoin);
 }
 
-// On reconnect (an idle/backgrounded tab that dropped, or a server restart)
-// get the user back into their room with no manual step. Without this we become
-// a ghost: still in the room on our own screen, but gone for everyone else, and
-// our typing reaches no one. Staff notice this most because they are never
-// AFK-redirected out of a room. Spectators re-spectate.
-//
-// A plain network blip keeps the server's session, so a bare rejoin works and
-// semi-private access stays valid via the session. A server restart wipes the
-// in-memory session, so the rejoin would otherwise land as "Anonymous": we
-// first re-announce identity through the normal sign-in ("join lobby", which
-// re-validates the name and the reserved-name/key rule), then rejoin once it is
-// set. Doing this on every reconnect is harmless and keeps the path simple.
 socket.io.on("reconnect", () => {
   if (tabSuperseded || !currentRoomId) return;
   if (isSpectating) {
@@ -3415,8 +3187,6 @@ socket.io.on("reconnect", () => {
     return;
   }
 
-  // Capture typed text now, before "room joined" / updateCurrentMessages can
-  // blank our row, so it can be re-pushed after a restart forgot our buffer.
   pendingRestoreText =
     (typeof selfRawText === "string" && selfRawText) || lastSentMessage || null;
 
@@ -3426,18 +3196,12 @@ socket.io.on("reconnect", () => {
     localStorage.getItem("talkomaticLocation") ||
     "On The Web";
 
-  // No identity to restore (shouldn't happen on an established room page), or a
-  // guest name left from before names were required - announcing that would
-  // just be refused. Fall back to the bare rejoin and let the still-live
-  // server session answer.
   if (!uname || isGuestUsername(uname)) {
     if (uname) localStorage.removeItem("talkomaticUsername");
     socket.emit("join room", { roomId: currentRoomId });
     return;
   }
 
-  // Rejoin once the sign-in is acknowledged. The timeout is a fallback so a
-  // missed ack never strands the reconnect on the "updating" overlay.
   let rejoined = false;
   const doJoin = () => {
     if (rejoined) return;
@@ -3453,12 +3217,10 @@ socket.io.on("reconnect", () => {
   });
 });
 
-// Reads roomId from the URL and scrubs any legacy ?accessCode= parameter
-// from the address bar and browser history
 function readAndScrubUrlParams() {
   const params = new URLSearchParams(window.location.search);
   const roomId = params.get("roomId");
-  const accessCode = params.get("accessCode"); // legacy fallback only
+  const accessCode = params.get("accessCode");
 
   if (accessCode !== null) {
     params.delete("accessCode");
@@ -3467,7 +3229,6 @@ function readAndScrubUrlParams() {
     try {
       history.replaceState(null, "", cleanUrl);
     } catch {
-      // history API unavailable, join still works
     }
   }
 
@@ -3476,9 +3237,6 @@ function readAndScrubUrlParams() {
 
 async function initRoom() {
   const filter = new ClientWordFilter();
-  // Emotes come from an external host - kick off the load but never block (or
-  // delay) entering the room on it; it populates emoteList in the background.
-  // The word filter is same-origin and fast, so we still await it before joining.
   loadEmotes();
   await filter.init();
   if (filter.ready) clientWordFilter = filter;
@@ -3495,7 +3253,6 @@ async function initRoom() {
   if (roomId) {
     currentRoomId = roomId;
     if (spectate) {
-      // Staff (dev or mod) read-only watch; the server validates the key.
       isSpectating = true;
       socket.emit("spectate room", { roomId });
     } else {
@@ -3520,8 +3277,6 @@ window.addEventListener("load", () => {
     .getElementById("copyInviteLink")
     .addEventListener("click", copyInviteLink);
 
-  // Invite section collapse toggle (chevron tab at the top-right of the bar).
-  // Collapsing hands the freed vertical space back to the chat area.
   const inviteToggle = document.getElementById("toggleInvite");
   const inviteSection = document.getElementById("inviteSection");
   if (inviteToggle && inviteSection) {
@@ -3545,7 +3300,6 @@ window.addEventListener("load", () => {
     });
   }
 
-  // Sound
   const savedMute = localStorage.getItem("soundEnabled");
   if (savedMute !== null) {
     soundEnabled = JSON.parse(savedMute);
@@ -3553,12 +3307,9 @@ window.addEventListener("load", () => {
   }
   muteToggleButton.addEventListener("click", toggleMute);
 
-  // Word filter toggle
   const filterBtn = document.getElementById("filterToggle");
   if (filterBtn) filterBtn.addEventListener("click", toggleWordFilter);
 
-  // Hide-bots toggle: a viewer preference, nothing more. The bot stays in
-  // the room and keeps running; this viewer just stops seeing its panel.
   const hideBotsBtn = document.getElementById("hideBotsToggle");
   if (hideBotsBtn) {
     const paintHideBots = () => {
@@ -3579,16 +3330,12 @@ window.addEventListener("load", () => {
     });
   }
 
-  // Layout toggle (desktop, client-side view preference). Shown only at <=5
-  // users; refreshLayoutToggle() handles when it appears/disappears.
   const layoutBtn = document.getElementById("layoutToggle");
   if (layoutBtn) layoutBtn.addEventListener("click", toggleRoomLayout);
 
-  // Viewport: immediate handler so the mobile keyboard reflows without lag
   if (window.visualViewport)
     window.visualViewport.addEventListener("resize", handleViewportChange);
 
-  // Ensure autocomplete element exists
   if (!document.getElementById("emoteAutocomplete")) {
     const el = document.createElement("div");
     el.id = "emoteAutocomplete";
@@ -3605,9 +3352,6 @@ document.querySelector(".leave-room").addEventListener("click", () => {
   window.location.href = "/index.html";
 });
 
-// One active tab per browser session. If another tab takes over this identity,
-// pause this tab with a clear notice rather than letting the two fight over one
-// identity (which crossed names and typed messages between tabs).
 let tabSuperseded = false;
 function showTabSupersededOverlay() {
   if (tabSuperseded) return;
@@ -3648,8 +3392,6 @@ function showTabSupersededOverlay() {
 }
 socket.on("session superseded", showTabSupersededOverlay);
 
-// Window resize runs ONE debounced layout pass (the visualViewport listener
-// above stays immediate for keyboard responsiveness)
 let viewportDebounceTimer = null;
 function debouncedViewportChange() {
   if (viewportDebounceTimer) clearTimeout(viewportDebounceTimer);
@@ -3663,14 +3405,12 @@ setInterval(updateTimeLabels, 1000);
 window.addEventListener("resize", debouncedViewportChange);
 
 // ════════════════════════════════════════════════════════════════════════════
-// 18. STAFF UI (mod + dev) - built on the shared StaffUI kit. The server
-// validates role + hierarchy on every action; this layer is presentation only.
 // ════════════════════════════════════════════════════════════════════════════
 
 let currentRoomLocked = false;
 let currentRoomSlow = false;
 let currentRoomSpotlight = false;
-let currentRoomMaxSize = 0; // effective capacity of the current room (0 = default)
+let currentRoomMaxSize = 0;
 let hudInterval = null;
 let partyHornAudio = null;
 
@@ -3698,8 +3438,6 @@ function createModBadge(level) {
   return badge;
 }
 
-// Bots always wear this. The server sets isBotUser on every view of a bot
-// (hosted or API), so automation can never sit in a room passing as a person.
 function createBotBadge(owner) {
   const badge = document.createElement("span");
   badge.className = "bot-badge";
@@ -3708,9 +3446,6 @@ function createBotBadge(owner) {
   return badge;
 }
 
-// Small dev-only marker shown next to a staffer who is hidden or vanished from
-// normal users. The server sends the isHidden/isVanished flags only to devs, so
-// this never reaches a regular viewer.
 function makeStaffConcealedMarker(user) {
   const span = document.createElement("span");
   span.className = "staff-concealed-marker";
@@ -3725,7 +3460,6 @@ function makeStaffConcealedMarker(user) {
   return span;
 }
 
-// Report a user to staff. Available to normal users (staff act via the gear).
 async function openReportPrompt(user) {
   const name = user.username || "user";
   const cats = [
@@ -3818,13 +3552,8 @@ async function openUserNoteDialog(user, { viewOnly = true } = {}) {
 function openUserStaffMenu(user) {
   if (!window.StaffUI) return;
   const name = user.username || "user";
-  // Junior (level 1) mods handle what is on screen: wipe text, reset a name or
-  // location, turn a picture off, warn, and kick. Full (level 2) mods add the
-  // things that outlast the room - room bans and IP blocks. The server enforces
-  // this on every action regardless of what this menu shows.
   const isFullMod =
     currentUserIsDev || (currentUserIsMod && currentUserModLevel >= 2);
-  // Grouped so the menu reads as "tidy this up" then "remove them" then "roles"
   const cleanup = [];
   const items = [];
 
@@ -3893,7 +3622,6 @@ function openUserStaffMenu(user) {
       }),
   });
 
-  // Kick. Full mods/devs also place a room ban; junior mods can only remove.
   items.push({
     icon: '<i class="fas fa-user-slash"></i>',
     label: "Kick from room",
@@ -3934,7 +3662,6 @@ function openUserStaffMenu(user) {
     });
   }
 
-  // IP block - full mods / devs only.
   if (isFullMod) {
     items.push({
       icon: '<i class="fas fa-ban"></i>',
@@ -3945,7 +3672,6 @@ function openUserStaffMenu(user) {
     });
   }
 
-  // Warn: available to every mod level.
   items.push({
     icon: '<i class="fas fa-bullhorn"></i>',
     label: "Warn...",
@@ -3971,8 +3697,6 @@ function openUserStaffMenu(user) {
     },
   });
 
-  // Grant a mod role to a normal user. Devs choose the level; full (L2) mods
-  // may mint a junior (L1) key only. The server re-checks who may grant what.
   const makeModItem = {
     icon: '<i class="fas fa-user-shield"></i>',
     label: currentUserIsDev ? "Make this user a mod..." : "Make junior mod",
@@ -4082,8 +3806,6 @@ function openUserStaffMenu(user) {
         desc: "Revoke this user's mod key now",
         danger: true,
         onClick: async () => {
-          // The reason goes on their former-staff record in the dashboard, so
-          // it is asked for here too rather than only in the Moderators tab.
           const r = await StaffUI.prompt({
             title: "Remove mod",
             icon: '<i class="fas fa-user-xmark"></i>',
@@ -4171,10 +3893,6 @@ function openIpBlockPicker(user) {
                   name: "banRange",
                   type: "checkbox",
                   label: "Also block their surrounding range",
-                  // Off by default. This used to be on, which was harmless
-                  // because a range only ever applied to IPv6. Now that IPv4
-                  // resolves to a /24 it can cover 256 addresses, so it has to
-                  // be a deliberate choice rather than a default.
                   value: false,
                   help: "Covers the whole network they sit on (IPv6 /64, or IPv4 /24, which is up to 256 addresses) instead of the single address. Use it for someone who keeps returning on a neighbouring address, not as a matter of course.",
                 },
@@ -4217,9 +3935,6 @@ function createStaffPanelButton() {
 function openStaffPanel() {
   if (!window.StaffUI) return;
   const rid = currentRoomId;
-  // Every staff level can tidy a room: clear the board, rename it, lock it, or
-  // slow it down, all reversible. Closing a room deletes it, so that stays with
-  // full (level 2) mods. The server enforces this regardless of what shows here.
   const isFullMod =
     currentUserIsDev || (currentUserIsMod && currentUserModLevel >= 2);
   const roomItems = [
@@ -4307,7 +4022,6 @@ function openStaffPanel() {
   const groups = [];
   if (roomItems.length) groups.push({ title: "This room", items: roomItems });
 
-  // Appearance (moved out of the navbar to keep it tidy on mobile)
   const appearanceItems = [
     {
       id: "staffHideItem",
@@ -4496,8 +4210,6 @@ function openStaffPanel() {
     ],
   });
 
-  // Name the rank in the subtitle so a junior can see at a glance why some
-  // actions are not offered to them.
   const rankLabel = currentUserIsDev
     ? "Developer"
     : currentUserModLevel >= 2
@@ -4512,8 +4224,6 @@ function openStaffPanel() {
     subtitle: rankLabel,
     groups,
     onHelp: () => StaffUI.help(staffRole()),
-    // Reflow the user-box grid when the drawer pushes the room aside, so a busy
-    // room stays fully visible beside the panel instead of hidden behind it.
     onLayoutChange: adjustLayout,
   });
 }
@@ -4676,9 +4386,6 @@ function renderSpectate(data) {
   currentRoomLayout = data.layout || currentRoomLayout;
   currentRoomCreatedAt = data.createdAt || 0;
 
-  // Carry the spectator's role through so the full staff panel is available
-  // while watching: devs keep every dev power (including Max room size), mods
-  // get the mod panel. Drawing/typing stays blocked server-side via spectating.
   currentUserIsDev = !!data.isDev;
   currentUserIsMod = !!data.isMod;
   currentUserModLevel = data.modLevel || 0;
@@ -4693,8 +4400,6 @@ function renderSpectate(data) {
   if (rid) rid.textContent = data.roomId ? "Room ID: " + data.roomId : "*";
   const c = document.querySelector(".chat-container");
   if (c) {
-    // Same atomic swap as updateRoomUI so spectating an active room doesn't
-    // flash a half-built user list on slower devices.
     const frag = document.createDocumentFragment();
     (data.users || []).forEach((u) => createUserRow(u, frag));
     c.innerHTML = "";
@@ -4705,7 +4410,6 @@ function renderSpectate(data) {
   adjustLayout();
   if (data.currentMessages) updateCurrentMessages(data.currentMessages);
 
-  // Build the staff/dev tools button and reflect this room's live flags.
   if (isStaff()) createStaffPanelButton();
   applyRoomFlags(data);
 
@@ -4753,9 +4457,6 @@ socket.on("staff frozen", (data) => {
 socket.on("buffer wiped", () => {
   selfRawText = "";
   lastSentMessage = "";
-  // Clear the live input node straight from the DOM (not just the cached
-  // reference, which can go stale after a re-render) so the text really
-  // disappears from the wiped user's own textbox.
   const ci =
     document.querySelector(
       `.chat-row[data-user-id="${currentUserId}"] .chat-input`,
@@ -4847,8 +4548,6 @@ socket.on("maintenance status", (data) => {
 socket.on("staff action result", (data) => {
   if (!data) return;
   if (data.action === "room size" && data.size) currentRoomMaxSize = data.size;
-  // Shared wording, so the same action reads identically here and in the
-  // dashboard, and says who it hit and what it actually did.
   if (window.StaffUI) StaffUI.actionToast(data);
   else notify((data.ok ? "Done: " : "Failed: ") + data.action, data.ok ? "success" : "error");
 });
@@ -4919,9 +4618,6 @@ socket.on("you are now mod", (d) => {
   );
   setTimeout(() => window.location.reload(), 1600);
 });
-// Live level change (promote/demote) without a reload: update our cached level
-// so the next staff menu reflects the new powers. Our own badge refreshes via
-// the room user-update broadcast.
 socket.on("staff level changed", (d) => {
   if (!d) return;
   currentUserModLevel = d.level === 1 ? 1 : 2;
@@ -4933,22 +4629,17 @@ socket.on("staff level changed", (d) => {
     { timeout: 6000 },
   );
 });
-// Device identity: stash the activity summary for later features.
 socket.on("identity status", (d) => {
   if (window.TalkomaticIdentity) window.TalkomaticIdentity.activity = d || null;
 });
 socket.on("report received", () =>
   notify("Thanks - your report was sent to the moderators.", "success"),
 );
-// Staff-only live alerts (reports, mod-abuse flags). The server only emits this
-// to qualifying staff sockets, so non-staff never receive it.
 socket.on("staff notice", (d) => {
   if (d && d.text)
     notify(d.text, "warning", { title: "Staff alert", timeout: 8000 });
 });
 
-// Invite referral capture: ?ref=CODE records (once, server-side) who referred
-// this browser, in case someone lands straight in a room from an invite link.
 (function captureInviteRef() {
   try {
     const code = new URLSearchParams(window.location.search).get("ref");
@@ -4962,13 +4653,11 @@ socket.on("staff notice", (d) => {
   } catch (e) { }
 })();
 
-// Open the key-entry modal when the page is opened with #staff in the URL
 if (window.location.hash === "#staff") setTimeout(openStaffKeyEntry, 600);
 window.addEventListener("hashchange", () => {
   if (window.location.hash === "#staff") openStaffKeyEntry();
 });
 
-// Room-specific staff styles (badges, nav button, HUD, flags, spectate banner)
 (function injectRoomStaffStyles() {
   const css = `
     .user-info{flex-wrap:nowrap;overflow:hidden;}

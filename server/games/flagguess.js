@@ -1,11 +1,5 @@
 // server/games/flagguess.js
-// Ten flags, everybody guessing at once. Nobody waits for a turn, so this
-// plays the same on your own as it does with twenty people.
-//
-// The country never leaves the server while a round is running: the view
-// carries an opaque image token and a masked hint, and the answer only appears
-// once the round is over. Guesses are matched against a normalized form with
-// aliases, so "UK", "Holland" and "Ivory Coast" all count.
+// Ten flags, everybody guessing at once.
 
 const {
   COUNTRIES, BY_CODE, matches, isNearMiss, isAnyCountry, normalize,
@@ -15,10 +9,8 @@ const flagcdn = require("./flagcdn");
 const ROUNDS = 10;
 const GUESS_MS = 24000;
 const REVEAL_MS = 5500;
-const OPEN_MS = 3000; // a beat before the first flag, so nobody misses it
+const OPEN_MS = 3000;
 
-// A mix, so a game is neither ten gimmes nor ten obscurities. Roughly half the
-// flags anybody could name, then a step up, then a couple for the enthusiasts.
 const MIX = [1, 1, 1, 2, 1, 2, 3, 2, 1, 3];
 
 function shuffled(arr) {
@@ -30,8 +22,6 @@ function shuffled(arr) {
   return a;
 }
 
-// Ten countries, no repeats, following the difficulty mix where it can. If a
-// tier runs dry it borrows from the next one rather than giving up.
 function pickCountries() {
   const byTier = { 1: shuffled(COUNTRIES.filter((c) => c.tier === 1)),
                    2: shuffled(COUNTRIES.filter((c) => c.tier === 2)),
@@ -63,7 +53,6 @@ function create(players) {
     name: c.name,
     token: flagcdn.tokenFor(c.code),
   }));
-  // Fetch the lot now so no round opens on an empty canvas.
   flagcdn.warm(picks.map((p) => p.code));
 
   const state = {
@@ -71,15 +60,15 @@ function create(players) {
       userId: p.userId,
       username: p.username,
       score: 0,
-      got: 0, // rounds they named
+      got: 0,
       joinedAt: Date.now(),
     })),
     picks,
     round: 0,
     phase: "opening",
     endsAt: Date.now() + OPEN_MS,
-    guessed: [], // this round: { userId, username, pts, place, ms }
-    misses: [], // this round: userIds who have used their close-guess grace
+    guessed: [],
+    misses: [],
     over: false,
   };
   return state;
@@ -94,8 +83,6 @@ function addScore(state, userId, n) {
   if (p) p.score += n;
 }
 
-// Letters appear as the clock runs down. The length is free from the start,
-// which is the difference between a guessable flag and a coin toss.
 function maskFor(state, now) {
   const pick = current(state);
   if (!pick) return "";
@@ -108,7 +95,6 @@ function maskFor(state, now) {
   const shown = new Set();
   if (elapsed > 0.45 && letters.length) shown.add(letters[0]);
   if (elapsed > 0.7 && letters.length > 2) {
-    // Same second letter every time for a given country, so it never flickers.
     let seed = 0;
     for (let i = 0; i < name.length; i++) seed = (seed * 31 + name.charCodeAt(i)) >>> 0;
     shown.add(letters[1 + (seed % Math.max(1, letters.length - 1))]);
@@ -163,14 +149,11 @@ function move(state, userId, mv) {
   if (!pick) return { ok: false, err: "No flag up right now." };
 
   if (!matches(said, pick.code)) {
-    // Wrong guesses go in the feed as typed. They give nothing away and they
-    // are most of the fun of watching somebody else play.
     return {
       ok: true,
       quiet: true,
       correct: false,
-      known: isAnyCountry(said), // they named a country, just not this one
-      // Nearly right, but the spelling could have meant somebody else too.
+      known: isAnyCountry(said),
       close: isNearMiss(said, pick.code),
       chat: said,
     };
@@ -189,7 +172,6 @@ function move(state, userId, mv) {
   me.got++;
   addScore(state, userId, pts);
 
-  // Everybody has it, so stop running the clock down for nobody.
   if (state.guessed.length >= state.players.length) toReveal(state);
 
   return {
@@ -222,8 +204,6 @@ function tick(state, now) {
   return false;
 }
 
-// Somebody walked in mid-game. They play from right now and are scored on what
-// is left, which is the only honest way to let people join a running quiz.
 function addPlayer(state, p) {
   if (state.over) return false;
   if (state.players.some((x) => x.userId === p.userId)) return false;
@@ -245,7 +225,6 @@ function removePlayer(state, userId) {
     state.phase = "done";
     return true;
   }
-  // The people left may all have it now.
   if (state.phase === "guessing" && state.guessed.length >= state.players.length) {
     toReveal(state);
     return true;
@@ -254,7 +233,7 @@ function removePlayer(state, userId) {
 }
 
 function turnOf() {
-  return null; // everybody plays at once
+  return null;
 }
 
 function isOver(state) {
@@ -292,11 +271,8 @@ function view(state, userId) {
           : OPEN_MS,
     round: state.round,
     totalRounds: state.picks.length,
-    // An opaque handle, not the country. The image comes back from our own
-    // origin so the code is nowhere in the page.
     token: pick && state.phase !== "opening" ? pick.token : null,
     hint: pick && state.phase === "guessing" ? maskFor(state, now) : null,
-    // The answer, only once guessing is over.
     reveal: revealing && pick ? pick.name : null,
     guessed: state.guessed.map((g) => ({
       userId: g.userId,
@@ -350,7 +326,6 @@ module.exports = {
   view,
   addPlayer,
   removePlayer,
-  // exported for tests
   _pickCountries: pickCountries,
   _maskFor: maskFor,
   ROUNDS,

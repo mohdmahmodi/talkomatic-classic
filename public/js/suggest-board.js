@@ -1,27 +1,20 @@
 // public/js/suggest-board.js
-// Ideas & Bugs board for the lobby. Loads after lobby-client.js and reuses its
-// `socket`. Everyone can post, reply and vote; people can edit and delete their
-// own; staff set the status. All text is escaped before the markdown-lite
-// formatting is applied, so nothing a user types can become live HTML.
-//
-// The board carries hundreds of posts, so everything that makes one findable -
-// search, the type and status filters, sorting - happens here on the whole list
-// the server sends, rather than as a round trip per keystroke.
+// Ideas & Bugs board for the lobby.
 (function () {
   "use strict";
   if (typeof socket === "undefined") return;
 
-  var board = null; // last "board data" payload from the server
-  var sortMode = "top"; // "top" | "new"
-  var expanded = {}; // post id -> replies section open
-  var editing = null; // { id, replyId } currently being edited, or null
+  var board = null;
+  var sortMode = "top";
+  var expanded = {};
+  var editing = null;
   var query = "";
-  var kindFilter = "all"; // "all" | "idea" | "bug"
-  var statusFilter = new Set(); // empty = every status
+  var kindFilter = "all";
+  var statusFilter = new Set();
   var mineOnly = false;
   var built = false;
   var isOpen = false;
-  var knownIds = null; // post ids already seen, so live-arriving ones can flash
+  var knownIds = null;
 
   // ── helpers ───────────────────────────────────────────────────────────────
 
@@ -40,8 +33,6 @@
       .replace(/"/g, "&quot;");
   }
 
-  // Markdown-lite: **bold** *italic* ~~strike~~ `code`. Escaped first, so the
-  // only HTML that can appear is what this function itself emits.
   function renderRich(text) {
     var s = esc(text);
     s = s.replace(/\*\*([^*\n][^*]*?)\*\*/g, "<strong>$1</strong>");
@@ -52,13 +43,8 @@
     return s;
   }
 
-  // Everything posted before the board had a title field has none, so one is
-  // taken off the front of the body. Without this, 300 old posts would all show
-  // a blank heading.
   function titleOf(p) {
     if (p.title) return p.title;
-    // The markers come off too: a heading is plain text, so "**dark mode**"
-    // would otherwise show its asterisks where the body renders it bold.
     var flat = String(p.text || "")
       .replace(/\s+/g, " ")
       .replace(/\*\*|~~|[*`]/g, "")
@@ -79,8 +65,6 @@
     if (window.StaffUI) StaffUI.toast(msg, { type: type || "info" });
   }
 
-  // Role badges come only from the server-stamped role field, never from the
-  // display name, so they cannot be impersonated.
   function badgeFor(role) {
     if (role === "dev") {
       var b = el("span", "sb-badge sb-badge-dev");
@@ -105,8 +89,6 @@
     return null;
   }
 
-  // Plain words on purpose. Most of the people reading this board are between
-  // 10 and 16, and "Open" reads as a verb to them - "New" does not.
   var STATUS_META = {
     open: { label: "New", cls: "sb-st-open", icon: "fa-circle-dot" },
     approved: { label: "Approved", cls: "sb-st-approved", icon: "fa-check" },
@@ -171,7 +153,6 @@
 
     var modal = el("div", "sb-modal");
 
-    // ── Header ──
     var head = el("div", "sb-head");
     var titleWrap = el("div", "sb-title-wrap");
     var title = el("div", "sb-title");
@@ -198,7 +179,6 @@
     head.appendChild(titleWrap);
     head.appendChild(headBtns);
 
-    // ── Help panel, hidden until the ? is pressed ──
     helpPanel = el("div", "sb-help");
     helpPanel.style.display = "none";
     helpPanel.innerHTML =
@@ -217,7 +197,6 @@
       "<li>You get 3 posts a day, so make them count.</li>" +
       "</ul>";
 
-    // ── Controls: search, then filter rows ──
     var controls = el("div", "sb-controls");
 
     var searchRow = el("div", "sb-search-row");
@@ -242,12 +221,10 @@
     controls.appendChild(searchRow);
     controls.appendChild(filterWrap);
 
-    // ── Composer, collapsed until "New post" is pressed ──
     composeWrap = el("div", "sb-compose-wrap");
     composeWrap.style.display = "none";
     var compose = el("div", "sb-compose");
 
-    // Idea / Bug toggle, first thing so the rest reads in context.
     kindWrap = el("div", "sb-kind-toggle");
     var kindLabel = el("span", "sb-field-label", "This is a");
     kindWrap.appendChild(kindLabel);
@@ -322,7 +299,6 @@
     compose.appendChild(composeFoot);
     composeWrap.appendChild(compose);
 
-    // ── List ──
     countWrap = el("div", "sb-count-line", "");
     listWrap = el("div", "sb-list");
 
@@ -454,8 +430,6 @@
       var meta = STATUS_META[st];
       statusRow.appendChild(
         chipButton(meta.label, statusFilter.has(st), function () {
-          // Nothing ticked means everything, which is what people expect from
-          // a filter row that starts empty.
           if (statusFilter.has(st)) statusFilter.delete(st);
           else statusFilter.add(st);
           renderFilters();
@@ -539,8 +513,6 @@
 
   function renderList() {
     if (!listWrap) return;
-    // Live updates re-render the whole list; keep the reader's place, any
-    // half-typed reply, and its focus, so an arriving post never disrupts.
     var scrollTop = listWrap.scrollTop;
     var drafts = {};
     var focusPid = null;
@@ -590,7 +562,6 @@
     listWrap.scrollTop = scrollTop;
   }
 
-  // An inline editor, used for both a post and a reply.
   function editorFor(p, r) {
     var wrap = el("div", "sb-editor");
     var ta = el("textarea", "sb-input");
@@ -639,7 +610,6 @@
       "sb-card" + (p.status !== "open" ? " sb-" + p.status : ""),
     );
 
-    // Vote column
     var votes = el("div", "sb-votes");
     var upBtn = el(
       "button",
@@ -667,10 +637,8 @@
     votes.appendChild(score);
     votes.appendChild(downBtn);
 
-    // Main column
     var main = el("div", "sb-main");
 
-    // Title line: what makes a list of 300 skimmable.
     var titleRow = el("div", "sb-card-title-row");
     var km = KIND_META[p.kind || "idea"];
     var kindChip = el("span", "sb-kind " + km.cls);
@@ -706,8 +674,6 @@
     if (isEditing) {
       main.appendChild(editorFor(p, null));
     } else {
-      // Old posts have no separate title, so the body would repeat what the
-      // heading already says. Show it only when it adds something.
       if (p.title || String(p.text || "").replace(/\s+/g, " ").trim().length > 70) {
         var body = el("div", "sb-text");
         body.innerHTML = renderRich(p.text);
@@ -729,7 +695,6 @@
     });
     foot.appendChild(replyToggle);
 
-    // Your own post: edit and delete, whoever you are.
     if (p.mine && !isEditing) {
       var mineCtl = el("span", "sb-own-controls");
       var edit = el("button", "sb-link", "Edit");
@@ -756,7 +721,6 @@
       foot.appendChild(mineCtl);
     }
 
-    // Staff: set the status, and remove anything.
     if (board.canModerate) {
       var ctl = el("span", "sb-dev-controls");
       STATUS_ORDER.forEach(function (s) {
@@ -870,10 +834,6 @@
   }
 
   // ── Unread badges on the lobby button ─────────────────────────────────────
-  // Somebody who posts an idea has no reason to come back unless something
-  // happened to it, so the button says what did. Three counts, each with its
-  // own icon as well as its own colour: colour alone is not a label, and a
-  // bare number tells a reader nothing about which kind of news it is.
 
   var SEEN_KEY = "tkBoardSeen";
 
@@ -889,7 +849,6 @@
     try {
       localStorage.setItem(SEEN_KEY, String(Date.now()));
     } catch (e) {
-      /* private mode: the badge simply keeps showing */
     }
   }
 
@@ -919,7 +878,6 @@
       host.appendChild(pill);
       words.push(pill.title);
     });
-    // Screen readers and long-press tooltips get the sentence, not the colours.
     link.title = words.length ? words.join(", ") : "";
     link.classList.toggle("has-notif", words.length > 0);
   }
@@ -930,7 +888,6 @@
 
   socket.on("board badges", renderBadges);
 
-  // Ask once the socket is up, and again on reconnect.
   if (socket.connected) refreshBadges();
   socket.on("connect", refreshBadges);
 
@@ -942,8 +899,6 @@
     overlay.classList.add("show");
     document.body.style.overflow = "hidden";
     socket.emit("board open");
-    // Opening the board IS reading it, so the badge clears now rather than on
-    // close: somebody who opens it, reads a reply and closes it has seen it.
     markSeen();
     renderBadges(null);
   }

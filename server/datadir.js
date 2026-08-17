@@ -1,7 +1,5 @@
 // server/datadir.js
-// Where runtime JSON stores are written. Defaults to the repo root (historic
-// behavior for plain `npm start`). Set DATA_DIR (Docker uses /app/data) to
-// keep state on a mounted volume that survives redeploys.
+// Where runtime JSON stores are written.
 const path = require("path");
 const fs = require("fs");
 

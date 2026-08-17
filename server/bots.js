@@ -1,33 +1,5 @@
 // server/bots.js
 // User-made room bots, both tiers.
-//
-// Tier 1 is the no-code creator (botcreator.html): a bot is a JSON rule set -
-// triggers, conditions, actions - executed HERE, by this interpreter. Nobody's
-// code ever runs on this server; the "program" is data, capped and inspectable.
-// A deployed bot occupies a real seat in room.users (flagged isBotUser) and
-// types into a real textbox buffer at human speed, so to every client it is
-// just another member of the room.
-//
-// Tier 2 is the developer API: an external process connects over Socket.IO
-// with a bot token (server/security.js) and drives an ordinary user session
-// from its own code. Those sockets are marked isBot at the handshake; rooms.js
-// stamps their room entry isBotUser and holds them to the same per-room cap,
-// and the staff surface here can see and kill them like any hosted bot.
-//
-// The rules that keep this from ever hurting the server or the rooms:
-//   - a room holds 1 bot per 5 seats, capped at 5, both tiers combined
-//   - one deployed bot per owner, MAX_SAVED saved configs per owner
-//   - a bot runs only while its owner is connected somewhere on the site;
-//     the sweep retires it (grace period) when the owner is gone
-//   - a bot alone in a room leaves, so bots never keep empty rooms alive
-//   - every action drains a token bucket; an empty bucket drops the action
-//   - everything a bot says passes sanitizeMessage + IP redaction; automod
-//     is each viewer's client-side choice, same as for human keystrokes
-//   - a global kill switch (staff), plus per-bot kill and room vote-kick
-//
-// Wired from rooms.js: init(deps) hands over the room broadcast helpers,
-// register(socket, safe) attaches the socket events, and three tiny hooks
-// (onText / onJoin / onLeave) feed the interpreter its triggers.
 
 const path = require("path");
 const fs = require("fs");
@@ -54,33 +26,30 @@ const STORE_PATH = path.join(DATA_DIR, "bots.json");
 
 // ── Limits (the whole abuse posture in one place) ───────────────────────────
 
-// Creative room (rules, actions, say length) is deliberately roomy: people
-// build whole games. The abuse posture lives in the RATE limits underneath
-// (queue, tokens, say gap), which is what actually protects a room.
 const LIMITS = {
-  MAX_BOTS_PER_ROOM: 5, // the hard ceiling; rooms earn 1 bot per 5 seats
-  MAX_SAVED: 20, // saved configs per owner
+  MAX_BOTS_PER_ROOM: 5,
+  MAX_SAVED: 20,
   MAX_DEPLOYED_PER_OWNER: 1,
-  MAX_ACTIVE_TOTAL: 20, // hosted bots server-wide, a hard load ceiling
+  MAX_ACTIVE_TOTAL: 20,
   MAX_RULES: 200,
   MAX_ACTIONS_PER_RULE: 20,
   MAX_CONDITIONS_PER_RULE: 10,
   MAX_SAY_LENGTH: 1000,
-  MAX_QUEUE: 12, // pending actions; a full queue drops the whole new group
-  ACTION_TOKENS: 20, // token bucket: actions per minute
+  MAX_QUEUE: 12,
+  ACTION_TOKENS: 20,
   SAY_MIN_GAP_MS: 1500,
   TIMER_MIN_MINUTES: 2,
-  MAX_VARS: 256, // global variables per bot
-  MAX_USER_VARS: 200, // per-user variable rows per bot (oldest evicted)
+  MAX_VARS: 256,
+  MAX_USER_VARS: 200,
   VAR_VALUE_LENGTH: 500,
-  UTTERANCE_IDLE_MS: 1500, // text unchanged this long = the person finished
-  TYPE_CHARS_PER_TICK: 4, // ~33 chars/sec at the 120ms tick
-  OWNER_GRACE_MS: 60000, // owner may drop briefly (reload) without killing bots
+  UTTERANCE_IDLE_MS: 1500,
+  TYPE_CHARS_PER_TICK: 4,
+  OWNER_GRACE_MS: 60000,
   MAX_CONFIG_BYTES: 200000,
 };
 
 const TICK_MS = 120;
-const SWEEP_EVERY_TICKS = 16; // ~2s
+const SWEEP_EVERY_TICKS = 16;
 
 // ── Persistence (same flat JSON store pattern as suggestions/appeals) ───────
 
@@ -125,9 +94,6 @@ function flushSync() {
   }
 }
 
-// Saved bots belong to the device, not the session: the device id survives
-// sign-ins and restarts, so people keep their bots. Sessions without a device
-// id (rare) fall back to the session user id.
 function ownerKeyOf(socket) {
   return socket.deviceId || socket.handshake?.session?.userId || null;
 }
@@ -142,9 +108,6 @@ function ownerRecord(ownerKey, create) {
 }
 
 // ── Rule validation ─────────────────────────────────────────────────────────
-// Everything a config can contain is whitelisted here. Anything else is
-// stripped, so a hand-crafted payload cannot smuggle extra shapes into the
-// store or the interpreter.
 
 const TRIGGERS = ["command", "says", "mention", "join", "leave", "timer"];
 const ACTIONS = ["say", "append", "wait", "set", "add", "random", "repeat", "clear", "leave"];
@@ -158,7 +121,6 @@ function cleanTemplate(text, max) {
   return sanitizeMessage(String(text == null ? "" : text)).slice(0, max);
 }
 
-// Returns { ok, bot } with a fully rebuilt object, or { ok:false, error }.
 function validateConfig(input, existingId) {
   if (!input || typeof input !== "object")
     return { ok: false, error: "No bot data." };
@@ -175,8 +137,6 @@ function validateConfig(input, existingId) {
   if (linkfilter.containsLink(name))
     return { ok: false, error: "Names cannot contain a link." };
 
-  // The line after the slash, like a person's "Sara / Earth". Their choice;
-  // the BOT badge is what marks it as a bot, not this text.
   let location = enforceLocationLimit(sanitizeName(String(input.location || "")));
   if (location && wordFilter.checkText(location).hasOffensiveWord)
     return { ok: false, error: "That location is not allowed." };
@@ -274,7 +234,6 @@ function validateConfig(input, existingId) {
         if (a.type === "set") act.value = cleanTemplate(a.value, 500);
         else if (a.type === "add") {
           act.amount = cleanTemplate(a.amount, 40) || "1";
-          // Older saved bots have no op; they keep plain adding forever.
           act.op = MATH_OPS.includes(a.op) ? a.op : "add";
         } else {
           act.from = cleanTemplate(a.from, 1000);
@@ -322,13 +281,10 @@ function validateConfig(input, existingId) {
 
 // ── Runtime state ───────────────────────────────────────────────────────────
 
-let deps = null; // injected by rooms.js in init()
+let deps = null;
 
-// botUserId -> runtime
 const active = new Map();
-// roomId -> Map(userId -> { text, changedAt, doneText }) for utterance detection
 const roomText = new Map();
-// ownerId(session userId) -> last time a socket of theirs was seen connected
 const ownerSeen = new Map();
 
 let tickTimer = null;
@@ -342,9 +298,6 @@ function botCountInRoom(room) {
   return (room?.users || []).filter((u) => u.isBotUser).length;
 }
 
-// How many bots a room may hold, both tiers combined: 1 per 5 seats, so the
-// default 5-person room gets 1, a 10-person room 2, and a 25+ seat room the
-// ceiling of 5. Bigger rooms have the people to absorb more bot chatter.
 function maxBotsForRoom(room) {
   const cap = deps && deps.roomCapacity ? deps.roomCapacity(room) : 5;
   return Math.max(1, Math.min(LIMITS.MAX_BOTS_PER_ROOM, Math.floor(cap / 5)));
@@ -361,10 +314,6 @@ function activeBotOfOwner(ownerKey) {
   return null;
 }
 
-// The stand-in for a socket. The room broadcast helpers only ever read
-// roomId, id, and the session identity off it - verified against
-// emitRoomChatUpdate / emitRoomTyping / canRecipientSeeDevUser before this
-// shape was settled - so this is every field they touch.
 function makeFakeSocket(botUserId, name, roomId, location) {
   return {
     id: "bot:" + botUserId,
@@ -381,16 +330,11 @@ function makeFakeSocket(botUserId, name, roomId, location) {
 }
 
 // ── Template expansion ──────────────────────────────────────────────────────
-// Single pass, never recursive: a variable whose value contains {braces} is
-// inserted as-is, so user data can never become new template code.
 
 function expand(rt, template, ctx) {
   return String(template).replace(/\{([a-z0-9:_|.\- ]+)\}/gi, (whole, body) => {
     const key = body.trim();
     const low = key.toLowerCase();
-    // Both vocabularies work everywhere. The creator page teaches the plain
-    // one ({name}, {word1}, {memory:coins}); the older coder-flavored tokens
-    // stay valid so no saved bot ever breaks.
     if (low === "user" || low === "name") return ctx.username || "someone";
     if (low === "line" || low === "text") return ctx.line || "";
     if (low === "arg" || low === "words" || low === "everything")
@@ -409,10 +353,7 @@ function expand(rt, template, ctx) {
       return row && row[n] != null ? String(row[n]) : "0";
     }
     if (low === "bot") return rt.name;
-    // A line break mid-say, for people who miss that Enter works in the box.
     if (low === "newline") return "\n";
-    // Every !command this bot answers to, one per line: a !help say that
-    // never goes stale.
     if (low === "commands") {
       const seen = [];
       for (const r of rt.bot.rules)
@@ -420,7 +361,6 @@ function expand(rt, template, ctx) {
           seen.push("!" + r.on.word);
       return seen.join("\n");
     }
-    // How long the bot has been in its room, for !info style commands.
     if (low === "runtime")
       return fmtRuntime(Date.now() - (rt.deployedAt || Date.now()));
     if (low === "room") return rt.roomName || "";
@@ -457,7 +397,7 @@ function expand(rt, template, ctx) {
       if (opts.length) return opts[Math.floor(Math.random() * opts.length)];
       return whole;
     }
-    return whole; // unknown token: left visible so the creator can see the typo
+    return whole;
   });
 }
 
@@ -498,8 +438,6 @@ function setVar(rt, act, ctx, value) {
     if (!ctx.userId) return;
     const u = rt.bot.uvars;
     if (!u[ctx.userId]) {
-      // Oldest row out when the table is full, so one bot cannot grow without
-      // bound by watching a busy room for a month.
       const keys = Object.keys(u);
       if (keys.length >= LIMITS.MAX_USER_VARS) delete u[keys[0]];
       u[ctx.userId] = {};
@@ -523,10 +461,6 @@ function getVar(rt, act, ctx) {
   return rt.bot.vars[act.var];
 }
 
-// The "change a memory" action's arithmetic, one place for both the live tick
-// and the test sandbox. Divide by zero keeps the old value instead of turning
-// a counter into Infinity, and results are trimmed to two decimals so a
-// divided score stays readable.
 function applyMath(cur, op, amt) {
   const a = Number.isFinite(cur) ? cur : 0;
   const b = Number.isFinite(amt) ? amt : 0;
@@ -540,16 +474,6 @@ function applyMath(cur, op, amt) {
 
 // ── The interpreter ─────────────────────────────────────────────────────────
 
-// A matched rule becomes a GROUP on the bot's single queue, and groups run
-// strictly one at a time. Two things hang on this shape:
-//   - conditions are evaluated when the group STARTS, not when the trigger
-//     fired, so "!rps" can roll a random in rule 1 and have rules 2-9 judge
-//     the result - earlier rules' variable writes are visible to later ones
-//   - the action token is charged at the same moment, so a rule whose
-//     conditions turn out false costs nothing
-// A repeat block runs everything above it again, 2-5 times in total. It is
-// unrolled into a flat list the moment the rule fires, so the interpreter
-// itself never loops. Hard cap keeps a 5x repeat of 5 blocks bounded.
 function unrollActions(acts) {
   if (!acts.some((a) => a.type === "repeat")) return acts;
   const out = [];
@@ -577,8 +501,6 @@ function fireRule(rt, rule, ctx, ri) {
     ctx,
     i: 0,
     checked: false,
-    // Which rule this came from. The live runtime never reads it; the test
-    // sandbox uses it to light up the rule card that just ran.
     ri: typeof ri === "number" ? ri : rt.bot.rules.indexOf(rule),
   });
 }
@@ -593,9 +515,6 @@ function takeToken(rt) {
   return true;
 }
 
-// Where "!word" sits in the line as its own word: at the start, or after a
-// space, and not glued to more letters ("!fishing" is not "!fish"). Anywhere
-// in the line counts, so nobody has to know that Enter starts a fresh line.
 function commandIndex(lowerLine, word) {
   const token = "!" + word;
   let i = lowerLine.indexOf(token);
@@ -614,8 +533,6 @@ function onUtterance(rt, userId, username, line, fullText) {
   for (let ri = 0; ri < rt.bot.rules.length; ri++) {
     const rule = rt.bot.rules[ri];
     const on = rule.on;
-    // Each match gets its own ctx: a command's args must not leak into a
-    // plain "says" rule that fired off the same line.
     const ctx = { userId, username, line, args: [] };
     if (on.type === "command") {
       const at = commandIndex(lower, on.word);
@@ -627,14 +544,10 @@ function onUtterance(rt, userId, username, line, fullText) {
     } else if (on.type === "mention") {
       if (!lower.includes(rt.name.toLowerCase())) continue;
     } else continue;
-    fireRule(rt, rule, ctx, ri); // the queue cap bounds a runaway rulebook
+    fireRule(rt, rule, ctx, ri);
   }
 }
 
-// What a bot is about to say, made safe the same way for every path:
-// expanded, sanitized, length-capped, IPs redacted. Deliberately NOT run
-// through the word filter: automod is a per-viewer choice made client-side,
-// for bot text exactly as for human keystrokes.
 function polishSay(rt, act, ctx) {
   let text = expand(rt, act.text, ctx);
   text = sanitizeMessage(text).slice(0, LIMITS.MAX_SAY_LENGTH);
@@ -642,9 +555,6 @@ function polishSay(rt, act, ctx) {
   return text;
 }
 
-// Runs one action of the current group. Returns true when the action is done
-// and the group may advance; false means "try this same action again next
-// tick" (a say pacing itself behind the minimum gap).
 function runAction(rt, act, ctx) {
   switch (act.type) {
     case "say": {
@@ -660,8 +570,6 @@ function runAction(rt, act, ctx) {
       deps.emitTyping(rt.fake, rt.userId, rt.name, true);
       return true;
     }
-    // Like say, but under what the bot already wrote instead of replacing
-    // it: a greeter can stack arrivals, a game can keep its board on screen.
     case "append": {
       const sinceLast = Date.now() - rt.lastSayAt;
       if (sinceLast < LIMITS.SAY_MIN_GAP_MS) {
@@ -672,7 +580,6 @@ function runAction(rt, act, ctx) {
       if (!text.trim()) return true;
       const cur = state.userMessageBuffers.get(rt.userId) || "";
       let combined = cur ? cur + "\n" + text : text;
-      // The box is capped like anyone's; oldest lines scroll away first.
       while (combined.length > CONFIG.LIMITS.MAX_MESSAGE_LENGTH) {
         const nl = combined.indexOf("\n");
         if (nl === -1) {
@@ -682,7 +589,6 @@ function runAction(rt, act, ctx) {
         combined = combined.slice(nl + 1);
       }
       rt.lastSayAt = Date.now();
-      // Typing picks up from the end of what is already there.
       rt.typing = { text: combined, at: Math.min(cur.length, combined.length) };
       deps.emitTyping(rt.fake, rt.userId, rt.name, true);
       return true;
@@ -725,8 +631,6 @@ function runAction(rt, act, ctx) {
   }
 }
 
-// The bot's textbox. Progressive writes through the same buffer + broadcast
-// path a person's keystrokes take, so every client renders it identically.
 function setBotText(rt, text) {
   state.userMessageBuffers.set(rt.userId, text);
   deps.emitChat(rt.fake, {
@@ -802,9 +706,6 @@ function deploy(socket, bot, room, ownerKey) {
   return rt;
 }
 
-// Why the last run ended, written onto the saved config so the owner can see
-// it on their bot list later. "Timers don't work" reports were mostly bots
-// that had quietly gone home when the owner left; now the card says so.
 function stampStop(rt, why) {
   const rec = store.owners[rt.ownerKey];
   const cfg = rec?.bots.find((b) => b.id === rt.bot.id);
@@ -813,8 +714,6 @@ function stampStop(rt, why) {
   saveSoon();
 }
 
-// Takes the bot out of its room and out of the runtime, through the same
-// leave path a person takes so every client and the lobby stay consistent.
 function retire(rt, why) {
   if (!active.has(rt.userId)) return;
   active.delete(rt.userId);
@@ -840,7 +739,6 @@ function retire(rt, why) {
   notifyOwner(rt, "bot stopped", { botId: rt.bot.id, why: why || "stopped" });
 }
 
-// Tell the owner's open botcreator page(s) their bot changed state.
 function notifyOwner(rt, event, payload) {
   if (!io()) return;
   for (const [, s] of io().sockets.sockets) {
@@ -869,12 +767,6 @@ function tick() {
   tickCount++;
   const now = Date.now();
 
-  // Utterances: a person's text has settled and their LAST LINE moved through
-  // an actual change since the last settle. The box persists, so two things
-  // must both work: clearing the box and retyping the same command fires again
-  // (the line changed on the way, even though the final text looks identical),
-  // and fixing a typo on an OLD line, or adding blank lines, fires nothing
-  // (the last line never changed). lineDirty tracks exactly that.
   for (const [roomId, users] of roomText) {
     let anyBotHere = false;
     for (const rt of active.values()) if (rt.roomId === roomId) { anyBotHere = true; break; }
@@ -897,7 +789,6 @@ function tick() {
   }
 
   for (const rt of active.values()) {
-    // Timers fire on their own schedule, with no triggering user.
     for (const t of rt.timers) {
       if (now < t.nextAt) continue;
       const rule = rt.bot.rules[t.i];
@@ -907,7 +798,7 @@ function tick() {
 
     if (rt.typing) {
       tickTyping(rt);
-      continue; // typing occupies the bot, like it occupies a person
+      continue;
     }
     if (rt.waitUntil > now) continue;
 
@@ -915,8 +806,6 @@ function tick() {
     if (!group) continue;
     if (!group.checked) {
       group.checked = true;
-      // Conditions read the variables as they are NOW, after every earlier
-      // group finished, and the token is only charged on a pass.
       if (!evalConds(rt, group.conds, group.ctx)) {
         rt.queue.shift();
         continue;
@@ -947,10 +836,6 @@ function lastLine(text) {
   return "";
 }
 
-// Identity of the last non-empty line: its row AND its text. The row matters
-// for one paste-shaped case: dropping a second "!roll" under an old "!roll"
-// in a single update keeps the text identical, but it is a new line and must
-// count as one.
 function lastLineKey(text) {
   const lines = String(text || "").split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {
@@ -960,14 +845,9 @@ function lastLineKey(text) {
   return "";
 }
 
-// The one place every way a bot can die is checked. Event-driven paths exist
-// for the common cases, but membership here is self-healing: whatever state
-// the rest of the server gets into, a bot that should not be running stops
-// within a couple of seconds.
 function sweep() {
   const now = Date.now();
 
-  // Which owners are online right now.
   if (io()) {
     for (const [, s] of io().sockets.sockets) {
       const uid = s.connected && s.handshake?.session?.userId;
@@ -982,8 +862,6 @@ function sweep() {
     }
     const room = state.rooms.get(rt.roomId);
     if (!room || !(room.users || []).some((u) => u.id === rt.userId)) {
-      // Room closed, or the bot was removed by staff/vote out from under the
-      // runtime. Clean up quietly - the membership change already happened.
       active.delete(rt.userId);
       state.userMessageBuffers.delete(rt.userId);
       if (rt.varsDirty) saveSoon();
@@ -1014,14 +892,12 @@ function sweep() {
 
 // ── Hooks called by rooms.js ────────────────────────────────────────────────
 
-// Every processed textbox update in every room passes through here. Cheap by
-// design: one map write unless a bot is actually seated in that room.
 function onText(roomId, userId, username, text) {
   if (!active.size || !roomId) return;
   let hasBot = false;
   for (const rt of active.values()) if (rt.roomId === roomId) { hasBot = true; break; }
   if (!hasBot) return;
-  if (userId.startsWith("bot_")) return; // never listen to a bot (or itself)
+  if (userId.startsWith("bot_")) return;
   let users = roomText.get(roomId);
   if (!users) {
     users = new Map();
@@ -1034,8 +910,6 @@ function onText(roomId, userId, username, text) {
     username,
     changedAt: Date.now(),
     doneText: rec ? rec.doneText : "",
-    // Sticky until the next settle: the moment the last line differs from
-    // what it just was, this update cycle counts as a real utterance.
     lineDirty:
       (rec ? rec.lineDirty : false) ||
       lastLineKey(text) !== lastLineKey(rec ? rec.text : ""),
@@ -1064,13 +938,9 @@ function onLeave(roomId, userId, user) {
   }
 }
 
-// A vote-kick or staff kick that removed the bot's room entry directly.
 function noteEvicted(botUserId) {
   const rt = active.get(botUserId);
   if (!rt) return;
-  // A room ban lands on the seat's random userId; carry it over to the bot's
-  // saved config id, or the same bot could be redeployed straight back into
-  // the room that just threw it out.
   const room = state.rooms.get(rt.roomId);
   if (room?.bannedUserIds?.has(botUserId)) room.bannedUserIds.add(rt.bot.id);
   active.delete(botUserId);
@@ -1136,8 +1006,6 @@ function requireSignin(socket) {
   return false;
 }
 
-// The code names WHY it failed, so the page can answer with a proper modal
-// ("that room is full, here is what to do") instead of a bare toast.
 function fail(socket, message, code) {
   socket.emit("bots error", { message, code: code || null });
 }
@@ -1173,9 +1041,6 @@ function register(socket, safe) {
         v.bot.vars = existing.vars || {};
         v.bot.uvars = existing.uvars || {};
         rec.bots[rec.bots.indexOf(existing)] = v.bot;
-        // A live deployment keeps running the OLD rules until redeployed;
-        // swapping a rulebook mid-conversation is more surprising than
-        // "stop, edit, start again".
       } else {
         rec.bots.push(v.bot);
       }
@@ -1225,7 +1090,6 @@ function register(socket, safe) {
           "already_running",
         );
 
-      // The room: an existing one by id, or a fresh one they name here.
       let room = null;
       if (data?.roomId) {
         room = state.rooms.get(String(data.roomId));
@@ -1259,8 +1123,6 @@ function register(socket, safe) {
       } else if (data?.newRoom) {
         if (!CONFIG.FEATURES.ENABLE_ROOM_CREATION)
           return fail(socket, "Room creation is turned off right now.", "no_new_rooms");
-        // The bot needs its owner in the room (a bot alone leaves), so a new
-        // room deploy sends the OWNER there; the bot follows them in.
         const name = enforceRoomNameLimit(sanitizeName(String(data.newRoom.name || "")));
         if (!name || name.length < 3)
           return fail(socket, "Give the new room a name (3+ characters).", "name_room");
@@ -1297,15 +1159,11 @@ function register(socket, safe) {
         };
         state.rooms.set(roomId, room);
         state.apiCache.delete("public_rooms");
-        // An empty room self-deletes on its timer unless somebody arrives.
-        // The page navigates the owner there on "bots deployed".
         deps.startRoomDeletionTimer(roomId);
       } else {
         return fail(socket, "Pick a room, or name a new one.", "pick_room");
       }
 
-      // New rooms start empty: the bot deploys pending, seated the moment its
-      // owner walks in (the sweep would retire a bot alone in a room anyway).
       if (data?.newRoom) {
         pendingNewRoom.set(socket.handshake.session.userId, {
           botId: bot.id,
@@ -1351,15 +1209,8 @@ function register(socket, safe) {
     "bots test start",
     safe(async (data) => {
       if (!requireSignin(socket)) return;
-      // The same validator a save uses, so a broken rule is caught HERE,
-      // while they are looking at it, with a plain sentence about what is
-      // wrong - not later at deploy time.
       const v = validateConfig(data?.bot, "test");
       if (!v.ok) return socket.emit("bots test error", { message: v.error });
-      // Editing a rule mid-test restarts the sandbox with the new rules but
-      // KEEPS what the bot remembered, so someone tuning a fishing bot does
-      // not lose their coins every time they reword a message. The wipe
-      // button is the only thing that wipes.
       const old = testSessions.get(socket.id);
       if (old && data?.keepMemory) {
         v.bot.vars = old.bot.vars;
@@ -1476,7 +1327,6 @@ function register(socket, safe) {
         retire(rt, "stopped by staff");
         deps.logStaff(socket, "kill bot", { id, username: rt.name }, rt.roomId || "-");
       } else if (io()) {
-        // A tier-2 bot is a real socket; killing it is a disconnect.
         for (const [, s] of io().sockets.sockets) {
           if (s.isBot && s.handshake?.session?.userId === id) {
             deps.logStaff(
@@ -1496,7 +1346,7 @@ function register(socket, safe) {
   socket.on(
     "staff bots toggle",
     safe(async (data) => {
-      if (!socket.isDev) return; // the master switch is dev-only
+      if (!socket.isDev) return;
       store.enabled = data?.enabled !== false;
       saveSoon();
       if (!store.enabled) for (const rt of [...active.values()]) retire(rt, "bots turned off");
@@ -1507,32 +1357,23 @@ function register(socket, safe) {
 }
 
 // ── The test room ───────────────────────────────────────────────────────────
-// The creator page has a pretend room next to the editor: the builder types a
-// line, the CURRENT (even unsaved) rules run against it through the exact
-// same interpreter as a live bot - same validation, same conditions, same
-// word filter - and the page animates the replies and lights up the rules
-// that fired. Nothing here touches real rooms, caps, or the store; a sandbox
-// is one in-memory object per socket, gone on disconnect.
 
-const testSessions = new Map(); // socket.id -> sandbox runtime
+const testSessions = new Map();
 
 function makeSandbox(bot, username) {
   return {
     userId: "test",
     name: bot.name,
-    bot, // a validated deep copy; vars start empty so tests are predictable
+    bot,
     roomId: null,
     roomName: "the test room",
     queue: [],
     dropped: 0,
-    deployedAt: Date.now(), // so {runtime} has something to say here too
+    deployedAt: Date.now(),
     tester: username || "You",
   };
 }
 
-// Drains the sandbox queue synchronously, capturing what the live tick would
-// have done: which rules ran or were skipped, what got said and with what
-// pacing, and what the bot now remembers.
 function drainTest(rt) {
   const out = { fired: [], skipped: [], says: [], left: false };
   let delay = 0;
@@ -1545,14 +1386,14 @@ function drainTest(rt) {
     }
     out.fired.push(group.ri);
     for (const act of group.acts) {
-      if (out.says.length >= 20) break; // a runaway test stays readable
+      if (out.says.length >= 20) break;
       switch (act.type) {
         case "say": {
           const text = polishSay(rt, act, group.ctx);
           if (!text.trim()) break;
           delay += LIMITS.SAY_MIN_GAP_MS / 2;
           out.says.push({ text, delayMs: delay });
-          delay += Math.min(4000, text.length * 30); // the typing time
+          delay += Math.min(4000, text.length * 30);
           break;
         }
         case "append": {
@@ -1602,7 +1443,6 @@ function drainTest(rt) {
     }
   }
   out.memories = rt.bot.vars;
-  // The tester's own per-person memories, plus the pretend friend's if any.
   out.myMemories = rt.bot.uvars["tester"] || {};
   out.friendMemories = rt.bot.uvars["friend"] || {};
   return out;
@@ -1612,19 +1452,15 @@ function testReply(socket, extra) {
   socket.emit("bots test out", extra);
 }
 
-// A "deploy to a brand-new room" waits for the owner to arrive in that room.
-// ownerId -> { botId, ownerKey, roomId, at }
 const pendingNewRoom = new Map();
 
-// Called by rooms.js when anyone joins a room: if this joiner has a pending
-// new-room deploy for THIS room, seat their bot next to them now.
 function onOwnerJoined(socket, room) {
   const ownerId = socket.handshake?.session?.userId;
   if (!ownerId) return;
   const pend = pendingNewRoom.get(ownerId);
   if (!pend || pend.roomId !== room.id) return;
   pendingNewRoom.delete(ownerId);
-  if (Date.now() - pend.at > 120000) return; // they took too long; forget it
+  if (Date.now() - pend.at > 120000) return;
   if (!store.enabled) return;
   const rec = ownerRecord(pend.ownerKey, false);
   const bot = rec?.bots.find((b) => b.id === pend.botId);
@@ -1643,7 +1479,6 @@ function onOwnerJoined(socket, room) {
   });
 }
 
-// Expired pending deploys are dropped so the map cannot grow.
 setInterval(() => {
   const now = Date.now();
   for (const [k, v] of pendingNewRoom)

@@ -1,29 +1,8 @@
 // server/games/index.js
 // The game floor for a room: pools, tables, seating, winner-stays rotation,
-// challenges, forfeits and clocks. Knows nothing about any particular game.
-//
-// The idea that makes the "nobody waits" requirement fall out: a pool is not a
-// line waiting for one table, it is a bucket. Whenever the bucket has enough
-// people for another match, another table is spawned. Fifty people queueing
-// tic tac toe get twenty five tables, not a queue.
-//
-// Everything is keyed on userId, never socket.id. Room joins here hand off
-// between two sockets sharing one userId, so a socket-keyed seat would drop a
-// player every time they walked from the lobby into a room.
+// challenges, forfeits and clocks.
 
 // ── Adding a game ───────────────────────────────────────────────────────────
-// Multiplayer game: write a rules module next to this file exposing
-//   id, name, icon, blurb, howTo[], minPlayers, maxPlayers, turnBased,
-//   create/move/turnOf/isOver/result/view  (+ optional tick, addPlayer,
-//   removePlayer, timeoutMove, openMs, joinInProgress, shout)
-// then require it and drop it in GAMES below. Nothing else needs touching:
-// queueing, chat, spectating, forfeits and clocks all come for free.
-//
-// Standalone game that runs on its own page: add an entry to EXTERNAL. It gets
-// a card in the picker and opens in a frame, with no server side at all.
-//
-// Icons are one of { emoji }, { fa } (Font Awesome class) or { image } (path
-// under public/), so a game can use whichever suits it.
 
 const linkfilter = require("../linkfilter");
 const tictactoe = require("./tictactoe");
@@ -32,11 +11,8 @@ const drawguess = require("./drawguess");
 const flagguess = require("./flagguess");
 const flagcdn = require("./flagcdn");
 
-// Order matters: this is the order the picker lists them in, most-played first.
 const GAMES = { drawguess, flagguess, tictactoe, connect4 };
 
-// Games that live on their own page under public/games. No sockets, no seats,
-// no server state; the panel just frames them.
 const EXTERNAL = [
   {
     id: "popshot",
@@ -53,39 +29,34 @@ const EXTERNAL = [
   },
 ];
 
-// Games worth telling the room about when one starts. The turn-based pair are
-// deliberately not here: two people playing tic tac toe is not news, and it
-// would fire every rotation.
 const SHOUT_TYPES = { drawguess: true, flagguess: true };
-const SHOUT_GAP_MS = 4 * 60 * 1000; // per room, per game type
+const SHOUT_GAP_MS = 4 * 60 * 1000;
 
-// Winner keeps the seat in these; the timed group dissolves its table instead.
 const WINNER_STAYS = { tictactoe: true, connect4: true };
 
-// Two clocks missed in a row and the seat goes to somebody who wants it.
 const MAX_MISSES = 2;
 
 const MAX_TABLES_PER_ROOM = 40;
-const FINISH_MS = 12000; // result stays up this long before the seat changes
+const FINISH_MS = 12000;
 const CHALLENGE_MS = 60000;
 const CHALLENGE_COOLDOWN_MS = 15000;
-const GRACE_MS = 20000; // reconnect window before a missing player forfeits
-const STREAK_CAP = 5; // champion rotates out after this many straight wins
+const GRACE_MS = 20000;
+const STREAK_CAP = 5;
 const TICK_MS = 1000;
-const CHAT_MAX = 80; // messages kept per game
+const CHAT_MAX = 80;
 const CHAT_LEN = 200;
 const CHAT_MIN_GAP_MS = 700;
-const CHAT_BURST = 6; // messages allowed inside the window below
+const CHAT_BURST = 6;
 const CHAT_BURST_MS = 9000;
-const SAY_REPEAT_MS = 8000; // the same announcement will not repeat inside this
+const SAY_REPEAT_MS = 8000;
 const TYPING_MS = 4000;
 
 const CHEERS = ["👏", "🔥", "😱", "😂", "💪", "🎉"];
 const CHEER_GAP_MS = 900;
 
-const floors = new Map(); // roomId -> floor
-const challenges = new Map(); // challengeId -> record
-const lastChallengeAt = new Map(); // userId -> ts
+const floors = new Map();
+const challenges = new Map();
+const lastChallengeAt = new Map();
 
 let deps = null;
 let timer = null;
@@ -155,7 +126,6 @@ function tablesOfType(f, type) {
   return [...f.tables.values()].filter((t) => t.type === type);
 }
 
-// The one table of this type a player may hold at a time.
 function tableOf(f, userId, type) {
   for (const t of f.tables.values()) {
     if (type && t.type !== type) continue;
@@ -189,8 +159,6 @@ function tableSummary(t) {
     streak: t.streak,
     openDeadline: t.openDeadline,
     matchNumber: t.matchNumber,
-    // Precomputed so the client never has to work out whether a row is
-    // joinable from three separate fields.
     room: rules ? rules.maxPlayers - t.seats.length : 0,
     canJoin:
       !!rules &&
@@ -239,7 +207,6 @@ function tableDetail(t, userId) {
     votes,
     voteNeeded: Math.ceil((t.seats.length - 1) / 2),
     canVote: seated && t.seats.length >= 3,
-    // Watchers waiting on a seat here, and whether you are one of them.
     nextUp: nextUpList(t),
     iAmNext: t.nextUp.includes(userId),
     canPlayNext: !seated && !!rules && WINNER_STAYS[t.type] !== undefined,
@@ -247,9 +214,6 @@ function tableDetail(t, userId) {
   };
 }
 
-// The floor list is deliberately light: table summaries and pool sizes only.
-// Board state rides on the per-table event so a fifty person room does not
-// resend twenty five boards every time somebody queues.
 function floorFor_view(f, userId) {
   const pools = {};
   const myQueue = {};
@@ -259,13 +223,9 @@ function floorFor_view(f, userId) {
     if (at >= 0) myQueue[type] = at + 1;
   }
   const mine = {};
-  // Headline numbers per game, so the picker can say who is playing what
-  // without the client counting across every row.
   const counts = {};
   for (const type of Object.keys(GAMES))
     counts[type] = { playing: 0, waiting: 0, games: 0, live: 0, names: [] };
-  // Tables where this person has claimed the next round, so the panel can give
-  // those claims back when it closes without having each board open.
   const myNext = [];
   for (const t of f.tables.values()) {
     if (t.seats.some((s) => s.userId === userId)) mine[t.type] = t.id;
@@ -302,7 +262,6 @@ function emitFloor(roomId) {
   }
 }
 
-// Only people at the table (or watching it) need the board.
 function emitTable(t) {
   if (!deps) return;
   for (const s of deps.socketsInRoom(t.roomId)) {
@@ -332,10 +291,7 @@ function toUser(roomId, userId, event, payload) {
   }
 }
 
-// "Somebody started Draw & Guess" to the whole room, so the games nobody stumbles
-// into get an audience. Skips whoever is already at the table, and one type can
-// only shout once every SHOUT_GAP_MS however many boards open in between.
-const lastShout = new Map(); // roomId:type -> when
+const lastShout = new Map();
 function shoutRoom(t, text) {
   if (!deps) return;
   const key = t.roomId + ":" + t.type;
@@ -377,24 +333,22 @@ function createTable(f, type, opts) {
     result: null,
     createdAt: Date.now(),
     missingSince: new Map(),
-    misses: new Map(), // consecutive missed clocks, resets on a real move
+    misses: new Map(),
     chat: [],
     chatSeq: 0,
     lastChatAt: new Map(),
-    nextUp: [], // watchers who asked for a seat when this round ends
-    chatBurst: new Map(), // userId -> recent send times, caps a flood
-    cheerAt: new Map(), // userId -> last cheer, one lane per person
-    lastSaid: new Map(), // userId -> their last line, kills copy-paste repeats
-    saidAt: new Map(), // announcement -> when, stops narration looping
-    typing: new Map(), // userId -> expiry, drives "someone is typing"
-    votes: new Map(), // targetUserId -> Set of voters
+    nextUp: [],
+    chatBurst: new Map(),
+    cheerAt: new Map(),
+    lastSaid: new Map(),
+    saidAt: new Map(),
+    typing: new Map(),
+    votes: new Map(),
   };
   f.tables.set(t.id, t);
   return t;
 }
 
-// Every seat change runs through these two so the room status line, the AFK
-// exemption and the event feed can never drift out of sync with the seats.
 function seatPlayer(f, t, user) {
   if (t.seats.some((s) => s.userId === user.userId)) return;
   t.seats.push({
@@ -407,12 +361,10 @@ function seatPlayer(f, t, user) {
   const rules = rulesFor(t.type);
   if (deps.setPlaying)
     deps.setPlaying(t.roomId, user.userId, true, rules ? rules.name : null);
-  // Someone joining a game already underway takes a live seat too.
   if (t.state === "playing" && t.game && rules && rules.addPlayer) {
     rules.addPlayer(t.game, { userId: user.userId, username: user.username });
   }
   say(t, `${user.username} joined`);
-  // Catch them up on the canvas, once.
   if (t.game) syncCanvas(t.roomId, user.userId, t.id);
 }
 
@@ -426,8 +378,6 @@ function unseatPlayer(f, t, userId) {
   t.votes.delete(userId);
   t.misses.delete(userId);
   for (const set of t.votes.values()) set.delete(userId);
-  // They may still be sat at another game, so only clear the room status when
-  // this was their last seat anywhere in the room.
   if (deps.setPlaying && !tableOf(f, userId, null))
     deps.setPlaying(t.roomId, userId, false);
   return gone;
@@ -441,9 +391,6 @@ function pushChat(t, entry) {
   emitRelay(t, { kind: "chat", message: t.chat[t.chat.length - 1] });
 }
 
-// Narration. This is what makes a game feel busy rather than silent, right up
-// until somebody works out they can flip a switch on and off and fill the feed
-// with it. The same line does not go out twice in a row inside the window.
 function say(t, text, tone) {
   const now = Date.now();
   if (now - (t.saidAt.get(text) || 0) < SAY_REPEAT_MS) return;
@@ -453,8 +400,6 @@ function say(t, text, tone) {
   pushChat(t, { kind: "system", text, tone: tone || null });
 }
 
-// One rate limiter for everything a person can put in the feed, so a guess box
-// is not a way around the chat box.
 function canSpeak(t, userId) {
   const now = Date.now();
   const hits = (t.chatBurst.get(userId) || []).filter(
@@ -469,8 +414,6 @@ function canSpeak(t, userId) {
   return true;
 }
 
-// A wrong guess reads as a message from that person, marked so the client can
-// colour it. Right ones are announced without ever printing the word.
 function pushGuess(t, userId, text) {
   if (!canSpeak(t, userId)) return;
   const who = deps.userInfo(t.roomId, userId) || {};
@@ -481,7 +424,7 @@ function pushGuess(t, userId, text) {
     username: (seat && seat.username) || who.username || "Someone",
     role: who.role || null,
     avatar: who.avatar || null,
-    text, // masked per viewer in the browser, not here
+    text,
   });
 }
 
@@ -518,14 +461,10 @@ function startMatch(t) {
   armTurn(t);
   emitTable(t);
 
-  // Tell the room, but only for the games that want a crowd, and only on the
-  // first match at that board: a rematch is not news.
   if (SHOUT_TYPES[t.type] && t.matchNumber === 1) {
     const who = t.seats.length === 1 ? t.seats[0].username : null;
     shoutRoom(
       t,
-      // A game with nothing to offer a joiner says so itself, because the
-      // generic line below invites people into a seat that does not exist.
       rules.shout
         ? rules.shout(t.seats, rules.name)
         : who
@@ -547,11 +486,9 @@ function armTurn(t) {
 function maybeStart(f, t) {
   const rules = rulesFor(t.type);
   if (!rules || t.state !== "open") return;
-  if (t.reservedFor) return; // a challenge holds the seat until answered
+  if (t.reservedFor) return;
   if (t.seats.length >= rules.maxPlayers) return startMatch(t);
   if (t.seats.length >= rules.minPlayers) {
-    // Timed group games take late joiners for a moment before locking in;
-    // a two seater has nothing to wait for once it is full.
     if (!rules.openMs) return;
     if (!t.openDeadline) t.openDeadline = Date.now() + rules.openMs;
   } else {
@@ -559,14 +496,11 @@ function maybeStart(f, t) {
   }
 }
 
-// Fill open seats, then spawn tables while the pool can still fill one.
 function pump(f, type) {
   const rules = rulesFor(type);
   if (!rules) return;
   const pool = poolFor(f, type);
 
-  // Fill anything already running that still takes people (Draw & Guess) or
-  // is waiting to start, before opening anything new.
   for (const t of tablesOfType(f, type)) {
     if (t.reservedFor) continue;
     const joinable =
@@ -598,10 +532,6 @@ function pump(f, type) {
     if (t.state === "open") emitTable(t);
   }
 
-  // One person left over with nowhere to sit gets their own board and waits
-  // there, instead of watching a queue position on the floor. Only when this
-  // game has nothing else running: if a board already exists, they queue for
-  // it so the winner-stays rotation still feeds off the line.
   if (
     pool.length &&
     !tablesOfType(f, type).length &&
@@ -619,8 +549,6 @@ function pump(f, type) {
       return;
     }
     maybeStart(f, t);
-    // Hand them their board even though it cannot start yet, so they wait at
-    // it rather than on the floor.
     if (t.state === "open") emitTable(t);
   }
 }
@@ -637,7 +565,6 @@ function finishMatch(t) {
   const winner = res.winnerId
     ? t.seats.find((s) => s.userId === res.winnerId)
     : null;
-  // Named here once so the headline, the feed and the room all agree.
   t.result.winnerName = winner ? winner.username : null;
 
   if (WINNER_STAYS[t.type]) {
@@ -667,8 +594,6 @@ function finishMatch(t) {
   emitTable(t);
 }
 
-// What this particular viewer should be told happened. Working it out on the
-// server means the client never has to infer a loss from a missing win.
 function outcomeFor(t, userId) {
   if (t.state !== "finished" || !t.result) return null;
   const r = t.result;
@@ -708,22 +633,14 @@ function outcomeFor(t, userId) {
   return { kind: "over", headline: "Game over", detail: null };
 }
 
-// Seats change hands here: winner keeps theirs, everyone else goes back to the
-// room, and the front of the pool fills the gap.
 function rotate(f, t) {
   const rules = rulesFor(t.type);
   const pool = poolFor(f, t.type);
 
-  // Watchers who asked for a seat go first, ahead of the room-wide queue: they
-  // sat through the round, and they are already looking at this board.
   const waiting = t.nextUp.filter((uid) => deps.userInfo(t.roomId, uid));
   t.nextUp = [];
 
   if (!WINNER_STAYS[t.type]) {
-    // Whoever asked for another round gets one, even if the rest of the table
-    // did not. Requiring everybody meant one person wandering off ended the
-    // game for the five who wanted to keep playing. The board stays up, so
-    // anyone else can walk back in.
     const keen = t.seats.filter((s) => t.rematch.has(s.userId));
     if (keen.length) {
       for (const s of t.seats.slice())
@@ -735,7 +652,6 @@ function rotate(f, t) {
       t.rotateAt = null;
       t.rematch = new Set();
       t.votes = new Map();
-      // The watchers who put their hand up join this round too.
       for (const uid of waiting) {
         if (t.seats.length >= rules.maxPlayers) {
           if (!pool.includes(uid)) pool.push(uid);
@@ -752,14 +668,12 @@ function rotate(f, t) {
           ? `${keen[0].username} is going again. Anyone can join.`
           : `${keen.length} players are going again. Anyone can join.`,
       );
-      pump(f, t.type); // fills the rest from the room queue
+      pump(f, t.type);
       maybeStart(f, t);
       if (t.state === "open") emitTable(t);
       emitFloor(f.roomId);
       return;
     }
-    // Nobody wanted another. This board is going away, so a watcher's claim
-    // moves to the front of the line for the next one rather than evaporating.
     for (const uid of waiting) if (!pool.includes(uid)) pool.unshift(uid);
     dissolve(f, t, "over");
     pump(f, t.type);
@@ -767,8 +681,6 @@ function rotate(f, t) {
     return;
   }
 
-  // Both sides asked for another and nobody is waiting, so let them have it.
-  // Somebody who sat through the round waiting to play counts as waiting.
   const everyone = t.seats.every((s) => t.rematch.has(s.userId));
   if (everyone && t.seats.length >= rules.minPlayers && !pool.length && !waiting.length) {
     startMatch(t);
@@ -782,7 +694,7 @@ function rotate(f, t) {
   if (res.winnerId && t.streak && t.streak.n < STREAK_CAP) {
     keep = t.seats.filter((s) => s.userId === res.winnerId);
   } else if (res.draw && !queueWaiting) {
-    keep = t.seats.slice(); // nobody waiting, a draw just plays on
+    keep = t.seats.slice();
   }
   if (!res.winnerId && !res.draw) keep = [];
 
@@ -805,11 +717,9 @@ function rotate(f, t) {
       winnerName: res.winnerName || null,
     });
 
-  // Seat the watchers who put their hand up, then let the room queue fill
-  // whatever is left.
   for (const uid of waiting) {
     if (t.seats.length >= rules.maxPlayers) {
-      if (!pool.includes(uid)) pool.push(uid); // no room, back of the line
+      if (!pool.includes(uid)) pool.push(uid);
       continue;
     }
     const u = deps.userInfo(t.roomId, uid);
@@ -844,9 +754,6 @@ function queueJoin(roomId, user, type) {
   return { ok: true };
 }
 
-// A watcher asking for a seat at THIS board when the round ends. Without it a
-// spectator had to leave the game, find the floor, and queue, by which time the
-// winner had already been paired with somebody else.
 function playNext(roomId, user, tableId, on) {
   const f = floorFor(roomId);
   const t = f.tables.get(tableId);
@@ -867,7 +774,6 @@ function playNext(roomId, user, tableId, on) {
   if (tableOf(f, user.userId, t.type))
     return { err: `You are already in a game of ${rules.name}.` };
   t.nextUp.push(user.userId);
-  // Watching implies wanting to see it, so put them on the spectator list too.
   if (!t.spectators.has(user.userId)) t.spectators.add(user.userId);
   say(t, `${user.username} is up for the next round`);
   emitTable(t);
@@ -875,7 +781,6 @@ function playNext(roomId, user, tableId, on) {
   return { ok: true };
 }
 
-// Everyone still in the room who asked for the next round here, in order.
 function nextUpList(t) {
   const out = [];
   for (const uid of t.nextUp) {
@@ -927,9 +832,6 @@ function chat(roomId, user, tableId, text) {
   const f = floorFor(roomId);
   const t = f.tables.get(tableId);
   if (!t) return { err: "That game has finished." };
-  // A reconnect hands you a new socket, and the panel can be showing a game
-  // you are no longer formally watching. Rather than refusing the message,
-  // enrol them: anybody in the room is entitled to watch and talk.
   if (!audienceOf(t).has(user.userId)) {
     if (!deps.userInfo(t.roomId, user.userId))
       return { err: "You are not in this room." };
@@ -939,42 +841,27 @@ function chat(roomId, user, tableId, text) {
 
   let body = String(text || "").replace(/\s+/g, " ").trim().slice(0, CHAT_LEN);
   if (!body) return { ok: true };
-  // Reaches the whole room like a textbox does. Unlike the word filter below,
-  // this is not a per-viewer choice.
   body = linkfilter.redact(body);
   const last = t.lastChatAt.get(user.userId) || 0;
   if (Date.now() - last < CHAT_MIN_GAP_MS) return { err: "Slow down a moment." };
-  // Saying "a" thirty times is under any per-message gap, so the same line
-  // twice running is refused and a burst is capped on top of that.
   if (t.lastSaid.get(user.userId) === body.toLowerCase())
     return { err: "You just said that." };
   if (!canSpeak(t, user.userId))
     return { err: "That is a lot of messages. Give it a few seconds." };
   t.lastChatAt.set(user.userId, Date.now());
   t.lastSaid.set(user.userId, body.toLowerCase());
-  // Sent as typed, the same as the room's own chat. Masking happens per viewer
-  // in the browser, so somebody who turned the word filter off actually gets
-  // what they asked for instead of pre-censored text.
 
   const playing = t.seats.some((s) => s.userId === user.userId);
   t.typing.delete(user.userId);
 
-  // Some games treat plain chat as a play. Draw & Guess does: typing in the
-  // feed is guessing, so there is no second box to find. The game decides;
-  // the floor only asks. A line it does not claim falls through and is posted
-  // as an ordinary message below.
   if (t.state === "playing" && t.game) {
     const rules = rulesFor(t.type);
     if (rules && rules.chatGuess) {
       const out = rules.chatGuess(t.game, user.userId, body);
       if (out && out.swallow) {
-        // One letter off the answer. Posting it would spoil the word for
-        // everybody, so the line is dropped without comment.
         return { ok: true };
       } else if (out) {
-        t.misses.delete(user.userId); // they are clearly still here
-        // The word itself is never echoed: that would hand it to everybody
-        // still guessing. The announcement covers it.
+        t.misses.delete(user.userId);
         if (out.announce) say(t, out.announce, out.tone);
         if (rules.isOver(t.game)) {
           finishMatch(t);
@@ -987,8 +874,6 @@ function chat(roomId, user, tableId, text) {
       }
     }
   }
-  // Role and picture are stamped from the room record, never from the client,
-  // so a badge cannot be faked by a patched page.
   const who = deps.userInfo(t.roomId, user.userId) || {};
   pushChat(t, {
     kind: "msg",
@@ -1023,8 +908,6 @@ function typingList(t) {
   return out;
 }
 
-// Majority of the other players can put somebody out of a game. Kept to the
-// people actually in it, so a room full of spectators cannot brigade a player.
 function voteRemove(roomId, userId, tableId, targetUserId) {
   const f = floorFor(roomId);
   const t = f.tables.get(tableId);
@@ -1042,7 +925,6 @@ function voteRemove(roomId, userId, tableId, targetUserId) {
     set = new Set();
     t.votes.set(targetUserId, set);
   }
-  // Clicking again takes the vote back, so a misclick is not permanent.
   if (set.has(userId)) {
     set.delete(userId);
     if (!set.size) t.votes.delete(targetUserId);
@@ -1069,9 +951,6 @@ function voteRemove(roomId, userId, tableId, targetUserId) {
   return { ok: true };
 }
 
-// The drawing canvas is sent once on join and then kept current by deltas.
-// This is the "catch me up" call for a joiner, a watcher, or a client that
-// spots a gap in the revision numbers.
 function syncCanvas(roomId, userId, tableId) {
   const f = floorFor(roomId);
   const t = f.tables.get(tableId);
@@ -1097,7 +976,6 @@ function isPlaying(roomId, userId) {
   return false;
 }
 
-// Walking away from a live match hands the win to whoever is left.
 function leaveTable(roomId, userId, tableId) {
   const f = floorFor(roomId);
   const t = f.tables.get(tableId);
@@ -1119,7 +997,6 @@ function forfeit(f, t, userId) {
 
   if (t.state === "playing") {
     if (rules.removePlayer && t.game) {
-      // Group games reshuffle around the gap instead of ending.
       const ended = rules.removePlayer(t.game, userId);
       if (rules.isOver(t.game)) return finishMatch(t);
       if (ended) emitTable(t);
@@ -1133,8 +1010,6 @@ function forfeit(f, t, userId) {
       return;
     }
     if (t.seats.length < rules.minPlayers) {
-      // Two seater: the one still sitting there takes it. Ends the match
-      // without going through finishMatch.
       const survivor = t.seats[0];
       t.result = {
         winnerId: survivor ? survivor.userId : null,
@@ -1172,11 +1047,8 @@ function makeMove(roomId, userId, tableId, mv) {
   const rules = rulesFor(t.type);
   const out = rules.move(t.game, userId, mv);
   if (!out.ok) return { err: out.err || "Illegal move." };
-  t.misses.delete(userId); // they are still here
+  t.misses.delete(userId);
 
-  // "Sarah guessed it" and friends land in the game feed, so everybody can see
-  // that people are getting somewhere. A near miss goes in as the person said
-  // it, which is half the fun of watching.
   if (out.announce) say(t, out.announce, out.tone);
   if (out.chat) pushGuess(t, userId, out.chat);
 
@@ -1186,12 +1058,8 @@ function makeMove(roomId, userId, tableId, mv) {
     return { ok: true, ...out };
   }
 
-  // A relay is a small delta for the whole table (a stroke, a score tick)
-  // instead of resending the board to everyone.
   if (out.relay) emitRelay(t, out.relay);
   if (out.quiet) {
-    // Only the mover's own view changed, and only some moves need it resent.
-    // Strokes do not: the relay above already carries them.
     if (out.selfPush)
       toUser(roomId, userId, "games table", tableDetail(t, userId));
   } else {
@@ -1201,8 +1069,6 @@ function makeMove(roomId, userId, tableId, mv) {
   return { ok: true, ...out };
 }
 
-// A drag arrives as a batch. Applying them one at a time meant one broadcast
-// per segment; this applies the lot and sends a single relay.
 function drawStrokes(roomId, userId, tableId, segments) {
   const f = floorFor(roomId);
   const t = f.tables.get(tableId);
@@ -1231,20 +1097,14 @@ function rematch(roomId, userId, tableId) {
   if (t.state !== "finished") return { err: "Nothing to rematch yet." };
   if (!t.seats.some((s) => s.userId === userId))
     return { err: "You are not in this game." };
-  // These two only apply where a seat is scarce. In the timed games the board
-  // stays up and anyone can walk into it, so asking for another round never
-  // costs anybody else theirs.
   if (WINNER_STAYS[t.type]) {
     if (poolFor(f, t.type).length)
       return { err: "People are waiting, so the seat rotates." };
-    // Somebody sat through the round to get a turn. Two players rematching
-    // each other forever would step straight over them.
     if (t.nextUp.some((uid) => deps.userInfo(t.roomId, uid)))
       return { err: "Somebody is up next, so the seat rotates." };
   }
 
   const seat = t.seats.find((s) => s.userId === userId);
-  // Clicking again takes it back, the same as every other vote here.
   if (t.rematch.has(userId)) {
     t.rematch.delete(userId);
     emitTable(t);
@@ -1252,8 +1112,6 @@ function rematch(roomId, userId, tableId) {
   }
   t.rematch.add(userId);
 
-  // Once everybody has asked, go now. Making them sit out the rest of the
-  // countdown made the button look broken.
   const need = t.seats.length;
   const anyWaiting = t.nextUp.some((uid) => deps.userInfo(t.roomId, uid));
   if (t.rematch.size >= need && need >= rulesFor(t.type).minPlayers && !anyWaiting) {
@@ -1262,7 +1120,6 @@ function rematch(roomId, userId, tableId) {
     emitFloor(roomId);
     return { ok: true };
   }
-  // Said out loud, so the other side knows somebody is waiting on them.
   say(
     t,
     `${(seat && seat.username) || "Someone"} wants a rematch (${t.rematch.size}/${need})`,
@@ -1288,8 +1145,6 @@ function spectate(roomId, userId, tableId, on) {
     toUser(roomId, userId, "games table", tableDetail(t, userId));
     syncCanvas(roomId, userId, t.id);
   }
-  // Everyone at the game needs the new count and name list, not just the
-  // person who started or stopped watching.
   emitTable(t);
   emitFloor(roomId);
   return { ok: true };
@@ -1298,8 +1153,6 @@ function spectate(roomId, userId, tableId, on) {
 function challenge(roomId, from, targetUserId, type) {
   const rules = rulesFor(type);
   if (!rules) return { err: "Unknown game." };
-  // Head to head is about the seat count, not about taking turns, so asking
-  // somebody by name works for any strictly two player game.
   if (rules.maxPlayers !== 2 || rules.minPlayers !== 2)
     return { err: `${rules.name} is not a head to head game.` };
   if (targetUserId === from.userId) return { err: "Pick somebody else." };
@@ -1395,7 +1248,6 @@ function respondChallenge(roomId, userId, challengeId, accept) {
   return { ok: true };
 }
 
-// Everything this user is holding in this room, released at once.
 function userLeftRoom(roomId, userId) {
   const f = floors.get(roomId);
   if (!f) return;
@@ -1470,9 +1322,6 @@ function tick() {
   for (const [roomId, f] of [...floors]) {
     let floorChanged = false;
 
-    // Anyone who walked out of the room stops holding a seat or a queue slot.
-    // Checked by sweep rather than a disconnect hook, because a room join here
-    // hands off between two sockets and a hook would fire on the handoff.
     for (const [type, pool] of f.pools) {
       const before = pool.length;
       for (let i = pool.length - 1; i >= 0; i--)
@@ -1536,9 +1385,6 @@ function tick() {
           if (who) t.misses.set(who, misses);
           const seat = who ? t.seats.find((s) => s.userId === who) : null;
 
-          // One missed clock gets a move played for them. Two in a row and the
-          // seat goes to somebody who actually wants it, so a player who walks
-          // off cannot hold a board hostage.
           if (who && misses >= MAX_MISSES) {
             if (seat) say(t, `${seat.username} stopped playing`);
             toUser(roomId, who, "games closed", { tableId: t.id, reason: "idle" });
@@ -1578,9 +1424,6 @@ function tick() {
   }
 }
 
-// Watching a game and having nothing to do but type is a poor deal, so a
-// watcher can throw an emoji at the board. It goes nowhere near the chat feed:
-// cheering is meant to be spammable, and the feed is not.
 function cheer(roomId, userId, tableId, emoji) {
   const f = floorFor(roomId);
   const t = f.tables.get(tableId);
@@ -1592,8 +1435,6 @@ function cheer(roomId, userId, tableId, emoji) {
     emitFloor(roomId);
   }
   const now = Date.now();
-  // Dropped in silence rather than refused: being told off for cheering twice
-  // would be a strange thing to happen to somebody enjoying themselves.
   if (now - (t.cheerAt.get(userId) || 0) < CHEER_GAP_MS) return { ok: true };
   t.cheerAt.set(userId, now);
   const u = deps.userInfo(roomId, userId) || {};
@@ -1628,8 +1469,6 @@ module.exports = {
   drawStrokes,
   syncCanvas,
   isPlaying,
-  // The flag proxy, wired to an express route. Takes the opaque round token
-  // and gives back image bytes, so the country code is never in a url.
   flagImage: (token) => {
     const code = flagcdn.codeForToken(token);
     return code ? flagcdn.imageFor(code) : null;

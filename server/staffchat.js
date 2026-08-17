@@ -1,48 +1,21 @@
 // server/staffchat.js
-// The Desk: staff-only chat and shift console. Channels, threads, presence,
-// and @mod/@dev pings raised from a room textbox. Everything here is for
-// people who already hold a staff key; a normal user never learns it exists.
-//
-// Two rules are load-bearing and must survive any edit:
-//  - Nothing in this file calls logStaff or feeds the audit action log. Chat
-//    is not moderation work, and a record must not be paddable with it.
-//  - Identity at the Desk is the staff key label. Hiding a flair or vanishing
-//    conceals someone from USERS, never from other staff in here.
+// The Desk: staff-only chat and shift console.
 
 const path = require("path");
 const fs = require("fs");
 const fsp = require("fs").promises;
 const { DATA_DIR } = require("./datadir");
-// Same masker the notification feed uses, so the Desk cannot become the back
-// door to an address the dashboard hides. audit only reaches back into this
-// file from inside a function, so requiring it here is not a cycle.
 const { maskIps } = require("./audit");
 
 const FILE = path.join(DATA_DIR, "staff-chat.json");
 
 // ── Channels ────────────────────────────────────────────────────────────────
-// #queues carries the same cards the notification feed gets: reports,
-// appeals, applications, suggestions, abuse flags. The review queues are
-// full-mod work everywhere else on the site, so the channel is L2+ too, and
-// each card still carries its own audience level from the feed.
-// `virtual: true` means the channel has no stored messages of its own. It is a
-// live view onto a store that already exists somewhere else - the audit log,
-// the ban history, the announcements file - rendered as Desk rows on request.
-// Nothing is copied into staff-chat.json, so these channels cannot drift from
-// the dashboard and cannot bloat the file.
-//
-// `access` mirrors the dashboard tab that shows the same thing, so a mod who
-// can see something there can see it here and nowhere else changes:
-//   activity  -> Activity tab, every staff member
-//   bans      -> Ban list tab, data-min2 (full mods and devs)
-//   announce  -> Announcements tab, data-dev
 const CHANNELS = [
   { key: "floor", name: "floor", desc: "Day to day. The default." },
   { key: "help", name: "help", desc: "Live calls for backup from rooms." },
   { key: "queues", name: "queues", desc: "Incoming reports, appeals, applications.", access: "l2" },
   { key: "l2", name: "l2", desc: "Bans, blocks, escalations.", access: "l2" },
   { key: "devs", name: "devs", desc: "Keys, promotions, mod abuse.", access: "dev" },
-  // Posted to by the server at the end of each day. Nobody types in here.
   { key: "stats", name: "stats", desc: "How yesterday went.", readonly: true },
   {
     key: "activity",
@@ -75,47 +48,39 @@ const isVirtual = (key) => {
 };
 
 const MSG_MAX = 1200;
-const CHANNEL_CAP = 1500; // messages kept per channel
+const CHANNEL_CAP = 1500;
 const THREAD_MSG_CAP = 800;
-const ARCHIVED_CAP = 300; // archived threads kept
+const ARCHIVED_CAP = 300;
 const EDIT_WINDOW_MS = 5 * 60 * 1000;
-const THREAD_QUIET_MS = 24 * 60 * 60 * 1000; // no messages for a day -> archived
-const PING_COOLDOWN_MS = 60 * 1000; // per staff member per room
-const PING_ESCALATE_MS = 3 * 60 * 1000; // unclaimed for this long -> waiting
+const THREAD_QUIET_MS = 24 * 60 * 60 * 1000;
+const PING_COOLDOWN_MS = 60 * 1000;
+const PING_ESCALATE_MS = 3 * 60 * 1000;
 const RECEIPT_WINDOW_MS = 30 * 60 * 1000;
 
-// What may be put on a message as a reaction. The fixed set is the one the
-// client offers first; a room emote code (":like_this:") is the other allowed
-// shape. Kept in step with REACTIONS in public/js/desk.js - the client only
-// ever sends from its own list, and this is what stops anything else landing.
 const REACTIONS = [
   "👍", "👎", "✅", "❌", "👀", "🔥", "❤️", "😂", "🎉", "🤔", "⚠️", "🚨",
 ];
 const EMOTE_CODE_RE = /^:[A-Za-z0-9_.-]{1,40}:$/;
-const REACTION_CAP = 12; // distinct reactions on one message
+const REACTION_CAP = 12;
 
 // ── State ───────────────────────────────────────────────────────────────────
 let desk = {
   seq: 0,
-  channels: {}, // key -> [message]
-  threads: [], // { id, title, createdBy, createdAt, lastTs, link, messages }
-  lastRead: {}, // "role:label" -> { channelOrThreadId: ts }
-  // Today's running tally, posted to #stats when the day turns over. Kept in
-  // the saved file so a restart at teatime does not lose the morning.
+  channels: {},
+  threads: [],
+  lastRead: {},
   day: null,
 };
 for (const c of CHANNELS) desk.channels[c.key] = [];
 
-const byId = new Map(); // message id -> { msg, key }
-// Today's unique visitors. Declared up here because load() runs at require
-// time and rebuilds it from the saved day.
+const byId = new Map();
 let visitorSet = new Set();
-let ctx = null; // wired once from rooms.js
+let ctx = null;
 let saveTimer = null;
 let presenceTimer = null;
-const sendTimes = new Map(); // idKey -> [ts] for rate limiting
-const pingCooldowns = new Map(); // idKey|roomId -> ts
-const pingEdge = new WeakMap(); // socket -> { mod, dev } token was present last text
+const sendTimes = new Map();
+const pingCooldowns = new Map();
+const pingEdge = new WeakMap();
 
 function io() {
   return ctx && ctx.io();
@@ -127,19 +92,12 @@ function isStaff(socket) {
 }
 
 function who(socket) {
-  // The avatar is the same validated Discord snowflake + hash the rooms use;
-  // the client rebuilds the CDN URL itself and never trusts a raw URL.
   const av = socket.handshake?.session?.avatar;
   return {
     label: socket.staffLabel || (socket.isDev ? "dev" : "mod"),
     role: socket.isDev ? "dev" : "mod",
     level: socket.isDev ? 0 : socket.modLevel || 2,
     alias: socket.handshake?.session?.username || null,
-    // Accept BOTH shapes the session can hold. It is written as {discordId}
-    // by the lobby and normalised to {id} on the identity path, and this only
-    // ever looked for `id` - so anybody whose session kept the other shape had
-    // no picture anywhere on the Desk while theirs showed fine in a room,
-    // where the client helper has always accepted either.
     avatar:
       av && (av.id || av.discordId) && av.hash
         ? {
@@ -155,7 +113,7 @@ const idKeyOf = (w) => w.role + ":" + w.label;
 
 function canRead(socket, key) {
   if (!isStaff(socket)) return false;
-  if (key.startsWith("t")) return true; // threads are staff-wide
+  if (key.startsWith("t")) return true;
   const ch = CHANNELS.find((c) => c.key === key);
   if (!ch) return false;
   if (ch.access === "dev") return !!socket.isDev;
@@ -168,8 +126,6 @@ const isReadonly = (key) => {
   return !!(ch && ch.readonly);
 };
 
-// A queue card keeps the audience it had on the notification feed, so the
-// Desk can never show somebody a card the dashboard would have hidden.
 function canSeeMessage(socket, key, msg) {
   if (!canRead(socket, key)) return false;
   if (msg.devOnly && !socket.isDev) return false;
@@ -239,11 +195,6 @@ function load() {
 }
 
 // ── Reading the old messages back ───────────────────────────────────────────
-// Everything in #queues and #stats was written by the server from a fixed
-// sentence template, so the sentence can be read back into the fields the
-// cards want. Done once at boot for anything that predates the cards, and it
-// keeps `text` exactly as it was: search still matches it, and a message that
-// does not parse is simply left as the line it always was.
 function parseQueueCard(m) {
   const t = String(m.text || "");
   if (m.qkind === "report") {
@@ -270,9 +221,6 @@ function parseQueueCard(m) {
     return x ? { by: x[1] } : null;
   }
   if (m.qkind === "suggestion") {
-    // Three sentence shapes have been posted here over time. All of them read
-    // back into a card, so a board post from months ago looks the same as one
-    // from this morning instead of staying a bare line forever.
     let x = /^(.+?) posted (an idea|a bug) on the board: ([\s\S]+)$/.exec(t);
     if (x)
       return {
@@ -314,8 +262,6 @@ function parseStats(m) {
     const x = re.exec(body);
     return x ? Number(x[1]) || 0 : 0;
   };
-  // Both wordings: this only ever runs on posts written before the numbers
-  // were carried separately, and some of those use the older phrasing.
   const visitors = num(
     /(\d+)\s+(?:person|people)\s+(?:stopped by|used Talkomatic)/,
   );
@@ -333,10 +279,6 @@ function parseStats(m) {
   };
 }
 
-// Cards settled under the old rules stayed in the tray with a "handled by X"
-// stamp on them, including ones whose appeal or report has since been deleted
-// outright. They are all dealt with, so they come out on the way in rather
-// than sitting there until the day-long sweep reaches them.
 function dropSettledCards() {
   const list = desk.channels.queues || [];
   const kept = list.filter((m) => !(m && m.done));
@@ -352,8 +294,6 @@ function backfillCards() {
     if (!m || m.card || m.kind !== "system") continue;
     const c = parseQueueCard(m);
     if (!c) continue;
-    // No ids on an old message, so no buttons on the card either: acting on
-    // somebody the server can no longer identify is not something to guess at.
     m.card = sanitizeCard(m.qkind, c);
     changed++;
   }
@@ -370,14 +310,8 @@ function backfillCards() {
 load();
 
 // ── Threads ─────────────────────────────────────────────────────────────────
-// Archived is derived from quiet time, never a stored flag: threads that go a
-// day without a message drop out of the sidebar but stay readable. Deleting
-// staff discussion would erase the reasoning behind decisions, so only a dev
-// can remove one, and it takes an explicit act.
 const isArchived = (t) => Date.now() - (t.lastTs || t.createdAt) > THREAD_QUIET_MS;
 
-// A thread title is free text somebody typed, and the rail shows it to every
-// staff member, so it gets masked like anything else they could have written.
 function threadSummary(t, showIp) {
   return {
     id: t.id,
@@ -400,15 +334,8 @@ function pruneArchived() {
 }
 
 // ── Mentions ────────────────────────────────────────────────────────────────
-// A mention is "@" followed by a staff label, matched against the real list of
-// labels rather than a word pattern: labels are free text and can carry spaces
-// and punctuation, so anything-after-an-@ would guess wrong constantly. Longest
-// label first, so "@Sam" never eats the mention of "@Sam T".
-// Everyone who holds a key, with the rank that decides which group mentions
-// reach them. Sockets are folded in so somebody signed in on a key that is not
-// in the store yet still resolves.
 function staffDirectory() {
-  const by = new Map(); // lowercase label -> { label, role, level }
+  const by = new Map();
   const add = (label, role, level) => {
     if (!label) return;
     const k = label.toLowerCase();
@@ -430,10 +357,6 @@ const staffLabels = () =>
     .map((s) => s.label)
     .sort((a, b) => b.length - a.length);
 
-// Group mentions. "@everyone" and the three ranks, so a call for backup does
-// not mean typing out eight names. The groups are exclusive: "@L2 mods" means
-// the full mods, not the developers as well - somebody reaching for a
-// developer types "@devs", and somebody who wants the lot types "@everyone".
 const MENTION_GROUPS = [
   { key: "everyone", tokens: ["everyone", "all"] },
   { key: "dev", tokens: ["devs", "developers"] },
@@ -443,7 +366,6 @@ const MENTION_GROUPS = [
 const GROUP_BY_TOKEN = new Map();
 for (const g of MENTION_GROUPS)
   for (const t of g.tokens) GROUP_BY_TOKEN.set(t, g.key);
-// Longest first, so "@l2 mods" is never read as "@l2" with "mods" left over.
 const GROUP_TOKENS = [...GROUP_BY_TOKEN.keys()].sort(
   (a, b) => b.length - a.length,
 );
@@ -456,8 +378,6 @@ function inGroup(key, role, level) {
   return false;
 }
 
-// Every @token in the text, matched against real names and the group list.
-// Returns the labels named outright and the groups called.
 function extractMentions(text) {
   const out = { labels: [], groups: [] };
   if (typeof text !== "string" || text.indexOf("@") === -1) return out;
@@ -470,7 +390,6 @@ function extractMentions(text) {
       from = at + needle.length;
       const before = at > 0 ? text[at - 1] : "";
       const after = text[from] || "";
-      // Not part of a word, an email address, or a longer name.
       if (/[\w@#]/.test(before) || /\w/.test(after)) continue;
       return true;
     }
@@ -486,9 +405,6 @@ function extractMentions(text) {
   return out;
 }
 
-// Was this socket's holder named, by name or by group? Messages written before
-// mentions were stored fall back to the old substring test so old highlights
-// do not disappear.
 function mentions(msg, socket) {
   if (!socket.staffLabel) return false;
   const mine = socket.staffLabel.toLowerCase();
@@ -505,21 +421,10 @@ function mentions(msg, socket) {
 }
 
 // ── Fan-out ─────────────────────────────────────────────────────────────────
-// Messages go to every eligible STAFF socket whether the Desk is open or not,
-// so the dock badge is always right. Volume is tiny: staff only.
 function outbound(msg, socket) {
-  // Every string heading to a reader without the raw feed is masked in ONE
-  // pass over the whole message. Field by field was tried first and was
-  // wrong: a reply carries a SNAPSHOT of the message it answers, so quoting a
-  // masked line put the address straight back on screen. Doing it wholesale
-  // means a field added to a message later is covered the day it is added.
   const copy = socket.isMainDev ? { ...msg } : maskDeep(msg);
-  // Edit and delete history is a dev-only view; a mod sees the tombstone.
   if (!socket.isDev) delete copy.history;
   copy.mention = mentions(msg, socket);
-  // Reactions are stored as identity keys and sent as a count, the names
-  // behind it, and whether this reader is one of them. The client never has to
-  // work out who it is looking at. Staff labels, so never masked.
   if (Array.isArray(msg.reactions) && msg.reactions.length) {
     const mine = idKeyOf(who(socket));
     copy.reactions = msg.reactions.map((r) => ({
@@ -542,8 +447,6 @@ function broadcast(key, msg, updated) {
 
 function broadcastThreadList() {
   if (!io()) return;
-  // Two lists, not one per socket: the titles are the same for everybody at a
-  // given clearance, and the rail is redrawn on every reply.
   const masked = desk.threads.map((t) => threadSummary(t, false));
   const full = desk.threads.map((t) => threadSummary(t, true));
   for (const [, s] of io().sockets.sockets)
@@ -557,9 +460,6 @@ function targetList(key) {
     const t = desk.threads.find((x) => x.id === key);
     return t ? { list: t.messages, thread: t, cap: THREAD_MSG_CAP } : null;
   }
-  // A virtual channel has no list to append to. Returning null here is what
-  // stops anything - a send, a reaction, an edit - reaching it, because every
-  // one of those paths bails when this comes back empty.
   if (isVirtual(key)) return null;
   return desk.channels[key] ? { list: desk.channels[key], cap: CHANNEL_CAP } : null;
 }
@@ -577,7 +477,7 @@ function pushMessage(key, msg) {
   if (tgt.thread) {
     const wasArchived = isArchived(tgt.thread);
     tgt.thread.lastTs = msg.ts;
-    if (wasArchived) broadcastThreadList(); // a reply revives it in the rail
+    if (wasArchived) broadcastThreadList();
   }
   scheduleSave();
   return msg;
@@ -595,13 +495,6 @@ function system(key, text, extra) {
   return msg;
 }
 
-// Queue cards, fed from audit.recordNotification - the one place every
-// report, appeal, application, suggestion and abuse flag already passes
-// through. The card keeps the feed's audience level.
-//
-// `opts.card` is the structured version of the same event: the Desk draws a
-// real card from it and puts the matching buttons on it. `text` is still
-// stored, and is what older clients (and the search index) read.
 function systemQueues(qkind, text, opts) {
   if (qkind === "report") noteEvent("report");
   const card = opts && opts.card ? sanitizeCard(qkind, opts.card) : null;
@@ -613,21 +506,12 @@ function systemQueues(qkind, text, opts) {
   });
 }
 
-// Everything on a card is either a short string or a number, and every string
-// is capped. The client renders all of it with textContent, but a card that
-// can carry unbounded text is a way to blow up the saved file.
-// A function declaration, not a const: load() runs at require time and calls
-// sanitizeCard through the backfill, which would hit the temporal dead zone of
-// anything declared with let/const further down the file.
 function cut(v, n) {
   return v == null ? null : String(v).slice(0, n || 200);
 }
 
 function sanitizeCard(qkind, c) {
   const out = {
-    // What an action on this person or thing should stamp. Several ids can
-    // point at one card: a report is keyed by user id, but a block lands on
-    // the device id, and both mean "this report is handled".
     ids: Array.isArray(c.ids)
       ? c.ids.filter(Boolean).map((x) => cut(x, 100)).slice(0, 6)
       : [],
@@ -654,21 +538,11 @@ function sanitizeCard(qkind, c) {
   return out;
 }
 
-// Fields that must reach the client byte for byte, because the client matches
-// on them rather than reading them: message and thread ids, the channel key,
-// the device and user ids a card is keyed by. None of them is prose, and none
-// is ever shaped like an address, so skipping them costs no cover.
-//
-// Everything else is masked. The list is written as "what must NOT change"
-// rather than "what to mask" on purpose: get the second kind of list wrong and
-// an address leaks, get this one wrong and a label reads oddly.
 const NEVER_MASK = new Set([
   "id", "key", "refId", "ids", "itemId", "roomId",
   "targetUserId", "byUserId", "deviceId",
 ]);
 
-// Masks every string anywhere in a message, however deeply nested. Numbers,
-// booleans and nulls pass through untouched.
 function maskDeep(value, field) {
   if (typeof value === "string")
     return NEVER_MASK.has(field) ? value : maskIps(value);
@@ -682,24 +556,13 @@ function maskDeep(value, field) {
 }
 
 // ── Queue cards: settled, and cleared out ───────────────────────────────────
-// A card leaves the queue the moment anybody deals with what it is about,
-// wherever they did it - the dashboard, a room, or the Desk itself. #queues is
-// a tray of outstanding work, so a handled item has no business sitting in it;
-// who did what is kept in the audit feed, which is the actual record.
-// An item that comes BACK (a reopened appeal) is posted as a fresh card.
 function settleQueue(match) {
   dropQueue(match);
 }
 
-// Only actions that actually settle a queue item clear one. Spectating a
-// reported user, or renaming a room they happen to be in, is not the same as
-// dealing with the report, and a card that clears itself for the wrong reason
-// is worse than one that has to be cleared by hand.
 const SETTLES_QUEUE =
   /^(kick|ban|ip block|unblock ip|warn|wipe buffer|dismiss report|freeze|reset location|turn pfp off|piano mute|approve mod application|reject mod application|dismiss appeal|lift ban|approve suggestion|decline suggestion|revoke mod)/;
 
-// Takes cards off the queue and tells every open Desk to drop them, so a
-// handled or deleted item does not sit there asking to be dealt with again.
 function dropQueue(match) {
   const list = desk.channels.queues || [];
   const gone = [];
@@ -717,7 +580,6 @@ function dropQueue(match) {
       s.emit("desk drop", { key: "queues", ids: gone });
 }
 
-// Somebody acted on a user: clear every open card about that user.
 function settleQueueForTarget(byLabel, action, id) {
   if (!id || !SETTLES_QUEUE.test(String(action || ""))) return;
   settleQueue(
@@ -728,9 +590,6 @@ function settleQueueForTarget(byLabel, action, id) {
   );
 }
 
-// Queue cards are a working tray, not an archive: the dashboard feed and the
-// audit log are where things are kept. Anything older than a day goes, so a
-// week away does not mean scrolling through a thousand handled reports.
 const QUEUE_TTL_MS = 24 * 60 * 60 * 1000;
 
 function pruneQueues() {
@@ -754,10 +613,6 @@ function pruneQueues() {
 }
 
 // ── The daily tally ─────────────────────────────────────────────────────────
-// Counted here rather than mined out of the audit log, because most of it
-// (visitors, rooms opened, how many were on at once) is never written down
-// anywhere. The day boundary is the same Pacific one the dashboard groups its
-// activity feed by, so "yesterday" means the same thing in both places.
 const VISITOR_CAP = 5000;
 
 function freshDay(start) {
@@ -778,7 +633,6 @@ function dayStart(now) {
     const s = ctx && ctx.audit && ctx.audit.startOfPacificDay(now);
     if (s) return s;
   } catch (_) { }
-  // No Intl on this build: fall back to UTC midnight rather than never rolling.
   return Math.floor(now / 86400000) * 86400000;
 }
 
@@ -820,15 +674,12 @@ const plural = (n, one, many) => n + " " + (n === 1 ? one : many || one + "s");
 function postDailyStats(d) {
   if (!d) return;
   const visitors = visitorSet.size || d.visitors.length;
-  // A day where literally nothing happened is not worth a post.
   if (!visitors && !d.rooms && !d.actions) return;
   const when = new Date(d.start).toLocaleDateString(undefined, {
     weekday: "long",
     day: "numeric",
     month: "long",
   });
-  // Each number says what it counts on its own, so the sentence reads the same
-  // way the Desk's tiles do and nobody has to guess which total is which.
   const bits = [
     plural(visitors, "person", "people") + " used Talkomatic",
     plural(d.rooms, "room") + " created",
@@ -842,11 +693,7 @@ function postDailyStats(d) {
     kind: "system",
     author: null,
     qkind: "stats",
-    // The sentence stays: it is what search matches on, and what a client
-    // that does not know about `stats` still shows.
     text: when + ": " + bits.join(", ") + ".",
-    // The numbers on their own, so the Desk can lay the day out properly
-    // instead of reading a paragraph back to you.
     stats: {
       day: d.start,
       when,
@@ -875,8 +722,6 @@ function samplePeak() {
 }
 
 // ── Rate limiting ───────────────────────────────────────────────────────────
-// A leaked staff key that can spam every moderator's phone is a denial of
-// service on the team itself, so sends are throttled per identity.
 function allowSend(idKey) {
   const now = Date.now();
   const times = (sendTimes.get(idKey) || []).filter((t) => now - t < 10000);
@@ -893,8 +738,6 @@ function unreadFor(socket) {
   const out = {};
   for (const c of CHANNELS) {
     if (!canRead(socket, c.key)) continue;
-    // A live view onto another store. Counting unread there would mean an
-    // ever-growing badge on a feed nobody is expected to read to the end.
     if (c.virtual) {
       out[c.key] = { n: 0, mentions: 0 };
       continue;
@@ -924,14 +767,10 @@ function unreadFor(socket) {
 }
 
 // ── The team ────────────────────────────────────────────────────────────────
-// Everyone holding a key, on or off. It backs both the team view and the "@"
-// list, so it has to be right the moment a key is granted or pulled - hence
-// rosterDirty, which pushes it rather than waiting to be asked.
 function rosterFor(socket) {
   const live = buildPresence(socket).staff;
   const online = new Map(live.map((s) => [s.role + ":" + s.label, s]));
 
-  // Last time each staff label did anything, from the action log.
   let lastBy = new Map();
   try {
     lastBy = ctx.audit.lastActiveByLabel();
@@ -968,8 +807,6 @@ function rosterFor(socket) {
   return out;
 }
 
-// Somebody was granted a key, promoted, or removed: everybody's team list and
-// "@" list is now wrong until they are told.
 function rosterDirty() {
   if (!io()) return;
   for (const [, s] of io().sockets.sockets)
@@ -978,12 +815,9 @@ function rosterDirty() {
 }
 
 // ── Presence ────────────────────────────────────────────────────────────────
-// Who is on, and where. Hidden staff appear to everyone marked hidden: a mod
-// who is invisible in a room AND unidentifiable here would be unaccountable in
-// both directions. Vanished devs stay dev-only, matching everywhere else.
 function buildPresence(recipient) {
-  const staff = new Map(); // idKey -> row
-  const roomsWithStaff = new Map(); // roomId -> Set(label)
+  const staff = new Map();
+  const roomsWithStaff = new Map();
   if (!io()) return { staff: [], rooms: [] };
 
   for (const [, s] of io().sockets.sockets) {
@@ -1040,8 +874,6 @@ function buildPresence(recipient) {
       name: room.name,
       type: room.type,
       n: visible,
-      // How many it holds, so "4" can be shown as "4 of 5" and a full room can
-      // offer to be watched instead of joined.
       cap: ctx.roomCapacity ? ctx.roomCapacity(room) : null,
       locked: !!room.locked,
       slow: !!room.slowMode,
@@ -1067,10 +899,6 @@ function presenceDirty() {
 }
 
 // ── Pings ───────────────────────────────────────────────────────────────────
-// A staff member types @mod or @dev in their room textbox. The textbox is live
-// character by character, so the trigger is edge-based: it fires when the
-// token APPEARS in the text, never again while it stays there, and a cooldown
-// stops a retype from stacking cards.
 function onRoomText(socket, roomId, text) {
   if (!ctx || !isStaff(socket) || !roomId) return;
   const had = pingEdge.get(socket) || { mod: false, dev: false };
@@ -1124,7 +952,6 @@ function onRoomText(socket, roomId, text) {
   if (!msg) return;
   broadcast("help", msg);
 
-  // Nobody claims it in time: the card goes loud rather than sliding away.
   setTimeout(() => {
     const ref = byId.get(msg.id);
     if (!ref || ref.msg.ping?.status !== "open") return;
@@ -1134,23 +961,13 @@ function onRoomText(socket, roomId, text) {
   }, PING_ESCALATE_MS);
 }
 
-// A staff action lands while a ping for that room is live: attach a receipt,
-// so the card ends up a record of what was actually done about it. Called
-// from logStaff; must stay cheap because logStaff fires on everything.
-// `byRole` is passed so a developer's action does not sign a receipt on a
-// backup card, which would put their name in front of the room that called
-// for help - the one place the feed rule could be walked around.
 function noteStaffAction(byLabel, action, targetStr, roomTag, byRole) {
-  // Queue cards are cleared from here too, because this is the one place every
-  // staff action already passes through, whoever did it and wherever from.
   if (targetStr && targetStr.startsWith("user:")) {
     const o = targetStr.lastIndexOf("(");
     const c = targetStr.lastIndexOf(")");
     const id = o !== -1 && c > o ? targetStr.slice(o + 1, c) : null;
     settleQueueForTarget(byLabel, action, id);
   }
-  // The queue clearing above still happens for a developer - the work was
-  // done, so the card goes - but no receipt is written in their name.
   if (byRole === "dev") return;
   if (!roomTag || typeof roomTag !== "string") return;
   const open = roomTag.lastIndexOf("(");
@@ -1181,17 +998,9 @@ function noteStaffAction(byLabel, action, targetStr, roomTag, byRole) {
 }
 
 // ── Virtual channels ────────────────────────────────────────────────────────
-// #activity, #bans and #announce are windows onto stores that already exist.
-// Nothing here is written to staff-chat.json: the rows are built on request
-// and pushed live, so they can never disagree with the dashboard.
-//
-// Every one of these builders is PER READER. The audit feed redacts addresses
-// by level, the ban list is dev-only for the address itself, and #announce is
-// dev-only outright - so what comes back depends on who asked.
 
 const VIRTUAL_LIMIT = 200;
 
-// One staff action or notification, as a Desk row.
 function activityRow(e) {
   return { id: "a" + e.id, ts: e.ts || 0, kind: "activity", entry: e };
 }
@@ -1208,8 +1017,6 @@ function virtualHistory(key, socket) {
   try {
     if (key === "activity") {
       if (!ctx || !ctx.audit) return [];
-      // recent() already drops dev-only entries and anything above this
-      // person's level, and masks addresses unless showIp is set.
       const rows = ctx.audit.recent(VIRTUAL_LIMIT, {
         showIp: !!socket.isMainDev,
         showAll: !!socket.isMainDev,
@@ -1239,12 +1046,8 @@ function virtualHistory(key, socket) {
   return [];
 }
 
-// Live pushes. Each one re-derives per recipient rather than sending one shared
-// object, because what a reader may see differs by level.
 function pushActivity(entry) {
   if (!io() || !entry) return;
-  // Same rule the dashboard feed applies, asked of the same function: a
-  // developer's actions and the key alerts go to the operations feed only.
   const privileged =
     ctx && ctx.audit ? ctx.audit.isPrivilegedEntry(entry) : !!entry.devOnly;
   for (const [, s] of io().sockets.sockets) {
@@ -1258,8 +1061,6 @@ function pushActivity(entry) {
   }
 }
 
-// An activity row that no longer exists upstream. Sent to everyone who can
-// read the channel so open Desks drop it without a reload.
 function dropActivity(ids) {
   if (!io() || !ids || !ids.length) return;
   const rows = ids.map((id) => "a" + id);
@@ -1294,35 +1095,25 @@ function pushAnnounce(item) {
 // ── Socket wiring ───────────────────────────────────────────────────────────
 function init(context) {
   ctx = context;
-  // A safety-net refresh so presence never sits stale for long even if a hook
-  // was missed somewhere.
   setInterval(presenceDirty, 25000).unref();
-  // Watches the clock for the day rolling over, and keeps the busiest-moment
-  // number honest between rollovers.
   ensureDay();
   setInterval(() => {
     ensureDay();
     samplePeak();
   }, 60000).unref();
-  // Yesterday's handled reports are not today's work. Swept on the hour, and
-  // once at boot so a restart does not leave a week of them sitting there.
   pruneQueues();
   setInterval(pruneQueues, 60 * 60 * 1000).unref();
 }
 
 function register(socket, safe) {
-  // Everything re-checks isStaff on every event: a revoked key is already
-  // live-downgraded on its sockets, and that must cut Desk access instantly.
 
   socket.on(
     "desk hello",
     safe(async () => {
-      if (!isStaff(socket)) return; // non-staff never even get an error
+      if (!isStaff(socket)) return;
       socket.deskHello = true;
       const w = who(socket);
       socket.emit("desk ready", {
-        // `who` is also stamped onto every message this person sends, so the
-        // session-only bits are added here rather than in there.
         me: { ...w, mainDev: !!socket.isMainDev },
         channels: CHANNELS.filter((c) => canRead(socket, c.key)).map((c) => ({
           key: c.key,
@@ -1344,9 +1135,6 @@ function register(socket, safe) {
       if (!isStaff(socket)) return;
       const key = typeof data?.key === "string" ? data.key : "";
       if (!canRead(socket, key)) return;
-      // A live view onto another store, built per reader (the audit feed is
-      // already IP-redacted by level, and the ban list hides addresses from
-      // anyone but a dev).
       if (isVirtual(key))
         return socket.emit("desk history", {
           key,
@@ -1364,8 +1152,6 @@ function register(socket, safe) {
         )
         : null;
 
-      // Jumping to a search hit: a window centred on that moment, with room
-      // to page in both directions.
       const around = Number(data?.around) || 0;
       if (around) {
         const visible = tgt.list.filter((m) => canSeeMessage(socket, key, m));
@@ -1416,8 +1202,6 @@ function register(socket, safe) {
         });
       const text = String(data?.text || "").trim().slice(0, MSG_MAX);
       if (!text) return;
-      // Replies carry a snapshot of what they answer, not just an id, so the
-      // quote still reads after the original is pruned or edited.
       let reply = null;
       if (typeof data?.replyTo === "string") {
         const ref = byId.get(data.replyTo);
@@ -1429,7 +1213,6 @@ function register(socket, safe) {
             text: String(ref.msg.text || "").slice(0, 120),
           };
       }
-      // Who was named, worked out once here rather than by every reader.
       const named = extractMentions(text);
       const msg = pushMessage(key, {
         ts: Date.now(),
@@ -1444,21 +1227,12 @@ function register(socket, safe) {
       broadcast(key, msg);
       if (!named.labels.length && !named.groups.length) return;
 
-      // Naming somebody is a ping. Whoever is on gets it now; whoever is off
-      // is not lost - it counts as an unread mention and is waiting for them
-      // the moment they sign back in. The sender is told which is which so
-      // they know whether to expect an answer.
-      //
-      // A group is the same thing said once: it is expanded to the people it
-      // actually reaches, so "@everyone" reports who is off just as a list of
-      // names would have.
       const dir = staffDirectory();
-      const wanted = new Map(); // lowercase label -> label
+      const wanted = new Map();
       for (const l of named.labels) wanted.set(l.toLowerCase(), l);
       for (const g of named.groups)
         for (const p of dir)
           if (inGroup(g, p.role, p.level)) wanted.set(p.label.toLowerCase(), p.label);
-      // Pinging yourself is not a ping.
       wanted.delete(w.label.toLowerCase());
 
       const on = new Set();
@@ -1489,9 +1263,6 @@ function register(socket, safe) {
     }),
   );
 
-  // Turns a name or user id into someone the staff events can act on. This
-  // is what lets a command like /kick take a username: the client asks here,
-  // then fires the same staff event a button would have.
   socket.on(
     "desk resolve",
     safe(async (data) => {
@@ -1499,7 +1270,7 @@ function register(socket, safe) {
       const q = String(data?.q || "").trim();
       if (!q || q.length > 60) return;
       const ql = q.toLowerCase();
-      const seen = new Map(); // userId -> candidate
+      const seen = new Map();
       const consider = (id, username, roomId, exact) => {
         if (!id || seen.has(id)) return;
         const room = roomId ? ctx.state.rooms.get(roomId) : null;
@@ -1547,15 +1318,12 @@ function register(socket, safe) {
         });
       const text = String(data?.text || "").trim().slice(0, MSG_MAX);
       if (!text) return;
-      // Devs can always read what a message said before it changed.
       (ref.msg.history = ref.msg.history || []).push({
         ts: Date.now(),
         text: ref.msg.text,
       });
       ref.msg.text = text;
       ref.msg.editedAt = Date.now();
-      // An edit can add or drop a name. It re-marks the message, but it never
-      // re-pings: an edit is not a way to poke somebody twice.
       const named = extractMentions(text);
       if (named.labels.length) ref.msg.mentions = named.labels;
       else delete ref.msg.mentions;
@@ -1576,8 +1344,6 @@ function register(socket, safe) {
       const own = ref.msg.author && idKeyOf(ref.msg.author) === idKeyOf(w);
       if (!own && !socket.isDev)
         return socket.emit("desk error", { message: "Not your message." });
-      // A tombstone, never a silent hole: everyone can see something was
-      // removed and by whom, and devs keep the original text.
       (ref.msg.history = ref.msg.history || []).push({
         ts: Date.now(),
         text: ref.msg.text,
@@ -1591,14 +1357,6 @@ function register(socket, safe) {
   );
 
   // ── Reactions ─────────────────────────────────────────────────────────
-  // One tap, one opinion: tapping the same thing again takes it back. Held
-  // against the staff identity rather than the socket, so somebody with the
-  // Desk open in three tabs still counts once.
-  //
-  // Two shapes are allowed and nothing else: one of the fixed set above, or a
-  // room emote code written ":like_this:". The server cannot know which emote
-  // codes exist - that list is fetched by the browser - so it checks the shape
-  // and lets an unknown code render as the text it is.
   socket.on(
     "desk react",
     safe(async (data) => {
@@ -1612,14 +1370,12 @@ function register(socket, safe) {
       const list = (ref.msg.reactions = ref.msg.reactions || []);
       let r = list.find((x) => x.e === e);
       if (!r) {
-        // A message is a message, not a scoreboard.
         if (list.length >= REACTION_CAP) return;
         list.push((r = { e, by: [] }));
       }
       const at = r.by.indexOf(mine);
       if (at === -1) r.by.push(mine);
       else r.by.splice(at, 1);
-      // The last person taking theirs back takes the whole thing away.
       if (!r.by.length) list.splice(list.indexOf(r), 1);
       if (!list.length) delete ref.msg.reactions;
       scheduleSave();
@@ -1660,7 +1416,7 @@ function register(socket, safe) {
   socket.on(
     "desk thread delete",
     safe(async (data) => {
-      if (!socket.isDev) return; // deleting discussion is a dev-only act
+      if (!socket.isDev) return;
       const id = String(data?.id || "");
       const t = desk.threads.find((x) => x.id === id);
       if (!t) return;
@@ -1685,8 +1441,6 @@ function register(socket, safe) {
         Number(data?.ts) || Date.now(),
       );
       scheduleSave();
-      // Every tab this person has open agrees about what is read. Matching by
-      // identity label rather than session covers the dashboard socket too.
       let synced = false;
       if (io())
         for (const [, s] of io().sockets.sockets) {
@@ -1707,9 +1461,6 @@ function register(socket, safe) {
     }),
   );
 
-  // The whole team, not just whoever is on. Offline members carry when they
-  // were last doing something, which is the thing you actually want to know
-  // before deciding whether to wait for them or handle it yourself.
   socket.on(
     "desk roster",
     safe(async () => {
@@ -1731,8 +1482,6 @@ function register(socket, safe) {
       p.claimedAt = Date.now();
       scheduleSave();
       broadcast(ref.key, ref.msg, true);
-      // The person who asked sees, in their room, that help is coming - this
-      // is what stops three mods piling into the same guest.
       if (p.byUserId)
         for (const s of ctx.findSocketsByUserId(p.byUserId))
           if (isStaff(s))
@@ -1752,8 +1501,6 @@ function register(socket, safe) {
       const p = ref?.msg?.ping;
       if (!p || p.status === "resolved") return;
       const w = who(socket);
-      // The claimer closes their own card; a dev can close any; an unclaimed
-      // card can be closed by whoever handled it.
       if (p.status === "claimed" && p.claimedBy !== w.label && !socket.isDev)
         return socket.emit("desk error", {
           message: p.claimedBy + " claimed this one.",
@@ -1767,10 +1514,6 @@ function register(socket, safe) {
     }),
   );
 
-  // The room inspector: see into a room and act without joining it. All staff
-  // levels get the view (a junior trusted to kick can see what they are
-  // kicking for); the actions themselves stay behind their existing per-level
-  // server gates, so this widens sight, never power.
   socket.on(
     "desk room info",
     safe(async (data) => {
@@ -1818,15 +1561,11 @@ function register(socket, safe) {
               title: (socket.isMainDev ? title : maskIps(title)) || null,
               ts: m.ts,
               author: m.author ? m.author.label : null,
-              // Masked before the cut, so a hit never ends on half an address.
               text: (socket.isMainDev ? m.text : maskIps(m.text)).slice(0, 200),
             });
         }
       };
       for (const c of CHANNELS)
-        // Virtual channels are not searched here: the dashboard already has a
-        // real search over the audit log and the ban list, and a half-search
-        // that only covers what is currently loaded would be worse than none.
         if (!c.virtual && canRead(socket, c.key))
           scan(c.key, desk.channels[c.key] || []);
       for (const t of desk.threads) scan(t.id, t.messages, t.title);

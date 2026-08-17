@@ -1,12 +1,5 @@
 // botcreator.js
-// The Bot Creator page, in two screens. HOME: your bots, the ready-made
-// bots, and a guided "start from an idea" wizard. EDITOR: an action bar
-// that is always in reach, a palette of blocks on the left, rule stacks on
-// a canvas, and the live test room on the right. Blocks move by real drag
-// and drop (pointer events, no native drag ghost). Rules still run through
-// the real server interpreter (server/bots.js) even before they are saved.
-
-/* global io, toastr */
+// The Bot Creator page, in two screens.
 
 (function () {
   "use strict";
@@ -19,10 +12,6 @@
 
   // ── Socket ────────────────────────────────────────────────────────────────
 
-  // Reconnection never gives up. The page used to stop retrying after five
-  // attempts, so a server update mid-deploy left a stale "your bot is live"
-  // bar with a dead stop button. Now it keeps trying with backoff and
-  // re-syncs the real status the moment the server is back.
   const socket = io({
     transports: ["websocket"],
     upgrade: false,
@@ -41,12 +30,12 @@
 
   // ── Page state ────────────────────────────────────────────────────────────
 
-  let me = null; // { userId, username, isDev, isMod }
-  let status = null; // last "bots status" payload
-  let edit = null; // the bot being edited: { id?, name, location, rules[] }
-  let dirty = false; // unsaved edits exist
-  let deployMode = "existing"; // or "new"
-  let testDirty = true; // the test sandbox needs the current rules re-sent
+  let me = null;
+  let status = null;
+  let edit = null;
+  let dirty = false;
+  let deployMode = "existing";
+  let testDirty = true;
 
   const $ = (id) => document.getElementById(id);
 
@@ -488,8 +477,6 @@
     { v: "timer", label: "every X minutes" },
   ];
 
-  // Each action also carries the one-line description the palette and the
-  // add-a-block menu show, so picking one never means guessing.
   const ACTION_OPTIONS = [
     { v: "say", label: "say something", desc: "The bot types into its box" },
     {
@@ -552,10 +539,6 @@
   ];
 
   // ── Memories, visually ────────────────────────────────────────────────────
-  // A memory exists the moment a block writes it. This list is what the
-  // palette shows: everything the blocks already use, plus ones made with
-  // the + button that no block uses yet. Chips click their token into the
-  // text box that was last focused, so nobody types curly brackets.
 
   let lastField = null;
 
@@ -569,8 +552,6 @@
     );
   }
 
-  // Both signals, because a click sees pointerdown even when focus events
-  // are swallowed, and keyboard users produce only focusin.
   document.addEventListener("focusin", (e) => {
     if (fieldQualifies(e.target)) lastField = e.target;
   });
@@ -579,7 +560,7 @@
   });
 
   function collectMemories() {
-    const found = new Map(); // name -> "bot" | "user"
+    const found = new Map();
     if (!edit) return [];
     for (const m of edit._memories || [])
       if (!found.has(m.name)) found.set(m.name, m.per);
@@ -733,7 +714,6 @@
       label.className = "bc-pal-label";
       label.textContent = m.name + " · " + memKindLabel(m.per);
       chip.appendChild(label);
-      // Never steal focus from the box being typed in.
       chip.addEventListener("pointerdown", (e) => e.preventDefault());
       chip.addEventListener("click", () => insertIntoField(memToken(m)));
       host.appendChild(chip);
@@ -747,8 +727,6 @@
     host.appendChild(add);
   }
 
-  // Creative caps come from the server and are roomy on purpose; the
-  // fallbacks only matter before the first status arrives.
   function maxRules() {
     return status?.limits?.maxRules || 200;
   }
@@ -827,15 +805,9 @@
   });
 
   socket.on("connect_error", (err) => {
-    // Quiet while retrying; the live bar explains what is happening.
     if (!connLost) toastr.error(err?.message || "Could not connect.");
     connLost = true;
     renderLive();
-    // The manager auto-retries transport failures, but a handshake the
-    // server REFUSED (which happens when a page reconnects in the first
-    // moments of a server update, before it is ready) stops the socket
-    // for good unless someone calls connect() again. This is what used to
-    // leave a stale "your bot is live" bar that nothing could fix.
     setTimeout(() => {
       if (!socket.connected) socket.connect();
     }, 2500);
@@ -843,10 +815,6 @@
 
   socket.on("signin status", (s) => {
     if (!s?.isSignedIn) {
-      // A server update wipes sessions but not people: sign back in with
-      // the name the lobby saved, the same way the lobby itself would.
-      // Without this, an update left this page signed out with a stale
-      // "your bot is live" bar nothing could clear.
       const savedName = localStorage.getItem("talkomaticUsername");
       if (savedName && !triedAutoSignin) {
         triedAutoSignin = true;
@@ -877,7 +845,7 @@
     status = st;
     renderHome();
     renderEditorChrome();
-    renderNewsTab(); // the numbers panel reads live limits
+    renderNewsTab();
     maybeShowNews();
   });
 
@@ -891,7 +859,6 @@
     document.querySelectorAll(".bc-modal-back").forEach((el) => el.remove());
   }
 
-  // Returns the modal element so callers can fill it.
   function openModal(wide) {
     closeModal();
     const back = document.createElement("div");
@@ -925,7 +892,6 @@
     box.appendChild(btns);
   }
 
-  // Deploy problems get a real answer: what went wrong and what to do next.
   const DEPLOY_HELP = {
     room_full: {
       title: "That room is full",
@@ -972,11 +938,10 @@
   socket.on("bots error", (d) => {
     const help = d?.code && DEPLOY_HELP[d.code];
     if (help) {
-      socket.emit("get rooms"); // whatever bounced, the list is stale
+      socket.emit("get rooms");
       infoModal(help.title, help.body);
       return;
     }
-    // Save-shaped problems land in the bar, right next to the button.
     if (edit && document.querySelector("#editorView.active")) {
       setSaveNote("err", d?.message || "That could not be saved.");
       return;
@@ -1053,8 +1018,6 @@
         (b.location || "Bot");
       card.appendChild(name);
       card.appendChild(meta);
-      // Why the last run ended, so "my bot vanished" answers itself. Live
-      // bots show the green dot instead.
       if (b.lastStop && deployedInfo()?.botId !== b.id) {
         const mins = Math.round((Date.now() - b.lastStop.at) / 60000);
         if (mins < 48 * 60) {
@@ -1146,8 +1109,6 @@
     bar.innerHTML =
       '<i class="fas fa-circle-play"></i><b></b><span class="bc-live-meta"></span>';
     bar.querySelector("b").textContent = bot?.name || "Your bot";
-    // Connection down: say so honestly instead of showing a stop button
-    // that cannot reach the server.
     if (connLost) {
       bar.querySelector(".bc-live-meta").textContent =
         "reconnecting to Talkomatic... its true status shows in a moment";
@@ -1198,8 +1159,6 @@
     draftTimer = setTimeout(saveDraftNow, 600);
   }
 
-  // The debounce loses the last keystrokes if the tab closes right after
-  // them; flush on the way out so a misclick or a closed tab costs nothing.
   window.addEventListener("beforeunload", saveDraftNow);
   document.addEventListener("visibilitychange", function () {
     if (document.visibilityState === "hidden") saveDraftNow();
@@ -1219,7 +1178,6 @@
     host.innerHTML = "";
     const d = readDraft();
     if (!d) return;
-    // Editing right now, or the draft is just the saved version: no card.
     if (edit && document.querySelector("#editorView.active")) return;
     const bar = document.createElement("div");
     bar.className = "bc-continue";
@@ -1261,7 +1219,7 @@
     if (!edit.location) edit.location = "Bot";
     dirty = false;
     testDirty = true;
-    saveDraftNow(); // the continue card always offers the last thing opened
+    saveDraftNow();
     showView("editor");
     $("botName").value = edit.name || "";
     $("botLocation").value = edit.location;
@@ -1333,8 +1291,6 @@
     saveDraftSoon();
   }
 
-  // The same checks the server runs, done here first so the message can
-  // name the rule and the page can point at it.
   function validateLocal() {
     if (!edit) return { ok: false, msg: "Nothing to save yet." };
     if ((edit.name || "").trim().length < 2)
@@ -1438,9 +1394,6 @@
   });
 
   // ── The palette ───────────────────────────────────────────────────────────
-  // Every entry carries plain-words help behind its ? button: what the block
-  // does, how to use it, one example. The READY COMBOS are prefilled blocks
-  // (one or several actions) for the things people build most.
 
   const PAL_ITEMS = [
     { group: "RULES" },
@@ -1764,9 +1717,6 @@
   renderPalette();
 
   // ── Drag and drop ─────────────────────────────────────────────────────────
-  // Pointer events, no native HTML5 drag: a solid clone follows the pointer
-  // and an orange line shows exactly where the block will land. A press that
-  // never moves counts as a click (palette blocks add to the last rule).
 
   let drag = null;
 
@@ -1834,7 +1784,6 @@
     drag.ghost.style.left = e.clientX + 12 + "px";
     drag.ghost.style.top = e.clientY + 10 + "px";
 
-    // Keep the canvas scrolling when dragging near the edges.
     const main = document.querySelector(".bc-main");
     if (e.clientY < 110) main.scrollBy(0, -14);
     else if (e.clientY > window.innerHeight - 70) main.scrollBy(0, 14);
@@ -2062,8 +2011,6 @@
     return inp;
   }
 
-  // The wand menu: inserts a magic word at the cursor so nobody has to
-  // remember curly-bracket spelling. One open menu at a time.
   let openMagicMenu = null;
   function mkMagicButton(target) {
     const wrap = document.createElement("span");
@@ -2078,7 +2025,6 @@
       if (openMagicMenu) openMagicMenu.remove();
       const menu = document.createElement("div");
       menu.className = "bc-magic-menu";
-      // The bot's own memories come first, by name, in plain words.
       const mine = collectMemories().map((m) => ({
         tok: memToken(m),
         desc: "your memory: " + m.name + " (" + memKindLabel(m.per) + ")",
@@ -2118,7 +2064,6 @@
     }
   });
 
-  // A picker menu with a label AND a plain sentence per choice.
   function openMenu(anchorWrap, items, onPick) {
     if (openMagicMenu) openMagicMenu.remove();
     const menu = document.createElement("div");
@@ -2169,7 +2114,6 @@
     return chip;
   }
 
-  // What a folded rule shows instead of its blocks.
   function ruleSummary(rule) {
     const on = rule.on || {};
     let t = "";
@@ -2207,7 +2151,6 @@
     if (rule._folded) card.classList.add("collapsed");
     card.dataset.ri = String(ri);
 
-    // WHEN: the hat block. Grip drags the whole rule; the toolbar lives here.
     const head = document.createElement("div");
     head.className = "bc-blk blk-when bc-rule-head";
     const grip = mkGrip();
@@ -2302,7 +2245,6 @@
     );
     card.appendChild(head);
 
-    // The blocks under the hat. Folding hides these, not the hat.
     const body = document.createElement("div");
     body.className = "bc-rule-body";
 
@@ -2428,8 +2370,6 @@
           ? "Also, {name} arrived! (written under what it already said)"
           : "Hi {name}! (press Enter for a new line)";
       t.value = act.text || "";
-      // Two visible lines from the start, growing with the message, so
-      // nobody has to guess that a say can have more than one line.
       const grow = () => {
         t.style.height = "auto";
         t.style.height = Math.min(160, Math.max(52, t.scrollHeight)) + "px";
@@ -2791,16 +2731,13 @@
   });
 
   // ── The test room ─────────────────────────────────────────────────────────
-  // Behaves like room.html: you type into YOUR textbox, and after your last
-  // line sits still for a moment the bot reads it, exactly like a live room.
-  // The bot types into ITS textbox letter by letter. No send button exists.
 
-  const SETTLE_MS = 1200; // a touch quicker than a live room, same idea
+  const SETTLE_MS = 1200;
   let settleTimer = null;
-  let prevLine = ""; // the last line as of the previous keystroke
-  let lineDirty = false; // did the last line actually change since the last send
-  let testWaiting = null; // callback parked until "bots test ready"
-  let botTimers = []; // pending say animations, cleared on bot switch
+  let prevLine = "";
+  let lineDirty = false;
+  let testWaiting = null;
+  let botTimers = [];
 
   function lastNonEmptyLine(text) {
     const lines = String(text || "").split("\n");
@@ -2811,8 +2748,6 @@
     return "";
   }
 
-  // Row + text, same identity the server uses: a pasted duplicate of the
-  // last line is a new line even though the text reads the same.
   function lastLineKey(text) {
     const lines = String(text || "").split("\n");
     for (let i = lines.length - 1; i >= 0; i--) {
@@ -2870,9 +2805,6 @@
     );
   }
 
-  // Same idea as the live server: the bot answers when the LAST LINE moved
-  // through a real change, so clearing the box and typing !roll a second
-  // time works, while poking around on old lines stays silent.
   $("trMyBox").addEventListener("input", () => {
     const key = lastLineKey($("trMyBox").value);
     if (key !== prevLine) lineDirty = true;
@@ -2889,15 +2821,11 @@
     ensureTest(() => socket.emit("bots test say", { text }));
   }
 
-  // The bot's box works like the real one: a new message replaces what was
-  // there, typed out letter by letter.
   function typeIntoBotBox(text, delayMs, append) {
     botTimers.push(
       setTimeout(() => {
         const box = $("trBotBox");
         $("trBotTyping").style.display = "";
-        // An append keeps the box and carries on underneath; a say starts
-        // the box over, both exactly as in a real room.
         const base = append && box.textContent ? box.textContent + "\n" : "";
         const full = base + text;
         let i = base.length;
@@ -3033,7 +2961,6 @@
     h.innerHTML = '<i class="fas fa-rocket"></i> ';
     box.appendChild(h);
 
-    // This bot (or another) is already out: manage it here.
     if (d) {
       const mine = d.botId === edit.id;
       h.appendChild(
@@ -3148,12 +3075,9 @@
     socket.emit("get rooms");
   }
 
-  // Every public room is listed, even the ones a bot cannot join right now.
-  // Those stay visible but disabled with the reason in the row, so "why is
-  // my room not in the list" never needs asking.
   socket.on("initial rooms", (list) => {
     const sel = document.getElementById("roomSelect");
-    if (!sel) return; // the deploy modal is not open
+    if (!sel) return;
     const rooms = Array.isArray(list) ? list : [];
     const prev = sel.value;
     sel.innerHTML = "";
@@ -3262,10 +3186,6 @@
   socket.on("staff action result", () => socket.emit("staff bots list"));
 
   // ── What's new ────────────────────────────────────────────────────────────
-  // Bumped whenever the creator gains something, so regulars hear it from us
-  // instead of noticing by accident. Nothing here ever breaks a saved bot,
-  // and the card says so. Someone with no saved bots skips the card: it is
-  // all new to them anyway.
 
   const NEWS_VERSION = 5;
   const NEWS = [
@@ -3277,10 +3197,6 @@
     "Rooms have a bot button next to Apps: anyone can hide bots from their own view (the bot still runs).",
   ];
 
-  // The full changelog behind the What's new tab. The dismissible card on
-  // home shows the short list once; this tab keeps everything findable,
-  // with the current numbers up top so nobody has to discover a limit by
-  // hitting it.
   const CHANGELOG = [
     {
       title: "The limits, out of the way",
@@ -3417,7 +3333,6 @@
     const seen = Number(localStorage.getItem("bc_news_seen") || 0);
     if (seen >= NEWS_VERSION) return;
     if (!(status.bots || []).length) {
-      // First-timer: everything is new, the page itself is the news.
       localStorage.setItem("bc_news_seen", String(NEWS_VERSION));
       return;
     }
@@ -3457,12 +3372,10 @@
 
   // ── Misc ──────────────────────────────────────────────────────────────────
 
-  // Live status refresh while a bot is out in a room and this tab is open.
   setInterval(() => {
     if (me && deployedInfo()) socket.emit("bots status");
   }, 5000);
 
-  // The docs show real URLs for this deployment, not a hardcoded host.
   document
     .querySelectorAll(".js-origin")
     .forEach((el) => (el.textContent = window.location.origin));

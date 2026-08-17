@@ -1,17 +1,10 @@
 // public/js/connection-overlay.js
-// Full-screen overlay for connection events. On "server restarting" it shows a
-// countdown, then sends the user to the lobby (which reconnects to the fresh
-// server). On an unexpected disconnect it shows a "reconnecting" notice instead
-// of letting the page silently freeze. Attached by the lobby and room clients.
+// Full-screen overlay for connection events.
 (function () {
   "use strict";
   var restarting = false;
   var reconnectTimer = null;
   var buttonsTimer = null;
-  // When true (the room page), a restart does NOT redirect to the lobby - it
-  // shows an "updating" notice and lets Socket.IO reconnect, so the client can
-  // rejoin the same room in place. The lobby leaves this false and keeps the
-  // old countdown+redirect (for the lobby that is just a harmless refresh).
   var rejoinInPlace = false;
 
   function styles() {
@@ -83,9 +76,6 @@
     return b;
   }
 
-  // A reload was supposed to pick up the new build and did not. Rather than
-  // bouncing the page forever, say what is wrong and offer the one thing that
-  // always works.
   function showOutdated() {
     styles();
     var o = overlay();
@@ -102,7 +92,6 @@
         try {
           sessionStorage.removeItem("tk-build-reload");
         } catch (e) {
-          /* nothing to clear */
         }
         window.location.reload();
       }),
@@ -133,9 +122,6 @@
     o.style.display = "flex";
   }
 
-  // Room page: a restart shows this notice and we wait for Socket.IO to
-  // reconnect (the room client then rejoins in place). No countdown, no
-  // redirect - the connect handler hides it once we are back.
   function showUpdating() {
     restarting = true;
     styles();
@@ -146,8 +132,6 @@
       '<div class="tk-conn-msg">Reconnecting you to your room. Hold tight, ' +
       "this only takes a moment.</div>" +
       '<div class="tk-conn-actions" style="display:none"></div></div>';
-    // If the auto-rejoin stalls, give the user a reliable way out instead of an
-    // endless spinner. Rejoin reloads the page, which always re-enters the room.
     var actions = o.querySelector(".tk-conn-actions");
     actions.appendChild(
       actionButton("Rejoin room", false, function () {
@@ -173,8 +157,6 @@
     if (o) o.style.display = "none";
   }
 
-  // Called by the room client once it is genuinely back in the room. Forces the
-  // overlay closed even while the restarting latch is set.
   function recovered() {
     clearTimeout(reconnectTimer);
     clearTimeout(buttonsTimer);
@@ -187,20 +169,12 @@
     attach: function (socket, opts) {
       if (!socket) return;
       rejoinInPlace = !!(opts && opts.rejoinInPlace);
-      // A room page rejoins in place across a restart, so it keeps running the
-      // scripts and stylesheets it started with however many times the server
-      // is redeployed. The server names its build on every connect; if ours is
-      // older we reload once, now that the server is provably back up. Asset
-      // urls are content-stamped, so an ordinary reload is enough to pull the
-      // new files - no hard refresh needed.
       socket.on("server build", function (d) {
         var theirs = d && d.id;
         if (!theirs) return;
         var tag = document.querySelector('meta[name="tk-build"]');
         var ours = tag && tag.getAttribute("content");
         if (!ours || ours === theirs) return;
-        // If a reload did not fix it (a proxy serving stale html, say), do not
-        // sit in a loop: say so once and let the person decide.
         var tried = null;
         try {
           tried = sessionStorage.getItem("tk-build-reload");
@@ -211,7 +185,6 @@
         try {
           sessionStorage.setItem("tk-build-reload", theirs);
         } catch (e) {
-          /* private mode: we simply lose the loop guard */
         }
         window.location.reload();
       });
@@ -220,17 +193,12 @@
         else showRestart((d && d.seconds) || 5);
       });
       socket.on("disconnect", function (reason) {
-        // Ignore intentional disconnects (tab handoff, navigation).
         if (restarting || reason === "io client disconnect") return;
         clearTimeout(reconnectTimer);
-        reconnectTimer = setTimeout(showReconnecting, 1200); // grace for blips
+        reconnectTimer = setTimeout(showReconnecting, 1200);
       });
       socket.on("connect", function () {
         clearTimeout(reconnectTimer);
-        // On the room page the socket being back is not enough: we stay on the
-        // notice until the room rejoin lands (recovered() from "room joined"),
-        // so a reconnect that fails to restore the room doesn't leave a blank
-        // screen. The lobby has nothing to rejoin, so connecting is enough.
         if (rejoinInPlace) return;
         restarting = false;
         hide();

@@ -1,17 +1,10 @@
 // public/js/announce.js
-// The developer notice card. Loads after lobby-client.js and reuses its
-// `socket`. One notice at a time, shown full-screen the first time somebody
-// sees it and never again once they close it - until a NEWER one is posted.
-//
-// Everything a notice contains is written by a developer, but it is still
-// escaped before the markdown is applied: the only HTML on this card is HTML
-// this file emits. A notice is not a place to be relaxed about that, because
-// it is the one thing every single person is shown.
+// The developer notice card.
 (function () {
   "use strict";
   if (typeof socket === "undefined") return;
 
-  var SEEN_KEY = "tkNoticeSeen"; // highest announcement id this browser has read
+  var SEEN_KEY = "tkNoticeSeen";
   var current = null;
   var overlay = null;
   var built = false;
@@ -42,18 +35,12 @@
 
   function markSeen(id) {
     try {
-      // Highest wins, so an older notice going live again cannot un-read a
-      // newer one somebody has already dealt with.
       if (id > seenId()) localStorage.setItem(SEEN_KEY, String(id));
     } catch (e) {
-      /* private mode: they will be shown it again, which is the safe way round */
     }
   }
 
   // ── Markdown ──────────────────────────────────────────────────────────────
-  // Escaped first, then a small, closed set of markup is put back. Block level
-  // is handled line by line so headings, lists and quotes actually render
-  // rather than arriving as literal hashes and dashes.
   function inline(s) {
     return s
       .replace(/!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)/g, function (m, alt, src) {
@@ -75,7 +62,7 @@
   function renderMarkdown(src) {
     var lines = esc(String(src || "")).split("\n");
     var out = [];
-    var list = null; // "ul" | "ol" | null
+    var list = null;
     var inCode = false;
     var code = [];
 
@@ -89,7 +76,6 @@
     for (var i = 0; i < lines.length; i++) {
       var raw = lines[i];
 
-      // Fenced code: taken verbatim, no inline markup inside.
       if (/^\s*```/.test(raw)) {
         if (inCode) {
           out.push("<pre><code>" + code.join("\n") + "</code></pre>");
@@ -120,11 +106,11 @@
       var h = /^(#{1,4})\s+(.*)$/.exec(line);
       if (h) {
         closeList();
-        var lvl = Math.min(6, h[1].length + 1); // "#" is h2: the card owns h1
+        var lvl = Math.min(6, h[1].length + 1);
         out.push("<h" + lvl + ">" + inline(h[2]) + "</h" + lvl + ">");
         continue;
       }
-      var q = /^&gt;\s?(.*)$/.exec(line); // ">" is escaped by now
+      var q = /^&gt;\s?(.*)$/.exec(line);
       if (q) {
         closeList();
         out.push("<blockquote>" + inline(q[1]) + "</blockquote>");
@@ -167,14 +153,11 @@
     alert: { label: "Important", icon: "fa-triangle-exclamation", cls: "an-alert" },
   };
 
-  // The quick picks. Anything else comes from the reader's own emoji keyboard.
   var QUICK = ["👍", "🎉", "❤️", "🔥", "😮", "😢"];
 
   var bodyEl, reactRow, titleEl, kindEl, metaEl, pickerInput;
   var gotItBtn, countFill, countHint, countTimer = null;
 
-  // How long the way out stays shut. Long enough that the card cannot be
-  // clicked away on reflex, short enough that it never feels like a punishment.
   var HOLD_SECONDS = 4;
 
   function build() {
@@ -207,8 +190,6 @@
     reactRow = el("div", "an-reacts");
     reactWrap.appendChild(reactRow);
 
-    // A real text input, so the phone's own emoji keyboard and the desktop
-    // picker both work. Nothing to build and nothing to keep up to date.
     var picker = el("div", "an-picker");
     pickerInput = el("input", "an-picker-input");
     pickerInput.type = "text";
@@ -222,14 +203,12 @@
       }
     });
     pickerInput.addEventListener("input", function () {
-      // Emoji keyboards insert and move on, so a picked emoji sends itself.
       var v = pickerInput.value.trim();
       if (v && !/[\w\s]/.test(v)) sendReaction(v);
     });
     picker.appendChild(pickerInput);
     reactWrap.appendChild(picker);
 
-    // The way out, held shut for a few seconds. See startCountdown for why.
     var closeWrap = el("div", "an-close-wrap");
     gotItBtn = el("button", "an-close-btn");
     gotItBtn.appendChild(el("span", "an-close-label", "Got it"));
@@ -252,18 +231,11 @@
     overlay.appendChild(card);
     document.body.appendChild(overlay);
 
-    // Deliberately NOT click-outside-to-close: this is the one thing everybody
-    // is shown, and a stray click on the backdrop dismissing it forever is how
-    // people miss the notice entirely. Escape still works.
     document.addEventListener("keydown", function (e) {
       if (e.key === "Escape" && isOpen) close();
     });
   }
 
-  // Reactions repaint from the local list FIRST and let the server confirm
-  // afterwards. Waiting for the round trip made every press feel stuck, and
-  // the confirmation used to re-render the whole card - re-parsing the entire
-  // markdown body - to change one number.
   function applyLocalReaction(emoji) {
     if (!current) return;
     var list = current.reactions || (current.reactions = []);
@@ -317,8 +289,6 @@
       });
       reactRow.appendChild(b);
     });
-    // The quick picks that nobody has used yet, so there is always something
-    // to press without opening a keyboard.
     QUICK.forEach(function (e) {
       if (mine[e]) return;
       var b = el("button", "an-react an-quick");
@@ -347,12 +317,6 @@
     renderReactions();
   }
 
-  // The dismiss button is held shut for a few seconds, and SAYS SO. A notice
-  // everybody is shown is also a notice everybody learns to click away without
-  // reading; a short wait is enough to break that reflex. The bar fills so the
-  // wait is visibly finite rather than a button that mysteriously ignores you,
-  // and the line underneath gives the reason instead of leaving people to
-  // guess they have hit a bug.
   function startCountdown() {
     if (!gotItBtn) return;
     stopCountdown();
@@ -376,8 +340,6 @@
         gotItBtn.disabled = false;
         gotItBtn.removeAttribute("aria-disabled");
         countFill.style.width = "100%";
-        // Focus only once it can actually be used, so a keyboard user is not
-        // sitting on a dead button.
         try {
           gotItBtn.focus();
         } catch (e) {}
@@ -390,9 +352,6 @@
     countTimer = null;
   }
 
-  // overflow:hidden on body does not stop touch scrolling in iOS Safari;
-  // pinning the body in place does. The scroll position is put back on
-  // close so the page does not jump to the top.
   var lockedScrollY = 0;
 
   function lockBody() {
@@ -427,7 +386,6 @@
 
   function close() {
     if (!isOpen) return;
-    // The hold applies to Escape too, or it would be the way round it.
     if (gotItBtn && gotItBtn.disabled) return;
     isOpen = false;
     stopCountdown();
@@ -444,9 +402,6 @@
       return;
     }
     if (isOpen) {
-      // Same notice, and only the counts moved: repaint the one row. Calling
-      // render() here re-parsed the whole markdown body on every reaction from
-      // anybody in the lobby, which is what made pressing one feel slow.
       var sameNotice =
         prev &&
         prev.id === current.id &&
@@ -471,7 +426,6 @@
   if (socket.connected) ask();
   socket.on("connect", ask);
 
-  // Exposed so the lobby can offer "read it again" later if it ever wants to.
   window.Announcement = {
     open: function () {
       if (current) open();

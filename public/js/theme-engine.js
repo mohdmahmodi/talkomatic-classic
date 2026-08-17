@@ -1,9 +1,5 @@
-// public/js/theme-engine.js  (v2)
-// Design-token theming for Talkomatic, loaded in the <head> of the lobby AND
-// the room page before first paint. The lobby and rooms are themed SEPARATELY:
-// each has its own profile of { tokens, effect, fonts }, plus one shared
-// custom-CSS override, all stored in localStorage. The visual editor
-// (theme-editor.js) writes this state; this file only applies it.
+// public/js/theme-engine.js (v2) Design-token theming for Talkomatic, loaded
+// in the <head> of the lobby AND the room page before first paint.
 (function () {
   "use strict";
 
@@ -13,8 +9,6 @@
   var PAGE = /room\.html/i.test(location.pathname) ? "room" : "lobby";
 
   // ── Registry ──────────────────────────────────────────────────────────────
-  // adv: shown only in Advanced mode. staff: shown only to mods/devs.
-  // pages: which editor scope lists it (both when omitted).
   var TOKENS = [
     { id: "accent", label: "Accent", group: "Colors", def: "#ff9800", hint: "Titles, borders, buttons" },
     { id: "accent-hover", label: "Accent hover", group: "Colors", def: "#f57c00", hint: "Buttons when hovered" },
@@ -50,7 +44,6 @@
     { id: "soft", label: "Soft (neumorphic)" },
   ];
 
-  // Google font choices; empty id = the Talkomatic default font.
   var FONTS = [
     "", "Inter", "Poppins", "Nunito", "Montserrat", "Lato", "Roboto Slab",
     "Merriweather", "JetBrains Mono", "Space Mono", "VT323", "Press Start 2P",
@@ -92,7 +85,6 @@
         }
       }
     } catch (e) {}
-    // Migrate a v1 single-token theme into both profiles
     try {
       var old = JSON.parse(localStorage.getItem(LEGACY_KEY) || "null");
       if (old && typeof old === "object") {
@@ -146,9 +138,6 @@
     var root = document.documentElement;
     profile = profile || blankProfile();
 
-    // Tokens (colors are hex; range tokens are numbers applied with a unit
-    // plus a marker class so their broad !important rules only exist when
-    // the user actually set them)
     var staffThemed = false;
     var shaped = false;
     var borderw = false;
@@ -175,7 +164,6 @@
     root.classList.toggle("tk-borderw", borderw);
     root.classList.toggle("tk-chat-sized", chatSized);
 
-    // Effect pack
     for (var e = 0; e < EFFECTS.length; e++)
       if (EFFECTS[e].id)
         root.classList.toggle(
@@ -183,7 +171,6 @@
           profile.effect === EFFECTS[e].id,
         );
 
-    // Fonts
     var slots = ["main", "heading", "chat"];
     for (var f = 0; f < slots.length; f++) {
       var slot = slots[f];
@@ -194,7 +181,6 @@
       } else root.style.removeProperty("--tk-font-" + slot);
     }
 
-    // Shared custom CSS (advanced escape hatch, applies on both pages)
     var tag = document.getElementById("tkCustomCss");
     if (css && css.trim()) {
       if (!tag) {
@@ -218,11 +204,9 @@
     getState: getState,
     saveState: saveState,
     hasCustom: hasCustom,
-    // Live preview without persisting
     preview: function (profile, css) {
       applyProfile(profile, css);
     },
-    // Back to whatever is saved
     revert: function () {
       var st = getState();
       applyProfile(st[PAGE], st.css);
@@ -234,7 +218,6 @@
     },
   };
 
-  // Apply the saved theme for THIS page immediately, before first paint.
   var st = getState();
   applyProfile(st[PAGE], st.css);
 })();

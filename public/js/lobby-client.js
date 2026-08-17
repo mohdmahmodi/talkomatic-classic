@@ -1,28 +1,18 @@
 // ╔═══════════════════════════════════════════════════════════════════════════╗
-// ║  lobby-client.js - Talkomatic Lobby Client                                ║
-// ║  Server statistics, anti-spam lobby sorting, lobby visibility             ║
-// ║                                                                           ║
-// ║  PATCHED (June 2026 anniversary batch):                                   ║
-// ║  • FIX #4: Access codes are NEVER placed in redirect URLs anymore.        ║
-// ║    The server validates the code and stores it in the session BEFORE      ║
-// ║    emitting "room joined" / "room created", so the room page joins        ║
-// ║    via the session - no ?accessCode= in the address bar, history,         ║
-// ║    or analytics. The lastUsedAccessCode variable has been removed         ║
-// ║    entirely since it only existed to build those URLs.                    ║
-// ╚═══════════════════════════════════════════════════════════════════════════╝
+// ║ lobby-client.js - Talkomatic Lobby Client ║ ║ Server statistics,
+// anti-spam lobby sorting, lobby visibility ║ ║ ║ ║ PATCHED (June 2026
+// anniversary batch): ║ ║ • FIX #4: Access codes are NEVER placed in
+// redirect URLs anymore.
 
 // ============================================================================
-// 1. CUSTOM MODAL SYSTEM (IIFE to avoid conflicts)
 // ============================================================================
 (function () {
-  // Only initialize once to avoid duplicate event listeners
   if (window.modalFunctionsInitialized) {
     console.log("Custom modal already initialized");
     return;
   }
   window.modalFunctionsInitialized = true;
 
-  // Get modal elements
   const customModal = document.getElementById("customModal");
   const modalTitle = document.getElementById("modalTitle");
   const modalMessage = document.getElementById("modalMessage");
@@ -35,18 +25,15 @@
 
   let currentModalCallback = null;
 
-  // Define the modal functions - make private to this scope
   function showModal(title, message, options = {}) {
     modalTitle.textContent = title;
     modalMessage.textContent = message;
 
-    // Reset modal state
     modalInputContainer.style.display = "none";
     modalInput.value = "";
     modalInputError.style.display = "none";
     modalInputError.textContent = "";
 
-    // Configure input if needed
     if (options.showInput) {
       modalInputContainer.style.display = "block";
       modalInput.placeholder = options.inputPlaceholder || "";
@@ -54,21 +41,16 @@
       modalInput.focus();
     }
 
-    // Configure buttons
     modalCancelBtn.textContent = options.cancelText || "Cancel";
     modalConfirmBtn.textContent = options.confirmText || "Confirm";
 
-    // Show/hide cancel button
     modalCancelBtn.style.display =
       options.showCancel !== false ? "block" : "none";
 
-    // Store callback
     currentModalCallback = options.callback || null;
 
-    // Show modal
     customModal.classList.add("show");
 
-    // Prevent background scrolling
     document.body.style.overflow = "hidden";
   }
 
@@ -78,7 +60,6 @@
     currentModalCallback = null;
   }
 
-  // Expose public methods to window
   const ERROR_CODES = {
     VALIDATION_ERROR: "Validation Error",
     SERVER_ERROR: "Server Error",
@@ -128,7 +109,7 @@
           if (validationResult !== true) {
             modalInputError.textContent = validationResult;
             modalInputError.style.display = "block";
-            return false; // Prevent modal from closing
+            return false;
           }
         }
         callback(confirmed, inputValue);
@@ -137,7 +118,6 @@
     });
   };
 
-  // Event listeners for modal
   modalConfirmBtn.addEventListener("click", () => {
     if (currentModalCallback) {
       const shouldClose = currentModalCallback(true, modalInput.value);
@@ -158,26 +138,22 @@
 
   closeModalBtn.addEventListener("click", hideCustomModal);
 
-  // Close modal when clicking outside the content
   customModal.addEventListener("click", (e) => {
     if (e.target === customModal) {
       hideCustomModal();
     }
   });
 
-  // Validate input for numbers only
   modalInput.addEventListener("input", (e) => {
     e.target.value = e.target.value.replace(/[^0-9]/g, "");
   });
 
-  // Close modal with Escape key
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && customModal.classList.contains("show")) {
       hideCustomModal();
     }
   });
 
-  // Enter key in input field triggers confirm button
   modalInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       modalConfirmBtn.click();
@@ -186,7 +162,6 @@
 })();
 
 // ============================================================================
-// 2. STATS FOR NERDS MODAL
 // ============================================================================
 class StatsModal {
   constructor() {
@@ -196,12 +171,10 @@ class StatsModal {
     this.isOpen = false;
     this.lastUpdateTime = null;
 
-    // Modal content sections
     this.loadingSection = document.getElementById("statsLoadingSection");
     this.errorSection = document.getElementById("statsErrorSection");
     this.contentSection = document.getElementById("statsContentSection");
 
-    // Stats display elements
     this.elements = {
       rooms: document.getElementById("modalStatsRooms"),
       users: document.getElementById("modalStatsUsers"),
@@ -377,7 +350,6 @@ class StatsModal {
 }
 
 // ============================================================================
-// 3. CONNECTION STATUS INDICATOR
 // ============================================================================
 
 const connectionStatus = document.createElement("div");
@@ -405,12 +377,9 @@ function updateConnectionStatus() {
 }
 
 // ============================================================================
-// 4. SOCKET.IO INITIALIZATION
 // ============================================================================
 
-// Socket.io initialization with robust connection settings
 const socket = io({
-  // WebSocket only, matching the server. No long-poll handshake first.
   transports: ["websocket"],
   upgrade: false,
   reconnectionAttempts: 5,
@@ -426,20 +395,14 @@ const socket = io({
       undefined,
   },
 });
-// Restart countdown + reconnect overlay (returns the user to a fresh lobby).
 if (window.TalkomaticConnection) window.TalkomaticConnection.attach(socket);
-// The Desk (staff chat) rides the same socket; it stays dormant for non-staff.
 if (window.TalkoDesk) window.TalkoDesk.init(socket);
 
 // ============================================================================
-// 5. DOM REFERENCES & STATE
 // ============================================================================
 
-// DOM elements
 const logForm = document.getElementById("logform");
 const createRoomForm = document.getElementById("lobbyForm");
-// The "Create A Room..." heading is a sibling of the form, not part of it, so
-// hiding the form on its own leaves a heading with nothing underneath.
 const createRoomHeading = document.querySelector(".createRoom");
 function setCreateRoomVisible(show) {
   createRoomForm.classList.toggle("hidden", !show);
@@ -461,7 +424,6 @@ const noRoomsMessage = document.getElementById("noRoomsMessage");
 const accessCodeInput = document.getElementById("accessCodeInput");
 const roomTypeRadios = document.querySelectorAll('input[name="roomType"]');
 
-// Variables
 let currentUsername = "";
 let currentLocation = "";
 let currentUserId = null;
@@ -472,9 +434,6 @@ const MAX_USERNAME_LENGTH = 15;
 const MAX_LOCATION_LENGTH = 20;
 const MAX_ROOM_NAME_LENGTH = 25;
 
-// Mirrors isGuestName in server/state.js - keep the two in step. The server is
-// the one that decides; this copy only saves a round trip and clears out a
-// guest name left in localStorage from before names were required.
 function isGuestUsername(name) {
   if (typeof name !== "string") return true;
   const n = name.trim();
@@ -483,18 +442,14 @@ function isGuestUsername(name) {
     /^guest[\s._-]*[0-9a-f]*$/i.test(n) || /^(anonymous|someone|unknown)$/i.test(n)
   );
 }
-// How many people a room can hold, picked on the slider. The ceiling depends on
-// what the person holds and lives in roomSizeCeiling() below; the server clamps
-// to the same numbers, so a hand-sent value cannot open a 50-seat room.
 const ROOM_SIZE_MIN = 5;
 let devLobbyCodes = {};
 let statsModal = null;
 let currentUserIsDev = false;
 let currentUserIsMod = false;
-let currentUserModLevel = 0; // 0 = not a mod, 1 = junior, 2 = full
+let currentUserModLevel = 0;
 
 // ============================================================================
-// 6. SIGN-IN HELPERS
 // ============================================================================
 
 function checkSignInStatus() {
@@ -537,8 +492,6 @@ function setSignInState(username, location, shouldPersist = true) {
 }
 
 // ── Discord avatar (pfp) ────────────────────────────────────────────────────
-// Only a validated snowflake id + CDN hash are stored and sent; the image URL
-// is rebuilt from those two, so no arbitrary URL can ever be injected.
 const PFP_ID_RE = /^\d{17,20}$/;
 const PFP_HASH_RE = /^(?:a_)?[a-f0-9]{32}$/i;
 
@@ -561,10 +514,6 @@ function avatarUrl(av, size) {
   );
 }
 
-// Fetch the profile from pfpgrab and cache the hash briefly. Images always
-// come straight from Discord's CDN; only the hash lookup goes to pfpgrab.
-// `fresh` skips every cache layer - used when retrying an account that
-// previously had no picture, so a just-added avatar shows up immediately.
 async function resolveAvatar(discordId, fresh) {
   if (!fresh) {
     try {
@@ -592,7 +541,6 @@ async function resolveAvatar(discordId, fresh) {
     );
   }
   if (!body || !body.avatar || body.avatar.is_default || !body.avatar.hash) {
-    // Remember the miss so the next attempt for this ID bypasses caches
     localStorage.setItem("talkomaticPfpMiss", discordId);
     throw new Error("That Discord account has no profile picture set.");
   }
@@ -624,7 +572,6 @@ function emitJoinLobby(username, location) {
 }
 
 // ============================================================================
-// 7. SOCKET CONNECTION EVENTS
 // ============================================================================
 
 socket.on("connect", () => {
@@ -643,8 +590,6 @@ socket.on("disconnect", (reason) => {
 });
 
 socket.on("connect_error", (error) => {
-  // IP block: the server attaches ban details. Show a clear ban screen with a
-  // live countdown (or a permanent notice) instead of retrying forever.
   if (error?.data?.banned) {
     try {
       socket.io.opts.reconnection = false;
@@ -684,16 +629,12 @@ socket.on("reconnect", (attemptNumber) => {
   checkSignInStatus();
 });
 
-// Staff warning, including any queued while the user was offline (delivered on
-// connect). Shown as a prominent toast in the lobby.
 socket.on("staff warning", (data) => {
   const msg = (data && data.message) || "Please follow the Talkomatic rules.";
   if (window.toastr)
     toastr.warning(msg, "Staff warning", { timeOut: 12000, closeButton: true });
 });
 
-// One active tab per browser session: if another tab takes over this identity,
-// pause this tab instead of letting two tabs fight over one identity.
 let tabSuperseded = false;
 function showTabSupersededOverlay() {
   if (tabSuperseded) return;
@@ -741,8 +682,6 @@ function showBanScreen(info) {
   banScreenShown = true;
   const DISCORD = "https://discord.gg/N7tJznESrE";
 
-  // Themed to match the rest of Talkomatic (talkoSS, #202020/#000/#616161 with
-  // the #ff9800 orange accent). The accent strips are squared (radius 0).
   if (!document.getElementById("banScreenStyles")) {
     const style = document.createElement("style");
     style.id = "banScreenStyles";
@@ -936,7 +875,6 @@ function showBanScreen(info) {
     "</div>";
   document.body.appendChild(overlay);
 
-  // Reason is staff-entered free text: render via textContent, never as HTML.
   if (info.reason) {
     const rc = document.getElementById("banReason");
     const rt = document.getElementById("banReasonText");
@@ -946,8 +884,6 @@ function showBanScreen(info) {
     }
   }
 
-  // Who placed the ban (and when), built with textContent so the staff label is
-  // never treated as HTML. Hidden when the server did not record it.
   const meta = document.getElementById("banMeta");
   if (meta) {
     const addChip = (faClass, label, value) => {
@@ -974,15 +910,10 @@ function showBanScreen(info) {
     }
   }
 
-  // ── On-site appeal: the IP block only refuses sockets, so this HTTP POST
-  // still reaches the server. Keyed server-side by the banned IP. ──
   const deviceIdOf = () =>
     (window.TalkomaticIdentity && window.TalkomaticIdentity.deviceId) ||
     undefined;
 
-  // Everything below draws the conversation with staff. It is polled rather
-  // than pushed: while blocked, this browser's socket is refused at the door,
-  // so HTTP is the only channel there is.
   let appealState = null;
   let appealReplyTo = null;
   let appealPollTimer = null;
@@ -998,23 +929,16 @@ function showBanScreen(info) {
     }
   };
 
-  // The moderator's picture, rebuilt from the validated snowflake + hash the
-  // server stores - the same rule the rooms use, never a raw URL from data.
-  // Falls back to their initial, so there is always a face on the message.
   const PFP_ID_RE = /^\d{17,20}$/;
   const PFP_HASH_RE = /^(?:a_)?[a-f0-9]{32}$/i;
   const banAvatarSeen = new Set();
   function appealFace(m) {
     const wrap = document.createElement("span");
     wrap.className = "ac-av" + (m.role === "dev" ? " dev" : "");
-    // The initial goes underneath and stays there. The picture covers it, so
-    // a redraw or a CDN hiccup can never leave an empty circle - which is how
-    // faces were disappearing mid-conversation.
     const letter = document.createElement("span");
     letter.className = "ac-av-i";
     letter.textContent = (m.by || "S").trim().charAt(0).toUpperCase();
     wrap.appendChild(letter);
-    // The lobby's own builder, so an animated picture animates here too.
     const url = avatarUrl(m.avatar || {}, 64);
     if (!url) return wrap;
     const img = document.createElement("img");
@@ -1025,7 +949,7 @@ function showBanScreen(info) {
     let retried = false;
     img.addEventListener("load", () => {
       banAvatarSeen.add(url);
-      wrap.classList.add("has-pic"); // drop the letter behind it
+      wrap.classList.add("has-pic");
     });
     img.addEventListener("error", () => {
       if (banAvatarSeen.has(url) && !retried) {
@@ -1043,10 +967,6 @@ function showBanScreen(info) {
     return wrap;
   }
 
-  // Replaces the whole appeal panel with a single line. Used when there is
-  // nothing left to do here: it was filed, or staff have closed the door on
-  // filing another. Was called in two places and never defined, which threw
-  // instead of showing the message.
   function showAppealDone(text, heading) {
     const wrap = document.getElementById("banAppealWrap");
     if (!wrap) return;
@@ -1064,8 +984,6 @@ function showBanScreen(info) {
     wrap.appendChild(p);
   }
 
-  // Staff ended this person's ability to appeal. Say so before they write it
-  // all out and press a button that was never going to work.
   function showAppealBarred() {
     showAppealDone(
       "Appeals are closed for this account. A previous appeal was declined and " +
@@ -1117,8 +1035,6 @@ function showBanScreen(info) {
       if (m.from === "user") {
         who.textContent = "You";
       } else {
-        // A name, a rank and a face. Somebody appealing a ban is talking to a
-        // person, and every part of this is what makes that obvious.
         who.appendChild(appealFace(m));
         const nm = document.createElement("span");
         nm.className = "ac-name";
@@ -1151,8 +1067,6 @@ function showBanScreen(info) {
       const foot = document.createElement("div");
       foot.className = "ac-t";
       foot.textContent = fmtClock(m.ts);
-      // Answering a specific question is the difference between a chat and
-      // two people talking past each other.
       if (d.canWrite && m.from === "staff") {
         foot.appendChild(document.createTextNode("  "));
         const rb = document.createElement("button");
@@ -1317,8 +1231,6 @@ function showBanScreen(info) {
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (!d || !d.ok || !d.has) return;
-        // Only redraw when something actually changed, so a reply being typed
-        // is never wiped by a poll landing mid-sentence.
         const sig =
           d.messages.length + "|" + d.status + "|" + (d.locked ? 1 : 0);
         const old = appealState
@@ -1371,8 +1283,6 @@ function showBanScreen(info) {
       })
         .then((r) => r.json().catch(() => ({ ok: false })))
         .then((d) => {
-          // Filed, or one is already open or decided for this ban: either way
-          // the conversation is what they should be looking at.
           if (d && (d.ok || d.code === "already" || d.code === "decided"))
             return pollIntoChat(true);
           sendBtn.disabled = false;
@@ -1394,9 +1304,6 @@ function showBanScreen(info) {
         });
     });
 
-  // Fetch the thread and switch the panel over to the conversation. On the
-  // first load there may not be one yet, and that is not an error - the form
-  // simply stays as it is.
   function pollIntoChat(justSent) {
     const q = deviceIdOf() ? "?deviceId=" + encodeURIComponent(deviceIdOf()) : "";
     return fetch("/api/v1/appeal" + q, {
@@ -1416,8 +1323,6 @@ function showBanScreen(info) {
       });
   }
 
-  // An appeal filed earlier (or in another tab) opens straight into the chat,
-  // so a moderator's question is not sitting unread behind a "submitted" note.
   pollIntoChat(false);
 
   if (!permanent && info.expiry) {
@@ -1436,25 +1341,15 @@ function showBanScreen(info) {
     setInterval(tick, 1000);
   }
 
-  // Poll for an early lift (a dev accepting the appeal, unblocking the IP, or
-  // shortening the ban). The socket stays refused while blocked, so this checks
-  // over plain HTTP and reloads the moment the ban is gone. It also re-checks
-  // immediately when the tab is focused, so coming back feels instant.
   let banLifted = false;
   const checkLifted = () => {
     if (banLifted || document.hidden) return;
     fetch("/api/v1/ban-status", { credentials: "same-origin", cache: "no-store" })
-      // Only trust a real 200 response. A 429/5xx has no reliable ban state, and
-      // its error body carries no `banned` field - which previously read as
-      // falsy and was mistaken for "unbanned", firing a reload that re-polled,
-      // re-tripped the limiter, and looped every ~20-30s. Require an EXPLICIT
-      // banned:false before declaring the ban lifted.
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (banLifted || !d || typeof d.banned !== "boolean" || d.banned)
           return;
         banLifted = true;
-        // The lobby reads this once after the reload to welcome the user back.
         try {
           sessionStorage.setItem("tk_ban_lifted", "1");
         } catch (_) {}
@@ -1489,10 +1384,8 @@ socket.on("dev lobby context", (codes) => {
 });
 
 // ============================================================================
-// 8. FORM HANDLERS
 // ============================================================================
 
-// Show/hide access code field
 roomTypeRadios.forEach((radio) => {
   radio.addEventListener("change", (e) => {
     if (e.target.value === "semi-private") {
@@ -1513,7 +1406,6 @@ logForm.addEventListener("submit", async (e) => {
     window.showErrorModal("Please enter a username.");
     return;
   }
-  // Same rule the server enforces, checked here so the answer is immediate.
   if (isGuestUsername(newUsername)) {
     window.showErrorModal(
       "Guest names are not allowed. Please choose a username.",
@@ -1525,8 +1417,6 @@ logForm.addEventListener("submit", async (e) => {
     localStorage.setItem("talkomaticUsername", newUsername);
     localStorage.setItem("talkomaticLocation", newLocation);
 
-    // Discord avatar: resolve the entered ID before joining so the avatar is
-    // part of this sign-in. A lookup failure never blocks signing in.
     const pfpEnable = document.getElementById("pfpEnable");
     const pfpIdInput = document.getElementById("pfpDiscordId");
     if (pfpEnable && pfpEnable.checked) {
@@ -1540,8 +1430,6 @@ logForm.addEventListener("submit", async (e) => {
         localStorage.removeItem("talkomaticPfpEnabled");
       } else {
         try {
-          // If this exact ID previously had no picture, bypass caches so a
-          // freshly added Discord avatar is found right away.
           const fresh = localStorage.getItem("talkomaticPfpMiss") === rawId;
           await resolveAvatar(rawId, fresh);
           localStorage.setItem("talkomaticPfpEnabled", "1");
@@ -1577,7 +1465,6 @@ logForm.addEventListener("submit", async (e) => {
   }
 });
 
-// Pfp form wiring: checkbox reveals the ID input; both restore from storage.
 function updatePfpPreview() {
   const img = document.getElementById("pfpPreview");
   if (!img) return;
@@ -1618,9 +1505,6 @@ function updatePfpPreview() {
   sync();
   updatePfpPreview();
 
-  // People change their Discord picture: refresh the stored hash shortly
-  // after load and push the new one to the server if it differs. If the
-  // account lost its avatar, turn the feature off cleanly.
   setTimeout(async () => {
     if (localStorage.getItem("talkomaticPfpEnabled") !== "1") return;
     const before = storedAvatar();
@@ -1657,9 +1541,6 @@ goChatButton.addEventListener("click", () => {
   const roomType = document.querySelector(
     'input[name="roomType"]:checked',
   )?.value;
-  // The slider, clamped here and again on the server. The ceiling has to be
-  // the LEVEL's, not a fixed 10: this clamp is what was quietly cutting a
-  // staff member's 50 back down to 10 after the slider had offered it.
   const sizeEl = document.getElementById("roomSizeSlider");
   const maxSize = Math.max(
     ROOM_SIZE_MIN,
@@ -1679,11 +1560,6 @@ goChatButton.addEventListener("click", () => {
       }
     }
 
-    // FIX #4: The access code is sent to the server ONLY in this socket
-    // event. The server validates it and stores it in the session before
-    // confirming, so the redirect URL never needs to carry it.
-    // No layout here any more: every room starts vertical, and the button in
-    // the room's top right switches it for whoever presses it.
     socket.emit("create room", {
       name: roomName,
       type: roomType,
@@ -1719,7 +1595,6 @@ dynamicRoomList.addEventListener("click", (e) => {
 });
 
 // ============================================================================
-// 9. ROOM JOIN / CREATE FLOW
 // ============================================================================
 
 function promptAccessCode(roomId) {
@@ -1762,21 +1637,15 @@ socket.on("access code required", () => {
   promptAccessCode(roomId);
 });
 
-// FIX #4: Redirect with roomId ONLY. The server has already validated and
-// stored the access code in the session (it awaits the session save before
-// emitting this event), so room.html joins via the session - the code never
-// touches the URL, browser history, or analytics.
 socket.on("room joined", (data) => {
   window.location.href = `/room.html?roomId=${data.roomId}`;
 });
 
-// FIX #4: Same for room creation - roomId only.
 socket.on("room created", (roomId) => {
   window.location.href = `/room.html?roomId=${roomId}`;
 });
 
 // ============================================================================
-// 10. SIGN-IN STATUS & SIGN-OUT
 // ============================================================================
 
 socket.on("signin status", (data) => {
@@ -1834,7 +1703,6 @@ function signOut() {
 }
 
 // ============================================================================
-// 11. LOBBY ROOM LIST
 // ============================================================================
 
 socket.on("lobby update", (rooms) => {
@@ -1933,7 +1801,6 @@ function createRoomElement(room) {
       userDiv.appendChild(mb);
     }
 
-    // Bots wear the same gray flair here as in the room itself.
     if (user.isBotUser) {
       userDiv.classList.add("bot-lobby-user");
       const bb = document.createElement("span");
@@ -1978,9 +1845,6 @@ function createRoomElement(room) {
 
   roomTop.appendChild(roomInfo);
 
-  // Enter plus a spectate eye for public rooms. Spectate is read-only and works
-  // even when the room is full; semi-private rooms are left out so the access
-  // code isn't bypassed.
   const roomActions = document.createElement("div");
   roomActions.className = "room-actions";
   roomActions.appendChild(enterButton);
@@ -2000,13 +1864,10 @@ function createRoomElement(room) {
   roomElement.appendChild(roomActions);
   roomElement.appendChild(roomTop);
 
-  // Per-room staff controls; spotlight stays dev-only.
   if (currentUserIsDev || (currentUserIsMod && currentUserModLevel >= 2)) {
     const devRow = document.createElement("div");
     devRow.className = "lobby-dev-controls";
 
-    // Public rooms already have the everyone-eye next to Enter; a spectate
-    // button appears here only for the rooms that eye does not cover.
     if (currentUserIsDev && room.type !== "public") {
       const spectateBtn = document.createElement("button");
       spectateBtn.type = "button";
@@ -2054,12 +1915,10 @@ function getRoomTypeDisplay(type) {
 }
 
 // ============================================================================
-// 12. ANTI-SPAM: ACTIVITY-BASED ROOM SORTING
 // ============================================================================
 
 function sortRoomsByActivity(rooms) {
   return rooms.slice().sort((a, b) => {
-    // Spotlighted ("Official") rooms are always pinned to the top
     if (!!a.spotlight !== !!b.spotlight) return a.spotlight ? -1 : 1;
 
     const aCount = getJoinableCount(a);
@@ -2114,12 +1973,8 @@ function showRoomList() {
 }
 
 // ============================================================================
-// 13. INITIALIZATION
 // ============================================================================
 
-// How far the room size slider goes, by what the signed-in person holds. The
-// server clamps whatever actually arrives (newRoomCapacity), so this is only
-// about not offering a number that would be silently cut back down.
 const ROOM_SIZE_CEILING = { user: 10, jr: 15, mod: 25, dev: 50 };
 
 function roomSizeCeiling() {
@@ -2139,10 +1994,8 @@ function applyRoomSizeCeiling() {
   const min = Number(sizeEl.min) || 5;
   sizeEl.max = String(max);
   if (Number(sizeEl.value) > max) sizeEl.value = String(max);
-  sizeEl.dispatchEvent(new Event("input")); // keep the number above it in step
+  sizeEl.dispatchEvent(new Event("input"));
 
-  // Redraw the tick labels. Every value fits under the slider at 10 and
-  // nothing like it at 50, so the scale becomes evenly spaced markers.
   const scale = document.querySelector(".size-scale");
   if (!scale) return;
   const marks = [];
@@ -2160,7 +2013,6 @@ function initLobby() {
   document.querySelector('input[name="roomType"][value="public"]').checked =
     true;
 
-  // The room size slider, with the number above it kept in step.
   const sizeEl = document.getElementById("roomSizeSlider");
   const sizeOut = document.getElementById("roomSizeValue");
   if (sizeEl && sizeOut) {
@@ -2173,9 +2025,6 @@ function initLobby() {
 
   statsModal = new StatsModal();
 
-  // Guard the optional stats button: it was removed from the lobby menu, so
-  // getElementById returns null. Without this guard the throw aborts the rest
-  // of initLobby - including the Update Notes binding below.
   const statsBtn = document.getElementById("statsForNerdsButton");
   if (statsBtn)
     statsBtn.addEventListener("click", (e) => {
@@ -2185,7 +2034,6 @@ function initLobby() {
       }
     });
 
-  // Update Notes: re-open the update popup (popup.js) on demand.
   const updateNotesBtn = document.getElementById("updateNotesButton");
   if (updateNotesBtn)
     updateNotesBtn.addEventListener("click", (e) => {
@@ -2197,8 +2045,6 @@ function initLobby() {
     const savedUsername = localStorage.getItem("talkomaticUsername");
     const savedLocation = localStorage.getItem("talkomaticLocation");
 
-    // A saved guest name is treated as no name at all: the lobby used to hand
-    // one out on the first visit, and those browsers must pick a real one now.
     if (savedUsername && !isGuestUsername(savedUsername)) {
       currentUsername = savedUsername;
       currentLocation = savedLocation || "On The Web";
@@ -2214,8 +2060,6 @@ function initLobby() {
       showRoomList();
     } else {
       if (savedUsername) localStorage.removeItem("talkomaticUsername");
-      // No name yet, so the create-room box stays shut and the prompt above the
-      // room list asks for one. Picking a name runs the normal sign-in path.
       usernameInput.value = "";
       locationInput.value = savedLocation || "";
       isSignedIn = false;
@@ -2242,8 +2086,6 @@ window.addEventListener("beforeunload", () => {
 });
 
 // ════════════════════════════════════════════════════════════════════════════
-// 14. DEV / STAFF UI (lobby) - built on the shared StaffUI kit. The server
-// validates the dev key on every action; this layer is presentation only.
 // ════════════════════════════════════════════════════════════════════════════
 
 let manageKeysOpen = false;
@@ -2263,8 +2105,6 @@ function ensureDevPanelButton() {
   const btn = document.createElement("button");
   btn.id = "devPanelButton";
   btn.type = "button";
-  // Moderators get a panel here too. Without one they had no way to reach
-  // their own key or the dashboard from the lobby.
   btn.innerHTML = currentUserIsDev
     ? '<i class="fas fa-screwdriver-wrench"></i> Dev Panel'
     : '<i class="fas fa-shield-halved"></i> Mod Panel';
@@ -2469,8 +2309,6 @@ function openDevPanel() {
   });
 }
 
-// The lobby panel for moderators. Devs get openDevPanel with the global tools;
-// a mod's global surface is their record and their key.
 function openModLobbyPanel() {
   if (!window.StaffUI) return;
   StaffUI.panel({
@@ -2496,9 +2334,6 @@ function openModLobbyPanel() {
   });
 }
 
-// Show the staff key this browser is signed in with. Kept hidden behind a
-// click, because it is the only proof of role: anyone who reads it over your
-// shoulder becomes you.
 function myKeyItem() {
   return {
     icon: '<i class="fas fa-key"></i>',
@@ -2539,8 +2374,6 @@ function openMyKey() {
     }),
   );
 
-  // The reveal lives in the body, not the footer: footer buttons close the
-  // modal, and hiding it again should not mean reopening the whole thing.
   const box = StaffUI.el("div", { class: "tk-keybox" });
   const shown = StaffUI.el("div", { class: "tk-keyval", text: "•".repeat(28) });
   const eye = StaffUI.el("button", { class: "tk-btn tk-keyeye", text: "Show" });
@@ -2637,7 +2470,6 @@ socket.on("dev mod granted", (data) => {
   });
 });
 
-// Per-key actions: promote/demote level or revoke. Opened from the manage list.
 function openModKeyActions(k) {
   if (!window.StaffUI) return;
   const toLevel = k.level === 1 ? 2 : 1;
@@ -2739,9 +2571,6 @@ socket.on("dev blocks", (list) => {
     if (hrs < 48) return hrs + " hr left";
     return Math.round(hrs / 24) + " days left";
   };
-  // A block is named by whoever it hit, or by the kind of key it is. The
-  // address is only there for the operations feed, so the row has to read
-  // without one and the unblock has to go by the opaque ref.
   const nameOf = (b) =>
     b.label ||
     b.ip ||
@@ -2961,14 +2790,9 @@ socket.on("staff level changed", (d) => {
     { timeout: 6000 },
   );
 });
-// Device identity: stash the activity summary for later features (mod
-// applications) and warn once if this browser's id had to be restored from
-// a backup layer because localStorage was cleared.
 socket.on("identity status", (d) => {
   if (window.TalkomaticIdentity) window.TalkomaticIdentity.activity = d || null;
 });
-// Staff-only live alerts (reports, mod-abuse flags), pushed by the server only
-// to qualifying staff sockets.
 socket.on("staff notice", (d) => {
   if (d && d.text && typeof lobbyNotify === "function")
     lobbyNotify(d.text, "warning", { title: "Staff alert", timeout: 8000 });
@@ -2989,26 +2813,16 @@ socket.on("staff notice", (d) => {
     window.TalkomaticIdentity.ready.then(warn);
 })();
 
-// Key entry is reachable from the "Staff Access" link in the lobby menu, by
-// opening the lobby with #staff in the URL, or via the deep link from mod.html.
 const staffLoginLink = document.getElementById("staffLoginLink");
 if (staffLoginLink)
   staffLoginLink.addEventListener("click", (e) => {
     e.preventDefault();
-    // Already signed in as staff: jump straight to the dashboard (mod.html is
-    // exempt from the single-tab guard). Otherwise open the key-entry box.
     if (currentUserIsDev || currentUserIsMod)
       window.open("/mod.html", "_blank");
     else openStaffKeyEntry();
   });
 
-// The latest mod-application status for this browser (pending / approved /
-// rejected), pushed by the server on connect and on demand. Lets the lobby
-// menu offer "Check status" with the reviewer's note instead of "Become a
-// moderator" once a person has applied.
 let myAppStatus = null;
-// Whether the server is taking new applications. Null until it says, so the
-// link is not yanked away on a slow connection before the answer arrives.
 let applicationsOpen = null;
 const APP_STATUS_META = {
   pending: {
@@ -3033,15 +2847,9 @@ const APP_STATUS_META = {
   },
 };
 
-// Restyle the lobby link: a colored status dot + "Check status" once an
-// application exists, otherwise the plain "Apply to be a mod". Staff never see
-// this link (updateStaffLink hides it), so only restyle it for non-staff.
 function updateModApplyLink() {
   const link = document.getElementById("modApplyLink");
   if (!link || currentUserIsDev || currentUserIsMod) return;
-  // Intake closed and nothing of theirs to check: the link has nowhere to go,
-  // so it comes off rather than opening a form that will be refused. Anyone
-  // who has already applied keeps their way back to the answer.
   const closed = applicationsOpen === false;
   const mine = !!(myAppStatus && myAppStatus.has);
   link.style.display = closed && !mine ? "none" : "";
@@ -3057,8 +2865,6 @@ function updateModApplyLink() {
   }
 }
 
-// The status modal: a colored icon (amber pending, red denied, green approved)
-// and the reviewer's message if they left one.
 function showAppStatus() {
   const st = myAppStatus;
   if (!st || !st.has) return openModApply();
@@ -3082,9 +2888,6 @@ function showAppStatus() {
     s.textContent = "Submitted " + new Date(st.submittedAt).toLocaleString();
     body.appendChild(s);
   }
-  // Reviewer note rendered via textContent (never HTML), squared orange-style
-  // strip matching the rest of the staff UI. Never shown for a revoked status
-  // (its note would be the old approval message, which no longer applies).
   if (st.reason && st.status !== "revoked") {
     const note = document.createElement("div");
     note.style.cssText =
@@ -3116,7 +2919,6 @@ function showAppStatus() {
   });
 }
 
-// Mod application (active members only; the server re-checks "active").
 async function openModApply() {
   if (currentUserIsDev || currentUserIsMod) {
     lobbyNotify("You're already staff.", "info");
@@ -3208,9 +3010,8 @@ const modApplyLink = document.getElementById("modApplyLink");
 if (modApplyLink)
   modApplyLink.addEventListener("click", (e) => {
     e.preventDefault();
-    // Already applied? Show their status. Otherwise open the apply form.
     if (myAppStatus && myAppStatus.has) {
-      socket.emit("mod application status"); // refresh in case it changed
+      socket.emit("mod application status");
       showAppStatus();
     } else openModApply();
   });
@@ -3222,7 +3023,6 @@ socket.on("mod application result", (d) => {
       "success",
       { timeout: 7000 },
     );
-    // Reflect the pending state on the menu link right away.
     myAppStatus = { has: true, status: "pending", submittedAt: Date.now() };
     updateModApplyLink();
   } else
@@ -3257,7 +3057,6 @@ const suggestBoxLink = document.getElementById("suggestBoxLink");
 if (suggestBoxLink)
   suggestBoxLink.addEventListener("click", (e) => {
     e.preventDefault();
-    // Community board modal (suggest-board.js); old prompt is the fallback.
     if (window.SuggestBoard) window.SuggestBoard.open();
     else openSuggestBox();
   });
@@ -3273,21 +3072,14 @@ socket.on("suggestion result", (d) => {
     });
 });
 
-// Whether intake is open. Pushed on connect and again whenever a dev flips it,
-// so a lobby sitting open picks the change up without a reload.
 socket.on("applications state", (d) => {
   applicationsOpen = !d || d.open !== false;
   updateModApplyLink();
 });
 
-// The server pushes this on connect (if an application exists) and on request.
 socket.on("mod application status", (d) => {
   myAppStatus = d && d.has ? d : null;
   updateModApplyLink();
-  // A live review (the user is in the lobby when staff decide) gets a one-time
-  // notification, the same way a lifted ban does. The on-connect push has no
-  // `live` flag, so a page load never re-toasts an old decision. The full
-  // reviewer message is always available behind the "Check status" link.
   if (d && d.live && d.has) {
     if (d.status === "approved")
       lobbyNotify("Your moderator application was approved!", "success", {
@@ -3303,9 +3095,6 @@ socket.on("mod application status", (d) => {
   }
 });
 
-// Reflect the server-proven staff role in the menu link: "Staff Access" becomes
-// "Mod Dashboard" for mods and "Dev Dashboard" for devs once a key validates.
-// The tile is icon-only, so the role reads from the glyph and the tooltip.
 function updateStaffLink() {
   const link = document.getElementById("staffLoginLink");
   if (link) {
@@ -3319,20 +3108,14 @@ function updateStaffLink() {
     link.title = label;
     link.setAttribute("aria-label", label);
   }
-  // Staff do not apply to be a mod, so hide the apply link for them.
   const applyLink = document.getElementById("modApplyLink");
   if (applyLink) {
-    // Staff never apply; updateModApplyLink decides it for everyone else,
-    // because the intake can be closed.
     applyLink.style.display =
       currentUserIsDev || currentUserIsMod ? "none" : "";
-    // Reflect any known application status ("Check status" + colored dot).
     updateModApplyLink();
   }
 }
 updateStaffLink();
-// If the ban screen just reloaded us because a ban was lifted, welcome the user
-// back once. The flag is set on the ban screen right before it reloads.
 try {
   if (sessionStorage.getItem("tk_ban_lifted")) {
     sessionStorage.removeItem("tk_ban_lifted");
@@ -3393,7 +3176,6 @@ socket.on("maintenance status", (data) => {
   }
 });
 
-// Lobby staff styles (badges, spotlight, dev button, ticker / maintenance bars)
 (function injectLobbyStaffStyles() {
   const css = `
     .mod-lobby-badge{display:inline-block;background:#00bcd4;color:#003;font-size:8px;font-weight:bold;padding:1px 4px;border-radius:6px;margin:0 4px;letter-spacing:.5px;vertical-align:middle;}

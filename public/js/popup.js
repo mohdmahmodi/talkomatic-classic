@@ -1,28 +1,17 @@
-/**
- * Talkomatic Update Popup Manager
- * Handles showing update popups based on version changes and time intervals
- */
 class TalkomaticPopupManager {
   constructor() {
-    // Current version - update this when you release new versions.
-    // Bumping this re-shows the popup to everyone (see shouldShowPopup).
     this.currentVersion = "5.5.0";
-    // Cookie names
     this.cookieNames = {
       lastShown: "talkomatic_popup_last_shown",
       lastVersion: "talkomatic_popup_last_version",
     };
-    // Time intervals (in milliseconds)
     this.intervals = {
-      thirtyDays: 30 * 24 * 60 * 60 * 1000, // 30 days in milliseconds
+      thirtyDays: 30 * 24 * 60 * 60 * 1000,
     };
     this.popupContainer = null;
     this.isPopupVisible = false;
   }
 
-  /**
-   * Initialize the popup manager - call this on page load
-   */
   init() {
     if (document.readyState === "loading") {
       document.addEventListener("DOMContentLoaded", () =>
@@ -33,44 +22,31 @@ class TalkomaticPopupManager {
     }
   }
 
-  /**
-   * Check if popup should be shown and display it if needed
-   */
   checkAndShowPopup() {
     if (this.shouldShowPopup()) {
       this.createAndShowPopup();
     }
   }
 
-  /**
-   * Determine if the popup should be shown
-   * @returns {boolean} - true if popup should be shown
-   */
   shouldShowPopup() {
     const lastShown = this.getCookie(this.cookieNames.lastShown);
     const lastVersion = this.getCookie(this.cookieNames.lastVersion);
-    // First visit - show popup
     if (!lastShown || !lastVersion) {
       return true;
     }
-    // Version changed - show popup regardless of time
     if (lastVersion !== this.currentVersion) {
       return true;
     }
-    // Same version - check if 30 days have passed
     const lastShownDate = new Date(parseInt(lastShown));
     const now = new Date();
     const timeDifference = now.getTime() - lastShownDate.getTime();
     return timeDifference >= this.intervals.thirtyDays;
   }
 
-  /**
-   * Create popup styles
-   */
   createPopupStyles() {
     const styleId = "talkomatic-popup-styles";
     if (document.getElementById(styleId)) {
-      return; // Styles already added
+      return;
     }
     const style = document.createElement("style");
     style.id = styleId;
@@ -449,9 +425,6 @@ class TalkomaticPopupManager {
     document.head.appendChild(style);
   }
 
-  /**
-   * Create popup HTML content
-   */
   createPopupHTML() {
     const currentDate = new Date().toLocaleDateString("en-US", {
       month: "long",
@@ -548,9 +521,6 @@ class TalkomaticPopupManager {
 `;
   }
 
-  /**
-   * Create and show the popup
-   */
   createAndShowPopup() {
     try {
       this.createPopupStyles();
@@ -565,9 +535,6 @@ class TalkomaticPopupManager {
     }
   }
 
-  /**
-   * Create the popup container element
-   */
   createPopupContainer() {
     this.popupContainer = document.createElement("div");
     this.popupContainer.id = "talkomatic-popup-container";
@@ -582,9 +549,6 @@ class TalkomaticPopupManager {
         `;
   }
 
-  /**
-   * Show the popup with animation
-   */
   showPopup() {
     if (this.popupContainer) {
       this.popupContainer.style.display = "block";
@@ -592,9 +556,6 @@ class TalkomaticPopupManager {
     }
   }
 
-  /**
-   * Set up event handlers for closing the popup
-   */
   setupEventHandlers() {
     this.popupContainer.addEventListener("click", (e) => {
       if (e.target.dataset.action === "close") {
@@ -612,9 +573,6 @@ class TalkomaticPopupManager {
     document.addEventListener("keydown", this.keyHandler);
   }
 
-  /**
-   * Close the popup and save the state
-   */
   closePopup() {
     if (!this.isPopupVisible) return;
     const popupElement = this.popupContainer?.querySelector(
@@ -638,9 +596,6 @@ class TalkomaticPopupManager {
     }
   }
 
-  /**
-   * Save the current state to cookies
-   */
   savePopupState() {
     const now = new Date().getTime();
     const expiryDate = new Date();
@@ -653,17 +608,11 @@ class TalkomaticPopupManager {
     );
   }
 
-  /**
-   * Set a cookie
-   */
   setCookie(name, value, expiry) {
     const expires = expiry ? "; expires=" + expiry.toUTCString() : "";
     document.cookie = `${name}=${value}${expires}; path=/; SameSite=Lax`;
   }
 
-  /**
-   * Get a cookie value
-   */
   getCookie(name) {
     const nameEQ = name + "=";
     const ca = document.cookie.split(";");
@@ -675,30 +624,20 @@ class TalkomaticPopupManager {
     return null;
   }
 
-  /**
-   * Manually show the popup (for testing or admin purposes)
-   */
   forceShowPopup() {
     this.createAndShowPopup();
   }
 
-  /**
-   * Reset popup state (clear cookies)
-   */
   resetPopupState() {
     document.cookie = `${this.cookieNames.lastShown}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`;
     document.cookie = `${this.cookieNames.lastVersion}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`;
   }
 
-  /**
-   * Update the current version (call this when deploying new versions)
-   */
   updateVersion(newVersion) {
     this.currentVersion = newVersion;
   }
 }
 
-// Auto-initialize when script loads
 const talkomaticPopup = new TalkomaticPopupManager();
 talkomaticPopup.init();
 window.TalkomaticPopup = talkomaticPopup;

@@ -1,14 +1,5 @@
 // public/js/games-client.js
-// Mini games panel. Talks to server/games over the room socket, no second
-// connection.
-//
-// Two views. The floor picks a game and shows what is happening in the room.
-// The game view is a split: the board on the left, players and chat on the
-// right, stacking on a phone.
-//
-// Boards are objects with mount/update so a state push never rebuilds the DOM
-// under a focused input or wipes the drawing canvas. The chat log and the
-// board both patch in place for the same reason.
+// Mini games panel.
 
 (function () {
   const S = window.socket;
@@ -35,8 +26,6 @@
     return e;
   }
 
-  // Other people's words are masked here, per viewer, using the room's own
-  // filter and its on/off switch. The server sends what was actually typed.
   function masked(text) {
     const f = window.TalkomaticFilter;
     if (!f || !f.apply) return String(text == null ? "" : text);
@@ -58,8 +47,6 @@
   const ID_RE = /^[0-9]{5,25}$/;
   const HASH_RE = /^[a-f0-9_]{8,64}$/i;
 
-  // A game icon is { emoji }, { fa } or { image }, so a new game can use
-  // whichever it has to hand.
   function iconNode(icon, cls) {
     const wrap = el("span", { class: cls || "gm-icon" });
     if (!icon) return wrap;
@@ -76,8 +63,6 @@
     return wrap;
   }
 
-  // Staff flair, matching the room's own badges. Roles are stamped by the
-  // server from the room record, so these cannot be faked from a client.
   function badgeFor(role) {
     if (role === "dev") {
       const b = el("span", { class: "gm-staff gm-staff-dev", title: "Talkomatic developer" });
@@ -105,8 +90,6 @@
     return img;
   }
 
-  // Shared loading state. Some of the standalone games pull a few hundred KB
-  // of images and audio, so a blank panel reads as broken.
   function loadingNode(text, sub) {
     const box = el("div", { class: "gm-loading" });
     box.appendChild(el("div", { class: "gm-spinner" }));
@@ -130,15 +113,12 @@
   let roomUsers = [];
   let board = null;
   let boardKey = "";
-  let side = null; // players + chat controller for the open game
+  let side = null;
   let clockTimer = null;
-  let cleanupSolo = null; // timers for a solo game's loading state
-  let earlyRelays = []; // relays that landed before the board was ready
-  let pendingJoin = null; // a game we just pressed play on, awaiting a board
+  let cleanupSolo = null;
+  let earlyRelays = [];
+  let pendingJoin = null;
 
-  // The chat can be folded away to give the board the room, which is the
-  // difference between playable and cramped on a phone. Remembered per device,
-  // and starts folded on a small screen.
   let chatOpen = readChatPref();
   let unread = 0;
 
@@ -159,7 +139,6 @@
     try {
       localStorage.setItem("tk-games-chat", chatOpen ? "1" : "0");
     } catch (e) {
-      /* private mode, the toggle just will not stick */
     }
     applyChat();
   }
@@ -229,8 +208,6 @@
     bodyEl = el("div", { class: "gm-body" });
 
     overlay.appendChild(el("div", { class: "gm-modal" }, [head, stripEl, bodyEl]));
-    // Deliberately no click-outside-to-close: people were losing a game they
-    // were in the middle of by clicking next to the panel.
     document.body.appendChild(overlay);
   }
 
@@ -243,20 +220,13 @@
     render();
   }
 
-  // Closing the panel gives up everything you were holding. Keeping the seat
-  // meant somebody could shut the panel, walk off, and go on blocking the
-  // rotation with a name nobody could reach and a room textbox still saying
-  // they were playing. Escape steps back to the floor instead of closing, so
-  // there is still a way out of a board that does not cost you the game.
   function closePanel() {
     for (const tableId of Object.values(floor.myTables || {}))
       S.emit("games leave", { tableId });
     for (const type of Object.keys(floor.myQueue || {}))
       S.emit("games queue leave", { type });
-    // Any claim on a next round goes back too, whichever board it was on.
     for (const tableId of floor.myNext || [])
       S.emit("games play next", { tableId, on: false });
-    // Give the watch slot back, otherwise the count keeps counting you.
     if (detail && detail.spectating)
       S.emit("games spectate", { tableId: detail.id, on: false });
     isOpen = false;
@@ -315,13 +285,12 @@
       n.style.width = pct + "%";
       n.classList.toggle("gm-bar-low", pct < 20);
     });
-    // Boards with their own clock paint it themselves, four times a second.
     if (board && board.clock) board.clock();
   }
 
   function render() {
     if (!isOpen || !bodyEl) return;
-    if (view.name === "solo") return; // the frame owns the body until they go back
+    if (view.name === "solo") return;
     if (view.name === "game" && detail && detail.id === view.tableId)
       renderGame();
     else renderFloor();
@@ -379,10 +348,6 @@
       bodyEl.appendChild(sgrid);
     }
 
-    // One list, not two. Splitting boards into "happening now" and "waiting to
-    // start" made people read the same game twice and work out which half they
-    // wanted; the row itself already says which it is. Boards you are sitting
-    // at come first, since that is what you are most likely looking for.
     const boards = floor.tables.slice().sort((a, b) => {
       const mineA = a.seats.some((s) => s.userId === myId()) ? 0 : 1;
       const mineB = b.seats.some((s) => s.userId === myId()) ? 0 : 1;
@@ -411,7 +376,6 @@
     return s;
   }
 
-  // Standalone games under public/games. Same three row card as the rest.
   function soloCard(g) {
     const card = el("div", { class: "gm-card gm-card-solo" });
 
@@ -479,8 +443,6 @@
       });
   }
 
-  // Solo games run in their own frame inside the panel, so the room socket and
-  // the chat behind it stay put.
   function openSolo(g) {
     teardownGameView();
     view = { name: "solo", tableId: null };
@@ -529,9 +491,6 @@
       frame.classList.remove("gm-hidden");
     };
     frame.addEventListener("load", ready);
-    // The load event waits on every last image and script, and some of these
-    // games pull a big library from a CDN. Watch readyState too so the spinner
-    // clears the moment the game is actually usable.
     const poll = setInterval(() => {
       if (done) return clearInterval(poll);
       try {
@@ -539,7 +498,6 @@
           ready();
       } catch (_) {}
     }, 150);
-    // Say something rather than sitting on a bare spinner.
     const slow = setTimeout(() => {
       if (done) return;
       const sub = loading.querySelector(".gm-loading-sub");
@@ -547,7 +505,6 @@
       if (sub) sub.textContent = msg;
       else loading.appendChild(el("div", { class: "gm-loading-sub", text: msg }));
     }, 2500);
-    // Belt and braces: never leave a spinner up for ever.
     const bail = setTimeout(ready, 15000);
     cleanupSolo = () => {
       clearInterval(poll);
@@ -557,9 +514,6 @@
     bodyEl.appendChild(wrap);
   }
 
-  // One column, three rows: who it is, what you do, what it costs you.
-  // The icon sits inline with the title rather than owning a column, which is
-  // what squashed the text into a ribbon before.
   function gameCard(g) {
     const c = (floor.counts && floor.counts[g.id]) || {
       playing: 0, waiting: 0, live: 0, names: [],
@@ -571,7 +525,6 @@
       class: "gm-card" + (myGame ? " gm-card-mine" : ""),
     });
 
-    // Row 1: icon, name, description
     const top = el("div", { class: "gm-card-top" });
     top.appendChild(iconNode(g.icon, "gm-card-icon"));
     const text = el("div", { class: "gm-card-text" });
@@ -593,7 +546,6 @@
     top.appendChild(text);
     card.appendChild(top);
 
-    // Row 2: the action, and who is in there right now
     const mid = el("div", { class: "gm-card-mid" });
     if (myGame) {
       mid.appendChild(
@@ -616,9 +568,6 @@
         el("button", {
           class: "gm-btn gm-btn-primary",
           text: c.playing ? "Join in" : "Start a game",
-          // Remembered so the floor can walk us into the board as soon as one
-          // exists. Pressing play and being left on the list wondering whether
-          // anything happened was the confusing part.
           onclick: () => {
             pendingJoin = g.id;
             S.emit("games queue join", { type: g.id });
@@ -661,7 +610,6 @@
     mid.appendChild(line);
     card.appendChild(mid);
 
-    // Row 3: the small print, and inviting somebody by name
     const foot = el("div", { class: "gm-card-foot" });
     const tags = el("div", { class: "gm-card-tags" });
     tags.appendChild(
@@ -708,7 +656,6 @@
     if (seated) title.appendChild(el("span", { class: "gm-yours", text: "YOURS" }));
     mid.appendChild(title);
 
-    // Names, not "seats". A person reads names.
     const who = t.seats.map((s) => s.username);
     let line;
     if (!who.length) line = "Waiting for a player";
@@ -812,8 +759,6 @@
     view = { name: "game", tableId };
     if (!detail || detail.id !== tableId) detail = null;
     const t = floor.tables.find((x) => x.id === tableId);
-    // If we are not playing in it, looking at it means watching it, so the
-    // count is honest and the chat works without a second click.
     if (t && !t.seats.some((x) => x.userId === myId()))
       S.emit("games spectate", { tableId, on: true });
     if (t) stripEl.textContent = nameOf(t.type);
@@ -832,7 +777,7 @@
   function backToFloor() {
     if (detail && detail.spectating)
       S.emit("games spectate", { tableId: detail.id, on: false });
-    pendingJoin = null; // they changed their mind, do not drag them back in
+    pendingJoin = null;
     view = { name: "floor", tableId: null };
     detail = null;
     render();
@@ -888,8 +833,6 @@
       split.appendChild(sideEl);
       bodyEl.appendChild(split);
 
-      // Draw & Guess sizes itself to the space rather than scrolling, on a
-      // phone as well as a desktop. So does anything else on a canvas.
       const fits = t.type === "drawguess" || t.type === "flagguess";
       main.classList.toggle("gm-main-fit", fits);
       split.classList.toggle("gm-split-fit", fits);
@@ -899,7 +842,6 @@
       side.mount(sideEl);
       boardKey = key;
 
-      // Replay anything that arrived while this was being built.
       const held = earlyRelays.filter((r) => r.tableId === t.id);
       earlyRelays = [];
       for (const r of held) {
@@ -922,14 +864,11 @@
     if (!slot) return;
     const main = slot.parentNode;
     slot.textContent = "";
-    // Only when the board itself cannot run yet, never mid-match.
     const short = t.state === "open" && !t.game && !t.reservedFor;
     main.classList.toggle("gm-main-waiting", short);
     if (short) slot.appendChild(waitingPanel(t));
   }
 
-  // The result, said plainly and at full width. Nobody should have to work out
-  // whether they won from a timer in the corner.
   function paintBanner(t) {
     const host = overlay.querySelector("#gmBanner");
     if (!host) return;
@@ -970,9 +909,6 @@
     }
   }
 
-  // Where you stand, in words, before anything else on the bar. "Waiting" and
-  // "watching" on their own left people unsure whether they were in the game
-  // at all, so this always says which one you are and what you can do next.
   function statusPill(t) {
     const playing = t.state === "playing";
     if (t.seated) {
@@ -1020,7 +956,7 @@
       ]),
     );
 
-    if (t.state === "finished") return; // the banner is saying the rest
+    if (t.state === "finished") return;
     const g = t.game || {};
 
     if (t.state === "open") {
@@ -1077,14 +1013,9 @@
     host.textContent = "";
 
     if (t.seated && t.state === "finished") {
-      // The count shows as soon as anybody asks, not only once you have. Not
-      // seeing that the other person was already waiting on you was the whole
-      // reason this button felt dead.
       const asked = (t.rematch || []).length;
       const wants = (t.rematch || []).indexOf(myId()) >= 0;
       const gm = gameById(t.type);
-      // In the timed games everyone who asks plays on and the board stays open
-      // for anybody else, so this is not a vote and must not read like one.
       const unanimous = !!(gm && gm.winnerStays);
       const tally = asked ? " " + asked + "/" + t.seats.length : "";
       host.appendChild(
@@ -1126,8 +1057,6 @@
             onclick: () => S.emit("games join table", { tableId: t.id }),
           }),
         );
-      // Watching a round you cannot join yet: claim a seat for the next one
-      // rather than having to spot the moment it ends and race for it.
       if (t.canPlayNext && !t.canJoin) {
         const n = (t.nextUp || []).length;
         host.appendChild(
@@ -1154,14 +1083,10 @@
     }
   }
 
-  // Shown in place of the board while a game is short of players, so somebody
-  // who started one sits at their own board instead of watching a queue number.
   function waitingPanel(t) {
     const g = gameById(t.type);
     const box = el("div", { class: "gm-waiting" });
     box.appendChild(el("div", { class: "gm-waiting-pulse" }));
-    // Says plainly that they are already in it. "Waiting" on its own read as
-    // if they were queuing for a seat rather than sitting in one.
     box.appendChild(
       el("div", {
         class: "gm-waiting-head",
@@ -1219,11 +1144,6 @@
     let jumpEl, foldCaret;
     let rosterFolded = false;
 
-    // Whether the log follows new messages. Measuring "am I at the bottom?" at
-    // the moment a line arrives was not enough: one tall line with an avatar is
-    // most of the threshold, and a picture finishing loading after the line was
-    // added moved the floor out from under it. So the state is tracked from the
-    // person's own scrolling instead, and the jump happens after layout.
     let pinned = true;
     let missed = 0;
 
@@ -1233,8 +1153,6 @@
 
     function toBottom() {
       logEl.scrollTop = logEl.scrollHeight;
-      // Again next frame, so an avatar or an emote that changes the height
-      // after paint cannot leave the newest line half off the bottom.
       requestAnimationFrame(() => {
         if (pinned) logEl.scrollTop = logEl.scrollHeight;
       });
@@ -1247,7 +1165,6 @@
       toBottom();
     }
 
-    // Only shown when they have scrolled up and something arrived meanwhile.
     function paintJump() {
       if (!jumpEl) return;
       jumpEl.style.display = !pinned && missed ? "" : "none";
@@ -1277,8 +1194,6 @@
             (m.userId === myId() ? " gm-chat-mine" : "") +
             (m.watching ? " gm-chat-watch" : ""),
         });
-        // Avatar, badge and name live in one cell so the grid stays two
-        // columns and a long message wraps under itself, not around the name.
         const head = el("div", { class: "gm-chat-head" });
         const pfp = avatarNode(m.avatar, true);
         if (pfp) head.appendChild(pfp);
@@ -1290,8 +1205,6 @@
         head.appendChild(who);
         node.appendChild(head);
         const body = el("span", { class: "gm-chat-text", text: masked(m.text) });
-        // Keep what was actually said so flipping the filter can re-render it
-        // without asking the server again.
         body.dataset.raw = m.text == null ? "" : String(m.text);
         node.appendChild(body);
       }
@@ -1308,8 +1221,6 @@
       mount(host) {
         root = el("div", { class: "gm-sidepanel" });
 
-        // The roster folds away. On a phone it was taking a third of the panel
-        // and leaving the chat a slot to type into, so it starts folded there.
         const ph = el("button", {
           class: "gm-side-head gm-side-fold",
           type: "button",
@@ -1335,7 +1246,6 @@
           try {
             localStorage.setItem("tk-games-roster", rosterFolded ? "0" : "1");
           } catch (e) {
-            /* private mode: it just will not stick */
           }
         };
         let saved = null;
@@ -1374,8 +1284,6 @@
           ]),
         );
         logEl = el("div", { class: "gm-chat-log" });
-        // Follow the newest message unless they have deliberately scrolled up
-        // to read something. Their own scrolling is what decides it.
         logEl.addEventListener("scroll", () => {
           const now = nearBottom();
           if (now === pinned) return;
@@ -1438,13 +1346,11 @@
         stopWatching = null;
       },
 
-      // Appended live so the log never jumps while you are reading it.
       relay(payload) {
         if (payload.kind === "chat" && payload.message) {
           if (payload.message.id <= lastChatId) return;
           lastChatId = payload.message.id;
           addLine(payload.message);
-          // Folded away, so say how much is piling up behind the button.
           if (!chatOpen && payload.message.userId !== myId()) {
             unread++;
             applyChat();
@@ -1456,7 +1362,6 @@
 
       update(t) {
         const g = t.game || {};
-        // Player list. Draw & Guess carries its own richer roster.
         const list =
           g.players && g.players.length
             ? g.players
@@ -1487,8 +1392,6 @@
           row.appendChild(el("span", { class: "gm-player-name", text: p.username }));
           const badge = badgeFor(seat && seat.role);
           if (badge) row.appendChild(badge);
-          // Who has already asked for another game, so nobody is left guessing
-          // whether the other side is still there.
           if (t.state === "finished" && (t.rematch || []).indexOf(p.userId) >= 0)
             row.appendChild(
               el("i", {
@@ -1496,8 +1399,6 @@
                 title: p.username + " wants a rematch",
               }),
             );
-          // Sitting out the drawing shows here rather than in the chat, which
-          // is where it used to be until people found the switch.
           if (p.noDraw && !p.drawing)
             row.appendChild(
               el("i", {
@@ -1513,7 +1414,6 @@
               el("span", { class: "gm-player-score", text: p.count + "w" }),
             );
 
-          // Vote somebody out, only ever offered to the people playing.
           if (t.canVote && seatedPlayer && p.userId !== myId()) {
             const v = (t.votes || []).find((x) => x.userId === p.userId);
             const btn = el("button", {
@@ -1534,8 +1434,6 @@
           playersEl.appendChild(row);
         });
 
-        // Who has claimed a seat for the next round. Shown to the people
-        // playing too, so a winner knows somebody is waiting on them.
         const upNext = t.nextUp || [];
         nextHead.style.display = upNext.length ? "" : "none";
         nextEl.style.display = upNext.length ? "" : "none";
@@ -1554,8 +1452,6 @@
           nextEl.appendChild(chip);
         });
 
-        // Who is watching. Names, not just a number, so the room can see who
-        // turned up. Anyone watching can talk in the chat below.
         const watchers = t.watchers || [];
         const extra = (t.spectators || 0) - watchers.length;
         const show = watchers.length > 0;
@@ -1577,20 +1473,17 @@
             el("div", { class: "gm-watcher gm-watcher-more", text: "+" + extra + " more" }),
           );
 
-        // Backfill history the first time this game opens.
         if (!lastChatId && Array.isArray(t.chat)) {
           t.chat.forEach((m) => {
             lastChatId = Math.max(lastChatId, m.id);
             addLine(m);
           });
-          repin(); // opening a game always lands on the newest message
+          repin();
         }
         paintTyping(t.typing || []);
       },
     };
 
-    // The filter toggle flipped while this panel was open: repaint what is
-    // already on screen from the raw text we kept.
     function refilter() {
       if (!logEl) return;
       logEl.querySelectorAll(".gm-chat-text").forEach((n) => {
@@ -1618,7 +1511,6 @@
 
   const BOARDS = {};
 
-  // Tic Tac Toe -------------------------------------------------------------
   BOARDS.tictactoe = function () {
     let youAre, gridEl;
     const cells = [];
@@ -1677,7 +1569,6 @@
     };
   };
 
-  // Connect Four ------------------------------------------------------------
   BOARDS.connect4 = function () {
     let youAre, gridEl, colBar;
     const cells = [];
@@ -1750,11 +1641,6 @@
     }
   };
 
-  // Draw & Guess ------------------------------------------------------------
-  // Guess the Flag ----------------------------------------------------------
-  // The flag is painted onto a canvas from an image that is never put in the
-  // document, and its url is an opaque per-round token rather than a country
-  // code. Nothing in the page names the country until the round is revealed.
   BOARDS.flagguess = function () {
     let root, timerRow, timerNum, timerFill, roundEl, promptEl;
     let canvas, ctx, canvasBox, canvasWrap;
@@ -1764,9 +1650,6 @@
     let ro = null;
     let focused = false;
 
-    // 3:2 is the commonest flag shape. The canvas keeps it at every size and
-    // letterboxes anything squarer or longer, so Nepal and Switzerland are not
-    // stretched into something unrecognisable.
     const ART_W = 900;
     const ART_H = 600;
 
@@ -1779,8 +1662,6 @@
       const w = Math.max(180, Math.floor(ART_W * scale));
       canvasWrap.style.width = w + "px";
       canvasWrap.style.height = Math.max(120, Math.floor(ART_H * scale)) + "px";
-      // The guess box lines up with the flag rather than running the whole
-      // width of the panel, which looked enormous next to a small flag.
       if (root) root.style.setProperty("--gm-art-w", w + "px");
     }
 
@@ -1809,7 +1690,6 @@
       if (!ctx) return;
       clear();
       if (!img || !img.complete || !img.naturalWidth) return;
-      // Contain, not cover: a flag cropped to fill the box is a different flag.
       const s = Math.min(canvas.width / img.naturalWidth, canvas.height / img.naturalHeight);
       const w = img.naturalWidth * s;
       const h = img.naturalHeight * s;
@@ -1825,10 +1705,8 @@
       clear();
       if (!token) return;
       const next = new Image();
-      // Deliberately never appended to the document: the only thing in the
-      // page is the canvas, so there is no src for anybody to read.
       next.onload = () => {
-        if (shownToken !== token) return; // a newer round already started
+        if (shownToken !== token) return;
         img = next;
         paint();
       };
@@ -2044,9 +1922,6 @@
     let strokes = [];
     let painted = 0;
     let startNext = true;
-    // Revision the server stamps on each canvas change. Local strokes are drawn
-    // optimistically and counted here too, so a state push arriving while a
-    // batch is still in flight cannot roll the canvas back.
     let rev = -1;
     let syncing = false;
     let palette = null;
@@ -2054,9 +1929,6 @@
     let bg = 0;
     let ro = null;
 
-    // The drawing is a fixed 16:9 board, not whatever shape the window happens
-    // to be. Everyone gets the same picture at a different scale, and a brush
-    // is the same fraction of it on a phone and a desktop.
     const ART_W = 1280;
     const ART_H = 720;
     const BRUSH_SIZES = [5, 12, 26, 50];
@@ -2087,20 +1959,15 @@
       strokes.forEach(drawSeg);
       painted = strokes.length;
     }
-    // Largest 1000x700 box that fits the space we were given. Keeping the shape
-    // fixed is the whole point: a circle drawn on a desktop is still a circle
-    // on a phone, and the hit test below stays a plain proportion.
     function fit() {
       if (!canvasBox || !canvasWrap) return;
       const box = canvasBox.getBoundingClientRect();
       if (!box.width) return;
-      // A column layout leaves the height open, so size from the width there.
       const room = box.height > 60 ? box.height : Infinity;
       const scale = Math.min(box.width / ART_W, room / ART_H);
       const w = Math.max(160, Math.floor(ART_W * scale));
       canvasWrap.style.width = w + "px";
       canvasWrap.style.height = Math.max(112, Math.floor(ART_H * scale)) + "px";
-      // Keeps the guess box the same width as the drawing it belongs to.
       if (root) root.style.setProperty("--gm-art-w", w + "px");
     }
     function resize() {
@@ -2178,7 +2045,6 @@
       last = null;
     }
 
-    // A titled block in the rail. Same shape for ink, brush, tool and paper.
     function toolGroup(label, body, cls) {
       return el("div", { class: "gm-dg-grp " + cls }, [
         el("span", { class: "gm-dg-toollabel", text: label }),
@@ -2205,7 +2071,6 @@
       mount(stage) {
         root = el("div", { class: "gm-board gm-dg" });
 
-        // One header row: seconds, bar, turn counter.
         timerNum = el("div", { class: "gm-dg-secs" });
         timerFill = el("div", { class: "gm-dg-timefill" });
         progEl = el("div", { class: "gm-dg-turn" });
@@ -2236,8 +2101,6 @@
         canvas.addEventListener("touchmove", move, { passive: false });
         window.addEventListener("touchend", up);
 
-        // Toolbar: every group titled, so nobody has to guess what a row of
-        // small squares is for.
         tools = el("div", { class: "gm-dg-tools" });
 
         const swatches = el("div", { class: "gm-dg-swatches" });
@@ -2252,7 +2115,6 @@
             "aria-label": "Brush size " + (i + 1),
             onclick: () => setBrush(i),
           });
-          // Sized off the real brush width so the buttons read as a scale.
           const dot = el("span");
           const px = Math.round(4 + (w / BRUSH_SIZES[BRUSH_SIZES.length - 1]) * 16);
           dot.style.width = dot.style.height = px + "px";
@@ -2295,19 +2157,12 @@
         );
         tools.appendChild(acts);
 
-        // Toolbar sits beside the canvas on a wide screen and drops underneath
-        // on a narrow one, so the drawing gets as much room as possible.
         stageEl = el("div", { class: "gm-dg-stage" }, [tools, canvasBox]);
         root.appendChild(stageEl);
 
-        // Shown instead of the stage while the game is parked. An empty canvas
-        // next to "waiting for someone" told nobody anything.
         lobbyEl = el("div", { class: "gm-dg-lobby" });
         root.appendChild(lobbyEl);
 
-        // No guess box: the chat feed is the guess box. A second field under
-        // the canvas asked people to decide which one to type in and took
-        // space the drawing wanted. This line just says where to type.
         guessHint = el("div", { class: "gm-dg-guesslabel" });
         guessWrap = el("div", { class: "gm-dg-guesswrap gm-dg-tip" }, [guessHint]);
         root.appendChild(guessWrap);
@@ -2318,8 +2173,6 @@
         stage.appendChild(root);
         setTimeout(resize, 0);
         window.addEventListener("resize", resize);
-        // Hiding the chat or the toolbar changes the space without the window
-        // moving, so watch the box itself rather than only the window.
         if (window.ResizeObserver) {
           ro = new ResizeObserver(() => resize());
           ro.observe(canvasBox);
@@ -2343,8 +2196,6 @@
             rev = payload.rev;
             return;
           }
-          // A gap means we missed something, so take a fresh copy rather than
-          // letting the canvases drift apart.
           if (rev >= 0 && payload.rev - segs.length !== rev) {
             rev = payload.rev;
             return requestSync();
@@ -2451,9 +2302,6 @@
         choiceEl.textContent = "";
         drawerActions.textContent = "";
 
-        // Nothing to draw on: waiting for company, or the game is done and the
-        // canvas has already been wiped. Either way an empty board taking half
-        // the screen tells nobody anything, so it goes.
         const done = g.over || g.phase === "done";
         const parked = g.phase === "waiting" || done;
         stageEl.style.display = parked ? "none" : "";
@@ -2535,7 +2383,6 @@
         tools.style.display = iDraw ? "" : "none";
         canvas.classList.toggle("gm-dg-live", iDraw);
 
-        // Where to type, and whether they still need to.
         const showGuess = t.seated && g.phase === "drawing" && !g.amDrawer;
         guessWrap.style.display = showGuess ? "" : "none";
         if (showGuess) {
@@ -2555,7 +2402,6 @@
           }
         }
 
-        // Who has it, who we are still waiting on, and the nudge button.
         statusEl.textContent = "";
         if (g.phase === "drawing") {
           if (g.guessed.length) {
@@ -2595,7 +2441,6 @@
           }
         }
 
-        // A standing opt-out, always available to a seated player.
         if (t.seated && !g.over) {
           const opt = el("div", { class: "gm-dg-optout" });
           opt.appendChild(
@@ -2615,8 +2460,6 @@
       },
     };
 
-    // The end of a game. The canvas is already wiped by this point, so the
-    // board shows the table instead of a blank sheet of paper.
     function paintFinal(t, g) {
       lobbyEl.textContent = "";
       const card = el("div", { class: "gm-waiting gm-dg-lobbycard" });
@@ -2650,12 +2493,8 @@
       lobbyEl.appendChild(card);
     }
 
-    // The parked state, given the whole board. One headline, who is already
-    // here, and the two things you can actually do about it.
     function paintLobby(t, g) {
       lobbyEl.textContent = "";
-      // Same card as the pre-start one, so the two waits do not look like two
-      // different screens bolted together.
       const card = el("div", { class: "gm-waiting gm-dg-lobbycard" });
       card.appendChild(el("div", { class: "gm-waiting-pulse" }));
       card.appendChild(
@@ -2768,8 +2607,6 @@
   S.on("games snapshot", (d) => {
     catalog = d.catalog || [];
     takeFloor(d);
-    // Back from a reconnect: if we still hold a game, drop straight back into
-    // it instead of leaving a dead board on screen.
     const mine = Object.values(floor.myTables || {})[0];
     if (isOpen && mine && view.name === "floor") {
       view = { name: "game", tableId: mine };
@@ -2778,9 +2615,6 @@
     render();
   });
 
-  // "Draw & Guess just started" to the whole room. The server already rations
-  // these to one per game type every few minutes; this side only makes sure it
-  // is a click-to-join and never lands on top of the panel you are already in.
   S.on("games shout", (d) => {
     if (!d || !d.tableId) return;
     if (isOpen && view.name === "game" && view.tableId === d.tableId) return;
@@ -2789,7 +2623,6 @@
       openGame(d.tableId);
     };
     if (window.StaffUI && window.StaffUI.toast) {
-      // The helper has no click handler of its own, so wire the returned node.
       const node = window.StaffUI.toast(d.text, {
         type: "info",
         title: d.name,
@@ -2799,7 +2632,7 @@
         node.style.cursor = "pointer";
         node.title = "Open " + d.name;
         node.addEventListener("click", (ev) => {
-          if (ev.target.closest(".tk-tx")) return; // the dismiss button
+          if (ev.target.closest(".tk-tx")) return;
           jump();
         });
       }
@@ -2809,13 +2642,6 @@
       window.toastr.info(d.text, d.name, { timeOut: 10000, onclick: jump });
   });
 
-  // A dropped connection leaves the panel showing a board the server no longer
-  // knows we are looking at, and a restart wipes every table outright.
-  //
-  // Re-announcing the moment the socket is back is too early: the room page
-  // rejoins on its own clock, so the server would still have no room to look
-  // the floor up in. Wait for the rejoin, then step back into the games list.
-  // If the table survived, the snapshot below puts us straight back on it.
   let reannounce = null;
 
   function backToGames() {
@@ -2832,7 +2658,6 @@
 
   S.on("connect", () => {
     if (!isOpen || reannounce) return;
-    // The fallback covers a spectator, or a rejoin that never acknowledges.
     reannounce = setTimeout(backToGames, 3000);
   });
   S.on("room joined", backToGames);
@@ -2845,9 +2670,6 @@
       view = { name: "floor", tableId: null };
       detail = null;
     }
-    // Just pressed play: go to the board rather than leaving them reading the
-    // list. A seat is best, but a place in the line still means watching the
-    // game they asked to play, which is where they wanted to be.
     if (pendingJoin && view.name === "floor") {
       const seat = (floor.myTables || {})[pendingJoin];
       if (seat) {
@@ -2877,8 +2699,6 @@
   });
 
   S.on("games relay", (d) => {
-    // Landed before the board is up: keep it and replay on mount, otherwise a
-    // mid round joiner never sees the drawing already on the canvas.
     if (!board || !detail || d.tableId !== detail.id) {
       if (view.tableId === d.tableId) {
         earlyRelays.push(d);
@@ -2896,13 +2716,8 @@
       board.feedbackMsg(d.accepted + "  +" + d.pts, true);
     else if (d.correct && board.say)
       board.say("Correct, +" + d.pts + " points", true);
-    // "So close" is fine when the answer is one of two hundred countries. It
-    // is a giveaway when the answer is a single drawn word, so Draw & Guess
-    // never says it, and never posts the near miss either.
     else if (d.close && board.say && detail && detail.type !== "drawguess")
       board.say("So close", false);
-    // "known" means they typed a real country, just the wrong one. Worth
-    // saying, because it separates a near miss from a typo.
     else if (d.correct === false && board.say && detail && detail.type !== "drawguess")
       board.say(d.known ? "That is a country, but not this one" : "Not it", false);
   });
@@ -2974,7 +2789,6 @@
 
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape" || !isOpen) return;
-    // Step back rather than closing outright, so Escape mid-game is recoverable.
     if (view.name === "game" || view.name === "solo") backToFloor();
     else closePanel();
   });

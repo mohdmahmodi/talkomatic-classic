@@ -1,8 +1,5 @@
 // public/js/staff-ui.js
-// Shared staff UI kit used by the lobby, room, and the mod board. Provides
-// clean, XSS-safe modals / confirms / forms / menus / toasts so the staff
-// tools have one consistent look and never use native prompt()/confirm()/alert().
-// Exposes window.StaffUI. All user-supplied text is escaped before display.
+// Shared staff UI kit used by the lobby, room, and the mod board.
 
 (function () {
   if (window.StaffUI) return;
@@ -221,7 +218,6 @@
     );
   }
 
-  // tiny element helper
   function el(tag, props, children) {
     const e = document.createElement(tag);
     if (props)
@@ -229,7 +225,7 @@
         if (k === "class") e.className = props[k];
         else if (k === "text") e.textContent = props[k];
         else if (k === "html")
-          e.innerHTML = props[k]; // only for pre-escaped/trusted
+          e.innerHTML = props[k];
         else if (k.startsWith("on") && typeof props[k] === "function")
           e.addEventListener(k.slice(2).toLowerCase(), props[k]);
         else if (props[k] != null) e.setAttribute(k, props[k]);
@@ -242,9 +238,6 @@
     return e;
   }
 
-  // Render an icon cell. FontAwesome markup (our own trusted <i ...> strings)
-  // is rendered as HTML; anything else is plain text. Lets callers pass FA
-  // icons instead of emoji.
   function iconNode(val, cls) {
     const s = String(val == null ? "" : val);
     return /^\s*<i\b/.test(s)
@@ -252,10 +245,6 @@
       : el("div", { class: cls, text: s });
   }
 
-  // Subtle, semantic icon tints keyed off the FontAwesome icon name, so every
-  // menu across the lobby / rooms / mod board is colour-coded the same way with
-  // no per-item config. An explicit item.tone or a danger flag overrides this;
-  // unmatched icons fall back to the themed orange (default).
   const TONE_BY_ICON = {
     ban: "danger",
     bomb: "danger",
@@ -289,7 +278,6 @@
     ghost: "dev",
     crown: "dev",
   };
-  // FA style / utility tokens that are not the meaningful icon name.
   const TONE_SKIP = new Set([
     "solid",
     "regular",
@@ -318,8 +306,6 @@
 
   let openCount = 0;
 
-  // Core modal. `actions` = [{label, kind:'primary'|'danger'|'ghost', onClick, value}].
-  // onClick returning false keeps the modal open. Returns { close }.
   function modal(opts) {
     const o = opts || {};
     const backdrop = el("div", { class: "tk-backdrop" });
@@ -443,7 +429,6 @@
     });
   }
 
-  // Form prompt. fields: [{name,label,type,placeholder,value,options,required,maxLength,rows,help}]
   function prompt(opts) {
     const o = opts || {};
     const fields = o.fields || [
@@ -456,7 +441,6 @@
       fields.forEach((f) => {
         const wrap = el("div", { class: "tk-field" });
         if (f.type === "checkbox") {
-          // Renders as [x] label on one row; the value is its checked state.
           const cb = el("input", { type: "checkbox", class: "tk-checkbox" });
           cb.checked = !!f.value;
           const row = el("label", { class: "tk-checkbox-row" });
@@ -477,8 +461,6 @@
             class: "tk-textarea",
             placeholder: f.placeholder || "",
             maxlength: f.maxLength,
-            // Optional: a field that takes a pasted list wants to show the
-            // list, not three lines of it.
             rows: f.rows,
           });
           if (f.value) input.value = f.value;
@@ -565,9 +547,6 @@
     });
   }
 
-  // Render the grouped action items shared by menu() (centered) and panel()
-  // (drawer / sheet). closeOnClick closes the host when a non-keepOpen item is
-  // tapped; getClose returns the host's close fn (resolved lazily at click time).
   function renderGroups(groups, getClose, closeOnClick) {
     const wrap = el("div");
     (groups || []).forEach((g) => {
@@ -602,7 +581,6 @@
     return wrap;
   }
 
-  // Grouped action menu (centered modal). groups: [{title, items:[{icon,label,desc,danger,disabled,onClick,keepOpen,tone}]}]
   function menu(opts) {
     const o = opts || {};
     let ctrl;
@@ -629,11 +607,6 @@
     return ctrl;
   }
 
-  // ── Sliding staff panel: a right-docked drawer on desktop, a bottom sheet on
-  // mobile, or a centered window (the desktop choice is saved per browser and
-  // toggled from the panel header). Same grouped items as menu(); used for the
-  // big room / dev panels. opts.onLayoutChange fires on open / close / resize so
-  // the caller can reflow surrounding content (the room grid pushes aside).
   const PANEL_MODE_KEY = "talkomatic_staffMenuMode";
   const PANEL_WIDTH_KEY = "talkomatic_staffDrawerW";
   let activePanel = null;
@@ -666,7 +639,6 @@
   }
 
   function panel(opts) {
-    // Re-opening while one is up toggles it shut, so the Staff button toggles.
     if (activePanel) {
       activePanel.close();
       return null;
@@ -708,7 +680,7 @@
     }
     function onKey(e) {
       if (e.key === "Escape") {
-        if (openCount > 0) return; // a modal / prompt is stacked above the panel
+        if (openCount > 0) return;
         e.stopPropagation();
         close();
       }
@@ -847,9 +819,6 @@
     info: "fa-circle-info",
   };
 
-  // How long a toast stays up. Short messages were vanishing before they could
-  // be read, so the floor is 5s and long text buys more time (roughly reading
-  // speed). Errors never auto-dismiss: if something failed you get to read it.
   function toastDuration(type, text, title) {
     if (type === "error") return 0;
     const words = String((title || "") + " " + (text || "")).trim().split(/\s+/)
@@ -863,7 +832,6 @@
     const type = o.type || "info";
     const body = String(message == null ? "" : message);
     const t = el("div", { class: "tk-toast " + type });
-    // Routine confirmations announce politely; problems interrupt.
     t.setAttribute("role", type === "error" ? "alert" : "status");
     t.setAttribute("aria-live", type === "error" ? "assertive" : "polite");
     t.setAttribute("aria-atomic", "true");
@@ -892,8 +860,6 @@
 
     const ms = o.timeout != null ? o.timeout : toastDuration(type, body, o.title);
     if (ms > 0) {
-      // A progress bar makes the remaining time visible instead of the toast
-      // just disappearing, and hovering or focusing it holds the toast open.
       const bar = el("div", { class: "tk-tbar" });
       const fill = el("div", { class: "tk-tfill" });
       fill.style.animationDuration = ms + "ms";
@@ -928,9 +894,6 @@
     return t;
   }
 
-  // Turns a raw "staff action result" into something worth reading. The server
-  // sends a terse action name ("review application"), which on its own tells a
-  // moderator nothing about what actually happened or to whom.
   function actionToast(d) {
     if (!d) return;
     const who = d.username || d.name || null;
@@ -945,7 +908,6 @@
       return;
     }
 
-    // title + body per action; anything unlisted falls back to the action name.
     let title = null;
     let body = null;
     switch (A) {
@@ -1067,7 +1029,6 @@
 
   // ── Help: what every tool does and how to use it ─────────────────────────
   // ── Help: what every tool does, and the lowest rank that may use it ──────
-  // "jr" = junior mod (L1) and up, "mod" = full mod (L2) and up, "dev" = devs.
   const HELP = [
     {
       title: "Per-user actions (tap a user's row in a room)",
@@ -1238,9 +1199,6 @@
     },
   ];
 
-  // role: "dev" | "mod" (full, L2) | "jr" (junior, L1). Anything a viewer
-  // cannot use yet is dimmed rather than hidden, so a junior can see what the
-  // next level unlocks.
   function help(role) {
     const RANKS = {
       jr: { n: 1, chip: "jr", label: "All staff", icon: "fa-shield-halved" },

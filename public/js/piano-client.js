@@ -1,15 +1,5 @@
 // piano-client.js v2.0 - Multiplayer Piano for Talkomatic
 //
-// A shared, real-time piano that opens from Apps (top right) like Talkoboard.
-// Play together in a room or practice in Solo, with a sampled Grand Piano or a
-// built-in synth, live cursors, a floating chat, a room crown, and staff mute.
-//
-// Design notes:
-//  - DOM is built with createElement + textContent only (no innerHTML).
-//  - Audio is raw Web Audio: sampled piano (pitch-shifted Salamander set) or a
-//    two-oscillator synth, through a shared bus with optional reverb.
-//  - Trust model mirrors the board: the client only reflects state; the server
-//    validates notes, the lock, mutes and the crown by the session userId.
 
 class Piano {
   constructor(socketRef, userId, username, opts) {
@@ -19,7 +9,7 @@ class Piano {
     opts = opts || {};
     this.isStaff = !!(opts.isDev || opts.isMod);
     this.isOpen = false;
-    this.mode = "room"; // "room" (play together) | "solo" (private practice)
+    this.mode = "room";
 
     // ── Audio graph ─────────────────────────────────────────────────────
     this.audioCtx = null;
@@ -28,23 +18,22 @@ class Piano {
     this.dry = null;
     this.wet = null;
     this.convolver = null;
-    this.buffers = new Map(); // sampleMidi -> AudioBuffer
-    this.voices = new Map(); // "owner#index" -> voice
+    this.buffers = new Map();
+    this.voices = new Map();
     this.sustain = false;
     this.volume = 0.85;
     this.samplesReady = false;
     this.loadingSamples = false;
-    this.MAX_VOICES = 64; // hard polyphony cap; oldest voice is stolen past this
+    this.MAX_VOICES = 64;
 
     // ── Sound settings (synth/mixer) ────────────────────────────────────
-    this.instrument = "piano"; // "piano" | "synth"
-    this.waveform = "triangle"; // synth oscillator type
-    this.attack = 0.01; // synth attack (s)
-    this.release = 0.35; // synth release (s)
+    this.instrument = "piano";
+    this.waveform = "triangle";
+    this.attack = 0.01;
+    this.release = 0.35;
     this.reverbOn = true;
     this.reverbAmount = 0.28;
 
-    // Salamander sample set (one stem per MIDI note, every ~3 semitones).
     this.SAMPLE_NAMES = {
       21: "A0", 24: "C1", 27: "Ds1", 30: "Fs1", 33: "A1", 36: "C2",
       39: "Ds2", 42: "Fs2", 45: "A2", 48: "C3", 51: "Ds3", 54: "Fs3",
@@ -67,9 +56,9 @@ class Piano {
 
     // ── Input state ─────────────────────────────────────────────────────
     this.downKeys = new Set();
-    this.pointerKey = new Map(); // pointerId -> key index
-    this.kbKeys = new Map(); // computer-key -> key index
-    this.octaveBase = 48; // MIDI of the "z" key (C3); shiftable
+    this.pointerKey = new Map();
+    this.kbKeys = new Map();
+    this.octaveBase = 48;
     this.KEY_VELOCITY = 0.72;
 
     // ── Network batching ────────────────────────────────────────────────
@@ -78,36 +67,25 @@ class Piano {
     this.flushTimer = null;
     this.NOTE_FLUSH = 55;
 
-    // ── Key lighting (batched via rAF so heavy playing can't thrash layout) ──
-    this.keyHolders = new Map(); // index -> Map(owner -> pressTimestampMs)
+    this.keyHolders = new Map();
     this.keyEls = new Array(88);
-    this._dirtyKeys = new Set(); // keys whose visual needs a refresh
+    this._dirtyKeys = new Set();
     this._visualRaf = null;
-    this.MAX_LIGHT_MS = 12000; // auto-clear a key stuck-lit this long (dropped off)
+    this.MAX_LIGHT_MS = 12000;
 
     // ── Flood protection (one fast player must not lag the whole room) ───
-    // Note-ons are ALWAYS lit (cheap, rAF-batched) so fast playing stays
-    // visible; only the expensive audio is rate-capped. Remote players share one
-    // cap; the local player gets a far higher one so real playing (even fast
-    // MIDI glissandos) is never clipped - it only stops a black-MIDI / file
-    // flood from saturating this tab's audio thread.
-    this._renderWin = { t: 0, n: 0 }; // rolling 1s window of sounded remote note-ons
+    this._renderWin = { t: 0, n: 0 };
     this.MAX_RENDER_NOTES_PER_SEC = 240;
-    this._selfWin = { t: 0, n: 0 }; // rolling 1s window of sounded local note-ons
+    this._selfWin = { t: 0, n: 0 };
     this.MAX_SELF_NOTES_PER_SEC = 360;
     this._sweepTimer = null;
 
     // ── Cursors (desktop single-row only) ───────────────────────────────
     this.cursors = new Map();
     this.cursorT = 0;
-    this.CURSOR_INTERVAL = 40; // ms between outgoing cursor samples (sender, ~25Hz)
-    // Remote cursors are rendered ~RENDER_DELAY ms in the past and interpolated
-    // between buffered snapshots, so irregular packet arrival looks smooth
-    // instead of teleporting between packets. When the buffer runs out (the
-    // sender paused, or a packet is late) we HOLD at the last known position -
-    // no extrapolation, which used to overshoot and then snap back on stop.
-    this.CURSOR_RENDER_DELAY = 60; // ms; small, so cursors stay near the live notes
-    this.CURSOR_TIMEOUT = 3000; // ms with no update -> hide the cursor
+    this.CURSOR_INTERVAL = 40;
+    this.CURSOR_RENDER_DELAY = 60;
+    this.CURSOR_TIMEOUT = 3000;
     this._cursorRaf = null;
     this.isMultiRow = false;
 
@@ -118,9 +96,6 @@ class Piano {
     this.mutedSet = new Set();
     this.selfMuted = false;
     this.participants = new Map();
-    // Client-side, per-viewer mute: silences another player's notes for you
-    // only. Separate from staff mute (mutedSet), never leaves this tab, and is
-    // available to everyone.
     this.localMuted = new Set();
 
     // ── Chat ────────────────────────────────────────────────────────────
@@ -136,12 +111,9 @@ class Piano {
     this.midiAccess = null;
     this.midiCount = 0;
 
-    // Saved room chat text, restored when the piano closes.
     this._savedChat = null;
 
     // ── Layout tunables (structure can't live in CSS) ───────────────────
-    // At or below this width the keyboard stacks into rows so phone keys stay
-    // big. The row split (which keys go on each row) is in computeRows().
     this.MOBILE_BREAKPOINT = 820;
     this._resizeRaf = null;
 
@@ -153,7 +125,6 @@ class Piano {
   }
 
   // ═══════════════════════════════════════════════════════════════════════
-  // SMALL DOM HELPERS (no innerHTML anywhere)
   // ═══════════════════════════════════════════════════════════════════════
 
   el(tag, cls, text) {
@@ -185,7 +156,6 @@ class Piano {
   }
 
   // ═══════════════════════════════════════════════════════════════════════
-  // AUDIO ENGINE
   // ═══════════════════════════════════════════════════════════════════════
 
   ensureAudio() {
@@ -248,7 +218,6 @@ class Piano {
           });
           this.buffers.set(parseInt(midi, 10), buf);
         } catch (_) {
-          /* a missing sample just means that pitch won't sound */
         }
       }),
     );
@@ -276,7 +245,6 @@ class Piano {
     voice.t = this.audioCtx.currentTime;
     voice.pedal = false;
     this.voices.set(key, voice);
-    // Finished one-shot samples remove themselves so the map can't grow forever.
     if (voice.src) {
       voice.src.onended = () => {
         if (this.voices.get(key) === voice) this.voices.delete(key);
@@ -318,7 +286,7 @@ class Piano {
     const o2 = ctx.createOscillator();
     o2.type = this.waveform;
     o2.frequency.value = freq;
-    o2.detune.value = 7; // slight detune = warmth
+    o2.detune.value = 7;
     o1.connect(g);
     o2.connect(g);
     g.connect(this.busIn);
@@ -398,7 +366,6 @@ class Piano {
   }
 
   // ═══════════════════════════════════════════════════════════════════════
-  // KEY PRESS / RELEASE
   // ═══════════════════════════════════════════════════════════════════════
 
   canPlay() {
@@ -413,15 +380,9 @@ class Piano {
     if (!this.canPlay()) { this.flashLocked(); return; }
     if (this.downKeys.has(index)) return;
     this.downKeys.add(index);
-    // Show the press, bounce your name, and tell the room first - these stay
-    // cheap and batched even under a fast MIDI flood (the server clamps the
-    // network side).
     this.lightKey(index, true, "self");
     this.bouncePlayer(this.userId);
     this.bufferNote(index, velocity, false);
-    // Cap only the audio so a black-MIDI / file flood through a MIDI input can't
-    // saturate the audio thread and stall the tab. The cap sits far above any
-    // human (even a fast glissando), so real notes always sound.
     if (this._allowSelfSound()) {
       this.ensureAudio();
       this.playVoice("self", index, velocity);
@@ -456,11 +417,10 @@ class Piano {
   }
 
   // ═══════════════════════════════════════════════════════════════════════
-  // NETWORK (notes)
   // ═══════════════════════════════════════════════════════════════════════
 
   bufferNote(index, velocity, isOff) {
-    if (this.mode === "solo") return; // private practice: nothing leaves the tab
+    if (this.mode === "solo") return;
     const now = (window.performance || Date).now();
     if (this.noteBuf.length === 0) this.bufStart = now;
     const ev = { n: index, d: Math.max(0, Math.round(now - this.bufStart)) };
@@ -487,8 +447,6 @@ class Piano {
     if (!this.isOpen || this.mode === "solo") return;
     const owner = data.userId;
     this.ensureAudio();
-    // Play on arrival (batches land ~every 55ms, so this is already near-live).
-    // No per-note setTimeout: thousands of timers were a big part of the lag.
     const now = this._now();
     if (now - this._renderWin.t >= 1000) this._renderWin = { t: now, n: 0 };
     for (const ev of data.notes) {
@@ -496,21 +454,13 @@ class Piano {
       const idx = ev.n | 0;
       if (idx < 0 || idx > 87) continue;
       if (ev.s === 1) {
-        // Note-offs are ALWAYS honored so keys/voices never get stuck.
         this.releaseVoice(owner, idx);
         this.lightKey(idx, false, owner);
         continue;
       }
-      // Always light the key + bounce the player: this is the cheap, batched
-      // path, so even a fast MIDI flood stays VISIBLE (it "registers") instead
-      // of vanishing.
       this.lightKey(idx, true, owner);
       this.bouncePlayer(owner);
-      // Locally muted by this viewer: keep them visible (key + bounce) but play
-      // no sound, and don't spend the audio budget on them.
       if (this.localMuted.has(owner)) continue;
-      // Throttle only the expensive audio - under a flood (bot / black-MIDI)
-      // stop sounding extra note-ons so audio work can't pile up and lag the room.
       if (++this._renderWin.n > this.MAX_RENDER_NOTES_PER_SEC) continue;
       this.playVoice(owner, idx, ev.v);
     }
@@ -520,14 +470,10 @@ class Piano {
     return window.performance && performance.now ? performance.now() : Date.now();
   }
 
-  // A color per note (pitch class) so the keyboard lights up like a rainbow.
   noteColor(index) {
     return `hsl(${((21 + index) % 12) * 30}, 85%, 58%)`;
   }
 
-  // The color to light a key with: the color of whoever is pressing it (the most
-  // recent holder), so each player's notes show in their own color. Falls back
-  // to null when no one holds the key.
   pressColor(index) {
     const holders = this.keyHolders.get(index);
     if (!holders || holders.size === 0) return null;
@@ -539,8 +485,6 @@ class Piano {
     return this.userColor(owner === "self" ? this.userId : owner);
   }
 
-  // Record press/release as data only; the actual DOM write is batched in a
-  // single rAF pass per frame, so 1000 notes/sec still cost one repaint a frame.
   lightKey(index, on, owner) {
     owner = owner || "self";
     let holders = this.keyHolders.get(index);
@@ -572,14 +516,11 @@ class Piano {
     this._dirtyKeys.clear();
   }
 
-  // Safety net: clear keys/voices that have been held too long (a dropped
-  // note-off from a flood, or a player who vanished) so nothing stays stuck.
   _sweepStuck() {
     const now = this._now();
     let dirty = false;
     for (const [idx, holders] of this.keyHolders) {
       for (const [owner, t] of holders) {
-        // Never clear a key the local player is physically still holding.
         if (owner === "self" && this.downKeys.has(idx)) continue;
         if (now - t > this.MAX_LIGHT_MS) {
           holders.delete(owner);
@@ -595,16 +536,12 @@ class Piano {
       });
     }
     const ctxNow = this.audioCtx ? this.audioCtx.currentTime : 0;
-    // Safety net for a voice whose note-off never arrived. Generous (30s) so a
-    // genuinely sustained note (pedal / long synth pad) is not cut mid-play;
-    // real note-offs are always relayed, so true stuck notes are rare.
     for (const [key, v] of this.voices) {
       if (ctxNow - v.t > 30) { this._fade(v, 0.2); this.voices.delete(key); }
     }
   }
 
   // ═══════════════════════════════════════════════════════════════════════
-  // MODAL / HEADER
   // ═══════════════════════════════════════════════════════════════════════
 
   buildModal() {
@@ -626,7 +563,6 @@ class Piano {
     center.appendChild(this.keyboardWrap);
     stage.appendChild(center);
 
-    // "Now playing" strip, pinned to the top-left of the stage.
     stage.appendChild(this.buildNowPlaying());
 
     this.cursorLayer = this.el("div", "mpp-cursor-layer");
@@ -641,7 +577,6 @@ class Piano {
 
     container.appendChild(stage);
 
-    // Panels (overlaid). Keep references so the header buttons can toggle them.
     this.soundPanel = this.buildSoundPanel();
     this.helpPanel = this.buildHelpPanel();
     this.peoplePanel = this.buildPeoplePanel();
@@ -656,7 +591,6 @@ class Piano {
   buildHeader() {
     const header = this.el("div", "mpp-header");
 
-    // Left: brand + mode toggle
     const left = this.el("div", "mpp-head-left");
     const brand = this.el("div", "mpp-brand");
     brand.appendChild(this.ic("music"));
@@ -674,7 +608,6 @@ class Piano {
     seg.appendChild(this.modeSoloBtn);
     left.appendChild(seg);
 
-    // Right: sound, help, people, volume, midi, close
     const right = this.el("div", "mpp-head-right");
 
     this.soundBtn = this.btn("mpp-hbtn", "sliders", "Sound", "Sound & synth settings");
@@ -723,7 +656,6 @@ class Piano {
   buildToolbar() {
     const bar = this.el("div", "mpp-toolbar");
 
-    // Octave
     const oct = this.el("div", "mpp-tgroup");
     oct.appendChild(this.el("span", "mpp-tlabel", "Octave"));
     const down = this.btn("mpp-tbtn", "minus", null, "Octave down");
@@ -736,7 +668,6 @@ class Piano {
     oct.appendChild(up);
     bar.appendChild(oct);
 
-    // Sustain
     this.sustainBtn = this.btn("mpp-tbtn mpp-sustain", "shoe-prints", "Sustain", "Hold notes (Space, or a MIDI pedal)");
     this.sustainBtn.addEventListener("mousedown", (e) => { e.preventDefault(); this.setSustain(true); });
     this.sustainBtn.addEventListener("mouseup", () => this.setSustain(false));
@@ -744,9 +675,6 @@ class Piano {
     this.sustainBtn.addEventListener("click", () => this.showHint("Tip: hold Space for sustain"));
     bar.appendChild(this.sustainBtn);
 
-    // Crown (room mode only). Only staff can claim/hold it, so the button is
-    // hidden for everyone else - they still SEE who holds the crown via the
-    // label and the people list.
     this.crownWrap = this.el("div", "mpp-tgroup mpp-crown-wrap");
     this.crownBtn = this.btn("mpp-tbtn", "crown", "Claim", "Room crown");
     this.crownBtn.style.display = this.isStaff ? "" : "none";
@@ -763,7 +691,6 @@ class Piano {
   }
 
   // ═══════════════════════════════════════════════════════════════════════
-  // KEYBOARD (responsive: one row on desktop, stacked rows on mobile)
   // ═══════════════════════════════════════════════════════════════════════
 
   isBlack(midi) {
@@ -773,10 +700,7 @@ class Piano {
 
   computeRows() {
     const w = window.innerWidth || document.documentElement.clientWidth;
-    if (w > this.MOBILE_BREAKPOINT) return [[0, 87]]; // desktop: one keyboard
-    // Phones: stacked rows so every note stays thumb-sized. Each pair is the
-    // [first key, last key] (0 = lowest A0 ... 87 = top C8). Add/remove rows or
-    // change the ranges to taste - they just have to cover 0..87 in order.
+    if (w > this.MOBILE_BREAKPOINT) return [[0, 87]];
     return [
       [0, 21],
       [22, 43],
@@ -800,7 +724,6 @@ class Piano {
       this.keyboardWrap.appendChild(row);
     }
 
-    // Cursors only make sense over the single continuous desktop keyboard.
     if (!this.isMultiRow) {
       this.keyboardEl = this.keyboardWrap.querySelector(".mpp-row");
       if (this.keyboardEl) this.keyboardEl.appendChild(this.cursorLayer);
@@ -809,7 +732,6 @@ class Piano {
       if (this.cursorLayer.parentNode) this.cursorLayer.parentNode.removeChild(this.cursorLayer);
     }
 
-    // Re-apply any keys that are currently held (after a responsive rebuild).
     for (const [idx, holders] of this.keyHolders) {
       if (holders.size > 0 && this.keyEls[idx]) {
         this.keyEls[idx].style.setProperty("--press", this.pressColor(idx) || this.noteColor(idx));
@@ -824,10 +746,6 @@ class Piano {
 
     let totalWhite = 0;
     for (let i = start; i <= end; i++) if (!this.isBlack(21 + i)) totalWhite++;
-    // One white key as a percent of the row. White keys flex to fill the width
-    // (size them in CSS via --mpp-keyboard-max-width / height). Black keys are
-    // placed and sized off this, using the --mpp-black-key-width CSS variable
-    // so their width stays editable in the stylesheet too.
     const wpc = (100 / totalWhite).toFixed(4);
 
     let whitesSoFar = 0;
@@ -910,7 +828,6 @@ class Piano {
   }
 
   // ═══════════════════════════════════════════════════════════════════════
-  // CHAT (transparent, floats up under the piano and fades)
   // ═══════════════════════════════════════════════════════════════════════
 
   buildChat() {
@@ -926,12 +843,9 @@ class Piano {
         const v = this.chatInput.value.trim();
         if (v) this.sendChat(v);
         this.chatInput.value = "";
-        // Hand focus back to the keyboard so you can play again immediately,
-        // instead of staying stuck in the input (which made the keys feel dead).
         this.chatInput.blur();
         chat.classList.remove("active");
       } else if (e.key === "Escape") {
-        // Cancel typing and return to playing.
         this.chatInput.value = "";
         this.chatInput.blur();
         chat.classList.remove("active");
@@ -939,11 +853,6 @@ class Piano {
       }
       e.stopPropagation();
     });
-    // Focusing the input "wakes" the chat: full opacity + scrollable. We do NOT
-    // collapse it on blur - clicking a previous message to read or highlight it
-    // blurs the input, and collapsing there would yank the text away. The chat
-    // stays awake until you click outside it (handled in _onDocPointerDown),
-    // which then lets it fade back and become click-through so the keys play.
     this.chatInput.addEventListener("focus", () => chat.classList.add("active"));
     inputWrap.appendChild(this.chatInput);
     chat.appendChild(this.chatLog);
@@ -995,8 +904,6 @@ class Piano {
 
   _appendChat(node) {
     const log = this.chatLog;
-    // Only autoscroll if already near the bottom, so reading/selecting history
-    // isn't yanked away when a new message arrives.
     const nearBottom =
       log.scrollHeight - log.scrollTop - log.clientHeight < 48;
     this.chatNodes.push(node);
@@ -1014,8 +921,6 @@ class Piano {
       this.participants.set(data.userId, { username: data.username });
 
     const isSelf = data.userId === this.userId;
-    // Everyone (including you) uses the same hashed color so a person looks the
-    // same on every screen. "(you)"/self styling marks your own messages.
     const col = this.userColor(data.userId);
     const msg = this.el("div", "mpp-chat-msg" + (isSelf ? " mpp-chat-self" : ""));
     const name = this.el("span", "mpp-chat-name", data.username || "User");
@@ -1027,7 +932,6 @@ class Piano {
   }
 
   // ═══════════════════════════════════════════════════════════════════════
-  // PANELS (sound / help / people) - simple toggle dropdowns
   // ═══════════════════════════════════════════════════════════════════════
 
   togglePanel(which) {
@@ -1103,7 +1007,6 @@ class Piano {
     );
     panel.appendChild(f1);
 
-    // Synth-only controls live in their own box that shows/hides.
     this.synthBox = this.el("div", "mpp-synth-box");
 
     const wf = this.el("div", "mpp-field");
@@ -1130,7 +1033,6 @@ class Piano {
     );
     panel.appendChild(this.synthBox);
 
-    // Reverb (both instruments)
     const rev = this.el("div", "mpp-field");
     const revHead = this.el("div", "mpp-field-head");
     revHead.appendChild(this.el("span", "mpp-field-label", "Reverb"));
@@ -1194,11 +1096,9 @@ class Piano {
   }
 
   // ═══════════════════════════════════════════════════════════════════════
-  // CROWN / LOCK
   // ═══════════════════════════════════════════════════════════════════════
 
   onCrownButton() {
-    // Only staff may hold the crown; the server enforces this too.
     if (!this.isStaff) {
       this.showHint("Only staff can hold the crown");
       return;
@@ -1257,7 +1157,6 @@ class Piano {
   }
 
   // ═══════════════════════════════════════════════════════════════════════
-  // PARTICIPANTS / MUTE
   // ═══════════════════════════════════════════════════════════════════════
 
   handleParticipants(data) {
@@ -1294,15 +1193,13 @@ class Piano {
     this.socket.emit("piano mute user", { targetUserId: uid, mute });
   }
 
-  // Local mute: silence one player for this viewer only. Nothing is sent to the
-  // server, so it works for everyone and is independent of staff mute.
   toggleLocalMute(uid) {
     if (!uid || uid === this.userId) return;
     if (this.localMuted.has(uid)) {
       this.localMuted.delete(uid);
     } else {
       this.localMuted.add(uid);
-      this.dropUserVoices(uid); // cut anything of theirs ringing right now
+      this.dropUserVoices(uid);
     }
     this.renderParticipants();
   }
@@ -1338,7 +1235,6 @@ class Piano {
         m.title = "Muted";
         row.appendChild(m);
       }
-      // Per-viewer local mute (everyone gets this; it never leaves your tab).
       if (!r.self) {
         const lm = this.localMuted.has(r.userId);
         const b = this.btn("mpp-person-btn mpp-local-mute" + (lm ? " on" : ""),
@@ -1347,7 +1243,6 @@ class Piano {
         b.addEventListener("click", (e) => { e.stopPropagation(); this.toggleLocalMute(r.userId); });
         row.appendChild(b);
       }
-      // Staff-only room mute (silences the player for everyone, server-side).
       if (this.isStaff && !r.self) {
         const muted = this.mutedSet.has(r.userId);
         const b = this.btn("mpp-person-btn" + (muted ? " on" : ""),
@@ -1361,24 +1256,21 @@ class Piano {
   }
 
   // ═══════════════════════════════════════════════════════════════════════
-  // "NOW PLAYING" STRIP (desktop header) - who is here + a bounce per note
   // ═══════════════════════════════════════════════════════════════════════
 
   buildNowPlaying() {
     this.nowPlaying = this.el("div", "mpp-nowplaying");
-    this.npChips = new Map(); // userId -> { el, dot, name, last }
+    this.npChips = new Map();
     return this.nowPlaying;
   }
 
   renderNowPlaying() {
     if (!this.nowPlaying) return;
-    // Self first, then everyone else at the piano.
     const rows = [{ userId: this.userId, username: this.username, self: true }];
     for (const [uid, info] of this.participants) {
       if (uid === this.userId) continue;
       rows.push({ userId: uid, username: (info && info.username) || "User" });
     }
-    // Reconcile chips in place so a chip that is mid-bounce is never recreated.
     const seen = new Set();
     for (const r of rows) {
       seen.add(r.userId);
@@ -1390,15 +1282,12 @@ class Piano {
         chip = { el, name, last: 0 };
         this.npChips.set(r.userId, chip);
       }
-      // The chip itself is tinted in the player's color (no separate dot), with
-      // readable ink picked for that color. Self uses the same hashed color as
-      // everyone else so you look the same on every screen.
       const bg = this.userColor(r.userId);
       chip.el.style.background = bg;
       chip.name.style.color = this._inkFor(bg);
       chip.name.textContent = r.username + (r.self ? " (you)" : "");
       chip.el.classList.toggle("mpp-np-crown", !!this.crown && this.crown === r.userId);
-      this.nowPlaying.appendChild(chip.el); // keep DOM order (self first)
+      this.nowPlaying.appendChild(chip.el);
     }
     for (const [uid, chip] of this.npChips) {
       if (!seen.has(uid)) {
@@ -1408,8 +1297,6 @@ class Piano {
     }
   }
 
-  // Pulse a player's chip when they press a key. Throttled so a held trill (or a
-  // flood) can't thrash layout - within the window it is already mid-bounce.
   bouncePlayer(userId) {
     if (!this.npChips) return;
     const chip = this.npChips.get(userId);
@@ -1418,7 +1305,7 @@ class Piano {
     if (now - chip.last < 90) return;
     chip.last = now;
     chip.el.classList.remove("bounce");
-    void chip.el.offsetWidth; // restart the animation on rapid repeats
+    void chip.el.offsetWidth;
     chip.el.classList.add("bounce");
   }
 
@@ -1440,7 +1327,6 @@ class Piano {
   }
 
   // ═══════════════════════════════════════════════════════════════════════
-  // CURSORS
   // ═══════════════════════════════════════════════════════════════════════
 
   updateRemoteCursor(d) {
@@ -1458,9 +1344,6 @@ class Piano {
       c = { el: elc, buf: [], lastSeen: 0 };
       this.cursors.set(d.userId, c);
     }
-    // Buffer the snapshot (tagged with local arrival time) instead of moving the
-    // cursor now; the rAF loop interpolates from it. This is what kills the
-    // jitter - we never jump straight to the latest packet.
     const x = Math.max(0, Math.min(1, d.x));
     const y = Math.max(0, Math.min(1, d.y));
     const now = this._now();
@@ -1470,9 +1353,6 @@ class Piano {
     this._ensureCursorLoop();
   }
 
-  // One rAF loop drives every remote cursor at the display refresh rate, no
-  // matter how irregularly packets land. It runs only while a cursor is live and
-  // stops itself once they all go idle; the next packet restarts it.
   _ensureCursorLoop() {
     if (this._cursorRaf == null && this.isOpen && !this.isMultiRow) {
       this._cursorRaf = requestAnimationFrame(() => this._cursorFrame());
@@ -1483,7 +1363,7 @@ class Piano {
     this._cursorRaf = null;
     if (!this.isOpen || this.isMultiRow || !this.keyboardEl) return;
     const now = this._now();
-    const renderTime = now - this.CURSOR_RENDER_DELAY; // render slightly in the past
+    const renderTime = now - this.CURSOR_RENDER_DELAY;
     const rect = this.keyboardEl.getBoundingClientRect();
     let live = false;
     for (const [, c] of this.cursors) {
@@ -1502,9 +1382,6 @@ class Piano {
     if (live) this._cursorRaf = requestAnimationFrame(() => this._cursorFrame());
   }
 
-  // Find the two snapshots straddling renderTime and lerp between them. Before
-  // the buffer starts, hold the oldest; past the newest (a late packet),
-  // extrapolate along the last segment for a clamped window, then hold.
   _sampleCursor(buf, renderTime) {
     const n = buf.length;
     if (n === 0) return null;
@@ -1517,16 +1394,10 @@ class Piano {
         return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f };
       }
     }
-    // Past the newest snapshot (sender paused or a packet is late): hold at the
-    // last known position. We deliberately do NOT extrapolate - projecting past
-    // the final point and then correcting is exactly what made the cursor snap
-    // back when someone stopped moving.
     const b = buf[n - 1];
     return { x: b.x, y: b.y };
   }
 
-  // Keep the snapshot just before renderTime (and everything after) so there is
-  // always a segment to interpolate; never drop below two.
   _pruneCursorBuf(buf, renderTime) {
     let lo = 0;
     for (let i = 0; i < buf.length; i++) {
@@ -1545,7 +1416,6 @@ class Piano {
   }
 
   // ═══════════════════════════════════════════════════════════════════════
-  // MODE (solo / room)
   // ═══════════════════════════════════════════════════════════════════════
 
   setMode(mode) {
@@ -1582,14 +1452,9 @@ class Piano {
   }
 
   // ═══════════════════════════════════════════════════════════════════════
-  // OCTAVE / GLOBAL KEYS / MIDI
   // ═══════════════════════════════════════════════════════════════════════
 
   codeMap() {
-    // Keyed by physical key (e.code) so it works on any layout and never sticks
-    // when Shift / CapsLock change the produced character. Values are semitone
-    // offsets from the current octave base. Two rows span ~2.7 octaves; the
-    // Octave +/- buttons (or arrow keys) reach the rest of the 88.
     return {
       KeyZ: 0, KeyS: 1, KeyX: 2, KeyD: 3, KeyC: 4, KeyV: 5, KeyG: 6, KeyB: 7,
       KeyH: 8, KeyN: 9, KeyJ: 10, KeyM: 11,
@@ -1611,7 +1476,7 @@ class Piano {
     this._onKeyDown = (e) => {
       if (!this.isOpen) return;
       if (this.isTypingTarget(e.target)) return;
-      if (e.ctrlKey || e.metaKey || e.altKey) return; // leave browser shortcuts alone
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (e.code === "Escape") {
         if (this.soundPanel.classList.contains("show") || this.helpPanel.classList.contains("show") || this.peoplePanel.classList.contains("show")) {
           this.closePanels();
@@ -1619,8 +1484,6 @@ class Piano {
         return;
       }
       if (e.code === "Enter") {
-        // Enter (while playing) jumps focus into the chat so you can type without
-        // the mouse; Enter from the input sends and returns focus to the keys.
         e.preventDefault();
         if (this.mode !== "solo" && this.chatInput) {
           if (this.chatEl) this.chatEl.classList.add("active");
@@ -1642,7 +1505,6 @@ class Piano {
       this.pressKey(idx, this.KEY_VELOCITY);
     };
 
-    // Not gated on isOpen so a key-up always releases, even mid-close.
     this._onKeyUp = (e) => {
       if (e.code === "Space") { this.setSustain(false); return; }
       if (this.kbKeys.has(e.code)) {
@@ -1667,9 +1529,6 @@ class Piano {
         }
       }
     };
-    // Deactivate the chat only when you click OUTSIDE it. Clicks inside (a
-    // message, the scrollbar, the input) keep it awake, so you can read, scroll
-    // and highlight history without being kicked out of the input.
     this._onDocPointerDown = (e) => {
       if (!this.chatEl || !this.chatEl.classList.contains("active")) return;
       if (this.chatEl.contains(e.target)) return;
@@ -1683,12 +1542,9 @@ class Piano {
       });
     };
 
-    // The chat is click-through (so keys always play), so it can't catch the
-    // wheel where the keyboard covers it. Route wheel-over-chat to the log here.
     this._onWheel = (e) => {
       if (!this.isOpen || this.mode === "solo" || !this.chatEl || !this.chatLog)
         return;
-      // Only scroll when the chat is "awake" (input focused).
       if (!this.chatEl.classList.contains("active")) return;
       const cr = this.chatEl.getBoundingClientRect();
       if (
@@ -1697,7 +1553,7 @@ class Piano {
       )
         return;
       const log = this.chatLog;
-      if (log.scrollHeight <= log.clientHeight) return; // nothing to scroll
+      if (log.scrollHeight <= log.clientHeight) return;
       log.scrollTop += e.deltaY;
       e.preventDefault();
     };
@@ -1759,7 +1615,6 @@ class Piano {
   }
 
   // ═══════════════════════════════════════════════════════════════════════
-  // HELPERS
   // ═══════════════════════════════════════════════════════════════════════
 
   userColor(uid) {
@@ -1769,8 +1624,6 @@ class Piano {
     return `hsl(${h % 360}, 72%, 62%)`;
   }
 
-  // Pick dark or light text for a given chip background so the name stays
-  // readable on any player color. Handles "#rrggbb" and "hsl(h, s%, l%)".
   _inkFor(bg) {
     let r, g, b;
     if (bg[0] === "#") {
@@ -1812,8 +1665,6 @@ class Piano {
     this._hintTimer = setTimeout(() => this.hintEl.classList.remove("show"), 1900);
   }
 
-  // Reflect "playing the piano" in the player's room chat box (top-right) while
-  // they are at the piano, then restore whatever they had. Mirrors Talkoboard.
   setRoomStatus(on) {
     if (typeof socket === "undefined" || !socket) return;
     try {
@@ -1836,7 +1687,6 @@ class Piano {
   }
 
   // ═══════════════════════════════════════════════════════════════════════
-  // SOCKET
   // ═══════════════════════════════════════════════════════════════════════
 
   setupSocketListeners() {
@@ -1849,21 +1699,13 @@ class Piano {
     this.socket.on("piano user status", (d) => this.handleUserStatus(d));
     this.socket.on("user left", (uid) => this.onUserLeft(uid));
 
-    // A dropped socket (e.g. a server restart) leaves remote notes hanging.
-    // Clear all sounding voices and lit keys so nothing looks frozen while we
-    // reconnect; physically-held keys are released normally on keyup/pointerup,
-    // and remote players re-announce themselves after reconnecting.
     this.socket.on("disconnect", () => this.panic());
-    // After reconnecting, re-announce that the piano is open for us: server
-    // piano state is per-process and was wiped by the restart, so the rejoined
-    // room needs to learn we are here again.
     this.socket.on("connect", () => {
       if (this.isOpen && this.mode === "room") this.socket.emit("piano open");
     });
   }
 
   // ═══════════════════════════════════════════════════════════════════════
-  // OPEN / CLOSE
   // ═══════════════════════════════════════════════════════════════════════
 
   open() {

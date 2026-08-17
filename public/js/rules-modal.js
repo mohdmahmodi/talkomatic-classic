@@ -1,18 +1,6 @@
-/* rules-modal.js
-   The Talkomatic rules, in the same big centred modal the suggestion board
-   uses - it reuses that stylesheet's shell classes (sb-overlay, sb-modal,
-   sb-head, sb-list) on purpose so the two read as the same kind of thing,
-   and only the rules-specific pieces below carry their own styles.
-
-   Two tabs. Community is what users agree to. Moderator is what staff are
-   held to, and it is public deliberately: a rule nobody outside staff can
-   read is not a rule anybody can hold staff to. */
 (function () {
   "use strict";
 
-  // lobby-client.js declares `const socket` at script top level, which is a
-  // lexical global rather than a property of window - same access the
-  // suggestion board uses.
   if (typeof socket === "undefined") return;
 
   var overlay,
@@ -83,9 +71,6 @@
     titleWrap.appendChild(title);
     titleWrap.appendChild(sub);
 
-    // The close button has to sit inside .sb-head-btns, not straight in the
-    // header: that wrapper is what carries margin-left:auto. Without it the
-    // button just follows the title, which parks it mid-row on a wide screen.
     var headBtns = el("div", "sb-head-btns");
     var closeBtn = el("button", "sb-icon-btn sb-close", "×");
     closeBtn.setAttribute("aria-label", "Close");

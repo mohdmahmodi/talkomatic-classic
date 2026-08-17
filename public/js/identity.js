@@ -1,11 +1,3 @@
-/* Talkomatic durable device identity.
- *
- * A random per-browser id, mirrored across localStorage + cookie + IndexedDB
- * so a casual "clear my localStorage" self-heals from a backup layer. This is
- * NOT a login and is never trusted for anything privileged on the server - it
- * only powers "active vs new" and invite credit. Loaded BEFORE the lobby/room
- * clients so window.TalkomaticIdentity.deviceId is ready for the socket auth.
- */
 (function () {
   "use strict";
   var LS_KEY = "talkomatic_did";
@@ -59,8 +51,6 @@
     } catch (e) {}
   }
 
-  // ── Resolve synchronously from the two fast layers so the socket can send
-  //    the id immediately on connect. ──
   var lsId = lsGet();
   var ckId = readCookie(CK_KEY);
   if (!valid(lsId)) lsId = null;
@@ -75,8 +65,6 @@
   lsSet(id);
   writeCookie(CK_KEY, id);
 
-  // localStorage was empty but the cookie still had the id → it was cleared,
-  // and the backup saved us. Flag a gentle one-time warning.
   var restored = !lsId && !!ckId;
 
   window.TalkomaticIdentity = {
@@ -86,7 +74,6 @@
     ready: null,
   };
 
-  // ── IndexedDB: deepest backup, reconciled in the background. ──
   function idbOpen() {
     return new Promise(function (res, rej) {
       try {
@@ -146,19 +133,16 @@
         return idbGet(db).then(function (dbId) {
           if (valid(dbId)) {
             if (freshly && dbId !== id) {
-              // Both fast layers were empty but IndexedDB still had us. Recover
-              // it so future loads are stable, and flag the wipe. (This session
-              // keeps the id it already connected with.)
               id = dbId;
               lsSet(dbId);
               writeCookie(CK_KEY, dbId);
               window.TalkomaticIdentity.deviceId = dbId;
               window.TalkomaticIdentity.restored = true;
             } else if (!freshly && dbId !== id) {
-              return idbPut(db, id); // fast layers win; refresh the backup
+              return idbPut(db, id);
             }
           } else {
-            return idbPut(db, id); // first time on this browser
+            return idbPut(db, id);
           }
         });
       })

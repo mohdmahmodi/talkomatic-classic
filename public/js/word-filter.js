@@ -1,30 +1,8 @@
 // ╔═══════════════════════════════════════════════════════════════════════════╗
-// ║  word-filter.js - Talkomatic word filter (server)                        ║
-// ║  v2.1.0 - June 2026 anniversary batch                                    ║
-// ║                                                                           ║
-// ║  HARDENING (this version):                                                ║
-// ║  • Cross-newline detection: a whole-text scan supplements the per-line   ║
-// ║    scan, so "f\nu\nc\nk" no longer bypasses the filter.                  ║
-// ║  • Digit-padding detection: a digit-dropping variant scan catches        ║
-// ║    "fu1ck" (digits normally MAP to letters, which used to break the      ║
-// ║    match instead of being ignorable padding).                            ║
-// ║  • Doubled-letter detection: a fully-collapsed variant scan (text AND    ║
-// ║    word lists collapsed the same way) catches "fuuck".                   ║
-// ║  • Span gate: variant scans only accept a match when the original text   ║
-// ║    region is LONGER than the matched word - i.e. some bypass character   ║
-// ║    was actually present. Clean words can never be flagged by a variant   ║
-// ║    scan, so false positives are no worse than the primary scan.          ║
-// ║  • Unicode index fix: normalization and index-mapping are now built in   ║
-// ║    a single pass (buildNormalizedWithMap), iterating code POINTS and     ║
-// ║    handling multi-char mappings ("½"→"12"). Previously, astral chars     ║
-// ║    (mathematical bold etc.) desynced the asterisk ranges.                ║
-// ║  • Per-line result cache: while a user types on one line, every other    ║
-// ║    line is a cache hit. The old full-text cache had a ~0% hit rate.      ║
-// ║                                                                           ║
-// ║  PARITY RULE: the algorithm in this file and in word-filter-client.js    ║
-// ║  must remain IDENTICAL. Only the loading mechanism differs               ║
-// ║  (fs.readFileSync here, fetch in the client).                            ║
-// ╚═══════════════════════════════════════════════════════════════════════════╝
+// ║ word-filter.js - Talkomatic word filter (server) ║ ║ v2.1.0 - June 2026
+// anniversary batch ║ ║ ║ ║ HARDENING (this version): ║ ║ • Cross-newline
+// detection: a whole-text scan supplements the per-line ║ ║ scan, so
+// "f\nu\nc\nk" no longer bypasses the filter.
 
 const fs = require("fs");
 
@@ -70,7 +48,6 @@ class Trie {
 class WordFilter {
   constructor(wordsFilePath, substitutionsFilePath) {
     try {
-      // Load offensive and whitelisted words
       const data = JSON.parse(fs.readFileSync(wordsFilePath, "utf8"));
       if (
         !Array.isArray(data.offensive_words) ||
@@ -87,9 +64,6 @@ class WordFilter {
         `Loaded ${data.offensive_words.length} offensive words and ${data.whitelisted_words.length} whitelisted words`,
       );
 
-      // Caches:
-      // - cache: full-text results (helps repeated renders of the same text)
-      // - lineCache: per-line results (helps live typing unchanged lines hit)
       this.cache = new Map();
       this.cacheSize = 1000;
       this.lineCache = new Map();
@@ -97,7 +71,6 @@ class WordFilter {
       this.cacheHits = 0;
       this.cacheMisses = 0;
 
-      // Build comprehensive obfuscation mapping
       this.obfuscationMap = this.buildComprehensiveObfuscationMap(
         substitutionsFilePath,
       );
@@ -113,14 +86,6 @@ class WordFilter {
     }
   }
 
-  /**
-   * Builds the four tries:
-   * - offensiveTrie / whitelistTrie: words as-is (lowercased)
-   * - offensiveTrieCollapsed / whitelistTrieCollapsed: words with ALL
-   *   repeated-character runs collapsed to a single character, used by the
-   *   doubled-letter variant scan. Building the whitelist the same way keeps
-   *   whitelist behavior consistent between the two scans.
-   */
   buildTries(offensiveWords, whitelistedWords) {
     this.offensiveTrie = new Trie();
     this.whitelistTrie = new Trie();
@@ -139,17 +104,10 @@ class WordFilter {
     });
   }
 
-  /** Collapses every run of repeated characters to a single character. */
   collapseRuns(str) {
     return str.replace(/(.)\1+/g, "$1");
   }
 
-  /**
-   * Builds a comprehensive obfuscation map by combining the substitutions
-   * file with built-in Unicode mappings.
-   * (Server-only difference: reads from disk. The client receives the parsed
-   * JSON object instead.)
-   */
   buildComprehensiveObfuscationMap(substitutionsFilePath) {
     let mappings = {};
 
@@ -718,24 +676,6 @@ class WordFilter {
 
   // ── Normalization with index mapping ──────────────────────────────────────
 
-  /**
-   * Normalizes text to lowercase alphanumeric AND builds the index map back
-   * to the original string, in a single code-point-aware pass.
-   *
-   * Returns { normalized, map } where map[k] is the code-UNIT index in the
-   * original text of the character that produced normalized[k]. This is the
-   * fix for the astral-plane desync: the old findOriginalIndex iterated code
-   * units and pushed one index per multi-char mapping, so any message with
-   * mathematical-bold (or similar) characters had its asterisk ranges
-   * shifted.
-   *
-   * Options:
-   * - dropDigits: remove digits entirely instead of mapping them to letters
-   *   (variant scan for number padding, e.g. "fu1ck").
-   * - maxRun: maximum allowed run of identical characters. 2 = legacy
-   *   behavior (preserves doubles), 1 = fully collapsed (variant scan for
-   *   doubled letters, e.g. "fuuck").
-   */
   buildNormalizedWithMap(text, options = {}) {
     const dropDigits = options.dropDigits === true;
     const maxRun = options.maxRun || 2;
@@ -747,7 +687,7 @@ class WordFilter {
     let runLength = 0;
 
     for (const char of text) {
-      const unitLen = char.length; // 1, or 2 for surrogate pairs
+      const unitLen = char.length;
 
       let lowerChar = char.toLowerCase();
       lowerChar = lowerChar.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -757,14 +697,10 @@ class WordFilter {
         this.obfuscationMap[lowerChar] ||
         lowerChar;
 
-      // A mapping may produce multiple characters ("½" → "12", "Ⅱ" → "ii").
       for (const out of mapped) {
         if (!/[a-z0-9]/.test(out)) continue;
         if (dropDigits && /[0-9]/.test(out)) continue;
 
-        // Run clamping (replaces the old post-hoc regex, so the index map
-        // stays correct). Dropped characters do not break a run, matching
-        // the legacy behavior of collapsing AFTER normalization.
         if (out === lastChar) {
           runLength++;
           if (runLength > maxRun) continue;
@@ -783,9 +719,6 @@ class WordFilter {
     return { normalized, map };
   }
 
-  /**
-   * Legacy-compatible normalization (kept for tests/debug tooling).
-   */
   stringToAlphanumeric(text) {
     if (!text || typeof text !== "string") return "";
     return this.buildNormalizedWithMap(text).normalized;
@@ -793,10 +726,6 @@ class WordFilter {
 
   // ── Scanning ───────────────────────────────────────────────────────────────
 
-  /**
-   * Walks normalized text against an offensive/whitelist trie pair.
-   * Returns matches as [startNorm, endNorm) index pairs into `normalized`.
-   */
   scanNormalized(normalized, offensiveTrie, whitelistTrie) {
     const matches = [];
     let i = 0;
@@ -838,10 +767,6 @@ class WordFilter {
     return matches;
   }
 
-  /**
-   * Validates whether an offensive word match is legitimate
-   * (unchanged from v2.0: rejects 1-2 char matches, boundary-checks 3-4).
-   */
   isValidOffensiveMatch(normalizedText, startPos, endPos) {
     const matchLength = endPos - startPos;
 
@@ -895,7 +820,6 @@ class WordFilter {
     return ranges;
   }
 
-  /** Per-line primary scan, cached by line text. */
   checkLine(line) {
     if (this.lineCache.has(line)) {
       this.cacheHits++;
@@ -908,7 +832,7 @@ class WordFilter {
       {},
       this.offensiveTrie,
       this.whitelistTrie,
-      false, // primary scan: no gate
+      false,
     );
 
     this.lineCache.set(line, ranges);
@@ -919,7 +843,6 @@ class WordFilter {
     return ranges;
   }
 
-  /** Sorts ranges and merges overlapping/touching ones. */
   mergeRanges(ranges) {
     if (ranges.length <= 1) return ranges;
     ranges.sort((a, b) => a[0] - b[0]);
@@ -936,16 +859,6 @@ class WordFilter {
     return merged;
   }
 
-  /**
-   * Main detection entry point.
-   *
-   * PASS 1 - per-line scan (cached per line): the accurate, legacy-equivalent
-   *          scan that handles the vast majority of content.
-   * PASS 2 - bypass-hardening scans on the whole text (each span-gated):
-   *   a) standard normalization across newlines  → catches "f\nu\nc\nk"
-   *   b) digits dropped                          → catches "fu1ck"
-   *   c) repeats fully collapsed + collapsed tries → catches "fuuck"
-   */
   checkText(text) {
     if (!text || typeof text !== "string") {
       return { hasOffensiveWord: false, offensiveRanges: [] };
@@ -960,7 +873,6 @@ class WordFilter {
 
     let ranges = [];
 
-    // ── PASS 1: per-line (cached) ──
     const lines = text.split(/\r?\n/);
     let offset = 0;
     for (const line of lines) {
@@ -968,12 +880,9 @@ class WordFilter {
       for (const [s, e] of lineRanges) {
         ranges.push([s + offset, e + offset]);
       }
-      offset += line.length + 1; // +1 for the newline
+      offset += line.length + 1;
     }
 
-    // ── PASS 2: bypass-hardening variant scans (span-gated) ──
-
-    // (a) cross-newline - only useful when there IS more than one line
     if (lines.length > 1) {
       ranges.push(
         ...this.scanVariant(
@@ -986,7 +895,6 @@ class WordFilter {
       );
     }
 
-    // (b) digit padding - only when the text contains a digit
     if (/[0-9]/.test(text)) {
       ranges.push(
         ...this.scanVariant(
@@ -999,7 +907,6 @@ class WordFilter {
       );
     }
 
-    // (c) doubled letters - collapsed text vs collapsed word lists
     ranges.push(
       ...this.scanVariant(
         text,
@@ -1026,10 +933,6 @@ class WordFilter {
     return result;
   }
 
-  /**
-   * Replaces detected ranges with asterisks. Ranges arrive sorted and
-   * non-overlapping from checkText (mergeRanges).
-   */
   filterText(text) {
     const { offensiveRanges } = this.checkText(text);
     if (offensiveRanges.length === 0) return text;
@@ -1074,7 +977,6 @@ class WordFilter {
     this.cacheMisses = 0;
   }
 
-  /** Debug helper: shows how a string normalizes, per character. */
   testNormalization(text) {
     const { normalized } = this.buildNormalizedWithMap(text);
     const characterDetails = [...text].map((char) => {
