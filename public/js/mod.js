@@ -3245,8 +3245,13 @@
     if (h > 0) return "ends in " + h + "h " + m + "m";
     return "ends in " + m + "m";
   }
-  function resolveAppeal(a, decision, note) {
-    socket.emit("staff resolve appeal", { id: a.id, decision, note: note || "" });
+  function resolveAppeal(a, decision, note, barFuture) {
+    socket.emit("staff resolve appeal", {
+      id: a.id,
+      decision,
+      note: note || "",
+      barFuture: !!barFuture,
+    });
   }
 
   // ── The appeal conversation ──────────────────────────────────────────────
@@ -3553,11 +3558,17 @@
             type: "textarea",
             maxLength: 300,
           },
+          {
+            name: "bar",
+            type: "checkbox",
+            label: "Do not let them appeal again",
+            help: "Final. They cannot file another appeal for this or any future ban, until a developer allows it again.",
+          },
         ],
         danger: true,
         confirmText: "Decline appeal",
       });
-      if (r != null) resolveAppeal(a, "dismiss", (r.note || "").trim());
+      if (r != null) resolveAppeal(a, "dismiss", (r.note || "").trim(), !!r.bar);
     });
     foot.appendChild(acts);
   }
@@ -3719,6 +3730,20 @@
           ),
         );
       }
+      // Somebody closed the door on this person appealing again. Say so on
+      // the card, or the next moderator has no way of knowing.
+      if (a.barId) {
+        const b = span("ap-barred");
+        b.appendChild(icon("fa-ban"));
+        b.appendChild(
+          document.createTextNode(
+            " No further appeals" +
+              (a.barredBy ? " · set by " + a.barredBy : "") +
+              (a.barredAt ? " · " + relTime(a.barredAt) : ""),
+          ),
+        );
+        info.appendChild(b);
+      }
       if (a.deviceId || a.ip) {
         const idLine = span("mono", "");
         if (a.deviceId)
@@ -3731,6 +3756,30 @@
         info.appendChild(idLine);
       }
       foot.appendChild(info);
+
+      // Undoing one is dev-only and lives outside the open/resolved split,
+      // because a bar outlives the appeal that set it.
+      if (a.barId && isDev) {
+        const allow = document.createElement("button");
+        allow.className = "btn sm";
+        allow.appendChild(icon("fa-rotate-left"));
+        allow.appendChild(document.createTextNode(" Allow appeals again"));
+        allow.addEventListener("click", async () => {
+          if (window.StaffUI) {
+            const ok = await StaffUI.confirm({
+              title: "Allow appeals again",
+              message:
+                "Let " +
+                (a.name || "this user") +
+                " file appeals again. The ban itself is not affected.",
+              confirmText: "Allow",
+            });
+            if (!ok) return;
+          }
+          socket.emit("staff appeal unbar", { barId: a.barId, name: a.name });
+        });
+        foot.appendChild(allow);
+      }
 
       if (a.status === "open" && viewerIsFullMod()) {
         const actions = divc("ap-actions");
@@ -3799,12 +3848,18 @@
                 maxLength: 300,
                 placeholder: "e.g. The chat log backs up the report. Try again in a week.",
               },
+              {
+                name: "bar",
+                type: "checkbox",
+                label: "Do not let them appeal again",
+                help: "Final. They cannot file another appeal for this or any future ban, until a developer allows it again.",
+              },
             ],
             danger: true,
             confirmText: "Decline appeal",
           });
           if (r == null) return;
-          resolveAppeal(a, "dismiss", (r.note || "").trim());
+          resolveAppeal(a, "dismiss", (r.note || "").trim(), !!r.bar);
         });
         actions.appendChild(dismiss);
         foot.appendChild(actions);

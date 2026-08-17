@@ -25,6 +25,7 @@ const fsp = require("fs").promises;
 const { DATA_DIR } = require("./datadir");
 
 const STORE_PATH = path.join(DATA_DIR, "appeals.json");
+const BARS_PATH = path.join(DATA_DIR, "appeal-bars.json");
 const MAX = 2000;
 const WINDOW_MS = 30 * 24 * 60 * 60 * 1000; // keep appeals for 30 days
 
@@ -38,6 +39,112 @@ const USER_COOLDOWN_MS = 5000;
 let appeals = []; // oldest first
 let seq = 0;
 let saveTimer = null;
+
+// ── Appeal bars ─────────────────────────────────────────────────────────────
+// People who may not file another appeal. Staff set one when declining, for
+// the case the whole feature invites: somebody who appeals every ban forever
+// and answers every decision with a fresh one.
+//
+// Kept in its own file rather than on the appeal that ended it, because
+// appeals are pruned after thirty days and a bar that expires along with the
+// record it came from is not a bar.
+//
+// Matched on all three identifiers the appeal carried. The address is the
+// weakest of them - addresses get reassigned - but it is also the only one
+// that survives somebody clearing their cookies, which is exactly the person
+// this is for. A bar placed by mistake is lifted from the appeals board.
+let bars = [];
+let barSeq = 0;
+let barsSaveTimer = null;
+const BARS_MAX = 5000;
+
+function loadBars() {
+  try {
+    const arr = JSON.parse(fs.readFileSync(BARS_PATH, "utf8"));
+    bars = Array.isArray(arr) ? arr : [];
+    barSeq = bars.reduce((m, b) => Math.max(m, b.id || 0), 0);
+  } catch (err) {
+    if (err.code !== "ENOENT")
+      console.error("Error loading appeal-bars.json:", err);
+    bars = [];
+  }
+}
+
+function saveBarsSoon() {
+  if (barsSaveTimer) return;
+  barsSaveTimer = setTimeout(async () => {
+    barsSaveTimer = null;
+    try {
+      if (bars.length > BARS_MAX) bars = bars.slice(-BARS_MAX);
+      const tmp = BARS_PATH + ".tmp";
+      await fsp.writeFile(tmp, JSON.stringify(bars, null, 2), "utf8");
+      await fsp.rename(tmp, BARS_PATH);
+    } catch (e) {
+      console.error("appeal bars save failed:", e);
+    }
+  }, 1500);
+}
+
+function saveBarsSync() {
+  try {
+    if (bars.length > BARS_MAX) bars = bars.slice(-BARS_MAX);
+    const tmp = BARS_PATH + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify(bars, null, 2), "utf8");
+    fs.renameSync(tmp, BARS_PATH);
+  } catch (e) {
+    console.error("appeal bars flush failed:", e);
+  }
+}
+
+// Does any bar on file cover this browser?
+function barFor({ ip, deviceId, userId } = {}) {
+  return (
+    bars.find(
+      (b) =>
+        (deviceId && b.deviceId && b.deviceId === deviceId) ||
+        (userId && b.userId && b.userId === userId) ||
+        (ip && b.ip && b.ip === ip),
+    ) || null
+  );
+}
+
+function isBarred(who) {
+  return !!barFor(who);
+}
+
+// Stops this person filing again. Returns the record, or the existing one when
+// they are already barred - setting it twice is not two bars.
+function addBar({ ip, deviceId, userId, name, by, byRole, reason }) {
+  const already = barFor({ ip, deviceId, userId });
+  if (already) return already;
+  const rec = {
+    id: ++barSeq,
+    ip: ip || null,
+    deviceId: deviceId || null,
+    userId: userId || null,
+    name: name || null,
+    by: by || null,
+    byRole: byRole || null,
+    reason: reason || null,
+    at: Date.now(),
+  };
+  bars.push(rec);
+  saveBarsSoon();
+  return rec;
+}
+
+function removeBar(id) {
+  const n = Number(id);
+  const before = bars.length;
+  bars = bars.filter((b) => b.id !== n);
+  if (bars.length === before) return false;
+  saveBarsSoon();
+  return true;
+}
+
+function listBars() {
+  return bars.slice().reverse();
+}
 
 function load() {
   try {
@@ -88,6 +195,7 @@ function flushSync() {
   } catch (e) {
     console.error("appeals flush failed:", e);
   }
+  saveBarsSync();
 }
 
 function prune(now) {
@@ -124,6 +232,8 @@ function openForIp(ip, banKey) {
 // route can give the banned user a clear message. One open appeal per ban.
 function submit({ ip, deviceId, userId, name, message, ban }) {
   if (!ip) return { ok: false, code: "no_ip" };
+  // Staff have said this person does not get to do this again.
+  if (isBarred({ ip, deviceId, userId })) return { ok: false, code: "barred" };
   const key = banKeyOf(ban);
   if (openForIp(ip, key)) return { ok: false, code: "already" };
   // An appeal already decided for THIS ban cannot be re-filed - that is what
@@ -254,6 +364,20 @@ function replySnapshot(a, replyToId) {
   };
 }
 
+// Has the appellant written without anybody having answered yet? Filing an
+// appeal and then sending twenty more before a moderator has even read it is
+// the thing this stops, and that is ALL it stops: once a moderator has said
+// anything at all, it is a conversation and neither side is rationed.
+//
+// A system line ("this chat was ended by staff") is not somebody answering, so
+// it does not open the floodgate. An appeal filed with no note at all has not
+// used its one message yet.
+function awaitingFirstReply(a) {
+  const msgs = (a && a.messages) || [];
+  if (!msgs.some((m) => m.from === "user")) return false;
+  return !msgs.some((m) => m.from === "staff");
+}
+
 // The appellant writes. Everything they can get wrong has its own code so the
 // ban screen can say what actually happened.
 function userReply(a, text, replyToId) {
@@ -264,6 +388,9 @@ function userReply(a, text, replyToId) {
   if (body.length < 2) return { ok: false, code: "too_short" };
   const mine = a.messages.filter((m) => m.from === "user");
   if (mine.length >= USER_MSG_CAP) return { ok: false, code: "too_many" };
+  // One message until somebody answers. After that the appeal is a normal
+  // back-and-forth with no ration on either side.
+  if (awaitingFirstReply(a)) return { ok: false, code: "wait_reply" };
   const last = mine[mine.length - 1];
   if (last && Date.now() - last.ts < USER_COOLDOWN_MS)
     return { ok: false, code: "slow_down" };
@@ -423,6 +550,7 @@ function list() {
 }
 
 load();
+loadBars();
 
 module.exports = {
   submit,
@@ -444,4 +572,10 @@ module.exports = {
   flushSync,
   MSG_MAX,
   USER_MSG_CAP,
+  awaitingFirstReply,
+  isBarred,
+  barFor,
+  addBar,
+  removeBar,
+  listBars,
 };

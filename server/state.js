@@ -208,10 +208,11 @@ const state = {
   // Dev mode: userIds with a verified dev key
   devUsers: new Set(),
 
-  // Staff runtime toggles (in-memory; reset on restart by design)
+  // Staff runtime toggles (in-memory; reset on restart by design). The
+  // application intake switch is NOT one of these - it is owned and persisted
+  // by server/applications.js, because closing it has to mean closed.
   maintenance: false, // blocks new room creation and joins for non-staff
   lobbyTicker: "", // editable banner shown at the top of the lobby
-  applicationsOpen: true, // when false, new mod applications are not accepted
 
   // Caches
   normalizeCache: new Map(),

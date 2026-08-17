@@ -1065,8 +1065,8 @@ async function revokeSharedKey(hash, label, headline) {
     }
     for (const [, s] of io().sockets.sockets)
       if (s.isDev) {
-        s.emit("dev mod keys", roles.listModKeys());
-        s.emit("dev former mods", roles.listFormerMods());
+        s.emit("dev mod keys", roles.listModKeys(!!s.isMainDev));
+        s.emit("dev former mods", roles.listFormerMods(!!s.isMainDev));
       }
     staffchat.rosterDirty();
   } catch (e) {
@@ -1074,15 +1074,14 @@ async function revokeSharedKey(hash, label, headline) {
   }
 }
 
-// Marks the Desk's #queues card for one queue item as handled, so a card
-// acted on from the dashboard stops asking to be acted on in the Desk. Actions
-// aimed at a USER stamp themselves through logStaff; this is for the ones
-// aimed at a numbered item (an application, an appeal, a suggestion).
-function stampQueueItem(socket, qkind, itemId, action) {
+// Clears the Desk's #queues card for one queue item, so something dealt with
+// from the dashboard stops asking to be dealt with in the Desk. Actions aimed
+// at a USER clear themselves through logStaff; this is for the ones aimed at a
+// numbered item (an application, an appeal, a suggestion).
+function settleQueueItem(qkind, itemId) {
   try {
-    staffchat.stampQueue(
+    staffchat.settleQueue(
       (m) => m.qkind === qkind && m.card && m.card.itemId === Number(itemId),
-      { by: socket?.staffLabel || (socket?.isDev ? "dev" : "mod"), action },
     );
   } catch (_) {}
 }
@@ -1118,7 +1117,7 @@ function logStaff(socket, action, target, room, details) {
   // receipt, so the card ends up a record of what was done. Never the other
   // way round: nothing in the Desk writes to this log.
   try {
-    staffchat.noteStaffAction(label, action, targetStr, roomTag);
+    staffchat.noteStaffAction(label, action, targetStr, roomTag, roleTag);
     if (audit.isUsefulAction(action)) staffchat.noteEvent("action");
   } catch (_) { }
   // Watch mods (not devs - dev keys are owner-only) for action-rate abuse.
@@ -1227,6 +1226,11 @@ function buildReportsList(showIp) {
   });
 }
 
+// The last line a barred appellant reads, so the decision does not just
+// silently become a locked door on their next ban.
+const NO_MORE_APPEALS =
+  "You will not be able to file another appeal. This decision is final.";
+
 // Build the appeals board payload (shared by the get + resolve handlers): one
 // row per appeal, newest first. Raw addresses follow the same rule as the
 // reports board and the audit feed; `stillBlocked` lets the board show whether
@@ -1237,6 +1241,13 @@ function buildAppealsList(showIp) {
     // still be covered by an IPv6 /64 range ban.
     const stillBlocked = ipban.findActiveBlock(a.ip) !== null;
     const ban = a.ban || {};
+    // Whether this person has been barred from filing again, so the board can
+    // say so and offer to lift it rather than leaving it invisible.
+    const bar = appeals.barFor({
+      ip: a.ip,
+      deviceId: a.deviceId,
+      userId: a.userId,
+    });
     return {
       id: a.id,
       name: a.name || null,
@@ -1247,10 +1258,21 @@ function buildAppealsList(showIp) {
       at: a.at,
       status: a.status,
       resolution: a.resolution || null,
-      reviewedBy: a.reviewedBy || null,
+      // Who decided it, and who placed the ban underneath. A moderator is
+      // named; a developer reads as the team, the same as on the feed.
+      reviewedBy: showIp
+        ? a.reviewedBy || null
+        : roles.teamReviewer(a.reviewedBy),
       reviewedAt: a.reviewedAt || null,
       stillBlocked,
-      banBy: ban.by || null,
+      barId: bar ? bar.id : null,
+      barredBy: bar
+        ? showIp
+          ? bar.by || null
+          : roles.teamLabel(bar.by, bar.byRole)
+        : null,
+      barredAt: bar ? bar.at : null,
+      banBy: showIp ? ban.by || null : roles.teamLabel(ban.by, ban.byRole),
       banReason: showIp ? ban.reason || null : audit.maskIps(ban.reason || null),
       banPermanent: !!ban.permanent,
       banExpiry: ban.expiry || 0,
@@ -1258,22 +1280,32 @@ function buildAppealsList(showIp) {
       // The conversation. An appeal is judged on what was said in it, so the
       // board carries the whole thread rather than just the opening note.
       locked: !!a.locked,
-      lockedBy: a.lockedBy || null,
+      lockedBy: showIp ? a.lockedBy || null : roles.teamReviewer(a.lockedBy),
       // Set when a decision was put back on the table, so the board can say so
       // rather than looking like it was never decided.
-      reopenedBy: a.reopenedBy || null,
-      reopenedAt: a.reopenedAt || null,
-      messages: (a.messages || []).map((m) => ({
-        id: m.id,
-        ts: m.ts,
-        from: m.from,
-        by: m.by || null,
-        role: m.role || null,
-        level: m.level == null ? null : m.level,
-        avatar: m.avatar || null,
-        text: m.text || "",
-        reply: m.reply || null,
-      })),
+      reopenedBy: showIp
+        ? a.reopenedBy || null
+        : roles.teamReviewer(a.reopenedBy),
+      // The thread itself. A developer answering an appeal signs it as the
+      // team here too, and their picture comes off with the name - otherwise
+      // the avatar says who it was as plainly as the label would.
+      messages: (a.messages || []).map((m) => {
+        const hide = !showIp && m.from === "staff" && m.role === "dev";
+        return {
+          id: m.id,
+          ts: m.ts,
+          from: m.from,
+          by: hide ? roles.teamLabel(m.by, "dev") : m.by || null,
+          role: m.role || null,
+          level: m.level == null ? null : m.level,
+          avatar: hide ? null : m.avatar || null,
+          text: m.text || "",
+          reply:
+            m.reply && !showIp && m.reply.from === "staff"
+              ? { ...m.reply, by: roles.teamReviewer(m.reply.by) }
+              : m.reply || null,
+        };
+      }),
       // What staff need at a glance: is the ball in our court?
       waiting:
         a.status === "open" &&
@@ -1303,7 +1335,7 @@ function buildSuggestionsList(forDev) {
     at: s.at,
     status: s.status,
     resolution: s.resolution || null,
-    reviewedBy: s.reviewedBy || null,
+    reviewedBy: forDev ? s.reviewedBy || null : roles.teamReviewer(s.reviewedBy),
     reviewedAt: s.reviewedAt || null,
   }));
 }
@@ -1412,6 +1444,27 @@ function announceAppeal(id) {
 // appeal is one thing to deal with, and a conversation that files a card per
 // line would bury everything else. The boards update live and anybody with the
 // chat open sees it arrive.
+// Puts an appeal back on the Desk's queue after it was decided and then
+// reopened. The card only, not a second audit entry: the reopen is already
+// logged as the action it was, and the log is not a place to post twice.
+function requeueAppeal(id, text) {
+  const a = appeals.get(id);
+  if (!a) return;
+  try {
+    staffchat.systemQueues("appeal", text, {
+      minLevel: 2,
+      card: {
+        ids: [a.userId, a.deviceId].filter(Boolean),
+        by: a.name || "A banned user",
+        itemId: id,
+        deviceId: a.deviceId || null,
+        reason: a.message || null,
+        lines: a.ban && a.ban.reason ? ["Banned for: " + a.ban.reason] : null,
+      },
+    });
+  } catch (_) {}
+}
+
 function announceAppealMessage(id) {
   broadcastAppealsList();
   broadcastAppeal(id);
@@ -1487,7 +1540,7 @@ function sendAppsList(s) {
   );
   // Bundle the open/closed switch with every list so the dashboard toggle always
   // reflects the live state.
-  s.emit("applications state", { open: !!state.applicationsOpen });
+  s.emit("applications state", { open: !!applications.isOpen() });
 }
 
 // Push the updated application list to every reviewer (full mods + devs).
@@ -1497,12 +1550,13 @@ function broadcastAppsList() {
     if (s.isDev || (s.isMod && (s.modLevel || 2) >= 2)) sendAppsList(s);
 }
 
-// Push just the open/closed switch to every reviewer (after a dev toggles it).
+// Push the open/closed switch to everybody, not just reviewers: the lobby
+// shows the "Apply to be a mod" link, and a link whose only outcome is an
+// error message is a worse way to say "closed" than not offering it.
 function broadcastApplicationsState() {
   if (!io()) return;
   for (const [, s] of io().sockets.sockets)
-    if (s.isDev || (s.isMod && (s.modLevel || 2) >= 2))
-      s.emit("applications state", { open: !!state.applicationsOpen });
+    s.emit("applications state", { open: !!applications.isOpen() });
 }
 
 // Push the reports board to every open dashboard (full mods + devs) so new
@@ -1663,7 +1717,9 @@ function buildBlockList(showIp) {
       did:
         (b && typeof b === "object" && b.did) || (isId ? ip.slice(3) : null),
       label: (b && b.label) || (isId && matched[0] && matched[0].name) || null,
-      by: (b && b.by) || null,
+      by: showIp
+        ? (b && b.by) || null
+        : roles.teamLabel((b && b.by) || null, b && b.byRole),
       // Staff wrote this, and "evading from x.x.x.x" is a natural thing to
       // write. Masked for the same reason the address itself is.
       reason: showIp
@@ -1691,7 +1747,7 @@ function buildBanHistory(showIp) {
     id: e.id,
     name: e.name,
     action: e.action, // "ban" | "unban"
-    by: e.by,
+    by: showIp ? e.by : roles.teamLabel(e.by, e.byRole),
     at: e.at,
     reason: showIp ? e.reason : audit.maskIps(e.reason),
     duration: e.duration,
@@ -3221,6 +3277,10 @@ function registerSocketHandlers(opts) {
       const st = appStatusPayload(socket.deviceId, false);
       if (st.has) socket.emit("mod application status", st);
     }
+
+    // Whether intake is open at all, so the lobby can drop the apply link
+    // rather than offering a form that will only be refused.
+    socket.emit("applications state", { open: !!applications.isOpen() });
 
     // ── One active ROOM tab per browser session ─────────────────────────
     // Identity is the session id (shared across a browser's tabs). Two tabs
@@ -5408,8 +5468,8 @@ function registerSocketHandlers(opts) {
           expiry,
           label: blockedName,
           by: socket.staffLabel || null,
-          // Kept so the ban screen can say which half of the team it came
-          // from without naming anybody.
+          // Kept so the ban screen and the ban list can say which half of the
+          // team it came from without naming anybody.
           byRole: socket.isDev ? "dev" : "mod",
           ts: Date.now(),
           reason,
@@ -5424,6 +5484,7 @@ function registerSocketHandlers(opts) {
           name: blockedName,
           action: "ban",
           by: socket.staffLabel || null,
+          byRole: socket.isDev ? "dev" : "mod",
           reason,
           duration,
         });
@@ -5553,6 +5614,7 @@ function registerSocketHandlers(opts) {
           name: blockedName,
           action: "ban",
           by: socket.staffLabel || null,
+          byRole: socket.isDev ? "dev" : "mod",
           reason,
           duration,
         });
@@ -5879,6 +5941,7 @@ function registerSocketHandlers(opts) {
           from: oldName,
           ip: targetSocket?.clientIp || null,
           by: `${socket.isDev ? "dev" : "mod"}:${socket.staffLabel || ""}`,
+          byRole: socket.isDev ? "dev" : "mod",
           room: `room:${room.name || "?"}(${room.id || "?"})`,
         });
         socket.emit("staff action result", {
@@ -6715,7 +6778,11 @@ function registerSocketHandlers(opts) {
         // many addresses a key is live on), which is the point of the board,
         // without the addresses themselves.
         const showIp = !!socket.isMainDev;
-        const sessions = [...byKey.values()].map((g) => ({
+        // A developer's key sessions say when they are connected and from how
+        // many places, which is the same thing the activity feed no longer
+        // says. The board keeps doing its job - spotting a shared mod key.
+        const mine = (r) => showIp || r !== "dev";
+        const sessions = [...byKey.values()].filter((g) => mine(g.role)).map((g) => ({
           hash: showIp ? g.hash : g.hash.slice(0, 8),
           label: g.label,
           role: g.role,
@@ -6724,7 +6791,7 @@ function registerSocketHandlers(opts) {
           sessionCount: g.count,
           multiIp: g.ips.size > 1,
         }));
-        const history = roles.getKeyActivity().map((h) => ({
+        const history = roles.getKeyActivity().filter((h) => mine(h.role)).map((h) => ({
           hash: showIp ? h.hash : String(h.hash || "").slice(0, 8),
           label: h.label,
           role: h.role,
@@ -6769,6 +6836,7 @@ function registerSocketHandlers(opts) {
             name: blockedName,
             action: "unban",
             by: socket.staffLabel || null,
+          byRole: socket.isDev ? "dev" : "mod",
           });
         broadcastBlockList();
         broadcastBanHistory();
@@ -6925,10 +6993,10 @@ function registerSocketHandlers(opts) {
           label: granted.label,
           level: granted.level,
         });
-        socket.emit("dev mod keys", roles.listModKeys());
+        socket.emit("dev mod keys", roles.listModKeys(!!socket.isMainDev));
         // Somebody handed their key back stops being listed as former staff the
         // moment it happens, rather than on the next refresh.
-        socket.emit("dev former mods", roles.listFormerMods());
+        socket.emit("dev former mods", roles.listFormerMods(!!socket.isMainDev));
         // A new name has to show up in everyone's team list and "@" list now,
         // not whenever they next open the Desk.
         staffchat.rosterDirty();
@@ -6983,8 +7051,8 @@ function registerSocketHandlers(opts) {
           }
         }
         logStaff(socket, "revoke mod", hash.slice(0, 8), "-");
-        socket.emit("dev mod keys", roles.listModKeys());
-        socket.emit("dev former mods", roles.listFormerMods());
+        socket.emit("dev mod keys", roles.listModKeys(!!socket.isMainDev));
+        socket.emit("dev former mods", roles.listFormerMods(!!socket.isMainDev));
         staffchat.rosterDirty();
         socket.emit("staff action result", {
           action: "revoke mod",
@@ -7000,7 +7068,7 @@ function registerSocketHandlers(opts) {
         if (!requireStaff(socket)) return;
         // Mods see the roster, not the key material. Only a dev acts on keys,
         // so only a dev needs the hash that identifies one.
-        const keys = roles.listModKeys();
+        const keys = roles.listModKeys(!!socket.isMainDev);
         socket.emit(
           "dev mod keys",
           socket.isDev
@@ -7009,7 +7077,7 @@ function registerSocketHandlers(opts) {
         );
         // Who used to be staff rides along with the roster - the panel shows
         // them apart from it, marked as no longer moderators.
-        const former = roles.listFormerMods();
+        const former = roles.listFormerMods(!!socket.isMainDev);
         socket.emit(
           "dev former mods",
           socket.isDev
@@ -7061,7 +7129,7 @@ function registerSocketHandlers(opts) {
           }
         }
         logStaff(socket, `set mod level L${newLevel}`, hash.slice(0, 8), "-");
-        socket.emit("dev mod keys", roles.listModKeys());
+        socket.emit("dev mod keys", roles.listModKeys(!!socket.isMainDev));
         staffchat.rosterDirty();
         socket.emit("staff action result", {
           action: "set mod level",
@@ -7132,7 +7200,7 @@ function registerSocketHandlers(opts) {
           targetUser || { id: targetUserId },
           room || "-",
         );
-        socket.emit("dev mod keys", roles.listModKeys());
+        socket.emit("dev mod keys", roles.listModKeys(!!socket.isMainDev));
         staffchat.rosterDirty();
         socket.emit("staff action result", {
           action: "set mod level",
@@ -7158,6 +7226,7 @@ function registerSocketHandlers(opts) {
         socket.emit("audit snapshot", {
           entries: audit.recent(limit, {
             showIp: !!socket.isMainDev,
+            showAll: !!socket.isMainDev,
             isDev: !!socket.isDev,
             modLevel: socket.modLevel || 2,
             since: weekStart,
@@ -7170,8 +7239,14 @@ function registerSocketHandlers(opts) {
             modLevel: socket.isDev ? 0 : socket.modLevel || 2,
             mainDev: !!socket.isMainDev,
           },
+          // Who the feed can be filtered by. Developers are left off it for
+          // anyone but operations: there is nothing of theirs on the feed to
+          // filter to, and a name in the picker is an invitation to look for
+          // one.
           roster: {
-            devs: roles.listDevKeys().map((d) => d.label),
+            devs: socket.isMainDev
+              ? roles.listDevKeys().map((d) => d.label)
+              : [],
             mods: roles.listModKeys().map((m) => m.label),
           },
         });
@@ -7187,6 +7262,13 @@ function registerSocketHandlers(opts) {
         if (!requireStaff(socket)) return;
         const label = typeof data?.label === "string" ? data.label : "";
         const role = data?.role === "dev" ? "dev" : "mod";
+        // The feed does not carry developer actions, so neither does the
+        // record they add up to. Asking for one by name is the obvious way
+        // round the feed, so it is refused rather than answered emptily -
+        // and refused on the LABEL too, or the same question asked with
+        // role "mod" would still confirm the name back.
+        if (!socket.isMainDev && (role === "dev" || roles.isDevLabel(label)))
+          return;
         const h = audit.historyFor(label, role, {
           offset: data?.offset,
           limit: data?.limit,
@@ -7453,15 +7535,10 @@ function registerSocketHandlers(opts) {
           "-",
           note || undefined,
         );
-        // The queue card said "dismissed by someone". It has to stop saying
-        // that, or the next person to look will think it is handled.
-        try {
-          staffchat.stampQueue(
-            (m) => m.qkind === "appeal" && m.card && m.card.itemId === id,
-            { by: label, action: "reopened" },
-            true,
-          );
-        } catch (_) {}
+        // It came off the queue when it was decided. It is outstanding work
+        // again, so it goes back on as a fresh card rather than an old one
+        // being un-marked - there may be no old one left to un-mark.
+        requeueAppeal(id, `${a.name || "A banned user"}'s appeal was reopened.`);
         broadcastAppealsList();
         broadcastAppeal(id);
       }),
@@ -7532,6 +7609,7 @@ function registerSocketHandlers(opts) {
               name: a.name || null,
               action: "unban",
               by: socket.staffLabel || null,
+              byRole: socket.isDev ? "dev" : "mod",
               reason: "appeal accepted",
             });
           broadcastBlockList();
@@ -7545,9 +7623,24 @@ function registerSocketHandlers(opts) {
             typeof data?.note === "string" ? data.note : "",
           ).slice(0, 300);
           appeals.resolve(id, "dismissed", reviewer, note || null);
+          // Optional, and only ever on a decline: this person does not get to
+          // file another one. For the case the feature invites - somebody who
+          // answers every decision with a fresh appeal.
+          const barred = data?.barFuture
+            ? appeals.addBar({
+                ip: a.ip,
+                deviceId: a.deviceId,
+                userId: a.userId,
+                name: a.name,
+                by: socket.staffLabel || null,
+                byRole: socket.isDev ? "dev" : "mod",
+                reason: note || null,
+              })
+            : null;
+          if (barred) appeals.systemNote(a, NO_MORE_APPEALS);
           logStaff(
             socket,
-            "dismiss appeal",
+            barred ? "dismiss appeal (no more appeals)" : "dismiss appeal",
             { name: a.name || "?", id: a.userId || a.deviceId || "-" },
             "-",
             note || undefined,
@@ -7555,12 +7648,27 @@ function registerSocketHandlers(opts) {
         }
         broadcastAppealsList();
         broadcastAppeal(id);
-        stampQueueItem(
+        settleQueueItem("appeal", id);
+        socket.emit("staff appeals", buildAppealsList(!!socket.isMainDev));
+      }),
+    );
+
+    // Let a barred person appeal again. Dev-only: a bar is meant to be the end
+    // of it, so undoing one is a deliberate act by somebody who can also lift
+    // the ban underneath. Wrong bars happen; there has to be a way back.
+    socket.on(
+      "staff appeal unbar",
+      safe(async (data) => {
+        if (!requireDev(socket)) return;
+        const barId = Number(data?.barId);
+        if (!barId || !appeals.removeBar(barId)) return;
+        logStaff(
           socket,
-          "appeal",
-          id,
-          decision === "lift" ? "ban lifted" : "dismissed",
+          "allow appeals again",
+          typeof data?.name === "string" ? data.name : "-",
+          "-",
         );
+        broadcastAppealsList();
         socket.emit("staff appeals", buildAppealsList(!!socket.isMainDev));
       }),
     );
@@ -7578,13 +7686,9 @@ function registerSocketHandlers(opts) {
             "error",
             createErrorResponse(ERROR_CODES.BAD_REQUEST, "No such appeal."),
           );
-        try {
-          staffchat.stampQueue(
-            (m) => m.qkind === "appeal" && m.card && m.card.itemId === id,
-            { by: socket.staffLabel || "dev", action: "handled" },
-            true,
-          );
-        } catch (_) {}
+        // The appeal is gone, so its card goes with it - a card for something
+        // that no longer exists is the thing that had people opening a blank.
+        settleQueueItem("appeal", id);
         broadcastAppealsList();
         socket.emit("staff appeals", buildAppealsList(!!socket.isMainDev));
       }),
@@ -7663,7 +7767,7 @@ function registerSocketHandlers(opts) {
           "-",
         );
         broadcastSuggestionsList();
-        stampQueueItem(socket, "suggestion", id, decision);
+        settleQueueItem("suggestion", id);
         socket.emit("staff suggestions", buildSuggestionsList(!!socket.isDev));
       }),
     );
@@ -8024,9 +8128,9 @@ function registerSocketHandlers(opts) {
           { name: s.name || "?", id: s.userId || "-" },
           "-",
         );
-        // Stamp the Desk card for this post, so a decision made anywhere shows
-        // as handled in #queues rather than leaving two people to open it.
-        stampQueueItem(socket, "suggestion", s.id, s.status);
+        // Clear the Desk card for this post, so a decision made anywhere takes
+        // it off #queues rather than leaving two people to open it.
+        settleQueueItem("suggestion", s.id);
         broadcastBoard();
       }),
     );
@@ -8258,7 +8362,7 @@ function registerSocketHandlers(opts) {
             ok: false,
             error: "You're already staff.",
           });
-        if (!state.applicationsOpen)
+        if (!applications.isOpen())
           return socket.emit("mod application result", {
             ok: false,
             error: "Moderator applications are closed right now. Please check back later.",
@@ -8345,10 +8449,10 @@ function registerSocketHandlers(opts) {
       "dev set applications open",
       safe(async (data) => {
         if (!requireDev(socket)) return;
-        state.applicationsOpen = !!(data && data.open);
+        await applications.setOpen(!!(data && data.open));
         logStaff(
           socket,
-          state.applicationsOpen ? "open applications" : "close applications",
+          applications.isOpen() ? "open applications" : "close applications",
           "-",
           "-",
         );
@@ -8356,7 +8460,7 @@ function registerSocketHandlers(opts) {
         socket.emit("staff action result", {
           action: "applications open",
           ok: true,
-          open: state.applicationsOpen,
+          open: applications.isOpen(),
         });
       }),
     );
@@ -8442,12 +8546,7 @@ function registerSocketHandlers(opts) {
           );
         }
         broadcastAppsList();
-        stampQueueItem(
-          socket,
-          "application",
-          id,
-          decision === "approve" ? "approved" : "declined",
-        );
+        settleQueueItem("application", id);
         socket.emit("staff action result", {
           action: "review application",
           ok: true,
@@ -8632,7 +8731,7 @@ function registerSocketHandlers(opts) {
           level: granted.level,
         });
         // Only devs receive the full key roster (hashes/labels/levels).
-        if (socket.isDev) socket.emit("dev mod keys", roles.listModKeys());
+        if (socket.isDev) socket.emit("dev mod keys", roles.listModKeys(!!socket.isMainDev));
         staffchat.rosterDirty();
       }),
     );
@@ -8712,8 +8811,8 @@ function registerSocketHandlers(opts) {
           targetUser || { id: targetUserId },
           room || "-",
         );
-        socket.emit("dev mod keys", roles.listModKeys());
-        socket.emit("dev former mods", roles.listFormerMods());
+        socket.emit("dev mod keys", roles.listModKeys(!!socket.isMainDev));
+        socket.emit("dev former mods", roles.listFormerMods(!!socket.isMainDev));
         staffchat.rosterDirty();
         socket.emit("staff action result", {
           action: "remove mod",

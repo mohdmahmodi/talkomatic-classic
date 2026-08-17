@@ -664,7 +664,6 @@ setInterval(() => {
 app.locals.buildId = () => BUILD_ID;
 const PAGES = [
   "about",
-  "app-directory",
   "botcreator",
   "contributors",
   "desk",
@@ -935,6 +934,13 @@ function appealForBrowser(req) {
     deviceId,
     banned: !!active,
     banKey,
+    // Staff can end this for good on a decline. Read here so the ban screen
+    // says so up front instead of after they have written it all out.
+    barred: appeals.isBarred({
+      ip,
+      deviceId,
+      userId: req.session?.userId || null,
+    }),
     appeal: appeals.forUser(ip, deviceId, banKey),
   };
 }
@@ -947,17 +953,21 @@ function appealPayload(a, ctx) {
     return {
       ok: true,
       has: false,
-      canFile: !!(ctx && ctx.banned),
+      canFile: !!(ctx && ctx.banned && !ctx.barred),
+      barred: !!(ctx && ctx.barred),
     };
   return {
     ok: true,
     has: true,
+    barred: !!(ctx && ctx.barred),
     id: a.id,
     at: a.at,
     status: a.status,
     resolution: a.resolution || null,
     locked: !!a.locked,
-    canWrite: a.status === "open" && !a.locked,
+    // Their turn only when the last word was ours.
+    canWrite: a.status === "open" && !a.locked && !appeals.awaitingFirstReply(a),
+    awaitingReply: appeals.awaitingFirstReply(a),
     left: Math.max(
       0,
       appeals.USER_MSG_CAP -

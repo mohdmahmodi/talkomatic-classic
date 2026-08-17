@@ -4544,24 +4544,37 @@
       acts.appendChild(lift);
     }
     const decline = btn("dk-minib danger", "Decline", "fa-xmark");
-    decline.addEventListener("click", () =>
-      ask(
-        {
-          title: "Decline this appeal",
-          message:
-            "The ban stays in place. What you write is the last thing they read on their ban screen.",
-          label: "Message to them (optional)",
-          max: 300,
-          icon: '<i class="fas fa-xmark"></i>',
-        },
-        (note) =>
-          socket.emit("staff resolve appeal", {
-            id: a.id,
-            decision: "dismiss",
-            note: String(note || "").trim(),
-          }),
-      ),
-    );
+    // Not ask(): declining carries a second decision, and ask() is a
+    // one-field helper.
+    decline.addEventListener("click", () => {
+      if (!window.StaffUI || !window.StaffUI.prompt)
+        return socket.emit("staff resolve appeal", { id: a.id, decision: "dismiss" });
+      window.StaffUI.prompt({
+        title: "Decline this appeal",
+        icon: '<i class="fas fa-xmark"></i>',
+        message:
+          "The ban stays in place. What you write is the last thing they read on their ban screen.",
+        fields: [
+          { name: "note", label: "Message to them (optional)", type: "textarea", maxLength: 300 },
+          {
+            name: "bar",
+            type: "checkbox",
+            label: "Do not let them appeal again",
+            help: "Final. They cannot file another appeal for this or any future ban, until a developer allows it again.",
+          },
+        ],
+        danger: true,
+        confirmText: "Decline appeal",
+      }).then((r) => {
+        if (r == null) return;
+        socket.emit("staff resolve appeal", {
+          id: a.id,
+          decision: "dismiss",
+          note: String(r.note || "").trim(),
+          barFuture: !!r.bar,
+        });
+      });
+    });
     acts.appendChild(decline);
     if (isDev()) {
       const del = btn("dk-minib danger", "Delete", "fa-trash");

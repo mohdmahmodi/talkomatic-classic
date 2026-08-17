@@ -167,6 +167,37 @@ function listDevKeys() {
 const PUBLIC_DEV = "the Talkomatic team";
 const PUBLIC_STAFF = "the Talkomatic staff";
 
+// How a stored staff label reads to a member of the team who is not on the
+// operations feed. A moderator's name always stays: holding each other to
+// account is the whole point of the record. A developer's does not, because
+// their actions are not on the boards the team reads either, and a name left
+// on a ban row or an appeal decision would put it back.
+const TEAM_LABEL = "Talkomatic staff";
+
+function isDevLabel(label) {
+  return !!label && devKeys.some((d) => d.label === label);
+}
+
+// `role` is used when the caller knows it; otherwise the roster answers, which
+// is what makes this work on records written before roles were stored.
+function teamLabel(label, role) {
+  if (!label) return label;
+  const dev = role ? role === "dev" : isDevLabel(label);
+  return dev ? TEAM_LABEL : label;
+}
+
+// The same, for the "dev:Label" / "mod:Label" form the review fields store.
+// The role prefix is kept so the badge still renders; only the name goes.
+function teamReviewer(value) {
+  const s = String(value || "");
+  if (!s) return value;
+  const idx = s.indexOf(":");
+  const role = idx === -1 ? null : s.slice(0, idx);
+  const label = idx === -1 ? s : s.slice(idx + 1);
+  const dev = role ? role === "dev" : isDevLabel(label);
+  return dev ? (role ? role + ":" : "") + TEAM_LABEL : s;
+}
+
 function publicStaffName(label, role) {
   if (!label) return null;
   // Older records predate the role being stored with them, so fall back to
@@ -285,7 +316,7 @@ async function revokeModKey(hash, opts) {
 // Former staff, newest first. `returned` marks somebody who has since been
 // given a key again - they are back on the live roster, so the panel does not
 // list them as gone.
-function listFormerMods() {
+function listFormerMods(showAll) {
   const active = new Set(modKeys.map((k) => k.label));
   return formerMods
     .slice()
@@ -294,10 +325,10 @@ function listFormerMods() {
       hash: f.hash,
       label: f.label,
       level: normalizeLevel(f.level),
-      grantedBy: f.grantedBy || null,
+      grantedBy: showAll ? f.grantedBy || null : teamLabel(f.grantedBy || null),
       grantedAt: f.grantedAt || null,
       removedAt: f.removedAt || null,
-      removedBy: f.removedBy || null,
+      removedBy: showAll ? f.removedBy || null : teamLabel(f.removedBy || null),
       reason: f.reason || null,
       lastSeen: f.hash ? lastSeenForHash(f.hash) : null,
       returned: active.has(f.label),
@@ -340,12 +371,14 @@ function lastSeenForHash(hash) {
 }
 
 // Hashes, levels, provenance, and last-seen - safe to send to the dev panel.
-function listModKeys() {
+function listModKeys(showAll) {
   return modKeys.map((k) => ({
     hash: k.hash,
     label: k.label,
     level: normalizeLevel(k.level),
-    grantedBy: k.grantedBy || null,
+    // Who made them a moderator. A developer's name comes off here for the
+    // same reason it comes off the feed.
+    grantedBy: showAll ? k.grantedBy || null : teamLabel(k.grantedBy || null),
     grantedAt: k.grantedAt || null,
     lastSeen: lastSeenForHash(k.hash),
   }));
@@ -440,6 +473,9 @@ module.exports = {
   isDevKey,
   listDevKeys,
   publicStaffName,
+  isDevLabel,
+  teamLabel,
+  teamReviewer,
   getModKeyByPlain,
   validateKey,
   grantModKey,

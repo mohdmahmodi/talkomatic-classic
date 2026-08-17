@@ -1043,6 +1043,37 @@ function showBanScreen(info) {
     return wrap;
   }
 
+  // Replaces the whole appeal panel with a single line. Used when there is
+  // nothing left to do here: it was filed, or staff have closed the door on
+  // filing another. Was called in two places and never defined, which threw
+  // instead of showing the message.
+  function showAppealDone(text, heading) {
+    const wrap = document.getElementById("banAppealWrap");
+    if (!wrap) return;
+    wrap.textContent = "";
+    const h = document.createElement("div");
+    h.className = "ban-appeal-h";
+    const hi = document.createElement("i");
+    hi.className = "fas fa-scale-balanced";
+    h.appendChild(hi);
+    h.appendChild(document.createTextNode(" " + (heading || "Appeal")));
+    wrap.appendChild(h);
+    const p = document.createElement("p");
+    p.className = "ban-appeal-p";
+    p.textContent = text;
+    wrap.appendChild(p);
+  }
+
+  // Staff ended this person's ability to appeal. Say so before they write it
+  // all out and press a button that was never going to work.
+  function showAppealBarred() {
+    showAppealDone(
+      "Appeals are closed for this account. A previous appeal was declined and " +
+        "the decision was final, so no further appeals can be filed.",
+      "Appeal closed",
+    );
+  }
+
   function renderAppealChat() {
     const wrap = document.getElementById("banAppealWrap");
     if (!wrap || !appealState || !appealState.has) return;
@@ -1148,7 +1179,9 @@ function showBanScreen(info) {
       closed.textContent =
         d.status === "resolved"
           ? "This appeal is closed. Any moderator can reopen it if they think it deserves another look, and this page will say so. If your ban is still in place, the Discord link below is the next stop."
-          : "You cannot send any more messages here. Staff will still read what you have written.";
+          : d.awaitingReply
+            ? "Sent. Staff will read it and reply here - you will be able to write again once they have. Adding more now would only push your appeal down the queue."
+            : "You cannot send any more messages here. Staff will still read what you have written.";
       wrap.appendChild(closed);
       return;
     }
@@ -1215,6 +1248,9 @@ function showBanScreen(info) {
     too_short: "Please write a little more.",
     too_many: "You have sent the maximum number of messages on this appeal.",
     slow_down: "One moment - wait a few seconds between messages.",
+    wait_reply:
+      "You have already written. Wait for staff to reply before sending another message.",
+    barred: "Appeals are closed for this account.",
     no_appeal: "Your appeal could not be found. Try refreshing the page.",
   };
 
@@ -1342,6 +1378,7 @@ function showBanScreen(info) {
           sendBtn.disabled = false;
           sendBtn.innerHTML = prev;
           msgEl.classList.add("err");
+          if (d && d.code === "barred") return showAppealBarred();
           if (d && d.code === "too_short")
             msgEl.textContent = "Please write a little more.";
           else if (d && d.code === "not_banned")
@@ -1368,6 +1405,7 @@ function showBanScreen(info) {
     })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
+        if (d && d.ok && d.barred && !d.has) return showAppealBarred();
         if (d && d.ok && d.has) return startAppealChat(d);
         if (justSent)
           showAppealDone("Appeal submitted. A staff member will review it.");
@@ -2969,6 +3007,9 @@ if (staffLoginLink)
 // menu offer "Check status" with the reviewer's note instead of "Become a
 // moderator" once a person has applied.
 let myAppStatus = null;
+// Whether the server is taking new applications. Null until it says, so the
+// link is not yanked away on a slow connection before the answer arrives.
+let applicationsOpen = null;
 const APP_STATUS_META = {
   pending: {
     color: "#ffb454",
@@ -2998,7 +3039,14 @@ const APP_STATUS_META = {
 function updateModApplyLink() {
   const link = document.getElementById("modApplyLink");
   if (!link || currentUserIsDev || currentUserIsMod) return;
-  if (myAppStatus && myAppStatus.has && APP_STATUS_META[myAppStatus.status]) {
+  // Intake closed and nothing of theirs to check: the link has nowhere to go,
+  // so it comes off rather than opening a form that will be refused. Anyone
+  // who has already applied keeps their way back to the answer.
+  const closed = applicationsOpen === false;
+  const mine = !!(myAppStatus && myAppStatus.has);
+  link.style.display = closed && !mine ? "none" : "";
+  if (closed && !mine) return;
+  if (mine && APP_STATUS_META[myAppStatus.status]) {
     const m = APP_STATUS_META[myAppStatus.status];
     link.innerHTML =
       '<i class="fas fa-circle" style="color:' +
@@ -3225,6 +3273,13 @@ socket.on("suggestion result", (d) => {
     });
 });
 
+// Whether intake is open. Pushed on connect and again whenever a dev flips it,
+// so a lobby sitting open picks the change up without a reload.
+socket.on("applications state", (d) => {
+  applicationsOpen = !d || d.open !== false;
+  updateModApplyLink();
+});
+
 // The server pushes this on connect (if an application exists) and on request.
 socket.on("mod application status", (d) => {
   myAppStatus = d && d.has ? d : null;
@@ -3267,6 +3322,8 @@ function updateStaffLink() {
   // Staff do not apply to be a mod, so hide the apply link for them.
   const applyLink = document.getElementById("modApplyLink");
   if (applyLink) {
+    // Staff never apply; updateModApplyLink decides it for everyone else,
+    // because the intake can be closed.
     applyLink.style.display =
       currentUserIsDev || currentUserIsMod ? "none" : "";
     // Reflect any known application status ("Check status" + colored dot).

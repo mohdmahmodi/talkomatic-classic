@@ -51,12 +51,31 @@ function maskIps(value) {
 // reader, staff or not, gets every field except them.
 const MASKED_FIELDS = ["target", "details", "text"];
 
+// Entries that stay off the boards the wider team reads. Nothing is dropped
+// from the log itself - the record is complete and always was - this only
+// decides what the feed shows, so it reads as a record of moderation rather
+// than of the people running the server.
+//
+// Deliberately narrow: it is the ACTION rows and the key alerts. A comment is
+// somebody talking to the team on purpose and stays where they wrote it.
+function isPrivilegedEntry(e) {
+  if (!e) return false;
+  if (e.devOnly) return true;
+  return e.type === "action" && e.role === "dev";
+}
+
 function redactEntry(entry) {
   const copy = Object.assign({}, entry);
   delete copy.ip;
   delete copy.targetIp;
   for (const f of MASKED_FIELDS)
     if (copy[f] != null) copy[f] = maskIps(copy[f]);
+  // A forced rename is the one entry that is not an action but still names the
+  // staff member behind it. The event stays on the feed; the name does not.
+  if (copy.byRole === "dev") {
+    delete copy.by;
+    delete copy.byRole;
+  }
   return copy;
 }
 
@@ -69,15 +88,21 @@ function broadcast(entry) {
   } catch (_) {}
   if (!io()) return;
   const masked = redactEntry(entry);
+  const privileged = isPrivilegedEntry(entry);
   for (const [, s] of io().sockets.sockets) {
     if (!s.auditSub) continue;
+    if (s.isMainDev) {
+      s.emit("audit entry", entry);
+      continue;
+    }
+    // Nobody else, developers included, gets a developer's actions or a key
+    // alert on their feed.
+    if (privileged) continue;
     if (s.isDev) {
-      s.emit("audit entry", s.isMainDev ? entry : masked);
+      s.emit("audit entry", masked);
       continue;
     }
     if (!s.isMod) continue;
-    // Key security alerts concern dev/mod keys and IPs, so they are dev-only.
-    if (entry.devOnly) continue;
     // Some entries (mod-abuse flags, reports) are for full (level 2) mods +.
     if (entry.minLevel && (s.modLevel || 2) < entry.minLevel) continue;
     s.emit("audit entry", masked);
@@ -200,7 +225,7 @@ function recordIdentity({ userId, username, location, ip }) {
 }
 
 // Staff forced a user's name to Anonymous - log it and reset the baseline.
-function recordForcedRename({ userId, from, ip, by, room }) {
+function recordForcedRename({ userId, from, ip, by, byRole, room }) {
   const prevLoc = lastIdentity.get(userId)?.location || null;
   lastIdentity.set(userId, { username: "Anonymous", location: prevLoc });
   push({
@@ -213,6 +238,7 @@ function recordForcedRename({ userId, from, ip, by, room }) {
     location: prevLoc,
     ip: ip || null,
     by: by || null,
+    byRole: byRole || null,
     room: room || null,
   });
 }
@@ -384,11 +410,13 @@ function pacificDayStarts(n = 7, now = Date.now()) {
   return out;
 }
 
-// `showIp` and `isDev` are asked separately on purpose: what a reader is
-// allowed to open (dev-only entries, anything above their level) is a
-// different question from whether the raw addresses come with it.
+// `showIp`, `showAll` and `isDev` are asked separately on purpose. What a
+// reader may open (anything above their level), whether developer actions are
+// among it, and whether raw addresses come with it are three questions, and
+// answering them with one flag is how a leak gets built.
 function recent(limit = 500, opts = {}) {
   const showIp = !!opts.showIp;
+  const showAll = !!opts.showAll;
   const isDev = !!opts.isDev;
   const modLevel = opts.modLevel == null ? 2 : opts.modLevel;
   const since = opts.since || 0;
@@ -408,6 +436,7 @@ function recent(limit = 500, opts = {}) {
   } else {
     slice = entries.slice(-n);
   }
+  // Watching a room is not work and never belonged on the feed, for anybody.
   slice = slice.filter(
     (e) =>
       !(
@@ -416,6 +445,8 @@ function recent(limit = 500, opts = {}) {
         baseAction(e.action) === "spectate"
       ),
   );
+  // Developer actions and key alerts are for the operations feed only.
+  if (!showAll) slice = slice.filter((e) => !isPrivilegedEntry(e));
   // Devs see every entry; mods lose the dev-only ones and anything above
   // their level. Addresses come off for everyone but site operations.
   const visible = isDev
@@ -1381,6 +1412,9 @@ function lastActiveByLabel() {
   const by = new Map();
   for (const e of entries) {
     if (e.type !== "action" || !e.label) continue;
+    // A developer's last-active would say when they acted, which is the same
+    // thing the feed no longer says.
+    if (isPrivilegedEntry(e)) continue;
     by.set((e.role || "mod") + ":" + e.label, e.ts || null);
   }
   return by;
@@ -1431,6 +1465,7 @@ module.exports = {
   recent,
   remove,
   redactEntry,
+  isPrivilegedEntry,
   maskIps,
   historyFor,
   lastActiveByLabel,

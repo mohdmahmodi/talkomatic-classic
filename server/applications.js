@@ -14,6 +14,7 @@ const fsp = require("fs").promises;
 const { DATA_DIR } = require("./datadir");
 
 const APPS_PATH = path.join(DATA_DIR, "mod-applications.json");
+const OPEN_PATH = path.join(DATA_DIR, "applications-open.json");
 const MAX = 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DAILY_LIMIT = 3; // submissions per device per rolling 24h
@@ -23,6 +24,37 @@ const DAILY_LIMIT = 3; // submissions per device per rolling 24h
 let apps = [];
 let seq = 0;
 let saveTimer = null;
+
+// Whether new applications are being accepted. Kept in its own file rather
+// than in memory: a switch that quietly flipped itself back on at every deploy
+// is the same as no switch at all, which is exactly how it behaved. Closed
+// unless somebody has opened it, so intake never reopens on its own.
+let open = false;
+
+function loadOpen() {
+  try {
+    const o = JSON.parse(fs.readFileSync(OPEN_PATH, "utf8"));
+    open = !!(o && o.open);
+  } catch (err) {
+    if (err.code !== "ENOENT")
+      console.error("Error loading applications-open.json:", err);
+    open = false;
+  }
+}
+
+function isOpen() {
+  return open;
+}
+
+// Written straight through rather than debounced: this is a rare, deliberate
+// act, and it has to survive the restart that happens seconds later.
+async function setOpen(v) {
+  open = !!v;
+  const tmp = OPEN_PATH + ".tmp";
+  await fsp.writeFile(tmp, JSON.stringify({ open }), "utf8");
+  await fsp.rename(tmp, OPEN_PATH);
+  return open;
+}
 
 function load() {
   try {
@@ -34,6 +66,7 @@ function load() {
       console.error("Error loading mod-applications.json:", err);
     apps = [];
   }
+  loadOpen();
 }
 
 function saveSoon() {
@@ -166,6 +199,8 @@ function flushSync() {
 load();
 
 module.exports = {
+  isOpen,
+  setOpen,
   submit,
   get,
   setStatus,

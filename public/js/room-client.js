@@ -1560,15 +1560,6 @@ const APPS_DATA = {
     openInNewTab: false,
     action: "games",
   },
-  fileshare: {
-    name: "File Share",
-    description: "Share files and images securely",
-    icon: "\uD83D\uDCC1",
-    iconClass: "placeholder",
-    status: "coming-soon",
-    url: null,
-    openInNewTab: false,
-  },
 };
 let appDirectoryDropdown = null;
 
@@ -1635,17 +1626,8 @@ function createAppDirectoryDropdown() {
     }
     grid.appendChild(item);
   });
-  const footer = document.createElement("div");
-  footer.className = "app-directory-footer";
-  const link = document.createElement("a");
-  link.href = "app-directory.html";
-  link.className = "view-all-link";
-  link.target = "_blank";
-  link.textContent = "\uD83D\uDCC2 View All Apps";
-  footer.appendChild(link);
   appDirectoryDropdown.appendChild(header);
   appDirectoryDropdown.appendChild(grid);
-  appDirectoryDropdown.appendChild(footer);
   const navbar = document.querySelector(".top-navbar");
   if (navbar) {
     navbar.style.position = "relative";

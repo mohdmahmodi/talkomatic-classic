@@ -333,8 +333,21 @@ function parseStats(m) {
   };
 }
 
+// Cards settled under the old rules stayed in the tray with a "handled by X"
+// stamp on them, including ones whose appeal or report has since been deleted
+// outright. They are all dealt with, so they come out on the way in rather
+// than sitting there until the day-long sweep reaches them.
+function dropSettledCards() {
+  const list = desk.channels.queues || [];
+  const kept = list.filter((m) => !(m && m.done));
+  if (kept.length === list.length) return 0;
+  for (const m of list) if (m && m.done) byId.delete(m.id);
+  desk.channels.queues = kept;
+  return list.length - kept.length;
+}
+
 function backfillCards() {
-  let changed = 0;
+  let changed = dropSettledCards();
   for (const m of desk.channels.queues || []) {
     if (!m || m.card || m.kind !== "system") continue;
     const c = parseQueueCard(m);
@@ -668,38 +681,25 @@ function maskDeep(value, field) {
   return value;
 }
 
-// ── Queue cards: handled, and cleaned up ────────────────────────────────────
-// A card is stamped the moment anybody acts on what it is about, wherever they
-// did it - the dashboard, a room, or the Desk itself. The card stays put with
-// "handled by X" on it rather than vanishing, so two people do not both go
-// looking for the same report.
-// `force` overwrites a card that is already stamped. Reopening an appeal is
-// the case for it: the card must stop saying it was dealt with.
-function stampQueue(match, done, force) {
-  const list = desk.channels.queues || [];
-  let touched = false;
-  for (let i = list.length - 1; i >= 0; i--) {
-    const m = list[i];
-    if (!m.card || (m.done && !force)) continue;
-    if (!match(m)) continue;
-    m.done = { by: cut(done.by, 60), action: cut(done.action, 60), ts: Date.now() };
-    broadcast("queues", m, true);
-    touched = true;
-  }
-  if (touched) scheduleSave();
+// ── Queue cards: settled, and cleared out ───────────────────────────────────
+// A card leaves the queue the moment anybody deals with what it is about,
+// wherever they did it - the dashboard, a room, or the Desk itself. #queues is
+// a tray of outstanding work, so a handled item has no business sitting in it;
+// who did what is kept in the audit feed, which is the actual record.
+// An item that comes BACK (a reopened appeal) is posted as a fresh card.
+function settleQueue(match) {
+  dropQueue(match);
 }
 
-// Only actions that actually settle a queue item stamp one. Spectating a
+// Only actions that actually settle a queue item clear one. Spectating a
 // reported user, or renaming a room they happen to be in, is not the same as
 // dealing with the report, and a card that clears itself for the wrong reason
 // is worse than one that has to be cleared by hand.
 const SETTLES_QUEUE =
   /^(kick|ban|ip block|unblock ip|warn|wipe buffer|dismiss report|freeze|reset location|turn pfp off|piano mute|approve mod application|reject mod application|dismiss appeal|lift ban|approve suggestion|decline suggestion|revoke mod)/;
 
-// Somebody acted on a user: stamp every open card about that user.
-// A queue card whose subject no longer exists at all. Stamping says somebody
-// dealt with it; this is for when there is nothing left to have dealt with, so
-// the card goes rather than sitting there marked.
+// Takes cards off the queue and tells every open Desk to drop them, so a
+// handled or deleted item does not sit there asking to be dealt with again.
 function dropQueue(match) {
   const list = desk.channels.queues || [];
   const gone = [];
@@ -717,14 +717,14 @@ function dropQueue(match) {
       s.emit("desk drop", { key: "queues", ids: gone });
 }
 
-function stampQueueForTarget(byLabel, action, id) {
+// Somebody acted on a user: clear every open card about that user.
+function settleQueueForTarget(byLabel, action, id) {
   if (!id || !SETTLES_QUEUE.test(String(action || ""))) return;
-  stampQueue(
+  settleQueue(
     (m) =>
       (m.card.ids || []).includes(id) ||
       m.card.targetUserId === id ||
       m.card.deviceId === id,
-    { by: byLabel, action },
   );
 }
 
@@ -1137,15 +1137,21 @@ function onRoomText(socket, roomId, text) {
 // A staff action lands while a ping for that room is live: attach a receipt,
 // so the card ends up a record of what was actually done about it. Called
 // from logStaff; must stay cheap because logStaff fires on everything.
-function noteStaffAction(byLabel, action, targetStr, roomTag) {
-  // Queue cards are stamped from here too, because this is the one place every
+// `byRole` is passed so a developer's action does not sign a receipt on a
+// backup card, which would put their name in front of the room that called
+// for help - the one place the feed rule could be walked around.
+function noteStaffAction(byLabel, action, targetStr, roomTag, byRole) {
+  // Queue cards are cleared from here too, because this is the one place every
   // staff action already passes through, whoever did it and wherever from.
   if (targetStr && targetStr.startsWith("user:")) {
     const o = targetStr.lastIndexOf("(");
     const c = targetStr.lastIndexOf(")");
     const id = o !== -1 && c > o ? targetStr.slice(o + 1, c) : null;
-    stampQueueForTarget(byLabel, action, id);
+    settleQueueForTarget(byLabel, action, id);
   }
+  // The queue clearing above still happens for a developer - the work was
+  // done, so the card goes - but no receipt is written in their name.
+  if (byRole === "dev") return;
   if (!roomTag || typeof roomTag !== "string") return;
   const open = roomTag.lastIndexOf("(");
   const close = roomTag.lastIndexOf(")");
@@ -1206,6 +1212,7 @@ function virtualHistory(key, socket) {
       // person's level, and masks addresses unless showIp is set.
       const rows = ctx.audit.recent(VIRTUAL_LIMIT, {
         showIp: !!socket.isMainDev,
+        showAll: !!socket.isMainDev,
         isDev: !!socket.isDev,
         modLevel: socket.isDev ? 0 : socket.modLevel || 2,
       });
@@ -1236,9 +1243,13 @@ function virtualHistory(key, socket) {
 // object, because what a reader may see differs by level.
 function pushActivity(entry) {
   if (!io() || !entry) return;
+  // Same rule the dashboard feed applies, asked of the same function: a
+  // developer's actions and the key alerts go to the operations feed only.
+  const privileged =
+    ctx && ctx.audit ? ctx.audit.isPrivilegedEntry(entry) : !!entry.devOnly;
   for (const [, s] of io().sockets.sockets) {
     if (!s.connected || !isStaff(s) || !canRead(s, "activity")) continue;
-    if (entry.devOnly && !s.isDev) continue;
+    if (privileged && !s.isMainDev) continue;
     if (entry.minLevel && !s.isDev && (s.modLevel || 2) < entry.minLevel)
       continue;
     const shown =
@@ -1838,7 +1849,7 @@ module.exports = {
   noteEvent,
   presenceDirty,
   rosterDirty,
-  stampQueue,
+  settleQueue,
   dropQueue,
   flushSync,
 };

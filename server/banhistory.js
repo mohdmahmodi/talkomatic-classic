@@ -65,13 +65,16 @@ function flushSync() {
 }
 
 // Append one event. `action` is "ban" or "unban"; everything else is metadata.
-function record({ ip, name, action, by, at, reason, duration }) {
+function record({ ip, name, action, by, byRole, at, reason, duration }) {
   events.push({
     id: ++seq,
     ip: ip || null,
     name: name || null,
     action: action === "unban" ? "unban" : "ban",
     by: by || null,
+    // Which half of the team acted, so the board can name a moderator and not
+    // a developer without having to guess from the roster of the day.
+    byRole: byRole || null,
     at: at || Date.now(),
     reason: reason || null,
     duration: duration || null,
