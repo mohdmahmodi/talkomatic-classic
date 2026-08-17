@@ -20,6 +20,7 @@ const {
 } = require("./state");
 const ipredact = require("./ipredact");
 const linkfilter = require("./linkfilter");
+const nameguard = require("./nameguard");
 const { DATA_DIR } = require("./datadir");
 
 const STORE_PATH = path.join(DATA_DIR, "bots.json");
@@ -136,6 +137,15 @@ function validateConfig(input, existingId) {
     return { ok: false, error: "Names cannot contain an IP address." };
   if (linkfilter.containsLink(name))
     return { ok: false, error: "Names cannot contain a link." };
+  const nameCheck = nameguard.check(name, { reserved: CONFIG.RESERVED_NAMES });
+  if (!nameCheck.ok)
+    return {
+      ok: false,
+      error:
+        nameCheck.reason === "reserved"
+          ? "That name is too close to a name Talkomatic reserves."
+          : "Names can only use ordinary letters, numbers and punctuation.",
+    };
 
   let location = enforceLocationLimit(sanitizeName(String(input.location || "")));
   if (location && wordFilter.checkText(location).hasOffensiveWord)
@@ -144,6 +154,11 @@ function validateConfig(input, existingId) {
     return { ok: false, error: "Locations cannot contain an IP address." };
   if (location && linkfilter.containsLink(location))
     return { ok: false, error: "Locations cannot contain a link." };
+  if (location && !nameguard.check(location).ok)
+    return {
+      ok: false,
+      error: "Locations can only use ordinary letters, numbers and punctuation.",
+    };
   if (!location) location = "Bot";
 
   const rulesIn = Array.isArray(input.rules) ? input.rules : [];

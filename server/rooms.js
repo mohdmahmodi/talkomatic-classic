@@ -34,6 +34,7 @@ const roles = require("./roles");
 const audit = require("./audit");
 const ipredact = require("./ipredact");
 const linkfilter = require("./linkfilter");
+const nameguard = require("./nameguard");
 const identity = require("./identity");
 const modwatch = require("./modwatch");
 const keywatch = require("./keywatch");
@@ -3101,6 +3102,24 @@ function registerSocketHandlers(opts) {
               "Names and locations cannot contain a link.",
             ),
           );
+        // Staff are exempt from the reserved-name half for the same reason
+        // they are exempt from isReservedName below.
+        const staff = !!socket.isDev || !!socket.isMod;
+        const nameCheck = nameguard.check(username, {
+          reserved: staff ? [] : CONFIG.RESERVED_NAMES,
+        });
+        const placeCheck = nameguard.check(location);
+        const bad = !nameCheck.ok ? nameCheck : !placeCheck.ok ? placeCheck : null;
+        if (bad && bad.reason !== "empty")
+          return socket.emit(
+            "error",
+            createErrorResponse(
+              ERROR_CODES.VALIDATION_ERROR,
+              bad.reason === "reserved"
+                ? "That name is too close to a name Talkomatic reserves."
+                : "Names and locations can only use ordinary letters, numbers and punctuation.",
+            ),
+          );
 
         if (isGuestName(username)) {
           return socket.emit(
@@ -4189,6 +4208,14 @@ function registerSocketHandlers(opts) {
             createErrorResponse(
               ERROR_CODES.VALIDATION_ERROR,
               "Room name cannot contain a link.",
+            ),
+          );
+        if (!nameguard.check(roomName).ok)
+          return socket.emit(
+            "error",
+            createErrorResponse(
+              ERROR_CODES.VALIDATION_ERROR,
+              "Room name can only use ordinary letters, numbers and punctuation.",
             ),
           );
 
@@ -5634,6 +5661,14 @@ function registerSocketHandlers(opts) {
             createErrorResponse(
               ERROR_CODES.VALIDATION_ERROR,
               "Room name cannot contain a link.",
+            ),
+          );
+        if (!nameguard.check(roomName).ok)
+          return socket.emit(
+            "error",
+            createErrorResponse(
+              ERROR_CODES.VALIDATION_ERROR,
+              "Room name can only use ordinary letters, numbers and punctuation.",
             ),
           );
         const oldName = room.name;

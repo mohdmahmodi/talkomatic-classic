@@ -4,36 +4,57 @@
 const SKIP =
   /[\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u3164\ufeff\uffa0\u180b-\u180e\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufe00-\ufe0f]/;
 
-const FOLD = {
-  "。": ".", "．": ".", "｡": ".", "˙": ".", "․": ".",
-  "∕": "/", "⁄": "/", "／": "/",
-  а: "a", в: "b", е: "e", к: "k", м: "m", н: "h", о: "o", р: "p", с: "c",
-  т: "t", у: "y", х: "x", і: "i", ј: "j", ѕ: "s", һ: "h", ԁ: "d", ԛ: "q",
-  ԝ: "w", ѡ: "w", ɡ: "g", ⅼ: "l", ⅰ: "i", ᴏ: "o", ᴀ: "a",
-  α: "a", ε: "e", ι: "i", κ: "k", ν: "v", ο: "o", ρ: "p", τ: "t", υ: "u",
-};
+const FOLD = { "。": ".", "．": ".", "｡": ".", "˙": ".", "․": "." };
+for (const [from, to] of Object.entries(
+  require("./confusables.json").map,
+)) {
+  if (from.codePointAt(0) < 0x80) continue;
+  if (!/^[a-z0-9./-]$/.test(to)) continue;
+  FOLD[from] = to;
+}
 
-function normalize(value) {
+const SPACE = /\s/;
+const CACHE = new Map();
+
+function foldChar(ch) {
+  let v = CACHE.get(ch);
+  if (v !== undefined) return v;
+  let mapped = "";
+  for (const c of ch.normalize("NFKC")) mapped += FOLD[c] || c;
+  v = mapped
+    .normalize("NFD")
+    .replace(/\p{M}+/gu, "")
+    .toLowerCase();
+  if (CACHE.size < 8192) CACHE.set(ch, v);
+  return v;
+}
+
+function scan(value) {
   let text = "";
   const map = [];
-  for (let i = 0; i < value.length; i++) {
-    const ch = value[i];
+  let at = 0;
+  for (const ch of value) {
+    const start = at;
+    at += ch.length;
     if (SKIP.test(ch)) continue;
-    let out = FOLD[ch];
-    if (out === undefined) {
-      const code = ch.charCodeAt(0);
-      out =
-        code >= 0xff01 && code <= 0xff5e
-          ? String.fromCharCode(code - 0xfee0)
-          : ch;
-    }
-    out = out.toLowerCase();
-    for (let k = 0; k < out.length; k++) {
-      text += out[k];
-      map.push(i);
+    for (const c of foldChar(ch)) {
+      text += c;
+      map.push(start);
     }
   }
   map.push(value.length);
+  return { text, map };
+}
+
+function tighten(scanned) {
+  let text = "";
+  const map = [];
+  for (let i = 0; i < scanned.text.length; i++) {
+    if (SPACE.test(scanned.text[i])) continue;
+    text += scanned.text[i];
+    map.push(scanned.map[i]);
+  }
+  map.push(scanned.map[scanned.map.length - 1]);
   return { text, map };
 }
 
@@ -101,10 +122,7 @@ function looksLikeLink(value) {
   );
 }
 
-function findRanges(value) {
-  const ranges = [];
-  if (!looksLikeLink(value)) return ranges;
-  const { text, map } = normalize(value);
+function rangesIn({ text, map }, out) {
   LINK.lastIndex = 0;
   let m;
   while ((m = LINK.exec(text)) !== null) {
@@ -115,15 +133,35 @@ function findRanges(value) {
     if (!m[1]) {
       const labels = m[3] || "";
       const tld = m[4] || "";
-      const evidence = !!(m[5] || m[6]) || /^www\b/.test(labels);
+      const tail = m[6] || "";
+      const evidence =
+        !!m[5] ||
+        tail.startsWith("/") ||
+        tail.length >= 2 ||
+        /^www\b/.test(labels);
       if (!TLD.has(tld) && !tld.startsWith("xn--") && !evidence) continue;
       if (/^\d+$/.test(labels) && !evidence) continue;
     }
     const trimmed = m[0].replace(TRAILING, "");
     if (!trimmed) continue;
-    ranges.push([map[m.index], map[m.index + trimmed.length]]);
+    out.push([map[m.index], map[m.index + trimmed.length]]);
   }
-  return ranges;
+}
+
+function findRanges(value) {
+  const found = [];
+  if (!looksLikeLink(value)) return found;
+  const loose = scan(value);
+  rangesIn(loose, found);
+  if (SPACE.test(loose.text)) rangesIn(tighten(loose), found);
+  found.sort((a, b) => a[0] - b[0] || b[1] - a[1]);
+  const merged = [];
+  for (const r of found) {
+    const last = merged[merged.length - 1];
+    if (last && r[0] <= last[1]) last[1] = Math.max(last[1], r[1]);
+    else merged.push([r[0], r[1]]);
+  }
+  return merged;
 }
 
 function redact(value, label) {

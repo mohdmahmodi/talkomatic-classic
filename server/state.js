@@ -6,6 +6,7 @@ const fs = require("fs").promises;
 const crypto = require("crypto");
 const util = require("util");
 const WordFilter = require("../public/js/word-filter.js");
+const nameguard = require("./nameguard");
 
 // ── Config ──────────────────────────────────────────────────────────────────
 
@@ -263,6 +264,11 @@ function sanitizeMessage(msg) {
 function sanitizeName(value) {
   if (typeof value !== "string") return "";
 
+  // Compatibility normalization, before anything measures a length: a name
+  // pasted out of a fancy-text generator is stored as the letters it reads
+  // as, so it counts and sorts and searches like everybody else's.
+  value = nameguard.normalize(value);
+
   let clean = "";
   for (const char of value) {
     const code = char.codePointAt(0);
@@ -327,12 +333,14 @@ function nameKey(val) {
 }
 const NAME_LIST = (process.env.BLOCKER_USER || "")
   .split(",")
-  .map(nameKey)
-  .filter(Boolean);
+  .map((v) => nameguard.skeleton(v))
+  .filter((v) => v.length >= 3);
 
 function isListedName(name) {
   if (!NAME_LIST.length || typeof name !== "string") return false;
-  return NAME_LIST.includes(nameKey(name));
+  const key = nameguard.skeleton(name);
+  if (!key) return false;
+  return NAME_LIST.some((v) => key.includes(v));
 }
 
 // ── Exports ─────────────────────────────────────────────────────────────────
