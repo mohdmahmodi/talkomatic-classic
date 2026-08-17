@@ -5537,51 +5537,58 @@ function registerSocketHandlers(opts) {
       }),
     );
 
-    // Ban an IP directly by typing it in - no target user required. Full mods +
-    // devs; permanent is dev-only. Takes effect immediately.
+    // Ban by typing it in - no target user required. Full mods + devs;
+    // permanent is dev-only. Takes effect immediately.
+    //
+    // One entry is an address, a CIDR range ("151.57.212.0/24"), or a client id
+    // (the uuid shown on the reports / appeals cards, which resolves to an
+    // "id:" blocklist key). The field takes a list of them separated by commas,
+    // spaces or newlines, so cleaning up after a wave of evasion is one action
+    // rather than twenty.
     socket.on(
       "staff ban ip",
       safe(async (data) => {
         if (!requireStaff(socket)) return;
         if (!requireModLevel(socket, 2)) return;
-        const raw = typeof data?.ip === "string" ? data.ip.trim() : "";
-        // The field accepts an address or a client id (the uuid shown on the
-        // reports / appeals cards); ids resolve to an "id:" blocklist key.
-        const isIp = ipban.isValidIp(raw);
-        const isId =
-          !isIp && /^[a-f0-9-]{8,64}$/i.test(raw) && raw.includes("-");
-        if (!isIp && !isId)
-          return socket.emit(
-            "error",
-            createErrorResponse(
-              ERROR_CODES.BAD_REQUEST,
-              "Enter a valid IPv4 / IPv6 address or a client id.",
-            ),
+        const fail = (code, msg) =>
+          socket.emit("error", createErrorResponse(code, msg));
+        const MAX_ENTRIES = 200;
+        const entries = [
+          ...(Array.isArray(data?.ips) ? data.ips : []),
+          typeof data?.ip === "string" ? data.ip : "",
+        ]
+          .map((s) => String(s || ""))
+          .join("\n")
+          .split(/[\s,;]+/)
+          .filter(Boolean);
+        if (!entries.length)
+          return fail(
+            ERROR_CODES.BAD_REQUEST,
+            "Enter an IPv4 / IPv6 address, a range like 203.0.113.0/24, or a client id.",
           );
-        const ip = isIp ? ipban.normalizeIp(raw) : ipban.idKey(raw);
+        if (entries.length > MAX_ENTRIES)
+          return fail(
+            ERROR_CODES.BAD_REQUEST,
+            `That is ${entries.length} entries; ${MAX_ENTRIES} is the most in one go.`,
+          );
+
         const duration = data?.duration;
         const DURATIONS = { "1h": 3600000, "24h": 86400000, "7d": 604800000 };
         let ms;
         if (duration === "permanent") {
           if (!socket.isDev)
-            return socket.emit(
-              "error",
-              createErrorResponse(
-                ERROR_CODES.FORBIDDEN,
-                "Only devs can place permanent IP blocks.",
-              ),
+            return fail(
+              ERROR_CODES.FORBIDDEN,
+              "Only devs can place permanent IP blocks.",
             );
           ms = Infinity;
         } else if (DURATIONS[duration] !== undefined) {
           ms = DURATIONS[duration];
         } else {
-          return socket.emit(
-            "error",
-            createErrorResponse(
-              ERROR_CODES.BAD_REQUEST,
-              "Invalid duration. Use 1h, 24h, 7d" +
-              (socket.isDev ? ", or permanent." : "."),
-            ),
+          return fail(
+            ERROR_CODES.BAD_REQUEST,
+            "Invalid duration. Use 1h, 24h, 7d" +
+            (socket.isDev ? ", or permanent." : "."),
           );
         }
         const expiry =
@@ -5590,45 +5597,107 @@ function registerSocketHandlers(opts) {
           sanitizeMessage(
             typeof data?.reason === "string" ? data.reason : "",
           ).slice(0, 500) || null;
-        const cidr = isIp
-          ? ipban.autoRangeCidr(ip) ||
-            (data?.banRange ? ipban.computeRangeCidr(ip) : null)
-          : null;
-        const blockKey = cidr || ip;
-        // For an id entry, name it from the identity record so the list and
-        // history show who it hits instead of a bare token.
-        const idRec = isId ? identity.getRecord(raw.toLowerCase()) : null;
-        const blockedName = (idRec && idRec.name) || null;
-        state.blockedIPs.set(blockKey, {
-          expiry,
-          label: blockedName,
-          by: socket.staffLabel || null,
-          byRole: socket.isDev ? "dev" : "mod",
-          ts: Date.now(),
-          reason,
-        });
+
+        // Read the whole list before anything is written, so a pasted list with
+        // a typo in the middle of it does not land half a ban.
+        const targets = [];
+        const skipped = [];
+        const seen = new Set();
+        for (const entry of entries) {
+          let key = null;
+          let did = null;
+          let range = false;
+          if (entry.includes("/")) {
+            const parsed = ipban.parseRangeKey(entry);
+            if (!parsed) {
+              skipped.push(entry);
+              continue;
+            }
+            // Past the floor is not a ban, it is an outage: say so rather than
+            // dropping it on the skipped pile as if it were a typo.
+            if (parsed.tooWide)
+              return fail(
+                ERROR_CODES.BAD_REQUEST,
+                `${entry} is too wide to block. /${parsed.floor} is the widest range the list takes.`,
+              );
+            // A range this wide is an ISP rather than a person, so it takes the
+            // same hand a permanent block does.
+            if (parsed.broad && !socket.isDev)
+              return fail(
+                ERROR_CODES.FORBIDDEN,
+                `${entry} is wider than a /${parsed.v4 ? ipban.BROAD_IPV4_PREFIX : ipban.BROAD_IPV6_PREFIX}. Only devs can block a range that size.`,
+              );
+            key = parsed.key;
+            range = ipban.isRangeKey(key);
+          } else if (ipban.isValidIp(entry)) {
+            const ip = ipban.normalizeIp(entry);
+            const cidr =
+              ipban.autoRangeCidr(ip) ||
+              (data?.banRange ? ipban.computeRangeCidr(ip) : null);
+            key = cidr || ip;
+            range = !!cidr;
+          } else if (/^[a-f0-9-]{8,64}$/i.test(entry) && entry.includes("-")) {
+            did = entry.toLowerCase();
+            key = ipban.idKey(did);
+          } else {
+            skipped.push(entry);
+            continue;
+          }
+          if (!key || seen.has(key)) continue;
+          seen.add(key);
+          // For an id entry, name it from the identity record so the list and
+          // history show who it hits instead of a bare token.
+          const idRec = did ? identity.getRecord(did) : null;
+          targets.push({ key, did, range, name: (idRec && idRec.name) || null });
+        }
+
+        if (!targets.length)
+          return fail(
+            ERROR_CODES.BAD_REQUEST,
+            skipped.length === 1
+              ? `"${skipped[0]}" is not an address, a range, or a client id.`
+              : "None of those are an address, a range, or a client id.",
+          );
+
+        for (const t of targets) {
+          state.blockedIPs.set(t.key, {
+            expiry,
+            label: t.name,
+            by: socket.staffLabel || null,
+            byRole: socket.isDev ? "dev" : "mod",
+            ts: Date.now(),
+            reason,
+          });
+          banhistory.record({
+            ip: t.key,
+            name: t.name,
+            action: "ban",
+            by: socket.staffLabel || null,
+            byRole: socket.isDev ? "dev" : "mod",
+            reason,
+            duration,
+          });
+        }
         blocklist.saveSoon();
         evasion.invalidate();
-        banhistory.record({
-          ip: blockKey,
-          name: blockedName,
-          action: "ban",
-          by: socket.staffLabel || null,
-          byRole: socket.isDev ? "dev" : "mod",
-          reason,
-          duration,
-        });
         broadcastBlockList();
         broadcastBanHistory();
-        const affected = isId
-          ? [...io().sockets.sockets.values()].filter(
-            (s) => s.deviceId === raw.toLowerCase(),
-          )
-          : cidr
-            ? [...io().sockets.sockets.values()].filter((s) =>
-              ipban.ipInCidr(s.clientIp, cidr),
-            )
-            : findSocketsByIp(ip);
+
+        // One pass over the connected sockets for the whole list, rather than
+        // one per entry.
+        const affected = new Set();
+        for (const [, s] of io().sockets.sockets)
+          for (const t of targets) {
+            const hit = t.did
+              ? s.deviceId === t.did
+              : t.range
+                ? ipban.ipInCidr(s.clientIp, t.key)
+                : s.clientIp === t.key;
+            if (hit) {
+              affected.add(s);
+              break;
+            }
+          }
         for (const s of affected) {
           try {
             const uid = s.handshake?.session?.userId;
@@ -5639,10 +5708,15 @@ function registerSocketHandlers(opts) {
             s.disconnect(true);
           } catch (_) { }
         }
+        const rangeCount = targets.filter((t) => t.range).length;
         logStaff(
           socket,
-          `ban ip ${duration}${cidr ? " (range)" : ""}`,
-          blockedName || blockKey,
+          targets.length === 1
+            ? `ban ip ${duration}${rangeCount ? " (range)" : ""}`
+            : `ban ip ${duration} (${targets.length} entries, ${rangeCount} ranges)`,
+          targets.length === 1
+            ? targets[0].name || targets[0].key
+            : targets.map((t) => t.name || t.key).join(", ").slice(0, 400),
           "-",
           reason || undefined,
         );
@@ -5650,7 +5724,9 @@ function registerSocketHandlers(opts) {
           action: "ban ip",
           ok: true,
           duration,
-          rangeApplied: !!cidr,
+          rangeApplied: rangeCount > 0,
+          placed: targets.length,
+          skipped: skipped.length,
         });
       }),
     );

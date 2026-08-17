@@ -443,7 +443,7 @@
     });
   }
 
-  // Form prompt. fields: [{name,label,type,placeholder,value,options,required,maxLength,help}]
+  // Form prompt. fields: [{name,label,type,placeholder,value,options,required,maxLength,rows,help}]
   function prompt(opts) {
     const o = opts || {};
     const fields = o.fields || [
@@ -477,6 +477,9 @@
             class: "tk-textarea",
             placeholder: f.placeholder || "",
             maxlength: f.maxLength,
+            // Optional: a field that takes a pasted list wants to show the
+            // list, not three lines of it.
+            rows: f.rows,
           });
           if (f.value) input.value = f.value;
         } else if (f.type === "select") {
@@ -963,11 +966,17 @@
             : ". This covers one address only.");
         break;
       case "ban ip":
-        title = "Block placed";
+        title = d.placed > 1 ? d.placed + " blocks placed" : "Block placed";
         body =
-          "It takes effect now, for " +
+          "They take effect now, for " +
           (d.duration === "permanent" ? "good" : d.duration || "a while") +
-          (d.rangeApplied ? ", across the whole surrounding range." : ".");
+          (d.rangeApplied ? ", covering whole ranges." : ".") +
+          (d.skipped
+            ? " " +
+              d.skipped +
+              (d.skipped === 1 ? " entry was" : " entries were") +
+              " skipped: not an address, a range, or a client id."
+            : "");
         break;
       case "unblock ip":
         title = d.removed ? "Unbanned" : "Nothing to unban";

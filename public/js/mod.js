@@ -2870,18 +2870,21 @@
   function openBanIpDialog() {
     if (!window.StaffUI) return;
     StaffUI.prompt({
-      title: "Ban an IP",
+      title: "Ban an IP or range",
       icon: '<i class="fas fa-ban"></i>',
       subtitle: "Blocks the address right away",
       message:
-        "Anyone currently connected on this address is disconnected on the spot, and new connections are refused until the ban ends. They see your message on the ban screen.",
+        "Anyone currently connected behind this is disconnected on the spot, and new connections are refused until the ban ends. They see your message on the ban screen.",
       fields: [
         {
           name: "ip",
-          label: "IP address (IPv4 or IPv6)",
-          type: "text",
+          label: "Addresses and ranges",
+          type: "textarea",
+          rows: 7,
           required: true,
-          placeholder: "e.g. 203.0.113.7 or 2001:db8::1",
+          placeholder:
+            "203.0.113.7\n151.57.212.0/24\n2601:c4:4200:4890::/64",
+          help: "One per line, or separated by commas, so a list can be pasted straight in. A range is written CIDR-style: /24 covers 256 IPv4 addresses, /64 covers an IPv6 network. Everything on the list gets the same duration and message.",
         },
         {
           name: "duration",
@@ -2894,7 +2897,7 @@
           name: "banRange",
           type: "checkbox",
           label: "Also block the surrounding range",
-          help: "Blocks the whole network the address sits on (IPv6 /64, IPv4 /24), so a neighbouring address in the same pool is covered too.",
+          help: "For the plain addresses on the list: blocks the whole network each one sits on (IPv6 /64, IPv4 /24), so a neighbouring address in the same pool is covered too. Anything already written as a range is left at the size you wrote.",
         },
         {
           name: "reason",
@@ -2904,7 +2907,7 @@
           placeholder: "e.g. Ban evasion. Appeal from the ban screen.",
         },
       ],
-      confirmText: "Ban IP",
+      confirmText: "Place block",
     }).then((v) => {
       if (!v || !v.ip || !v.ip.trim()) return;
       socket.emit("staff ban ip", {

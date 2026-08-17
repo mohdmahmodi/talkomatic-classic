@@ -19,6 +19,15 @@ const DEFAULT_IPV6_PREFIX = 64;
 // when the evasion pattern (neighbouring addresses from one pool) justifies it.
 const DEFAULT_IPV4_PREFIX = 24;
 
+// Floors on a range typed in by hand. Past these a block stops being about a
+// person and starts being about an ISP: a v4 /16 is 65k addresses and a v6 /32
+// is a whole allocation. Anything wider than the "broad" line is a developer
+// decision, the same way a permanent block is.
+const MIN_IPV4_PREFIX = 16;
+const MIN_IPV6_PREFIX = 32;
+const BROAD_IPV4_PREFIX = 24;
+const BROAD_IPV6_PREFIX = 48;
+
 // Some blocklist keys are not addresses: they carry an "id:" prefix and match
 // on the connection's client identifier instead. They never match an IP.
 const ID_PREFIX = "id:";
@@ -79,6 +88,48 @@ function autoRangeCidr(ip) {
     const addr = ipaddr.parse(String(ip));
     if (addr.kind() !== "ipv6" || addr.isIPv4MappedAddress()) return null;
     return computeRangeCidr(ip, DEFAULT_IPV6_PREFIX);
+  } catch (_) {
+    return null;
+  }
+}
+
+// A range typed in by staff ("151.57.212.0/24") turned into the key it gets
+// stored under. null means the text is not a range at all; a result carrying
+// `tooWide` parsed fine but reaches past the floor, which is worth saying out
+// loud rather than reporting as a typo. `broad` marks the ones that parse,
+// store, and still want a developer behind them.
+//
+// The key is canonical: host bits are cleared, so "151.57.212.9/24" and
+// "151.57.212.0/24" cannot sit in the list as two entries covering one range.
+// IPv6 is never stored narrower than the /64 every other v6 block already
+// covers - a /96 typed by hand would block less than the bare address does.
+// A v4 /32 is one address rather than a range and comes back as the bare
+// address, so it dedupes against an exact entry instead of shadowing it.
+function parseRangeKey(text) {
+  try {
+    let [addr, bits] = ipaddr.parseCIDR(String(text).trim());
+    if (addr.kind() === "ipv6" && addr.isIPv4MappedAddress()) {
+      if (bits < 96) return null;
+      addr = addr.toIPv4Address();
+      bits -= 96;
+    }
+    const v4 = addr.kind() === "ipv4";
+    if (!v4 && bits > DEFAULT_IPV6_PREFIX) bits = DEFAULT_IPV6_PREFIX;
+    const floor = v4 ? MIN_IPV4_PREFIX : MIN_IPV6_PREFIX;
+    if (bits < floor) return { key: null, bits, v4, floor, tooWide: true };
+    const bytes = addr.toByteArray(); // most-significant first
+    for (let i = 0; i < bytes.length; i++) {
+      const keep = bits - i * 8;
+      if (keep >= 8) continue;
+      bytes[i] = keep <= 0 ? 0 : bytes[i] & (0xff << (8 - keep));
+    }
+    const network = ipaddr.fromByteArray(bytes).toString();
+    return {
+      key: v4 && bits === 32 ? network : `${network}/${bits}`,
+      bits,
+      v4,
+      broad: bits < (v4 ? BROAD_IPV4_PREFIX : BROAD_IPV6_PREFIX),
+    };
   } catch (_) {
     return null;
   }
@@ -171,8 +222,9 @@ function removeBlocksForDevice(id) {
   return removed;
 }
 
-// A bare, valid IPv4 or IPv6 address? Rejects CIDR text ("1.2.3.4/24"), so a
-// typed range is refused and ranges stay opt-in via the checkbox.
+// A bare, valid IPv4 or IPv6 address? Rejects CIDR text ("1.2.3.4/24"), which
+// is how callers tell an address apart from a range; a range goes through
+// parseRangeKey instead.
 function isValidIp(ip) {
   try {
     return ipaddr.isValid(String(ip));
@@ -261,6 +313,9 @@ function removeBlocksForIp(ip) {
 module.exports = {
   DEFAULT_IPV6_PREFIX,
   DEFAULT_IPV4_PREFIX,
+  BROAD_IPV4_PREFIX,
+  BROAD_IPV6_PREFIX,
+  parseRangeKey,
   isRangeKey,
   isIdKey,
   idKey,
