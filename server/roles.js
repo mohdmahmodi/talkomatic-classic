@@ -137,39 +137,50 @@ function listDevKeys() {
 }
 
 const PUBLIC_STAFF = "the Talkomatic staff";
+const PUBLIC_SYSTEM = "the system";
 
 const TEAM_LABEL = "Talkomatic staff";
+const SYSTEM_LABEL = "System";
 
 function isDevLabel(label) {
   return !!label && devKeys.some((d) => d.label === label);
 }
 
-function teamLabel(label) {
-  return label ? TEAM_LABEL : label;
+function isDevActor(label, role) {
+  return role ? role === "dev" : isDevLabel(label);
+}
+
+function teamLabel(label, role) {
+  if (!label) return label;
+  return isDevActor(label, role) ? SYSTEM_LABEL : TEAM_LABEL;
 }
 
 function teamReviewer(value) {
   const s = String(value || "");
   if (!s) return value;
   const idx = s.indexOf(":");
-  return idx === -1 ? TEAM_LABEL : s.slice(0, idx + 1) + TEAM_LABEL;
+  const role = idx === -1 ? null : s.slice(0, idx);
+  const label = idx === -1 ? s : s.slice(idx + 1);
+  if (isDevActor(label, role)) return SYSTEM_LABEL;
+  return (idx === -1 ? "" : s.slice(0, idx + 1)) + TEAM_LABEL;
 }
 
-function publicStaffName(label) {
-  return label ? PUBLIC_STAFF : null;
+function publicStaffName(label, role) {
+  if (!label) return null;
+  return isDevActor(label, role) ? PUBLIC_SYSTEM : PUBLIC_STAFF;
 }
 
 function stripStaffNames(text) {
   if (!text || typeof text !== "string") return text;
   let out = text;
   const names = [
-    ...devKeys.map((d) => d.label),
-    ...modKeys.map((k) => k.label),
-    ...formerMods.map((f) => f.label),
+    ...devKeys.map((d) => ({ name: d.label, dev: true })),
+    ...modKeys.map((k) => ({ name: k.label, dev: false })),
+    ...formerMods.map((f) => ({ name: f.label, dev: false })),
   ];
-  for (const name of names) {
+  for (const { name, dev } of names) {
     if (!name || name.length < 2 || !out.includes(name)) continue;
-    out = out.split(name).join(TEAM_LABEL);
+    out = out.split(name).join(dev ? SYSTEM_LABEL : TEAM_LABEL);
   }
   return out;
 }

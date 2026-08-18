@@ -1593,6 +1593,7 @@ function openTalkoboard() {
     talkoboardInstance = new Talkoboard(socket, currentUserId, currentUsername, {
       isDev: currentUserIsDev,
       isMod: currentUserIsMod,
+      watching: isSpectating,
     });
   }
   talkoboardInstance.open();

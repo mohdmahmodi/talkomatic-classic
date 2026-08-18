@@ -8,6 +8,7 @@ class Talkoboard {
     this.username = username || "Anonymous";
     this.isOpen = false;
     this.isStaff = !!(staff && (staff.isDev || staff.isMod));
+    this.watching = !!(staff && staff.watching);
     this.inspectActive = false;
     this._modCard = null;
     this._modTapAt = null;
@@ -2707,6 +2708,7 @@ class Talkoboard {
     if (now - this.cursorThrottle < this.CURSOR_SEND_INTERVAL) return;
     this.cursorThrottle = now;
     const pt = this.getCanvasPoint(e);
+    if (this.watching) return;
     this.socket.emit("board cursor", { x: pt.x, y: pt.y });
   }
 

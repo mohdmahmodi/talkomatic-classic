@@ -43,7 +43,7 @@ function redactEntry(entry) {
   for (const f of MASKED_FIELDS)
     if (copy[f] != null) copy[f] = maskIps(copy[f]);
   if (copy.label && copy.type !== "comment")
-    copy.label = roles.teamLabel(copy.label);
+    copy.label = roles.teamLabel(copy.label, copy.role);
   if (copy.byRole === "mod" || copy.byRole === "dev") {
     delete copy.by;
     delete copy.byRole;

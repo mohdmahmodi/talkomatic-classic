@@ -1069,10 +1069,10 @@ function buildAppealsList(showIp) {
       barredBy: bar
         ? showIp
           ? bar.by || null
-          : roles.teamLabel(bar.by)
+          : roles.teamLabel(bar.by, bar.byRole)
         : null,
       barredAt: bar ? bar.at : null,
-      banBy: showIp ? ban.by || null : roles.teamLabel(ban.by),
+      banBy: showIp ? ban.by || null : roles.teamLabel(ban.by, ban.byRole),
       banReason: showIp
         ? ban.reason || null
         : audit.maskIps(ban.reason || null),
@@ -1090,7 +1090,7 @@ function buildAppealsList(showIp) {
           id: m.id,
           ts: m.ts,
           from: m.from,
-          by: hide ? roles.teamLabel(m.by) : m.by || null,
+          by: hide ? roles.teamLabel(m.by, m.role) : m.by || null,
           role: m.role || null,
           level: hide ? null : m.level == null ? null : m.level,
           avatar: hide ? null : m.avatar || null,
@@ -1442,7 +1442,7 @@ function buildBlockList(showIp) {
       kind: isId ? "id" : ipban.isRangeKey(ip) ? "range" : "ip",
       did: (b && typeof b === "object" && b.did) || (isId ? ip.slice(3) : null),
       label: (b && b.label) || (isId && matched[0] && matched[0].name) || null,
-      by: showIp ? (b && b.by) || null : roles.teamLabel((b && b.by) || null),
+      by: showIp ? (b && b.by) || null : roles.teamLabel((b && b.by) || null, b && b.byRole),
       reason: showIp
         ? (b && b.reason) || null
         : audit.maskIps((b && b.reason) || null),
@@ -1466,7 +1466,7 @@ function buildBanHistory(showIp) {
     id: e.id,
     name: e.name,
     action: e.action,
-    by: showIp ? e.by : roles.teamLabel(e.by),
+    by: showIp ? e.by : roles.teamLabel(e.by, e.byRole),
     at: e.at,
     reason: showIp ? e.reason : audit.maskIps(e.reason),
     duration: e.duration,
