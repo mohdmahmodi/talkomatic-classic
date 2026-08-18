@@ -264,9 +264,6 @@ function sanitizeMessage(msg) {
 function sanitizeName(value) {
   if (typeof value !== "string") return "";
 
-  // Compatibility normalization, before anything measures a length: a name
-  // pasted out of a fancy-text generator is stored as the letters it reads
-  // as, so it counts and sorts and searches like everybody else's.
   value = nameguard.normalize(value);
 
   let clean = "";

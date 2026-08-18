@@ -791,7 +791,7 @@ function rosterFor(socket) {
         locations: [],
       });
     }
-    for (const d of ctx.roles.listDevKeys()) {
+    for (const d of socket.isMainDev ? ctx.roles.listDevKeys() : []) {
       const key = "dev:" + d.label;
       if (online.has(key)) continue;
       out.push({
@@ -823,6 +823,15 @@ function buildPresence(recipient) {
   for (const [, s] of io().sockets.sockets) {
     if (!s.connected || !isStaff(s)) continue;
     if (s.isVanished && !recipient.isDev) continue;
+    // Where a developer is, and that they are here at all, is theirs and
+    // site operations' to know. It carries into the room rows below, which
+    // are built from this same pass.
+    if (
+      s.isDev &&
+      !recipient.isMainDev &&
+      s.staffLabel !== recipient.staffLabel
+    )
+      continue;
     const w = who(s);
     const k = idKeyOf(w);
     let row = staff.get(k);

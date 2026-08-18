@@ -46,9 +46,6 @@ function scan(value) {
   return { text, map };
 }
 
-// Rejoins runs of three or more single-character tokens and leaves the rest of
-// the spacing alone. Closing every gap instead would make "go to example.com"
-// one token and take the words either side of it down with the address.
 function tighten(scanned) {
   const toks = [];
   const re = /\S+/g;
@@ -79,6 +76,18 @@ function tighten(scanned) {
       text += scanned.text[p];
       map.push(scanned.map[p]);
     }
+  }
+  map.push(scanned.map[scanned.map.length - 1]);
+  return { text, map };
+}
+
+function closeUp(scanned) {
+  let text = "";
+  const map = [];
+  for (let i = 0; i < scanned.text.length; i++) {
+    if (SPACE.test(scanned.text[i])) continue;
+    text += scanned.text[i];
+    map.push(scanned.map[i]);
   }
   map.push(scanned.map[scanned.map.length - 1]);
   return { text, map };
@@ -174,12 +183,28 @@ function rangesIn({ text, map }, out) {
   }
 }
 
+const MARKER = /(?:^|[^a-z0-9])wwws*./i;
+
+function markerRange(scanned, out) {
+  const m = MARKER.exec(scanned.text);
+  if (!m) return;
+  const at = m.index + m[0].toLowerCase().indexOf("www");
+  out.push([scanned.map[at], scanned.map[scanned.map.length - 1]]);
+}
 function findRanges(value) {
   const found = [];
   if (!looksLikeLink(value)) return found;
   const loose = scan(value);
   rangesIn(loose, found);
-  if (SPACE.test(loose.text)) rangesIn(tighten(loose), found);
+  const extra = [];
+  if (SPACE.test(loose.text)) {
+    rangesIn(tighten(loose), found);
+    rangesIn(closeUp(loose), extra);
+    markerRange(closeUp(loose), extra);
+  }
+  markerRange(loose, extra);
+  for (const r of extra)
+    if (!found.some((f) => r[0] < f[1] && f[0] < r[1])) found.push(r);
   found.sort((a, b) => a[0] - b[0] || b[1] - a[1]);
   const merged = [];
   for (const r of found) {
