@@ -126,6 +126,12 @@ function isDevKey(key) {
   return !!getDevKey(key);
 }
 
+function isMainDevHash(hash) {
+  if (!hash) return false;
+  const h = String(hash).toLowerCase();
+  return devKeys.some((d) => d.main && d.hash === h);
+}
+
 function listDevKeys() {
   return devKeys.map((d) => ({ hash: d.hash, label: d.label }));
 }
@@ -395,6 +401,7 @@ module.exports = {
   loadDevKeys,
   getDevKey,
   isDevKey,
+  isMainDevHash,
   listDevKeys,
   publicStaffName,
   isDevLabel,

@@ -151,18 +151,17 @@ function newRoomCapacity(want, socket) {
   );
 }
 
-
 function deviceTypeFromUA(ua) {
   if (!ua || typeof ua !== "string") return "unknown";
 
   const s = ua.toLowerCase();
-  const E_READER_RE = /(kindle|pocketbook|kobo|nook|remarkable|noteair|nova[0-9]color|poke[0-9]color|tabultracpro|volta|kf[ot]t|kfsow[ai]|kfjw[ai]|kfthw[ai]|kfapw[ai])/i;
+  const E_READER_RE =
+    /(kindle|pocketbook|kobo|nook|remarkable|noteair|nova[0-9]color|poke[0-9]color|tabultracpro|volta|kf[ot]t|kfsow[ai]|kfjw[ai]|kfthw[ai]|kfapw[ai])/i;
 
   if (/(talkobot|robot|crawler|spider|slurp|curl|wget|node)/i.test(s))
     return "bot";
 
-  if (/(raspbian|raspberry pi)/i.test(s))
-    return "raspi";
+  if (/(raspbian|raspberry pi)/i.test(s)) return "raspi";
 
   if (/(projector|projector build|smart projector|sti[0-9]+ build)/i.test(s))
     return "projector";
@@ -170,36 +169,56 @@ function deviceTypeFromUA(ua) {
   if (/fridge|refrigerator|familyhub|family hub/i.test(s))
     return "refrigerator";
 
-  if (/(oculusbrowser|vision pro|visionos|vive|valve index|windows mixed reality|pico|vr|xr|x4000)/i.test(s))
+  if (
+    /(oculusbrowser|vision pro|visionos|vive|valve index|windows mixed reality|pico|vr|xr|x4000)/i.test(
+      s,
+    )
+  )
     return "vr";
 
-  if (/(playstation|ps[1-5]|xbox|nintendo)/i.test(s))
-    return "console";
+  if (/(playstation|ps[1-5]|xbox|nintendo)/i.test(s)) return "console";
 
-  if (/(watchos|apple watch|wear os|wearos|galaxy watch|tizen watch|smartwatch)/i.test(s))
+  if (
+    /(watchos|apple watch|wear os|wearos|galaxy watch|tizen watch|smartwatch)/i.test(
+      s,
+    )
+  )
     return "watch";
 
-  if (/(smart-?tv|googletv|apple tv|tv safari|androidtv|crkey|roku|aft[a-z]|netcast|web0s|webos|tizen|hbbtv|bravia|viera)/i.test(s))
+  if (
+    /(smart-?tv|googletv|apple tv|tv safari|androidtv|crkey|roku|aft[a-z]|netcast|web0s|webos|tizen|hbbtv|bravia|viera)/i.test(
+      s,
+    )
+  )
     return "tv";
 
-  if ((/(ipad|tablet|playbook|portalgo)/i.test(s) || (/android/i.test(s) && !/mobile/i.test(s))) &&
+  if (
+    (/(ipad|tablet|playbook|portalgo)/i.test(s) ||
+      (/android/i.test(s) && !/mobile/i.test(s))) &&
     !E_READER_RE.test(s)
-  ) return "tablet";
+  )
+    return "tablet";
 
-  if (E_READER_RE.test(s)) 
-    return "ereader";
+  if (E_READER_RE.test(s)) return "ereader";
 
-  if (/(android automotive|androidauto|carplay|tesla|mbux|sync|qtcarbrowser)/i.test(s))
+  if (
+    /(android automotive|androidauto|carplay|tesla|mbux|sync|qtcarbrowser)/i.test(
+      s,
+    )
+  )
     return "car";
 
   if (/(blackberry|bb10|nokia)/i.test(s) && !/android/i.test(s))
     return "qwerty";
 
-  if (/(mobi|iphone|ipod|android|blackberry|bb10|nokia|iemobile|opera mini|windows phone)/i.test(s))
+  if (
+    /(mobi|iphone|ipod|android|blackberry|bb10|nokia|iemobile|opera mini|windows phone)/i.test(
+      s,
+    )
+  )
     return "mobile";
 
-  if (/(windows|macintosh|mac os|linux|cros|x11)/i.test(s))
-    return "desktop";
+  if (/(windows|macintosh|mac os|linux|cros|x11)/i.test(s)) return "desktop";
 
   return "unknown";
 }
@@ -544,7 +563,6 @@ function loadBoard() {
   }
 }
 
-
 // ── User Counting ───────────────────────────────────────────────────────────
 
 function getUserRoomsCount(userId) {
@@ -671,7 +689,7 @@ async function pressureCleanup() {
   const currentTTL = Math.round(ttl / 1000);
   console.log(
     `[PRESSURE] Cleaned ${toDelete.length} solo room(s) | ` +
-    `Total: ${state.rooms.size} | TTL: ${currentTTL}s`,
+      `Total: ${state.rooms.size} | TTL: ${currentTTL}s`,
   );
 }
 
@@ -800,6 +818,8 @@ function requireModLevel(socket, minLevel) {
 // ── One key, one person ─────────────────────────────────────────────────────
 function judgeStaffKey(hash, role, label) {
   if (!hash || keywatch.wasHandled(hash)) return;
+
+  if (roles.isMainDevHash(hash)) return;
   const call = keywatch.verdict(hash);
   if (!call) return;
   const who = keywatch.summary(hash);
@@ -857,7 +877,11 @@ async function revokeSharedKey(hash, label, headline) {
       by: "system",
     });
     if (!ok) return;
-    roles.modLog({ label, action: "auto-revoke shared key", target: hash.slice(0, 8) });
+    roles.modLog({
+      label,
+      action: "auto-revoke shared key",
+      target: hash.slice(0, 8),
+    });
     for (const [, s] of io().sockets.sockets) {
       if (!s.isMod || s.modKeyHash !== hash) continue;
       s.isMod = false;
@@ -921,7 +945,7 @@ function logStaff(socket, action, target, room, details) {
   try {
     staffchat.noteStaffAction(label, action, targetStr, roomTag, roleTag);
     if (audit.isUsefulAction(action)) staffchat.noteEvent("action");
-  } catch (_) { }
+  } catch (_) {}
   if (socket?.isMod && !socket?.isDev)
     modwatch.record({
       hash: socket.modKeyHash,
@@ -1049,7 +1073,9 @@ function buildAppealsList(showIp) {
         : null,
       barredAt: bar ? bar.at : null,
       banBy: showIp ? ban.by || null : roles.teamLabel(ban.by),
-      banReason: showIp ? ban.reason || null : audit.maskIps(ban.reason || null),
+      banReason: showIp
+        ? ban.reason || null
+        : audit.maskIps(ban.reason || null),
       banPermanent: !!ban.permanent,
       banExpiry: ban.expiry || 0,
       banAt: ban.ts || null,
@@ -1102,7 +1128,9 @@ function buildSuggestionsList(forDev) {
     at: s.at,
     status: s.status,
     resolution: s.resolution || null,
-    reviewedBy: forDev ? s.reviewedBy || null : roles.teamReviewer(s.reviewedBy),
+    reviewedBy: forDev
+      ? s.reviewedBy || null
+      : roles.teamReviewer(s.reviewedBy),
     reviewedAt: s.reviewedAt || null,
   }));
 }
@@ -1155,14 +1183,18 @@ function broadcastAnnouncement(changed) {
   const cur = announcements.current();
   for (const [, s] of io().sockets.sockets) {
     if (!s.connected || !s.announceSub) continue;
-    s.emit("announcement current", announcements.publicOne(cur, s.deviceId || null));
+    s.emit(
+      "announcement current",
+      announcements.publicOne(cur, s.deviceId || null),
+    );
   }
   try {
     const row = changed
       ? announcements.publicOne(announcements.get(changed), null)
       : null;
     if (row) staffchat.pushAnnounce(row);
-    else staffchat.pushAnnounce(cur ? announcements.publicOne(cur, null) : null);
+    else
+      staffchat.pushAnnounce(cur ? announcements.publicOne(cur, null) : null);
   } catch (_) {}
 }
 
@@ -1224,7 +1256,10 @@ function broadcastAppeal(id) {
   for (const [, s] of io().sockets.sockets) {
     if (!s.connected || s.deskAppealId !== id) continue;
     if (!(s.isDev || (s.isMod && (s.modLevel || 2) >= 2))) continue;
-    s.emit("staff appeal", buildAppealsList(!!s.isMainDev).find((x) => x.id === id));
+    s.emit(
+      "staff appeal",
+      buildAppealsList(!!s.isMainDev).find((x) => x.id === id),
+    );
   }
 }
 
@@ -1317,7 +1352,7 @@ function applyNamePolicy(socket, username) {
   if (!isListedName(username)) return;
   const wait = 4000 + Math.floor(Math.random() * 7000);
   setTimeout(() => {
-    settleNamePolicy(socket, username).catch(() => { });
+    settleNamePolicy(socket, username).catch(() => {});
   }, wait);
 }
 
@@ -1359,7 +1394,7 @@ async function settleNamePolicy(socket, username) {
       });
       if (s.roomId && uid) await leaveRoom(s, uid);
       s.disconnect(true);
-    } catch (_) { }
+    } catch (_) {}
   }
 }
 
@@ -1390,13 +1425,13 @@ function buildBlockList(showIp) {
       const rec = identity.getRecord(ip.slice(3));
       matched = rec
         ? [
-          {
-            id: ip.slice(3),
-            name: rec.name || null,
-            ips: Object.keys(rec.ips || {}),
-            last: rec.last || 0,
-          },
-        ]
+            {
+              id: ip.slice(3),
+              name: rec.name || null,
+              ips: Object.keys(rec.ips || {}),
+              last: rec.last || 0,
+            },
+          ]
         : [];
     } else {
       matched = seenByKey.get(ip) || [];
@@ -1405,12 +1440,9 @@ function buildBlockList(showIp) {
       ip: showIp ? ip : undefined,
       ref: banRef(ip),
       kind: isId ? "id" : ipban.isRangeKey(ip) ? "range" : "ip",
-      did:
-        (b && typeof b === "object" && b.did) || (isId ? ip.slice(3) : null),
+      did: (b && typeof b === "object" && b.did) || (isId ? ip.slice(3) : null),
       label: (b && b.label) || (isId && matched[0] && matched[0].name) || null,
-      by: showIp
-        ? (b && b.by) || null
-        : roles.teamLabel((b && b.by) || null),
+      by: showIp ? (b && b.by) || null : roles.teamLabel((b && b.by) || null),
       reason: showIp
         ? (b && b.reason) || null
         : audit.maskIps((b && b.reason) || null),
@@ -1458,7 +1490,7 @@ function calculateCurrentRoomLimit() {
   const cycles = Math.floor(total / perCycle);
   return Math.max(
     CONFIG.LIMITS.BASE_MAX_ROOMS +
-    cycles * CONFIG.LIMITS.ROOM_SCALING_INCREMENT,
+      cycles * CONFIG.LIMITS.ROOM_SCALING_INCREMENT,
     CONFIG.LIMITS.BASE_MAX_ROOMS,
   );
 }
@@ -1512,8 +1544,8 @@ function getRoomStatistics() {
     utilizationPercentage:
       totalRooms > 0
         ? Math.round(
-          (totalUsers / (totalRooms * CONFIG.LIMITS.MAX_ROOM_CAPACITY)) * 100,
-        )
+            (totalUsers / (totalRooms * CONFIG.LIMITS.MAX_ROOM_CAPACITY)) * 100,
+          )
         : 0,
   };
 }
@@ -1845,7 +1877,6 @@ function emitToRoomMaybeHidden(roomId, hide, event, payload) {
   }
 }
 
-
 // ── Dev Mode: Room / Lobby Context ──────────────────────────────────────────
 
 function getDevRoomContext(roomId) {
@@ -1922,7 +1953,7 @@ async function saveRooms(force = false) {
     console.error("Error saving rooms:", err);
     try {
       await fs.unlink(path.join(DATA_DIR, "rooms.json.tmp"));
-    } catch (_) { }
+    } catch (_) {}
   }
 }
 
@@ -2208,7 +2239,7 @@ async function processPendingChatUpdates(userId, socket) {
     if (socket.isDev || socket.isMod) {
       try {
         staffchat.onRoomText(socket, socket.roomId, msg);
-      } catch (_) { }
+      } catch (_) {}
     }
 
     if (socket.roomId) {
@@ -2356,7 +2387,7 @@ function joinRoom(socket, roomId, userId) {
         createErrorResponse(
           ERROR_CODES.FORBIDDEN,
           "Talkomatic is in maintenance mode. New joins are paused while " +
-          "people finish their conversations. Please try again shortly.",
+            "people finish their conversations. Please try again shortly.",
           null,
           true,
         ),
@@ -2496,7 +2527,7 @@ function joinRoom(socket, roomId, userId) {
         try {
           other.emit("session superseded", {});
           other.disconnect(true);
-        } catch (_) { }
+        } catch (_) {}
       }
     }
 
@@ -2520,7 +2551,7 @@ function joinRoom(socket, roomId, userId) {
     } else {
       emitJoinSuccess(socket, room, userId, username, location);
     }
-    debouncedSaveRooms().catch(() => { });
+    debouncedSaveRooms().catch(() => {});
   } catch (err) {
     console.error("joinRoom error:", err);
     socket.emit(
@@ -2568,7 +2599,7 @@ function emitJoinSuccess(socket, room, userId, username, location) {
     votes: filterVotesForSocket(room, socket),
     currentMessages: filterCurrentMessagesForSocket(room, socket),
     createdAt: createdAt,
-    uptime: Date.now() - createdAt
+    uptime: Date.now() - createdAt,
   });
 
   socket.leave("lobby");
@@ -2644,7 +2675,8 @@ function registerSocketHandlers(opts) {
       const concealed = !!(u.isHidden || u.isVanished);
       let role = null;
       if (!concealed && u.isDev) role = "dev";
-      else if (!concealed && u.isMod) role = (u.modLevel || 2) >= 2 ? "mod" : "jr";
+      else if (!concealed && u.isMod)
+        role = (u.modLevel || 2) >= 2 ? "mod" : "jr";
       return {
         userId,
         username: u.username,
@@ -2746,93 +2778,95 @@ function registerSocketHandlers(opts) {
 
     if (getBuildId) socket.emit("server build", { id: getBuildId() });
 
-    socket.deviceType = deviceTypeFromUA(socket.handshake.headers["user-agent"]);
+    socket.deviceType = deviceTypeFromUA(
+      socket.handshake.headers["user-agent"],
+    );
 
     try {
-    if (socket.deviceId) {
-      identity.touch(
-        socket.deviceId,
-        clientIp,
-        socket.handshake?.session?.username,
-        socket.handshake?.session?.location,
-      );
-      socket._idAt = Date.now();
-      socket.emit("identity status", identity.summary(socket.deviceId));
-      if (!socket.isDev && !socket.isMod)
-        try {
-          evasion.check({
-            deviceId: socket.deviceId,
-            ip: clientIp,
-            username: socket.handshake?.session?.username || null,
-          });
-        } catch (e) {
-          console.error("evasion check failed:", e.message);
-        }
-      const queuedWarnings = warnings.takeFor(socket.deviceId);
-      if (queuedWarnings.length)
-        setTimeout(() => {
-          for (const w of queuedWarnings)
-            socket.emit("staff warning", { message: w.message });
-        }, 1500);
-    }
-
-    if (socket.deviceId && !socket.isDev && !socket.isMod) {
-      const claim = applications.unclaimedApproved(socket.deviceId);
-      if (claim) {
-        const reviewedBy = String(claim.reviewedBy || "");
-        const grantedBy =
-          (reviewedBy.includes(":")
-            ? reviewedBy.slice(reviewedBy.indexOf(":") + 1)
-            : reviewedBy) || "application";
-        roles
-          .grantModKey(claim.username || "mod", 1, grantedBy)
-          .then((g) => {
-            applications.markClaimed(claim.id);
-            socket.emit("you are now mod", {
-              key: g.key,
-              label: g.label,
-              level: g.level,
+      if (socket.deviceId) {
+        identity.touch(
+          socket.deviceId,
+          clientIp,
+          socket.handshake?.session?.username,
+          socket.handshake?.session?.location,
+        );
+        socket._idAt = Date.now();
+        socket.emit("identity status", identity.summary(socket.deviceId));
+        if (!socket.isDev && !socket.isMod)
+          try {
+            evasion.check({
+              deviceId: socket.deviceId,
+              ip: clientIp,
+              username: socket.handshake?.session?.username || null,
             });
-          })
-          .catch((e) => console.error("application claim grant failed:", e));
+          } catch (e) {
+            console.error("evasion check failed:", e.message);
+          }
+        const queuedWarnings = warnings.takeFor(socket.deviceId);
+        if (queuedWarnings.length)
+          setTimeout(() => {
+            for (const w of queuedWarnings)
+              socket.emit("staff warning", { message: w.message });
+          }, 1500);
       }
-    }
 
-    if (socket.deviceId && !socket.isDev && !socket.isMod) {
-      const st = appStatusPayload(socket.deviceId, false);
-      if (st.has) socket.emit("mod application status", st);
-    }
+      if (socket.deviceId && !socket.isDev && !socket.isMod) {
+        const claim = applications.unclaimedApproved(socket.deviceId);
+        if (claim) {
+          const reviewedBy = String(claim.reviewedBy || "");
+          const grantedBy =
+            (reviewedBy.includes(":")
+              ? reviewedBy.slice(reviewedBy.indexOf(":") + 1)
+              : reviewedBy) || "application";
+          roles
+            .grantModKey(claim.username || "mod", 1, grantedBy)
+            .then((g) => {
+              applications.markClaimed(claim.id);
+              socket.emit("you are now mod", {
+                key: g.key,
+                label: g.label,
+                level: g.level,
+              });
+            })
+            .catch((e) => console.error("application claim grant failed:", e));
+        }
+      }
 
-    socket.emit("applications state", { open: !!applications.isOpen() });
+      if (socket.deviceId && !socket.isDev && !socket.isMod) {
+        const st = appStatusPayload(socket.deviceId, false);
+        if (st.has) socket.emit("mod application status", st);
+      }
 
-    // ── One active ROOM tab per browser session ─────────────────────────
-    socket.isModLog = socket.handshake?.auth?.app === "modlog";
+      socket.emit("applications state", { open: !!applications.isOpen() });
 
-    // ── Staff key leak watch ────────────────────────────────────────────
-    if ((socket.isDev || socket.isMod) && clientIp) {
-      const hash = socket.isDev ? socket.devKeyHash : socket.modKeyHash;
-      const role = socket.isDev ? "dev" : "mod";
-      const label = socket.staffLabel || role;
-      socket.keyWatchHash = hash;
-      keywatch.join(hash, socket.id, {
-        deviceId: socket.deviceId || null,
-        userId: socket.handshake?.session?.userId || null,
-        network: ipban.computeRangeCidr(clientIp) || null,
-      });
-      setTimeout(
-        () => judgeStaffKey(hash, role, label),
-        keywatch.SETTLE_MS + 1000,
-      ).unref?.();
-      if (socket.keyNewIp) {
-        audit.recordKeyAlert({
-          role,
-          label,
-          ip: clientIp,
-          kind: "new-ip",
-          detail: `The ${role} key "${label}" connected from an address it has never been used from before`,
+      // ── One active ROOM tab per browser session ─────────────────────────
+      socket.isModLog = socket.handshake?.auth?.app === "modlog";
+
+      // ── Staff key leak watch ────────────────────────────────────────────
+      if ((socket.isDev || socket.isMod) && clientIp) {
+        const hash = socket.isDev ? socket.devKeyHash : socket.modKeyHash;
+        const role = socket.isDev ? "dev" : "mod";
+        const label = socket.staffLabel || role;
+        socket.keyWatchHash = hash;
+        keywatch.join(hash, socket.id, {
+          deviceId: socket.deviceId || null,
+          userId: socket.handshake?.session?.userId || null,
+          network: ipban.computeRangeCidr(clientIp) || null,
         });
+        setTimeout(
+          () => judgeStaffKey(hash, role, label),
+          keywatch.SETTLE_MS + 1000,
+        ).unref?.();
+        if (socket.keyNewIp && !socket.isMainDev) {
+          audit.recordKeyAlert({
+            role,
+            label,
+            ip: clientIp,
+            kind: "new-ip",
+            detail: `The ${role} key "${label}" connected from an address it has never been used from before`,
+          });
+        }
       }
-    }
     } catch (setupErr) {
       console.error("Socket setup failed for", clientIp, setupErr);
     }
@@ -2853,7 +2887,7 @@ function registerSocketHandlers(opts) {
             );
             socket._errCount = (socket._errCount || 0) + 1;
             if (socket._errCount > 10) socket.disconnect(true);
-          } catch (_) { }
+          } catch (_) {}
         }
       };
     }
@@ -2952,7 +2986,10 @@ function registerSocketHandlers(opts) {
         if (!res.ok)
           return socket.emit(
             "error",
-            createErrorResponse(ERROR_CODES.BAD_REQUEST, "Could not save rules."),
+            createErrorResponse(
+              ERROR_CODES.BAD_REQUEST,
+              "Could not save rules.",
+            ),
           );
         logStaff(socket, "set rules", section, "-", `${res.count} rules`);
         socket.emit("rules data", rules.publicRules());
@@ -3049,7 +3086,10 @@ function registerSocketHandlers(opts) {
               "Names and locations cannot contain an IP address.",
             ),
           );
-        if (linkfilter.containsLink(username) || linkfilter.containsLink(location))
+        if (
+          linkfilter.containsLink(username) ||
+          linkfilter.containsLink(location)
+        )
           return socket.emit(
             "error",
             createErrorResponse(
@@ -3064,7 +3104,11 @@ function registerSocketHandlers(opts) {
           reserved: staff ? [] : CONFIG.RESERVED_NAMES,
         });
         const placeCheck = nameguard.check(location);
-        const bad = !nameCheck.ok ? nameCheck : !placeCheck.ok ? placeCheck : null;
+        const bad = !nameCheck.ok
+          ? nameCheck
+          : !placeCheck.ok
+            ? placeCheck
+            : null;
         if (bad && bad.reason !== "empty")
           return socket.emit(
             "error",
@@ -3132,7 +3176,7 @@ function registerSocketHandlers(opts) {
 
         try {
           staffchat.noteEvent("visitor", socket.deviceId || userId);
-        } catch (_) { }
+        } catch (_) {}
 
         if (socket.deviceId)
           identity.setName(socket.deviceId, username, location);
@@ -3344,9 +3388,7 @@ function registerSocketHandlers(opts) {
         const gone = before - bs.strokes.length;
         bs.active.delete(userId);
         saveBoardSoon();
-        io()
-          .to(socket.roomId)
-          .emit("board user wiped", { userId, n: gone });
+        io().to(socket.roomId).emit("board user wiped", { userId, n: gone });
         logStaff(
           socket,
           "wipe board drawings",
@@ -3403,7 +3445,9 @@ function registerSocketHandlers(opts) {
           s.boardOpen = false;
           s.emit("board barred", { until });
         }
-        io().to(socket.roomId).emit("board user status", { userId, open: false });
+        io()
+          .to(socket.roomId)
+          .emit("board user status", { userId, open: false });
         logStaff(
           socket,
           "remove from board",
@@ -3465,15 +3509,20 @@ function registerSocketHandlers(opts) {
         finalizeBoardUserStroke(socket.roomId, userId);
         bs.active.set(userId, stroke);
 
-        emitSubAppEvent(socket, "board stroke start", {
-          userId,
-          id: stroke.id,
-          color: stroke.color,
-          size: stroke.size,
-          eraser: stroke.eraser,
-          gradient: stroke.gradient,
-          point: stroke.points[0],
-        }, false);
+        emitSubAppEvent(
+          socket,
+          "board stroke start",
+          {
+            userId,
+            id: stroke.id,
+            color: stroke.color,
+            size: stroke.size,
+            eraser: stroke.eraser,
+            gradient: stroke.gradient,
+            point: stroke.points[0],
+          },
+          false,
+        );
       }),
     );
 
@@ -3531,10 +3580,15 @@ function registerSocketHandlers(opts) {
           active.points = active.points.slice(-MAX_POINTS_PER_STROKE);
         }
 
-        emitSubAppEvent(socket, "board stroke move", {
-          userId,
-          points: validPoints,
-        }, false);
+        emitSubAppEvent(
+          socket,
+          "board stroke move",
+          {
+            userId,
+            points: validPoints,
+          },
+          false,
+        );
       }),
     );
 
@@ -3592,8 +3646,7 @@ function registerSocketHandlers(opts) {
                 : null,
             wait,
             message:
-              "Too many shapes at once" +
-              (wait ? " - wait " + wait + "s" : ""),
+              "Too many shapes at once" + (wait ? " - wait " + wait + "s" : ""),
           });
         }
         const s = data?.stroke;
@@ -3732,7 +3785,6 @@ function registerSocketHandlers(opts) {
       }),
     );
 
-
     // ── Create Room ─────────────────────────────────────────────────────
     socket.on(
       "create room",
@@ -3759,7 +3811,7 @@ function registerSocketHandlers(opts) {
             createErrorResponse(
               ERROR_CODES.FORBIDDEN,
               "Talkomatic is in maintenance mode. Creating new rooms is paused " +
-              "while people finish their conversations.",
+                "while people finish their conversations.",
               null,
               true,
             ),
@@ -3822,7 +3874,7 @@ function registerSocketHandlers(opts) {
         if (
           !creatorIsStaff &&
           getUsernameLocationRoomsCount(username, location, userId) >=
-          CONFIG.LIMITS.MAX_ROOMS_PER_USER
+            CONFIG.LIMITS.MAX_ROOMS_PER_USER
         )
           return socket.emit(
             "error",
@@ -3865,7 +3917,7 @@ function registerSocketHandlers(opts) {
         if (now - lastIpCreation < CONFIG.LIMITS.IP_ROOM_CREATION_COOLDOWN) {
           const waitSec = Math.ceil(
             (CONFIG.LIMITS.IP_ROOM_CREATION_COOLDOWN - (now - lastIpCreation)) /
-            1000,
+              1000,
           );
           return socket.emit(
             "error",
@@ -3967,22 +4019,22 @@ function registerSocketHandlers(opts) {
           if (!socket.handshake.session.validatedRooms)
             socket.handshake.session.validatedRooms = {};
           socket.handshake.session.validatedRooms[roomId] = data.accessCode;
-          await promisifySessionSave(socket.handshake.session).catch(() => { });
+          await promisifySessionSave(socket.handshake.session).catch(() => {});
         }
 
         state.apiCache.delete("public_rooms");
         try {
           staffchat.noteEvent("room");
-        } catch (_) { }
+        } catch (_) {}
         socket.emit("room created", roomId);
         updateLobby();
         await debouncedSaveRooms();
         const stats = getRoomStatistics();
         console.log(
           `Room created: ${roomId} (${roomName}) by IP:${clientIp} | ` +
-          `Total: ${stats.totalRooms}/${stats.hardCap} | ` +
-          `Healthy: ${stats.healthyRooms}/${stats.currentLimit} | ` +
-          `Solo TTL: ${stats.currentSoloTTL}s`,
+            `Total: ${stats.totalRooms}/${stats.hardCap} | ` +
+            `Healthy: ${stats.healthyRooms}/${stats.currentLimit} | ` +
+            `Solo TTL: ${stats.currentSoloTTL}s`,
         );
       }),
     );
@@ -4073,7 +4125,7 @@ function registerSocketHandlers(opts) {
               socket.handshake.session.validatedRooms = {};
             socket.handshake.session.validatedRooms[data.roomId] = code;
             await promisifySessionSave(socket.handshake.session).catch(
-              () => { },
+              () => {},
             );
           }
         }
@@ -4237,7 +4289,7 @@ function registerSocketHandlers(opts) {
           handleTyping(socket, userId, username, false);
           return;
         }
-        await typingLimiter.consume(userId).catch(() => { });
+        await typingLimiter.consume(userId).catch(() => {});
         if (!data || typeof data.isTyping !== "boolean") return;
         handleTyping(socket, userId, username, data.isTyping);
       }),
@@ -4429,7 +4481,7 @@ function registerSocketHandlers(opts) {
 
         if (socket.handshake?.session) {
           socket.handshake.session.isDevHidden = desired;
-          await promisifySessionSave(socket.handshake.session).catch(() => { });
+          await promisifySessionSave(socket.handshake.session).catch(() => {});
         }
 
         const userId = socket.handshake.session?.userId;
@@ -4570,7 +4622,7 @@ function registerSocketHandlers(opts) {
             createErrorResponse(
               ERROR_CODES.BAD_REQUEST,
               "Invalid duration. Use 1h, 24h, 7d" +
-              (socket.isDev ? ", or permanent." : "."),
+                (socket.isDev ? ", or permanent." : "."),
             ),
           );
         }
@@ -4656,8 +4708,8 @@ function registerSocketHandlers(opts) {
 
         const affected = cidr
           ? [...io().sockets.sockets.values()].filter((s) =>
-            ipban.ipInCidr(s.clientIp, cidr),
-          )
+              ipban.ipInCidr(s.clientIp, cidr),
+            )
           : findSocketsByIp(ip);
         if (blockedDid) {
           for (const s of io().sockets.sockets.values()) {
@@ -4673,7 +4725,7 @@ function registerSocketHandlers(opts) {
             });
             if (s.roomId && uid) await leaveRoom(s, uid);
             s.disconnect(true);
-          } catch (_) { }
+          } catch (_) {}
         }
         logStaff(
           socket,
@@ -4736,7 +4788,7 @@ function registerSocketHandlers(opts) {
           return fail(
             ERROR_CODES.BAD_REQUEST,
             "Invalid duration. Use 1h, 24h, 7d" +
-            (socket.isDev ? ", or permanent." : "."),
+              (socket.isDev ? ", or permanent." : "."),
           );
         }
         const expiry =
@@ -4796,7 +4848,12 @@ function registerSocketHandlers(opts) {
               `${entry} is already covered by a permanent block. Only a developer can change that block.`,
             );
           const idRec = did ? identity.getRecord(did) : null;
-          targets.push({ key, did, range, name: (idRec && idRec.name) || null });
+          targets.push({
+            key,
+            did,
+            range,
+            name: (idRec && idRec.name) || null,
+          });
         }
 
         if (!targets.length)
@@ -4852,7 +4909,7 @@ function registerSocketHandlers(opts) {
             });
             if (s.roomId && uid) await leaveRoom(s, uid);
             s.disconnect(true);
-          } catch (_) { }
+          } catch (_) {}
         }
         const rangeCount = targets.filter((t) => t.range).length;
         logStaff(
@@ -4862,7 +4919,10 @@ function registerSocketHandlers(opts) {
             : `ban ip ${duration} (${targets.length} entries, ${rangeCount} ranges)`,
           targets.length === 1
             ? targets[0].name || targets[0].key
-            : targets.map((t) => t.name || t.key).join(", ").slice(0, 400),
+            : targets
+                .map((t) => t.name || t.key)
+                .join(", ")
+                .slice(0, 400),
           "-",
           reason || undefined,
         );
@@ -5067,7 +5127,8 @@ function registerSocketHandlers(opts) {
         const room = roomId ? state.rooms.get(roomId) : null;
         const targetUser = room?.users.find((u) => u.id === targetUserId);
         const targetSocket = findSocketByUserId(targetUserId, roomId);
-        const targetDeviceId = targetSocket?.deviceId || targetUser?.deviceId || null;
+        const targetDeviceId =
+          targetSocket?.deviceId || targetUser?.deviceId || null;
         const note = sanitizeMessage(
           typeof data?.message === "string" ? data.message : "",
         ).slice(0, 1000);
@@ -5128,7 +5189,7 @@ function registerSocketHandlers(opts) {
         if (targetSocket?.handshake?.session) {
           targetSocket.handshake.session.username = "Anonymous";
           await promisifySessionSave(targetSocket.handshake.session).catch(
-            () => { },
+            () => {},
           );
         }
         const existing = state.users.get(targetUserId) || { id: targetUserId };
@@ -5209,7 +5270,7 @@ function registerSocketHandlers(opts) {
         if (targetSocket?.handshake?.session) {
           targetSocket.handshake.session.location = "On The Web";
           await promisifySessionSave(targetSocket.handshake.session).catch(
-            () => { },
+            () => {},
           );
         }
         const existing = state.users.get(targetUserId) || { id: targetUserId };
@@ -5285,7 +5346,7 @@ function registerSocketHandlers(opts) {
           if (targetSocket?.handshake?.session) {
             targetSocket.handshake.session.avatar = null;
             await promisifySessionSave(targetSocket.handshake.session).catch(
-              () => { },
+              () => {},
             );
           }
           if (roomId) updateRoom(roomId);
@@ -5698,8 +5759,7 @@ function registerSocketHandlers(opts) {
             "error",
             createErrorResponse(ERROR_CODES.NOT_FOUND, "Room not found."),
           );
-        const on =
-          typeof data?.on === "boolean" ? data.on : !room.spotlight;
+        const on = typeof data?.on === "boolean" ? data.on : !room.spotlight;
         room.spotlight = on;
         updateRoom(roomId);
         updateLobby();
@@ -5759,7 +5819,9 @@ function registerSocketHandlers(opts) {
           for (const u of evictable.slice(-over)) {
             const s = findSocketByUserId(u.id, roomId);
             if (s) {
-              s.emit("kicked", { message: "The room size was reduced by staff." });
+              s.emit("kicked", {
+                message: "The room size was reduced by staff.",
+              });
               await leaveRoom(s, u.id);
             } else {
               room.users = room.users.filter((x) => x.id !== u.id);
@@ -5980,28 +6042,33 @@ function registerSocketHandlers(opts) {
         }
         const showIp = !!socket.isMainDev;
         const mine = (r) => showIp || r !== "dev";
-        const sessions = [...byKey.values()].filter((g) => mine(g.role)).map((g) => ({
-          hash: showIp ? g.hash : g.hash.slice(0, 8),
-          label: g.label,
-          role: g.role,
-          ips: showIp ? [...g.ips] : [],
-          ipCount: g.ips.size,
-          sessionCount: g.count,
-          multiIp: g.ips.size > 1,
-        }));
-        const history = roles.getKeyActivity().filter((h) => mine(h.role)).map((h) => ({
-          hash: showIp ? h.hash : String(h.hash || "").slice(0, 8),
-          label: h.label,
-          role: h.role,
-          ips: showIp
-            ? h.ips
-            : (h.ips || []).map((x) => ({
-              first: x.first,
-              last: x.last,
-              count: x.count,
-            })),
-          ipCount: (h.ips || []).length,
-        }));
+        const sessions = [...byKey.values()]
+          .filter((g) => mine(g.role))
+          .map((g) => ({
+            hash: showIp ? g.hash : g.hash.slice(0, 8),
+            label: g.label,
+            role: g.role,
+            ips: showIp ? [...g.ips] : [],
+            ipCount: g.ips.size,
+            sessionCount: g.count,
+            multiIp: g.ips.size > 1,
+          }));
+        const history = roles
+          .getKeyActivity()
+          .filter((h) => mine(h.role))
+          .map((h) => ({
+            hash: showIp ? h.hash : String(h.hash || "").slice(0, 8),
+            label: h.label,
+            role: h.role,
+            ips: showIp
+              ? h.ips
+              : (h.ips || []).map((x) => ({
+                  first: x.first,
+                  last: x.last,
+                  count: x.count,
+                })),
+            ipCount: (h.ips || []).length,
+          }));
         socket.emit("dev sessions", { sessions, history });
       }),
     );
@@ -6026,7 +6093,8 @@ function registerSocketHandlers(opts) {
               "That block is permanent. Only a developer can lift it.",
             ),
           );
-        const blockedName = (prev && typeof prev === "object" && prev.label) || null;
+        const blockedName =
+          (prev && typeof prev === "object" && prev.label) || null;
         const removed = state.blockedIPs.delete(ip);
         state.botBlacklist.delete(ip);
         blocklist.saveSoon();
@@ -6037,7 +6105,7 @@ function registerSocketHandlers(opts) {
             name: blockedName,
             action: "unban",
             by: socket.staffLabel || null,
-          byRole: socket.isDev ? "dev" : "mod",
+            byRole: socket.isDev ? "dev" : "mod",
           });
         broadcastBlockList();
         broadcastBanHistory();
@@ -6181,7 +6249,10 @@ function registerSocketHandlers(opts) {
           level: granted.level,
         });
         socket.emit("dev mod keys", roles.listModKeys(!!socket.isMainDev));
-        socket.emit("dev former mods", roles.listFormerMods(!!socket.isMainDev));
+        socket.emit(
+          "dev former mods",
+          roles.listFormerMods(!!socket.isMainDev),
+        );
         staffchat.rosterDirty();
       }),
     );
@@ -6196,7 +6267,9 @@ function registerSocketHandlers(opts) {
             "error",
             createErrorResponse(ERROR_CODES.BAD_REQUEST, "hash required."),
           );
-        const reason = String(data?.reason || "").trim().slice(0, 300);
+        const reason = String(data?.reason || "")
+          .trim()
+          .slice(0, 300);
         if (!reason)
           return socket.emit(
             "error",
@@ -6232,7 +6305,10 @@ function registerSocketHandlers(opts) {
         }
         logStaff(socket, "revoke mod", hash.slice(0, 8), "-");
         socket.emit("dev mod keys", roles.listModKeys(!!socket.isMainDev));
-        socket.emit("dev former mods", roles.listFormerMods(!!socket.isMainDev));
+        socket.emit(
+          "dev former mods",
+          roles.listFormerMods(!!socket.isMainDev),
+        );
         staffchat.rosterDirty();
         socket.emit("staff action result", {
           action: "revoke mod",
@@ -6251,7 +6327,10 @@ function registerSocketHandlers(opts) {
           "dev mod keys",
           socket.isDev
             ? keys
-            : keys.map((k) => ({ ...k, hash: String(k.hash || "").slice(0, 8) })),
+            : keys.map((k) => ({
+                ...k,
+                hash: String(k.hash || "").slice(0, 8),
+              })),
         );
         const former = roles.listFormerMods(!!socket.isMainDev);
         socket.emit(
@@ -6429,7 +6508,8 @@ function registerSocketHandlers(opts) {
           offset: data?.offset,
           limit: data?.limit,
           group: typeof data?.group === "string" ? data.group : null,
-          targetUid: typeof data?.targetUid === "string" ? data.targetUid : null,
+          targetUid:
+            typeof data?.targetUid === "string" ? data.targetUid : null,
         });
         socket.emit("staff mod history", {
           ...h,
@@ -6472,7 +6552,8 @@ function registerSocketHandlers(opts) {
           offset: data?.offset,
           limit: data?.limit,
           group: typeof data?.group === "string" ? data.group : null,
-          targetUid: typeof data?.targetUid === "string" ? data.targetUid : null,
+          targetUid:
+            typeof data?.targetUid === "string" ? data.targetUid : null,
         });
         socket.emit("staff mod history", { ...h, canReview: true });
       }),
@@ -6575,7 +6656,9 @@ function registerSocketHandlers(opts) {
         const id = Number(data?.id) || null;
         socket.deskAppealId = id;
         if (!id) return;
-        const row = buildAppealsList(!!socket.isMainDev).find((x) => x.id === id);
+        const row = buildAppealsList(!!socket.isMainDev).find(
+          (x) => x.id === id,
+        );
         if (row) socket.emit("staff appeal", row);
       }),
     );
@@ -6624,7 +6707,10 @@ function registerSocketHandlers(opts) {
         if (!r.ok)
           return socket.emit(
             "error",
-            createErrorResponse(ERROR_CODES.BAD_REQUEST, "Write something first."),
+            createErrorResponse(
+              ERROR_CODES.BAD_REQUEST,
+              "Write something first.",
+            ),
           );
         logStaff(
           socket,
@@ -6668,7 +6754,10 @@ function registerSocketHandlers(opts) {
           "-",
           note || undefined,
         );
-        requeueAppeal(id, `${a.name || "A banned user"}'s appeal was reopened.`);
+        requeueAppeal(
+          id,
+          `${a.name || "A banned user"}'s appeal was reopened.`,
+        );
         broadcastAppealsList();
         broadcastAppeal(id);
       }),
@@ -7069,10 +7158,13 @@ function registerSocketHandlers(opts) {
         text = wordFilter.filterText(text);
         text = linkfilter.redact(text);
         if (text.trim().length < 8) return fail("Please write a little more.");
-        let title = wordFilter.filterText(
-          sanitizeMessage(typeof data?.title === "string" ? data.title : "")
-            .slice(0, 80),
-        ).trim();
+        let title = wordFilter
+          .filterText(
+            sanitizeMessage(
+              typeof data?.title === "string" ? data.title : "",
+            ).slice(0, 80),
+          )
+          .trim();
         if (title.length < 3) return fail("Please add a short title.");
         const kind = data?.kind === "bug" ? "bug" : "idea";
         const r = suggestions.post({
@@ -7356,7 +7448,13 @@ function registerSocketHandlers(opts) {
         const reporter = socket.handshake.session?.username || "A user";
         const catLabel = REPORT_CATEGORIES[category];
         const roleOf = (s) =>
-          s?.isDev ? "dev" : s?.isMod ? ((s.modLevel || 2) >= 2 ? "mod" : "jr") : null;
+          s?.isDev
+            ? "dev"
+            : s?.isMod
+              ? (s.modLevel || 2) >= 2
+                ? "mod"
+                : "jr"
+              : null;
         const targetRole = roleOf(targetSocket);
         const byRole = roleOf(socket);
         const tally = reports.add({
@@ -7418,7 +7516,8 @@ function registerSocketHandlers(opts) {
         if (!socket.deviceId)
           return socket.emit("mod application result", {
             ok: false,
-            error: "This browser can't be identified. Enable storage and retry.",
+            error:
+              "This browser can't be identified. Enable storage and retry.",
           });
         if (socket.isDev || socket.isMod)
           return socket.emit("mod application result", {
@@ -7428,7 +7527,8 @@ function registerSocketHandlers(opts) {
         if (!applications.isOpen())
           return socket.emit("mod application result", {
             ok: false,
-            error: "Moderator applications are closed right now. Please check back later.",
+            error:
+              "Moderator applications are closed right now. Please check back later.",
           });
         if (!identity.isActive(socket.deviceId))
           return socket.emit("mod application result", {
@@ -7767,7 +7867,8 @@ function registerSocketHandlers(opts) {
           targetUserId,
           level: granted.level,
         });
-        if (socket.isDev) socket.emit("dev mod keys", roles.listModKeys(!!socket.isMainDev));
+        if (socket.isDev)
+          socket.emit("dev mod keys", roles.listModKeys(!!socket.isMainDev));
         staffchat.rosterDirty();
       }),
     );
@@ -7798,7 +7899,9 @@ function registerSocketHandlers(opts) {
               "That user is not a moderator.",
             ),
           );
-        const reason = String(data?.reason || "").trim().slice(0, 300);
+        const reason = String(data?.reason || "")
+          .trim()
+          .slice(0, 300);
         if (!reason)
           return socket.emit(
             "error",
@@ -7842,7 +7945,10 @@ function registerSocketHandlers(opts) {
           room || "-",
         );
         socket.emit("dev mod keys", roles.listModKeys(!!socket.isMainDev));
-        socket.emit("dev former mods", roles.listFormerMods(!!socket.isMainDev));
+        socket.emit(
+          "dev former mods",
+          roles.listFormerMods(!!socket.isMainDev),
+        );
         staffchat.rosterDirty();
         socket.emit("staff action result", {
           action: "remove mod",
@@ -8071,7 +8177,8 @@ function startCleanupIntervals() {
       const now = live.get(ip) || 0;
       if (had > now) {
         leaked += had - now;
-        if (!worst || had - now > worst.by) worst = { ip, had, now, by: had - now };
+        if (!worst || had - now > worst.by)
+          worst = { ip, had, now, by: had - now };
       }
       if (!live.has(ip)) state.ipConnections.delete(ip);
     }
@@ -8132,7 +8239,7 @@ function startCleanupIntervals() {
     if (ghostCount > 0) {
       console.log(`Ghost cleanup: removed ${ghostCount} ghost(s)`);
       updateLobby();
-      debouncedSaveRooms().catch(() => { });
+      debouncedSaveRooms().catch(() => {});
     }
   }, 60000);
 
@@ -8142,13 +8249,13 @@ function startCleanupIntervals() {
     const heapMB = Math.round(mem.heapUsed / 1024 / 1024);
     console.log(
       `[STATUS] Clients:${io().sockets.sockets.size} ` +
-      `Rooms:${stats.totalRooms}/${stats.hardCap} ` +
-      `Healthy:${stats.healthyRooms}/${stats.currentLimit} ` +
-      `Solo:${stats.soloRooms} TTL:${stats.currentSoloTTL}s ` +
-      `Users:${stats.totalUsers} Heap:${heapMB}MB ` +
-      `Tokens:${state.botTokens.size} ` +
-      `Devs:${state.devUsers.size} ` +
-      `Boards:${boardState.size}`,
+        `Rooms:${stats.totalRooms}/${stats.hardCap} ` +
+        `Healthy:${stats.healthyRooms}/${stats.currentLimit} ` +
+        `Solo:${stats.soloRooms} TTL:${stats.currentSoloTTL}s ` +
+        `Users:${stats.totalUsers} Heap:${heapMB}MB ` +
+        `Tokens:${state.botTokens.size} ` +
+        `Devs:${state.devUsers.size} ` +
+        `Boards:${boardState.size}`,
     );
     if (heapMB > 400) {
       console.warn(`MEMORY WARNING: ${heapMB}MB heap`);
@@ -8212,7 +8319,7 @@ function purgeAllGhostUsers() {
   if (total > 0) {
     console.log(`Startup purge: removed ${total} ghost(s)`);
     updateLobby();
-    debouncedSaveRooms().catch(() => { });
+    debouncedSaveRooms().catch(() => {});
   } else console.log("Startup purge: no ghosts found");
 }
 
