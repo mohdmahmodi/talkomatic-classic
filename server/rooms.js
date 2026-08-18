@@ -1637,6 +1637,7 @@ function spectatePayload(socket, room) {
     roomName: room.name,
     roomType: room.type,
     layout: room.layout,
+    userId: socket.handshake?.session?.userId || null,
     isDev: !!socket.isDev,
     isMod: !!socket.isMod,
     modLevel: socket.isMod ? socket.modLevel || 2 : 0,
@@ -3216,11 +3217,25 @@ function registerSocketHandlers(opts) {
 
     // ── Talkoboard: stroke lifecycle + state sync ───────────────────────
 
+    const boardViewFor = (viewer) => {
+      const bs = getBoardState(viewer.roomId);
+      const room = state.rooms.get(viewer.roomId);
+      const active = {};
+      for (const [uid, stroke] of bs.active) {
+        const u = room && room.users.find((x) => x.id === uid);
+        if (u && !canRecipientSeeDevUser(viewer, u)) continue;
+        active[uid] = stroke;
+      }
+      return { strokes: bs.strokes, active, claims: boardClaims(bs) };
+    };
+
     socket.on(
       "board open",
       safe(async () => {
         if (!socket.roomId || !socket.handshake.session?.userId) return;
-        if (socket.spectating) return;
+        // Watching staff get the board to look at and nothing else: no claim,
+        // no open flag, and no status going out to the room.
+        if (socket.spectating) return socket.emit("board state", boardViewFor(socket));
         const barred = boardBarredUntil(
           socket.roomId,
           socket.handshake.session.userId,

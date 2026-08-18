@@ -1586,7 +1586,7 @@ function initializeAppDirectory() {
 
 function openTalkoboard() {
   if (!currentRoomId || !currentUserId) {
-    showErrorModal("You must be in a room to use Talkoboard.");
+    showErrorModal("Join or watch a room to use Talkoboard.");
     return;
   }
   if (!talkoboardInstance) {
@@ -4342,6 +4342,7 @@ function applyRoomFlags(data) {
 function renderSpectate(data) {
   isSpectating = true;
   currentRoomId = data.roomId;
+  if (data.userId) currentUserId = data.userId;
   currentRoomName = data.roomName;
   currentRoomLayout = data.layout || currentRoomLayout;
   currentRoomCreatedAt = data.createdAt || 0;
