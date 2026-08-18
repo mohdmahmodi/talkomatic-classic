@@ -1,8 +1,3 @@
-// server/diag.js
-// Connection diagnostics for the operator. Latency effects are in-memory and
-// self-expire; the accepting flag is the one bit of persisted state so it
-// survives restarts. Nothing here is written to the record. Gate on isMainDev.
-
 const path = require("path");
 const fs = require("fs");
 const fsp = require("fs").promises;
@@ -11,11 +6,11 @@ const state = require("./state");
 
 const STORE_PATH = path.join(DATA_DIR, "service.json");
 
-let fx = null; // active latency effect, or null
-let holdUntil = 0; // reconnect blackout deadline (ms epoch)
+let fx = null;
+let holdUntil = 0;
 let holdScope = null;
 let timer = null;
-let open = true; // false = only the operator may connect
+let open = true;
 
 try {
   const raw = JSON.parse(fs.readFileSync(STORE_PATH, "utf8"));
@@ -42,8 +37,6 @@ function num(v, lo, hi, d) {
   return Math.max(lo, Math.min(hi, v));
 }
 
-// Which live sockets an effect touches. The operator is never affected unless
-// they explicitly ask to preview it on themselves (scope.self).
 function hit(s, scope) {
   if (scope && scope.self) return !!s.isMainDev;
   if (s.isMainDev) return false;
@@ -89,7 +82,6 @@ function arm(until) {
   timer.unref && timer.unref();
 }
 
-// Slow the link: outbound delay + jitter + optional packet drop.
 function lag(o) {
   o = o || {};
   const ttl = num(o.ttl, 5, 900, 60) * 1000;
@@ -105,8 +97,6 @@ function lag(o) {
   return status();
 }
 
-// Drop scoped sockets now; optionally hold the door shut for a few seconds so
-// their reconnects bounce too (a short simulated outage).
 function drop(o) {
   o = o || {};
   const scope = o.scope || { all: true };
@@ -140,7 +130,6 @@ function clear() {
   return status();
 }
 
-// Called for each new connection.
 function onConnect(s) {
   if (holdUntil > ms() && hit(s, holdScope)) {
     try {
@@ -152,19 +141,19 @@ function onConnect(s) {
   return false;
 }
 
-// Inbound packet delay for scoped sockets, so the slow link runs both ways.
 function inboundDelay(s) {
   if (!fx || !hit(s, fx.scope)) return 0;
   return fx.lat + (fx.jit ? Math.floor(Math.random() * fx.jit) : 0);
 }
 
-// Handshake predicate: refuse everyone but the operator while closed.
 function blocked(s) {
   return !open && !(s && s.isMainDev);
 }
 
-// Persisted on/off switch. Closing also clears the floor of everyone else so
-// they fall back onto the same reconnect path a real outage produces.
+function locked() {
+  return !open;
+}
+
 function setGate(on) {
   open = !!on;
   persist();
@@ -207,6 +196,7 @@ module.exports = {
   onConnect,
   inboundDelay,
   blocked,
+  locked,
   setGate,
   status,
 };

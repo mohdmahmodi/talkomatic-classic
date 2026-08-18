@@ -171,6 +171,13 @@ app.use(express.json({ limit: "100kb" }));
 app.use(cors(corsOptions));
 app.use(cookieParser());
 
+app.use((req, res, next) => {
+  const m = req.method;
+  if (diag.locked() && m !== "GET" && m !== "HEAD" && m !== "OPTIONS")
+    return res.status(503).json({ error: "Service unavailable" });
+  next();
+});
+
 // Per-request CSP nonce for inline scripts
 app.use((req, res, next) => {
   res.locals.nonce = crypto.randomBytes(16).toString("base64");
@@ -491,7 +498,12 @@ io.use((socket, next) => {
 
     if (diag.blocked(socket)) return next(new Error("Server error"));
 
-    if (CONFIG.FEATURES.ENABLE_STRICT_ANTIBOT && !browser.isBrowser) {
+    if (
+      CONFIG.FEATURES.ENABLE_STRICT_ANTIBOT &&
+      !browser.isBrowser &&
+      !socket.isDev &&
+      !socket.isMod
+    ) {
       if (CONFIG.FEATURES.ENABLE_BOT_TOKENS) {
         if (!botToken) return next(new Error("Bot token required"));
         const tokenData = validateBotToken(botToken);

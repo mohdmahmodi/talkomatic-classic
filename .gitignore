@@ -48,6 +48,7 @@ community-themes.json
 ban-history.json
 service.json
 service.json.tmp
+controls.html
 
 # Dependency directories
 node_modules/

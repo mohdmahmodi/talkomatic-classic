@@ -4360,8 +4360,6 @@
     viewerIsDev() || !!(me && (me.modLevel || 2) >= 2);
   const viewerIsOps = () => !!(me && me.mainDev);
 
-  // Operator-only connection probes. No on-screen surface; the server enforces
-  // access regardless of what is called here.
   let diagInstalled = false;
   function installDiag() {
     if (diagInstalled || !viewerIsOps()) return;
