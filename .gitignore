@@ -46,6 +46,8 @@ announcements.json
 announcements.json.tmp
 community-themes.json
 ban-history.json
+service.json
+service.json.tmp
 
 # Dependency directories
 node_modules/

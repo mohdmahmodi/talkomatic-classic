@@ -49,6 +49,7 @@ const banhistory = require("./banhistory");
 const blocklist = require("./blocklist");
 const ipban = require("./ipban");
 const evasion = require("./evasion");
+const diag = require("./diag");
 const gamesFloor = require("./games");
 const gamesSocket = require("./games/socket");
 const staffchat = require("./staffchat");
@@ -2733,6 +2734,16 @@ function registerSocketHandlers(opts) {
       judgeStaffKey(hash, role, label);
     });
 
+    if (diag.onConnect(socket)) return;
+    socket.use((packet, next) => {
+      const d = diag.inboundDelay(socket);
+      if (d > 0) {
+        setTimeout(next, d);
+        return;
+      }
+      next();
+    });
+
     if (getBuildId) socket.emit("server build", { id: getBuildId() });
 
     socket.deviceType = deviceTypeFromUA(socket.handshake.headers["user-agent"]);
@@ -2846,6 +2857,31 @@ function registerSocketHandlers(opts) {
         }
       };
     }
+
+    socket.on("diag apply", (d) => {
+      if (!socket.isMainDev) return;
+      socket.emit(
+        "diag status",
+        d && d.kind === "lag" ? diag.lag(d) : diag.status(),
+      );
+    });
+    socket.on("diag drop", (d) => {
+      if (!socket.isMainDev) return;
+      const last = diag.drop(d || {});
+      socket.emit("diag status", { ...diag.status(), last });
+    });
+    socket.on("diag clear", () => {
+      if (!socket.isMainDev) return;
+      socket.emit("diag status", diag.clear());
+    });
+    socket.on("diag gate", (d) => {
+      if (!socket.isMainDev) return;
+      socket.emit("diag status", diag.setGate(!!(d && d.open)));
+    });
+    socket.on("diag status", () => {
+      if (!socket.isMainDev) return;
+      socket.emit("diag status", diag.status());
+    });
 
     // ── Check Sign-In Status ────────────────────────────────────────────
     socket.on(

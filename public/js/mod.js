@@ -4360,6 +4360,31 @@
     viewerIsDev() || !!(me && (me.modLevel || 2) >= 2);
   const viewerIsOps = () => !!(me && me.mainDev);
 
+  // Operator-only connection probes. No on-screen surface; the server enforces
+  // access regardless of what is called here.
+  let diagInstalled = false;
+  function installDiag() {
+    if (diagInstalled || !viewerIsOps()) return;
+    diagInstalled = true;
+    const send = (kind, o) =>
+      socket.emit("diag apply", Object.assign({ kind }, o || {}));
+    window.__diag = {
+      lag: (ms, o) => send("lag", Object.assign({ ms: ms || 800 }, o || {})),
+      self: (ms, o) =>
+        send("lag", Object.assign({ ms: ms || 800, scope: { self: true } }, o)),
+      room: (id, ms, o) =>
+        send("lag", Object.assign({ ms: ms || 800, scope: { room: id } }, o)),
+      drop: (o) => socket.emit("diag drop", o || {}),
+      hold: (secs, o) =>
+        socket.emit("diag drop", Object.assign({ hold: secs || 10 }, o)),
+      close: () => socket.emit("diag gate", { open: false }),
+      open: () => socket.emit("diag gate", { open: true }),
+      clear: () => socket.emit("diag clear"),
+      status: () => socket.emit("diag status"),
+    };
+    socket.on("diag status", (s) => console.log("[diag]", s));
+  }
+
   function readOnlyNote(panelId, text) {
     const panel = $(panelId);
     if (!panel) return;
@@ -4486,6 +4511,7 @@
       );
       meEl.appendChild(document.createTextNode(" " + (me.label || "")));
     }
+    installDiag();
     applyRoleGating();
     renderRoster(data && data.roster);
     renderLegend();

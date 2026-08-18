@@ -197,6 +197,11 @@
         clearTimeout(reconnectTimer);
         reconnectTimer = setTimeout(showReconnecting, 1200);
       });
+      socket.on("connect_error", function (err) {
+        if (restarting || (err && err.data && err.data.banned)) return;
+        clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(showReconnecting, 1200);
+      });
       socket.on("connect", function () {
         clearTimeout(reconnectTimer);
         if (rejoinInPlace) return;

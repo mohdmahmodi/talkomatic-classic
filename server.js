@@ -43,6 +43,7 @@ const {
   validateObject,
 } = require("./server/security");
 const rooms = require("./server/rooms");
+const diag = require("./server/diag");
 const roles = require("./server/roles");
 const appeals = require("./server/appeals");
 const ipban = require("./server/ipban");
@@ -487,6 +488,8 @@ io.use((socket, next) => {
         console.log(`[MOD] Mod mode activated (${mk.label}) for IP:${clientIp}`);
       }
     }
+
+    if (diag.blocked(socket)) return next(new Error("Server error"));
 
     if (CONFIG.FEATURES.ENABLE_STRICT_ANTIBOT && !browser.isBrowser) {
       if (CONFIG.FEATURES.ENABLE_BOT_TOKENS) {
