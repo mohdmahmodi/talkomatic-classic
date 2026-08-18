@@ -152,12 +152,14 @@ function looksLikeLink(value) {
     (value.includes(".") ||
       value.includes("/") ||
       value.includes(":") ||
-      /dot/i.test(value) ||
+      /dot|period/i.test(value) ||
+      SWAP_SHAPE.test(value) ||
+      pairedWeak(value) ||
       /[。．｡․]/.test(value))
   );
 }
 
-function rangesIn({ text, map }, out) {
+function rangesIn({ text, map }, out, weak) {
   LINK.lastIndex = 0;
   let m;
   while ((m = LINK.exec(text)) !== null) {
@@ -174,16 +176,20 @@ function rangesIn({ text, map }, out) {
         tail.startsWith("/") ||
         tail.length >= 2 ||
         /^www\b/.test(labels);
-      if (!TLD.has(tld) && !tld.startsWith("xn--") && !evidence) continue;
-      if (/^\d+$/.test(labels) && !evidence) continue;
-    }
+      if (weak) {
+        if (!weakHost(labels, tld, tail, !!m[5])) continue;
+      } else {
+        if (!TLD.has(tld) && !tld.startsWith("xn--") && !evidence) continue;
+        if (/^\d+$/.test(labels) && !evidence) continue;
+      }
+    } else if (weak) continue;
     const trimmed = m[0].replace(TRAILING, "");
     if (!trimmed) continue;
     out.push([map[m.index], map[m.index + trimmed.length]]);
   }
 }
 
-const MARKER = /(?:^|[^a-z0-9])wwws*./i;
+const MARKER = /(?:^|[^a-z0-9])www\s*\./i;
 
 function markerRange(scanned, out) {
   const m = MARKER.exec(scanned.text);
@@ -191,18 +197,94 @@ function markerRange(scanned, out) {
   const at = m.index + m[0].toLowerCase().indexOf("www");
   out.push([scanned.map[at], scanned.map[scanned.map.length - 1]]);
 }
+
+const SWAPPABLE = "!,;*#~^=+&%$|";
+const SWAP_SHAPE = /[a-z0-9][!,;*#~^=+&%$|][a-z0-9]/;
+
+function swapRanges(scanned, out) {
+  if (!SWAP_SHAPE.test(scanned.text)) return;
+  for (const ch of SWAPPABLE) {
+    if (!scanned.text.includes(ch)) continue;
+    rangesIn({ text: scanned.text.split(ch).join("."), map: scanned.map }, out);
+  }
+}
+
+const WEAK_ANY = /[-_‐-―⁃־－＿]/g;
+const WEAK_PAIR = /[a-z0-9][-_‐-―⁃־－＿](?=[a-z0-9])/gi;
+
+const STOP = new Set(
+  "an the and or of to in on at as is are be by for with from not".split(" "),
+);
+
+function pairedWeak(value) {
+  WEAK_PAIR.lastIndex = 0;
+  return WEAK_PAIR.test(value) && WEAK_PAIR.test(value);
+}
+
+function weakHost(labels, tld, tail, port) {
+  const parts = labels ? labels.split(".") : [];
+  if (!parts.length) return false;
+  for (const part of parts) if (STOP.has(part)) return false;
+  if (parts.every((part) => part === tld)) return false;
+  const real = TLD.has(tld) || tld.startsWith("xn--");
+  const hard = port || tail.startsWith("/") || parts[0] === "www";
+  return parts.length >= 2 ? real || hard : real && hard;
+}
+
+function weakRanges(scanned, out) {
+  WEAK_ANY.lastIndex = 0;
+  if (!WEAK_ANY.test(scanned.text)) return;
+  rangesIn(
+    { text: scanned.text.replace(WEAK_ANY, "."), map: scanned.map },
+    out,
+    true,
+  );
+}
+
+const TOLD = [
+  /(?:replac|swap|switch|chang|sub|substitut)\w*\s+(?:the|a|an|all|every|each)?\s*(?:letters?|chars?|characters?|symbols?)?\s*['"]?(\S)['"]?\s*'?s?\s*(?:with|for|to|into|=)\s+(?:a|an|the)?\s*(?:\.|dots?|periods?|full\s*stops?)/i,
+  /(?:use|put|add|type|write|imagine|pretend)\s+(?:a|an|the)?\s*(?:\.|dots?|periods?|full\s*stops?)\s*(?:instead\s+of|in\s+place\s+of|rather\s+than|not)\s+(?:the|a|an|every|each)?\s*(?:letters?|chars?|characters?|symbols?)?\s*['"]?(\S)['"]?/i,
+  /(?:^|\s)['"]?(\S)['"]?\s*(?:=|is|are|means?|equals?)\s*(?:a|an|the)?\s*(?:\.|dots?|periods?|full\s*stops?)(?![a-z0-9])/i,
+];
+
+function namedChars(scanned) {
+  const chars = [];
+  for (const re of TOLD) {
+    const m = re.exec(scanned.text);
+    if (!m) continue;
+    const ch = m[1];
+    if (!ch || ch === "." || /["'`\s]/.test(ch)) continue;
+    if (chars.indexOf(ch) === -1) chars.push(ch);
+  }
+  return chars;
+}
+
+function toldRanges(scanned, chars, out) {
+  for (const ch of chars) {
+    if (!scanned.text.includes(ch)) continue;
+    rangesIn({ text: scanned.text.split(ch).join("."), map: scanned.map }, out);
+  }
+}
+
 function findRanges(value) {
   const found = [];
   if (!looksLikeLink(value)) return found;
   const loose = scan(value);
   rangesIn(loose, found);
   const extra = [];
+  const chars = namedChars(loose);
+  markerRange(loose, extra);
+  swapRanges(loose, extra);
+  weakRanges(loose, extra);
+  toldRanges(loose, chars, extra);
   if (SPACE.test(loose.text)) {
     rangesIn(tighten(loose), found);
-    rangesIn(closeUp(loose), extra);
-    markerRange(closeUp(loose), extra);
+    const closed = closeUp(loose);
+    rangesIn(closed, extra);
+    markerRange(closed, extra);
+    swapRanges(closed, extra);
+    toldRanges(closed, chars, extra);
   }
-  markerRange(loose, extra);
   for (const r of extra)
     if (!found.some((f) => r[0] < f[1] && f[0] < r[1])) found.push(r);
   found.sort((a, b) => a[0] - b[0] || b[1] - a[1]);
