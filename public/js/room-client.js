@@ -3705,6 +3705,20 @@ function openUserStaffMenu(user) {
       desc: "Lock their typing without kicking",
       onClick: () => socket.emit("staff freeze", { targetUserId: user.id }),
     });
+    roles.push({
+      icon: user.silenced
+        ? '<i class="fas fa-volume-high"></i>'
+        : '<i class="fas fa-volume-xmark"></i>',
+      label: user.silenced ? "Let them be heard again" : "Stop them being read",
+      desc: user.silenced
+        ? "Their typing reaches the room again"
+        : "They keep typing, nobody sees a word of it",
+      onClick: () =>
+        socket.emit("staff silence", {
+          targetUserId: user.id,
+          silenced: !user.silenced,
+        }),
+    });
     if (!user.isDev && !user.isMod) roles.push(makeModItem);
     if (user.isMod && !user.isDev) {
       const lvl = user.modLevel || 2;

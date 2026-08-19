@@ -175,6 +175,23 @@ function isPfpBlocked(id) {
   return !!(r && r.noPfp);
 }
 
+function setSilenced(id, on) {
+  if (!validId(id)) return false;
+  const r = rec(id);
+  const next = !!on;
+  if (!!r.mute === next) return false;
+  r.mute = next;
+  r.last = Date.now();
+  saveSoon();
+  return true;
+}
+
+function isSilenced(id) {
+  if (!validId(id)) return false;
+  const r = store[id];
+  return !!(r && r.mute);
+}
+
 function isActive(id) {
   const r = store[id];
   if (!r) return false;
@@ -299,6 +316,8 @@ module.exports = {
   getNote,
   setPfpBlocked,
   isPfpBlocked,
+  setSilenced,
+  isSilenced,
   isActive,
   summary,
   getRecord,

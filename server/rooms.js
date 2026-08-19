@@ -1619,12 +1619,31 @@ function canRecipientSeeDevUser(recipientSocket, user) {
   return canSeeConcealed(recipientSocket, user);
 }
 
+function applySilence(userId) {
+  if (!userId) return false;
+  const sockets = findSocketsByUserId(userId);
+  let on = false;
+  for (const s of sockets)
+    if (s.deviceId && identity.isSilenced(s.deviceId)) {
+      on = true;
+      break;
+    }
+  for (const s of sockets) s.silenced = on;
+  const roomId = getUserCurrentRoom(userId);
+  const room = roomId ? state.rooms.get(roomId) : null;
+  const u = room && room.users.find((x) => x.id === userId);
+  if (u) u.silenced = on;
+  return on;
+}
+
 function visibleToRoom(user) {
   return canRecipientSeeDevUser(null, user);
 }
 
 function socketVisibleToRoom(socket) {
-  return !(socket && socket.isDev && socket.isVanished);
+  if (!socket) return true;
+  if (socket.silenced) return false;
+  return !(socket.isDev && socket.isVanished);
 }
 
 function formatUserForSocket(user, recipientSocket) {
@@ -1652,6 +1671,8 @@ function formatUserForSocket(user, recipientSocket) {
     const note = user.deviceId ? identity.getNote(user.deviceId) : null;
     if (note) formatted.note = note;
   }
+
+  if (user.silenced && recipientSocket?.isDev) formatted.silenced = true;
 
   if (user.isDev) {
     formatted.isDev = true;
@@ -1738,8 +1759,13 @@ function filterCurrentMessagesForSocket(room, recipientSocket) {
   const own = getRecipientUserId(recipientSocket);
   for (const user of room?.users || []) {
     if (!canRecipientSeeDevUser(recipientSocket, user)) continue;
+    const mine = user.id === own;
+    if (user.silenced && !mine) {
+      messages[user.id] = "";
+      continue;
+    }
     const text = state.userMessageBuffers.get(user.id) || "";
-    messages[user.id] = raw || user.id === own ? text : scrubRoomText(text);
+    messages[user.id] = raw || mine ? text : scrubRoomText(text);
   }
   return messages;
 }
@@ -1878,6 +1904,7 @@ function emitRoomTyping(socket, userId, username, isTyping) {
     )
       continue;
     if (!canRecipientSeeDevUser(recipient, senderUser)) continue;
+    if (socket.silenced && getRecipientUserId(recipient) !== userId) continue;
     recipient.emit("user typing", { userId, username, isTyping });
   }
 }
@@ -1901,6 +1928,8 @@ function emitRoomChatUpdate(socket, payload) {
     )
       continue;
     if (!canRecipientSeeDevUser(recipient, senderUser)) continue;
+    if (socket.silenced && getRecipientUserId(recipient) !== payload.userId)
+      continue;
     recipient.emit("chat update", recipient.isMainDev ? payload : safe);
   }
 }
@@ -2004,6 +2033,7 @@ async function saveRooms(force = false) {
             const clean = { ...u };
             delete clean.isVanished;
             delete clean.isMainDev;
+            delete clean.silenced;
             return clean;
           }),
           bannedUserIds: Array.from(room.bannedUserIds || []),
@@ -2572,6 +2602,7 @@ function joinRoom(socket, roomId, userId) {
       modLevel: socket.isMod ? socket.modLevel || 2 : undefined,
       isHidden: !!socket.isHidden,
       isVanished: !!socket.isVanished,
+      silenced: !!(socket.deviceId && identity.isSilenced(socket.deviceId)),
       isBotUser: !!socket.isBot || undefined,
       deviceType: socket.isBot ? "bot" : socket.deviceType || "unknown",
       deviceId: socket.deviceId || null,
@@ -2584,6 +2615,7 @@ function joinRoom(socket, roomId, userId) {
 
     room.lastActiveTime = Date.now();
     socket.roomId = roomId;
+    applySilence(userId);
 
     if (socket.handshake?.sessionID && !socket.isModLog && !isStaff) {
       const sid = socket.handshake.sessionID;
@@ -2860,6 +2892,7 @@ function registerSocketHandlers(opts) {
           socket.handshake?.session?.location,
         );
         socket._idAt = Date.now();
+        applySilence(socket.handshake?.session?.userId);
         socket.emit("identity status", identity.summary(socket.deviceId));
         if (!socket.isDev && !socket.isMod)
           try {
@@ -5795,6 +5828,67 @@ function registerSocketHandlers(opts) {
           ok: true,
           targetUserId,
           frozen,
+        });
+      }),
+    );
+
+    socket.on(
+      "staff silence",
+      safe(async (data) => {
+        if (!requireDev(socket)) return;
+        const targetUserId = data?.targetUserId;
+        if (!targetUserId)
+          return socket.emit(
+            "error",
+            createErrorResponse(
+              ERROR_CODES.BAD_REQUEST,
+              "targetUserId required.",
+            ),
+          );
+        if (!canActOn(socket, targetUserId))
+          return socket.emit(
+            "error",
+            createErrorResponse(
+              ERROR_CODES.FORBIDDEN,
+              "You cannot act on this user.",
+            ),
+          );
+        const targets = findSocketsByUserId(targetUserId);
+        let deviceId = null;
+        for (const s of targets) if (s.deviceId) deviceId = s.deviceId;
+        if (!deviceId) {
+          const lk = reports.lastKnown(targetUserId);
+          deviceId = (lk && lk.deviceId) || null;
+        }
+        if (!deviceId)
+          return socket.emit(
+            "error",
+            createErrorResponse(
+              ERROR_CODES.NOT_FOUND,
+              "No client id on file for this user.",
+            ),
+          );
+        const on =
+          typeof data?.silenced === "boolean"
+            ? data.silenced
+            : !identity.isSilenced(deviceId);
+        identity.setSilenced(deviceId, on);
+        applySilence(targetUserId);
+        const roomId = getUserCurrentRoom(targetUserId);
+        const room = roomId ? state.rooms.get(roomId) : null;
+        const targetUser = room?.users.find((u) => u.id === targetUserId);
+        if (roomId) updateRoom(roomId);
+        logStaff(
+          socket,
+          on ? "silence" : "unsilence",
+          targetUser || { id: targetUserId },
+          room || "-",
+        );
+        socket.emit("staff action result", {
+          action: on ? "silence" : "unsilence",
+          ok: true,
+          targetUserId,
+          silenced: on,
         });
       }),
     );
