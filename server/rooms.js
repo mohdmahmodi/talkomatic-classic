@@ -326,19 +326,25 @@ function claimBlocking(socket, bs, x, y) {
 function sendClaims(roomId) {
   const bs = boardState.get(roomId);
   if (!io() || !bs) return;
-  io()
-    .to(roomId)
-    .emit("board claims", {
-      claims: boardClaims(bs).map((c) => ({
-        owner: c.owner,
-        name: c.name,
-        x: c.x,
-        y: c.y,
-        w: c.w,
-        h: c.h,
-        away: !!c.away,
-      })),
+  const all = boardClaims(bs).map((c) => ({
+    owner: c.owner,
+    name: c.name,
+    x: c.x,
+    y: c.y,
+    w: c.w,
+    h: c.h,
+    away: !!c.away,
+  }));
+  const room = state.rooms.get(roomId);
+  const byId = new Map((room?.users || []).map((u) => [u.id, u]));
+  for (const [, recipient] of io().sockets.sockets) {
+    if (!recipient.connected || recipient.roomId !== roomId) continue;
+    const claims = all.filter((c) => {
+      const owner = byId.get(c.owner);
+      return !owner || canRecipientSeeDevUser(recipient, owner);
     });
+    recipient.emit("board claims", { claims });
+  }
 }
 
 const CLAIM_GRACE_MS = 5 * 60 * 1000;
@@ -1613,6 +1619,14 @@ function canRecipientSeeDevUser(recipientSocket, user) {
   return canSeeConcealed(recipientSocket, user);
 }
 
+function visibleToRoom(user) {
+  return canRecipientSeeDevUser(null, user);
+}
+
+function socketVisibleToRoom(socket) {
+  return !(socket && socket.isDev && socket.isVanished);
+}
+
 function formatUserForSocket(user, recipientSocket) {
   if (!user) return null;
 
@@ -1679,6 +1693,19 @@ function spectatePayload(socket, room) {
     createdAt: createdAt,
     uptime: Date.now() - createdAt,
   };
+}
+
+function votesAgainst(room, targetUserId) {
+  if (!room || !room.votes) return 0;
+  const present = new Set((room.users || []).map((u) => u.id));
+  let n = 0;
+  for (const voterId in room.votes)
+    if (room.votes[voterId] === targetUserId && present.has(voterId)) n++;
+  return n;
+}
+
+function voteThreshold(room) {
+  return Math.floor((room.users || []).length / 2);
 }
 
 function filterVotesForSocket(room, recipientSocket) {
@@ -1807,11 +1834,12 @@ function emitRoomUserLeft(roomId, userId, leftUser) {
     if (!canRecipientSeeDevUser(recipient, leftUser)) continue;
     recipient.emit("user left", userId);
   }
-  try {
-    bots.onLeave(roomId, userId, leftUser);
-  } catch (e) {
-    console.error("bots onLeave error:", e);
-  }
+  if (visibleToRoom(leftUser))
+    try {
+      bots.onLeave(roomId, userId, leftUser);
+    } catch (e) {
+      console.error("bots onLeave error:", e);
+    }
 }
 
 function emitRoomUserJoined(room, joinedUser) {
@@ -1829,11 +1857,12 @@ function emitRoomUserJoined(room, joinedUser) {
       roomType: room.type,
     });
   }
-  try {
-    bots.onJoin(room.id, joinedUser);
-  } catch (e) {
-    console.error("bots onJoin error:", e);
-  }
+  if (visibleToRoom(joinedUser))
+    try {
+      bots.onJoin(room.id, joinedUser);
+    } catch (e) {
+      console.error("bots onJoin error:", e);
+    }
 }
 
 function emitRoomTyping(socket, userId, username, isTyping) {
@@ -1891,7 +1920,8 @@ function emitSubAppEvent(socket, event, payload, includeSender) {
       if (includeSender) recipient.emit(event, payload);
       continue;
     }
-    if (recipient.isDev) recipient.emit(event, payload);
+    if (recipient.isDev && (recipient.isMainDev || !socket.isMainDev))
+      recipient.emit(event, payload);
   }
 }
 
@@ -2031,6 +2061,7 @@ async function loadRooms() {
             );
           }
           item[1].users = [];
+          item[1].votes = {};
           item[1].lastActiveTime = Date.now();
           item[1].bannedUserIds = new Set(
             Array.isArray(item[1].bannedUserIds)
@@ -2289,11 +2320,12 @@ async function processPendingChatUpdates(userId, socket) {
       diff: { type: "full-replace", text: msg },
     });
 
-    try {
-      bots.onText(socket.roomId, userId, username, msg);
-    } catch (e) {
-      console.error("bots onText error:", e);
-    }
+    if (socketVisibleToRoom(socket))
+      try {
+        bots.onText(socket.roomId, userId, username, msg);
+      } catch (e) {
+        console.error("bots onText error:", e);
+      }
 
     setupAFKTimers(socket, userId);
 
@@ -2347,9 +2379,6 @@ async function leaveRoom(socket, userId) {
 
       if (room.votes) {
         delete room.votes[userId];
-        for (const vid in room.votes) {
-          if (room.votes[vid] === userId) delete room.votes[vid];
-        }
         emitRoomVoteUpdates(roomId);
       }
 
@@ -4206,10 +4235,7 @@ function registerSocketHandlers(opts) {
         if (room.votes[userId] === data.targetUserId) delete room.votes[userId];
         else room.votes[userId] = data.targetUserId;
         emitRoomVoteUpdates(roomId);
-        const votesAgainst = Object.values(room.votes).filter(
-          (v) => v === data.targetUserId,
-        ).length;
-        if (votesAgainst > Math.floor(room.users.length / 2)) {
+        if (votesAgainst(room, data.targetUserId) > voteThreshold(room)) {
           const target = findSocketByUserId(data.targetUserId, roomId);
           if (target) {
             target.emit("kicked");

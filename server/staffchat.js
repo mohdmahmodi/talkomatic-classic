@@ -506,7 +506,6 @@ const NEVER_MASK = new Set([
   "targetUserId", "byUserId", "deviceId",
 ]);
 
-// Fields that hold a staff name rather than free text.
 const NAME_FIELDS = new Set([
   "label", "by", "byLabel", "createdBy", "claimedBy", "resolvedBy",
   "deletedBy", "target",

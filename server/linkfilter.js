@@ -122,7 +122,38 @@ const TLD = new Set(
 );
 
 const DOT =
-  "(?:\\.|\\s+\\.\\s+|\\s*[\\[({<]\\s*(?:\\.|dot|d0t)\\s*[\\])}>]\\s*|\\s+dot\\s+)";
+  "(?:\\.|\\s+\\.\\s+|\\s*[\\[({<]\\s*(?:\\.|d[o0]t|period)\\s*[\\])}>]\\s*|\\s+d[o0]t\\s+)";
+const LEET = {
+  "0": ["o"],
+  "1": ["i", "l"],
+  "3": ["e"],
+  "4": ["a"],
+  "5": ["s"],
+  "6": ["g"],
+  "7": ["t"],
+  "8": ["b"],
+  "9": ["g"],
+};
+
+function deLeet(tld) {
+  let out = [""];
+  for (const ch of tld) {
+    const opts = LEET[ch] || [ch];
+    const next = [];
+    for (const pre of out) for (const o of opts) next.push(pre + o);
+    if (next.length > 16) return next.slice(0, 16);
+    out = next;
+  }
+  return out;
+}
+
+function isTld(tld) {
+  if (TLD.has(tld) || tld.startsWith("xn--")) return true;
+  if (!/\d/.test(tld) || !/[a-z]/.test(tld)) return false;
+  for (const alt of deLeet(tld)) if (TLD.has(alt)) return true;
+  return false;
+}
+
 const LABEL = "[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?";
 const SCHEME = "[a-z][a-z0-9+.*-]{1,14}\\s*:\\s*\\/\\s*\\/";
 
@@ -135,7 +166,7 @@ const LINK = new RegExp(
     LABEL +
     "){0,8})" +
     DOT +
-    "([a-z][a-z0-9-]{1,23})" +
+    "((?=[a-z0-9-]*[a-z])[a-z0-9][a-z0-9-]{1,23})" +
     "(:\\d{1,5})?" +
     "([\\/?#][^\\s<>\"']*)?)",
   "gi",
@@ -152,7 +183,7 @@ function looksLikeLink(value) {
     (value.includes(".") ||
       value.includes("/") ||
       value.includes(":") ||
-      /dot|period/i.test(value) ||
+      /d\s*[o0]\s*t|period/i.test(value) ||
       SWAP_SHAPE.test(value) ||
       pairedWeak(value) ||
       /[。．｡․]/.test(value))
@@ -179,7 +210,10 @@ function rangesIn({ text, map }, out, weak) {
       if (weak) {
         if (!weakHost(labels, tld, tail, !!m[5])) continue;
       } else {
-        if (!TLD.has(tld) && !tld.startsWith("xn--") && !evidence) continue;
+        if (/\d/.test(tld)) {
+          if (!isTld(tld)) continue;
+        } else if (!TLD.has(tld) && !tld.startsWith("xn--") && !evidence)
+          continue;
         if (/^\d+$/.test(labels) && !evidence) continue;
       }
     } else if (weak) continue;
@@ -209,6 +243,20 @@ function swapRanges(scanned, out) {
   }
 }
 
+const JUNK = /[|()\[\]{}<>!*#~^=+&%$]/;
+
+function stripJunk(scanned) {
+  let text = "";
+  const map = [];
+  for (let i = 0; i < scanned.text.length; i++) {
+    if (JUNK.test(scanned.text[i])) continue;
+    text += scanned.text[i];
+    map.push(scanned.map[i]);
+  }
+  map.push(scanned.map[scanned.map.length - 1]);
+  return { text, map };
+}
+
 const WEAK_ANY = /[-_‐-―⁃־－＿]/g;
 const WEAK_PAIR = /[a-z0-9][-_‐-―⁃־－＿](?=[a-z0-9])/gi;
 
@@ -226,7 +274,7 @@ function weakHost(labels, tld, tail, port) {
   if (!parts.length) return false;
   for (const part of parts) if (STOP.has(part)) return false;
   if (parts.every((part) => part === tld)) return false;
-  const real = TLD.has(tld) || tld.startsWith("xn--");
+  const real = isTld(tld);
   const hard = port || tail.startsWith("/") || parts[0] === "www";
   return parts.length >= 2 ? real || hard : real && hard;
 }
@@ -277,6 +325,7 @@ function findRanges(value) {
   swapRanges(loose, extra);
   weakRanges(loose, extra);
   toldRanges(loose, chars, extra);
+  if (JUNK.test(loose.text)) rangesIn(stripJunk(loose), extra);
   if (SPACE.test(loose.text)) {
     rangesIn(tighten(loose), found);
     const closed = closeUp(loose);
@@ -284,6 +333,7 @@ function findRanges(value) {
     markerRange(closed, extra);
     swapRanges(closed, extra);
     toldRanges(closed, chars, extra);
+    if (JUNK.test(closed.text)) rangesIn(stripJunk(closed), extra);
   }
   for (const r of extra)
     if (!found.some((f) => r[0] < f[1] && f[0] < r[1])) found.push(r);

@@ -4365,8 +4365,6 @@ function renderSpectate(data) {
   if (!banner) {
     banner = document.createElement("div");
     banner.id = "spectateBanner";
-    // Last child of the flex column, so it takes its own row at the foot of
-    // the page instead of covering the nav the staff button lives in.
     const page = document.querySelector(".page-container");
     (page || document.body).appendChild(banner);
   }
@@ -4671,8 +4669,6 @@ window.addEventListener("hashchange", () => {
     .room-flag.f-locked{background:#e5484d;color:#fff;}
     .room-flag.f-slow{background:#ff9800;color:#3a2c00;}
     #devHud{position:fixed;bottom:12px;left:12px;z-index:100000;background:rgba(10,11,14,.92);border:1px solid #ff9800;border-radius:10px;color:#ffb14d;font-family:monospace;font-size:12px;padding:12px 14px;line-height:1.6;pointer-events:none;white-space:pre;box-shadow:0 8px 30px rgba(0,0,0,.5);}
-    /* A row of the page column, not an overlay: the top nav keeps its buttons
-       and the chat area simply gives up the height. */
     #spectateBanner{flex:0 0 auto;display:flex;align-items:center;gap:10px;
       background:#5c2d91;color:#fff;font-size:13px;padding:6px 10px;
       box-sizing:border-box;border-top:1px solid rgba(255,255,255,.18);}
@@ -4687,7 +4683,6 @@ window.addEventListener("hashchange", () => {
     #spectateBanner .sb-btn:hover{background:#fff;color:#5c2d91;}
     #spectateBanner .sb-leave{border-color:#ffb4b4;color:#ffd8d8;}
     #spectateBanner .sb-leave:hover{background:#e5484d;border-color:#e5484d;color:#fff;}
-    /* The HUD floats bottom-left; lift it clear of the bar when both are up. */
     body:has(#spectateBanner) #devHud{bottom:52px;}
     @media (max-width:600px){
       #spectateBanner{flex-wrap:wrap;gap:6px;}

@@ -147,7 +147,6 @@ function isMainDevActor(label, role) {
   return isMainDevLabel(label);
 }
 
-// What a reader is served: raw fields, and the staff roster.
 function viewFor(socket) {
   return {
     ip: !!(socket && socket.isMainDev),
@@ -188,7 +187,6 @@ function teamLabel(label, role, view) {
   return isDevActor(label, role) ? label : TEAM_LABEL;
 }
 
-// Blocks and bans, where an unattributed action reads as a rule firing.
 function enforcedLabel(label, role, view) {
   if (!label) return label;
   if (view && view.ip) return label;
