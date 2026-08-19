@@ -36,42 +36,61 @@ function isPrivilegedEntry(e) {
   return e.type === "action" && e.role === "dev";
 }
 
-function redactEntry(entry) {
+function isOpsEntry(e) {
+  if (!e || e.type === "comment") return false;
+  return roles.isMainDevActor(e.label, e.role);
+}
+
+function redactEntry(entry, view) {
   const copy = Object.assign({}, entry);
   delete copy.ip;
   delete copy.targetIp;
   for (const f of MASKED_FIELDS)
     if (copy[f] != null) copy[f] = maskIps(copy[f]);
-  if (copy.label && copy.type !== "comment")
-    copy.label = roles.teamLabel(copy.label, copy.role);
+  if (copy.label)
+    copy.label =
+      copy.type === "comment"
+        ? roles.systemLabel(copy.label, copy.role)
+        : roles.teamLabel(copy.label, copy.role, view);
   if (copy.byRole === "mod" || copy.byRole === "dev") {
-    delete copy.by;
-    delete copy.byRole;
+    if (view && view.names) copy.by = roles.systemLabel(copy.by, copy.byRole);
+    else {
+      delete copy.by;
+      delete copy.byRole;
+    }
   }
   return copy;
 }
+
+const DEV_VIEW = { ip: false, names: true };
+const MOD_VIEW = { ip: false, names: false };
 
 function broadcast(entry) {
   try {
     require("./staffchat").pushActivity(entry);
   } catch (_) {}
   if (!io()) return;
-  const masked = redactEntry(entry);
   const privileged = isPrivilegedEntry(entry);
+  const ops = isOpsEntry(entry);
+  let forDev = null;
+  let forMod = null;
   for (const [, s] of io().sockets.sockets) {
     if (!s.auditSub) continue;
     if (s.isMainDev) {
       s.emit("audit entry", entry);
       continue;
     }
-    if (privileged) continue;
+    if (ops) continue;
     if (s.isDev) {
-      s.emit("audit entry", masked);
+      if (!forDev) forDev = redactEntry(entry, DEV_VIEW);
+      s.emit("audit entry", forDev);
       continue;
     }
+    if (privileged) continue;
     if (!s.isMod) continue;
     if (entry.minLevel && (s.modLevel || 2) < entry.minLevel) continue;
-    s.emit("audit entry", masked);
+    if (!forMod) forMod = redactEntry(entry, MOD_VIEW);
+    s.emit("audit entry", forMod);
   }
 }
 
@@ -359,13 +378,18 @@ function recent(limit = 500, opts = {}) {
         baseAction(e.action) === "spectate"
       ),
   );
-  if (!showAll) slice = slice.filter((e) => !isPrivilegedEntry(e));
+  if (!showAll) {
+    slice = slice.filter((e) => !isOpsEntry(e));
+    if (!isDev) slice = slice.filter((e) => !isPrivilegedEntry(e));
+  }
   const visible = isDev
     ? slice
     : slice.filter(
         (e) => !e.devOnly && (!e.minLevel || modLevel >= e.minLevel),
       );
-  return showIp ? visible : visible.map(redactEntry);
+  if (showIp) return visible;
+  const view = isDev ? DEV_VIEW : MOD_VIEW;
+  return visible.map((e) => redactEntry(e, view));
 }
 
 function baseAction(action) {
@@ -1211,7 +1235,7 @@ function lastActiveByLabel() {
   const by = new Map();
   for (const e of entries) {
     if (e.type !== "action" || !e.label) continue;
-    if (isPrivilegedEntry(e)) continue;
+    if (e.devOnly || isOpsEntry(e)) continue;
     by.set((e.role || "mod") + ":" + e.label, e.ts || null);
   }
   return by;
@@ -1262,6 +1286,7 @@ module.exports = {
   remove,
   redactEntry,
   isPrivilegedEntry,
+  isOpsEntry,
   maskIps,
   historyFor,
   lastActiveByLabel,

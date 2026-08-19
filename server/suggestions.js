@@ -278,7 +278,7 @@ function publicList({ deviceId, isDev, isStaff, limit = MAX } = {}) {
         editedAt: s.editedAt || null,
         status: s.status,
         statusBy: isStaff
-          ? s.statusBy
+          ? roles.systemLabel(s.statusBy, s.statusRole)
           : roles.publicStaffName(s.statusBy, s.statusRole),
         statusAt: s.statusAt,
         up,

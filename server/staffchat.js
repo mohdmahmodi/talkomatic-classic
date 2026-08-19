@@ -16,7 +16,6 @@ const CHANNELS = [
   { key: "queues", name: "queues", desc: "Incoming reports, appeals, applications.", access: "l2" },
   { key: "l2", name: "l2", desc: "Bans, blocks, escalations.", access: "l2" },
   { key: "devs", name: "devs", desc: "Keys, promotions, mod abuse.", access: "dev" },
-  { key: "stats", name: "stats", desc: "How yesterday went.", readonly: true },
   {
     key: "activity",
     name: "activity",
@@ -69,12 +68,10 @@ let desk = {
   channels: {},
   threads: [],
   lastRead: {},
-  day: null,
 };
 for (const c of CHANNELS) desk.channels[c.key] = [];
 
 const byId = new Map();
-let visitorSet = new Set();
 let ctx = null;
 let saveTimer = null;
 let presenceTimer = null;
@@ -180,12 +177,6 @@ function load() {
         desk.channels[c.key] = Array.isArray(raw.channels?.[c.key])
           ? raw.channels[c.key]
           : [];
-      if (raw.day && typeof raw.day === "object") {
-        desk.day = raw.day;
-        visitorSet = new Set(
-          Array.isArray(raw.day.visitors) ? raw.day.visitors : [],
-        );
-      }
     }
   } catch (e) {
     if (e.code !== "ENOENT") console.error("staff chat load failed:", e.message);
@@ -252,33 +243,6 @@ function parseQueueCard(m) {
   return null;
 }
 
-function parseStats(m) {
-  const t = String(m.text || "");
-  const at = t.indexOf(": ");
-  if (at === -1) return null;
-  const when = t.slice(0, at);
-  const body = t.slice(at + 2);
-  const num = (re) => {
-    const x = re.exec(body);
-    return x ? Number(x[1]) || 0 : 0;
-  };
-  const visitors = num(
-    /(\d+)\s+(?:person|people)\s+(?:stopped by|used Talkomatic)/,
-  );
-  const rooms = num(/(\d+)\s+rooms?\s+(?:opened|created)/);
-  if (!visitors && !rooms) return null;
-  return {
-    when,
-    visitors,
-    rooms,
-    peak: num(/(\d+)\s+online at once/),
-    actions: num(/(\d+)\s+(?:staff|moderator) actions?/),
-    reports: num(/(\d+)\s+reports?/),
-    pings: num(/(\d+)\s+calls?\s+for backup/),
-    strokes: 0,
-  };
-}
-
 function dropSettledCards() {
   const list = desk.channels.queues || [];
   const kept = list.filter((m) => !(m && m.done));
@@ -297,13 +261,6 @@ function backfillCards() {
     m.card = sanitizeCard(m.qkind, c);
     changed++;
   }
-  for (const m of desk.channels.stats || []) {
-    if (!m || m.stats || m.kind !== "system") continue;
-    const s = parseStats(m);
-    if (!s) continue;
-    m.stats = s;
-    changed++;
-  }
   if (changed) scheduleSave();
   return changed;
 }
@@ -316,7 +273,7 @@ function threadSummary(t, showIp) {
   return {
     id: t.id,
     title: showIp ? t.title : maskIps(t.title),
-    createdBy: t.createdBy,
+    createdBy: showIp ? t.createdBy : veil(t.createdBy),
     createdAt: t.createdAt,
     lastTs: t.lastTs,
     archived: isArchived(t),
@@ -347,7 +304,12 @@ function staffDirectory() {
   } catch (_) {}
   if (io())
     for (const [, s] of io().sockets.sockets)
-      if (s.connected && isStaff(s) && s.staffLabel)
+      if (
+        s.connected &&
+        isStaff(s) &&
+        s.staffLabel &&
+        !isVeiled(s.staffLabel, s.isDev ? "dev" : "mod")
+      )
         add(s.staffLabel, s.isDev ? "dev" : "mod", s.isDev ? 0 : s.modLevel || 2);
   return [...by.values()];
 }
@@ -431,7 +393,9 @@ function outbound(msg, socket) {
       e: r.e,
       n: r.by.length,
       me: r.by.includes(mine),
-      who: r.by.map((k) => k.slice(k.indexOf(":") + 1)),
+      who: r.by.map((k) =>
+        socket.isMainDev ? k.slice(k.indexOf(":") + 1) : veil(k.slice(k.indexOf(":") + 1)),
+      ),
     }));
   }
   return copy;
@@ -496,7 +460,6 @@ function system(key, text, extra) {
 }
 
 function systemQueues(qkind, text, opts) {
-  if (qkind === "report") noteEvent("report");
   const card = opts && opts.card ? sanitizeCard(qkind, opts.card) : null;
   return system("queues", text, {
     qkind: qkind || "notice",
@@ -543,11 +506,45 @@ const NEVER_MASK = new Set([
   "targetUserId", "byUserId", "deviceId",
 ]);
 
+// Fields that hold a staff name rather than free text.
+const NAME_FIELDS = new Set([
+  "label", "by", "byLabel", "createdBy", "claimedBy", "resolvedBy",
+  "deletedBy", "target",
+]);
+
+function veil(label, role) {
+  try {
+    return ctx.roles.systemLabel(label, role);
+  } catch (_) {
+    return label;
+  }
+}
+
+function isOps(user) {
+  try {
+    return !!ctx.isOpsUser(user);
+  } catch (_) {
+    return false;
+  }
+}
+
+function isVeiled(label, role) {
+  try {
+    return ctx.roles.isMainDevActor(label, role);
+  } catch (_) {
+    return false;
+  }
+}
+
 function maskDeep(value, field) {
-  if (typeof value === "string")
-    return NEVER_MASK.has(field) ? value : maskIps(value);
+  if (typeof value === "string") {
+    if (NEVER_MASK.has(field)) return value;
+    return maskIps(NAME_FIELDS.has(field) ? veil(value) : value);
+  }
   if (Array.isArray(value)) return value.map((v) => maskDeep(v, field));
   if (value && typeof value === "object") {
+    if (field === "author" && isVeiled(value.label, value.role))
+      return { label: veil(value.label), role: "dev", level: 0, alias: null, avatar: null };
     const out = {};
     for (const k in value) out[k] = maskDeep(value[k], k);
     return out;
@@ -610,115 +607,6 @@ function pruneQueues() {
   for (const [, s] of io().sockets.sockets)
     if (s.connected && s.deskHello && canRead(s, "queues"))
       s.emit("desk drop", { key: "queues", ids: gone });
-}
-
-// ── The daily tally ─────────────────────────────────────────────────────────
-const VISITOR_CAP = 5000;
-
-function freshDay(start) {
-  return {
-    start,
-    visitors: [],
-    rooms: 0,
-    reports: 0,
-    pings: 0,
-    actions: 0,
-    peak: 0,
-    boardStrokes: 0,
-  };
-}
-
-function dayStart(now) {
-  try {
-    const s = ctx && ctx.audit && ctx.audit.startOfPacificDay(now);
-    if (s) return s;
-  } catch (_) { }
-  return Math.floor(now / 86400000) * 86400000;
-}
-
-function ensureDay(now) {
-  const start = dayStart(now || Date.now());
-  if (!desk.day) {
-    desk.day = freshDay(start);
-    visitorSet = new Set();
-    return;
-  }
-  if (desk.day.start === start) return;
-  const finished = desk.day;
-  desk.day = freshDay(start);
-  visitorSet = new Set();
-  postDailyStats(finished);
-}
-
-function noteEvent(kind, id) {
-  ensureDay();
-  const d = desk.day;
-  if (kind === "visitor") {
-    if (!id || visitorSet.has(id)) return;
-    visitorSet.add(id);
-    if (d.visitors.length < VISITOR_CAP) d.visitors.push(id);
-    scheduleSave();
-    return;
-  }
-  if (kind === "room") d.rooms++;
-  else if (kind === "report") d.reports++;
-  else if (kind === "ping") d.pings++;
-  else if (kind === "action") d.actions++;
-  else if (kind === "stroke") d.boardStrokes++;
-  else return;
-  scheduleSave();
-}
-
-const plural = (n, one, many) => n + " " + (n === 1 ? one : many || one + "s");
-
-function postDailyStats(d) {
-  if (!d) return;
-  const visitors = visitorSet.size || d.visitors.length;
-  if (!visitors && !d.rooms && !d.actions) return;
-  const when = new Date(d.start).toLocaleDateString(undefined, {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-  });
-  const bits = [
-    plural(visitors, "person", "people") + " used Talkomatic",
-    plural(d.rooms, "room") + " created",
-  ];
-  if (d.peak) bits.push(d.peak + " online at once at the busiest");
-  if (d.actions) bits.push(plural(d.actions, "moderator action"));
-  if (d.reports) bits.push(plural(d.reports, "report") + " filed");
-  if (d.pings) bits.push(plural(d.pings, "call") + " for backup");
-  const msg = pushMessage("stats", {
-    ts: Date.now(),
-    kind: "system",
-    author: null,
-    qkind: "stats",
-    text: when + ": " + bits.join(", ") + ".",
-    stats: {
-      day: d.start,
-      when,
-      visitors,
-      rooms: d.rooms || 0,
-      peak: d.peak || 0,
-      actions: d.actions || 0,
-      reports: d.reports || 0,
-      pings: d.pings || 0,
-      strokes: d.boardStrokes || 0,
-    },
-  });
-  if (msg) broadcast("stats", msg);
-}
-
-function samplePeak() {
-  if (!io()) return;
-  ensureDay();
-  let n = 0;
-  for (const [, s] of io().sockets.sockets)
-    if (s.connected && !s.isModLog && s.handshake?.session?.userId) n++;
-  if (n > desk.day.peak) {
-    desk.day.peak = n;
-    scheduleSave();
-  }
 }
 
 // ── Rate limiting ───────────────────────────────────────────────────────────
@@ -791,7 +679,9 @@ function rosterFor(socket) {
         locations: [],
       });
     }
-    for (const d of socket.isMainDev ? ctx.roles.listDevKeys() : []) {
+    for (const d of socket.isDev
+      ? ctx.roles.listDevKeys(!!socket.isMainDev)
+      : []) {
       const key = "dev:" + d.label;
       if (online.has(key)) continue;
       out.push({
@@ -823,15 +713,13 @@ function buildPresence(recipient) {
   for (const [, s] of io().sockets.sockets) {
     if (!s.connected || !isStaff(s)) continue;
     if (s.isVanished && !recipient.isDev) continue;
-    // Where a developer is, and that they are here at all, is theirs and
-    // site operations' to know. It carries into the room rows below, which
-    // are built from this same pass.
-    if (
-      s.isDev &&
-      !recipient.isMainDev &&
-      s.staffLabel !== recipient.staffLabel
-    )
-      continue;
+    // Where a developer is, and that they are here at all, stays inside the
+    // dev roster. It carries into the room rows below, which are built from
+    // this same pass.
+    if (s.isDev && s.staffLabel !== recipient.staffLabel) {
+      if (!recipient.isDev) continue;
+      if (!recipient.isMainDev && isVeiled(s.staffLabel, "dev")) continue;
+    }
     const w = who(s);
     const k = idKeyOf(w);
     let row = staff.get(k);
@@ -875,9 +763,11 @@ function buildPresence(recipient) {
   const rooms = [];
   for (const [id, room] of ctx.state.rooms) {
     const users = room.users || [];
-    const visible = recipient.isDev
-      ? users.length
-      : users.filter((u) => !u.isVanished).length;
+    const visible = users.filter(
+      (u) =>
+        !u.isVanished ||
+        (recipient.isDev && (recipient.isMainDev || !isOps(u))),
+    ).length;
     rooms.push({
       id,
       name: room.name,
@@ -935,7 +825,6 @@ function onRoomText(socket, roomId, text) {
     .filter((u) => u.isDev || u.isMod)
     .map((u) => u.username);
 
-  noteEvent("ping");
   const msg = pushMessage("help", {
     ts: now,
     kind: "ping",
@@ -1037,7 +926,7 @@ function virtualHistory(key, socket) {
     if (key === "bans") {
       if (!ctx || !ctx.banHistory) return [];
       return ctx
-        .banHistory(!!socket.isMainDev)
+        .banHistory(ctx.roles.viewFor(socket))
         .slice(0, VIRTUAL_LIMIT)
         .map(banRow)
         .reverse();
@@ -1055,17 +944,24 @@ function virtualHistory(key, socket) {
   return [];
 }
 
+const DEV_VIEW = { ip: false, names: true };
+const MOD_VIEW = { ip: false, names: false };
+
 function pushActivity(entry) {
   if (!io() || !entry) return;
   const privileged =
     ctx && ctx.audit ? ctx.audit.isPrivilegedEntry(entry) : !!entry.devOnly;
+  const ops = ctx && ctx.audit ? ctx.audit.isOpsEntry(entry) : false;
   for (const [, s] of io().sockets.sockets) {
     if (!s.connected || !isStaff(s) || !canRead(s, "activity")) continue;
-    if (privileged && !s.isMainDev) continue;
+    if (!s.isMainDev && ops) continue;
+    if (privileged && !s.isDev) continue;
     if (entry.minLevel && !s.isDev && (s.modLevel || 2) < entry.minLevel)
       continue;
     const shown =
-      s.isMainDev || !ctx || !ctx.audit ? entry : ctx.audit.redactEntry(entry);
+      s.isMainDev || !ctx || !ctx.audit
+        ? entry
+        : ctx.audit.redactEntry(entry, s.isDev ? DEV_VIEW : MOD_VIEW);
     s.emit("desk message", { key: "activity", msg: activityRow(shown) });
   }
 }
@@ -1083,7 +979,7 @@ function pushBans() {
   if (!io() || !ctx || !ctx.banHistory) return;
   for (const [, s] of io().sockets.sockets) {
     if (!s.connected || !isStaff(s) || !canRead(s, "bans")) continue;
-    const list = ctx.banHistory(!!s.isMainDev);
+    const list = ctx.banHistory(ctx.roles.viewFor(s));
     if (!list.length) continue;
     s.emit("desk message", { key: "bans", msg: banRow(list[0]) });
   }
@@ -1105,11 +1001,6 @@ function pushAnnounce(item) {
 function init(context) {
   ctx = context;
   setInterval(presenceDirty, 25000).unref();
-  ensureDay();
-  setInterval(() => {
-    ensureDay();
-    samplePeak();
-  }, 60000).unref();
   pruneQueues();
   setInterval(pruneQueues, 60 * 60 * 1000).unref();
 }
@@ -1256,7 +1147,7 @@ function register(socket, safe) {
         s.emit("desk mention", {
           key,
           id: msg.id,
-          by: w.label,
+          by: s.isMainDev ? w.label : veil(w.label, w.role),
           group: named.groups[0] || null,
         });
       }
@@ -1497,7 +1388,7 @@ function register(socket, safe) {
             s.emit("desk ping update", {
               id: ref.msg.id,
               status: "claimed",
-              by: w.label,
+              by: s.isMainDev ? w.label : veil(w.label, w.role),
             });
     }),
   );
@@ -1512,7 +1403,9 @@ function register(socket, safe) {
       const w = who(socket);
       if (p.status === "claimed" && p.claimedBy !== w.label && !socket.isDev)
         return socket.emit("desk error", {
-          message: p.claimedBy + " claimed this one.",
+          message:
+            (socket.isMainDev ? p.claimedBy : veil(p.claimedBy)) +
+            " claimed this one.",
         });
       p.status = "resolved";
       p.resolvedBy = w.label;
@@ -1532,7 +1425,11 @@ function register(socket, safe) {
       if (!room)
         return socket.emit("desk room info", { roomId, gone: true });
       const users = (room.users || [])
-        .filter((u) => socket.isDev || !u.isVanished)
+        .filter(
+          (u) =>
+            !u.isVanished ||
+            (socket.isDev && (socket.isMainDev || !isOps(u))),
+        )
         .map((u) => ({
           ...ctx.formatUserForSocket(u, socket),
           location: u.location || "",
@@ -1569,7 +1466,11 @@ function register(socket, safe) {
               key,
               title: (socket.isMainDev ? title : maskIps(title)) || null,
               ts: m.ts,
-              author: m.author ? m.author.label : null,
+              author: m.author
+                ? socket.isMainDev
+                  ? m.author.label
+                  : veil(m.author.label, m.author.role)
+                : null,
               text: (socket.isMainDev ? m.text : maskIps(m.text)).slice(0, 200),
             });
         }
@@ -1594,7 +1495,6 @@ module.exports = {
   dropActivity,
   pushBans,
   pushAnnounce,
-  noteEvent,
   presenceDirty,
   rosterDirty,
   settleQueue,

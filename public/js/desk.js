@@ -2005,7 +2005,6 @@
     application: "fa-file-signature",
     suggestion: "fa-lightbulb",
     abuse: "fa-triangle-exclamation",
-    stats: "fa-chart-simple",
   };
   const QNAME = {
     report: "Report",
@@ -2013,7 +2012,6 @@
     application: "Mod application",
     suggestion: "Suggestion",
     abuse: "Worth a look",
-    stats: "Daily summary",
   };
 
   const isDev = () => !!me && me.role === "dev";
@@ -2352,78 +2350,6 @@
       const acts = queueActions(kind, c, m);
       if (acts && acts.childNodes.length) r.appendChild(acts);
     }
-    return r;
-  }
-
-  // ── The daily summary ─────────────────────────────────────────────────────
-  function statsCard(m) {
-    const s = m.stats || {};
-    const r = el("div", "dk-st");
-    r.dataset.id = m.id;
-
-    const head = el("div", "dk-st-h");
-    head.appendChild(icon("fa-chart-simple"));
-    head.appendChild(el("span", "dk-st-day", s.when || "Yesterday"));
-    const t = el("span", "dk-q-t", clockTime(m.ts));
-    t.title = new Date(m.ts).toLocaleString();
-    head.appendChild(t);
-    r.appendChild(head);
-    r.appendChild(
-      el("div", "dk-st-sub", "That whole day, midnight to midnight."),
-    );
-
-    const grid = el("div", "dk-st-g");
-    const tile = (n, label, hint, fa, cls) => {
-      const c = el("div", "dk-st-c" + (cls ? " " + cls : ""));
-      const top = el("div", "dk-st-n");
-      top.appendChild(icon(fa));
-      top.appendChild(el("span", null, String(n)));
-      c.appendChild(top);
-      c.appendChild(el("div", "dk-st-l", label));
-      c.appendChild(el("div", "dk-st-s", hint));
-      grid.appendChild(c);
-    };
-    const p = (n, one, many) => (n === 1 ? one : many);
-    tile(
-      s.visitors || 0,
-      p(s.visitors, "person used Talkomatic", "people used Talkomatic"),
-      "counted once each, however many times they came back",
-      "fa-users",
-      "lead",
-    );
-    tile(
-      s.peak || 0,
-      "online at the same time",
-      "the most at any one moment, not a total",
-      "fa-signal",
-    );
-    tile(
-      s.rooms || 0,
-      p(s.rooms, "room created", "rooms created"),
-      "new rooms opened that day",
-      "fa-door-open",
-    );
-    tile(
-      s.actions || 0,
-      p(s.actions, "moderator action", "moderator actions"),
-      "kicks, bans, warnings and the rest, across the team",
-      "fa-gavel",
-    );
-    tile(
-      s.reports || 0,
-      p(s.reports, "report filed", "reports filed"),
-      "sent in by people in rooms",
-      "fa-flag",
-      s.reports ? "warn" : "",
-    );
-    tile(
-      s.pings || 0,
-      p(s.pings, "call for backup", "calls for backup"),
-      "staff asking the team for a hand",
-      "fa-hand",
-      s.pings ? "warn" : "",
-    );
-    r.appendChild(grid);
     return r;
   }
 
@@ -2862,7 +2788,6 @@
     if (m.kind === "announce") return announceRow(m);
     if (m.kind === "ping") return pingCard(m);
     if (m.kind === "system") {
-      if (m.stats) return statsCard(m);
       if (m.card) return queueCard(m);
       const r = el("div", "dk-sys" + (m.qkind ? " card q-" + m.qkind : ""));
       r.dataset.id = m.id;
@@ -4325,7 +4250,6 @@
         ],
         ["#l2", "Bans, blocks and escalations. Full mods and devs."],
         ["#devs", "Keys, promotions, abuse flags. Developers only."],
-        ["#stats", "How each day went, written by the server at midnight."],
         ["#guide", "This page. Point anybody at it by writing its name."],
       ],
     },
@@ -4850,11 +4774,6 @@
     {
       words: ["hide", "hidden", "flair", "badge", "incognito"],
       say: "Hiding your flair hides you from users, never from the team. You still show here, marked HIDDEN, and you can be disliked in rooms while you are passing as a normal user.",
-      cmds: [],
-    },
-    {
-      words: ["stats", "numbers", "yesterday", "daily", "how many"],
-      say: "#stats gets a short summary of each day from the server: how many people came by, how many rooms opened, how busy it got.",
       cmds: [],
     },
   ];
@@ -5559,8 +5478,6 @@
 .dk-an-prev pre code{background:none;padding:0;}
 .dk-an-prev blockquote{margin:0 0 8px;padding-left:11px;border-left:3px solid #ff9800;
   color: #9a9a9a;}
-.dk-sys.q-stats .fas{color: #ff9800;}
-.dk-sys.q-stats{font-size:13px;color: #fff;}
 
 /* ── Queue cards ──
    A tray of things to do, so each one is a card with its own buttons rather
@@ -5610,35 +5527,6 @@
 .dk-q-done{display:flex;align-items:center;gap:6px;font-size:11.5px;color: #57d9a3;
   border-top:1px dashed #333;padding-top:7px;}
 .dk-q-done .fas{font-size:10px;}
-
-/* ── The daily summary ── */
-.dk-st{margin-top:10px;background: #1b1b1b;border:1px solid #3a3126;
-  border-radius:6px;padding:11px 13px;display:flex;flex-direction:column;gap:10px;
-  /* The card measures itself, not the window: the panel can be dragged down to
-     560px with both rails open, and the grid below has to answer to that. */
-  container-type:inline-size;}
-.dk-st-h{display:flex;align-items:center;gap:8px;}
-.dk-st-h .fas{color: #ff9800;font-size:12px;}
-.dk-st-day{font-size:13.5px;font-weight:bold;color: #ff9800;letter-spacing:.2px;flex:1;min-width:0;}
-/* Six numbers, three across, two down. auto-fit put five on one line and left
-   the sixth on a row of its own, which read like an afterthought. Three is
-   fixed rather than fitted, so the shape is the same every day. */
-.dk-st-g{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;}
-/* Below this a third tile is thinner than the words in it, so it drops to two
-   and then to one rather than shredding every label. A phone lands here. */
-@container (max-width:380px){.dk-st-g{grid-template-columns:repeat(2,minmax(0,1fr));}}
-@container (max-width:250px){.dk-st-g{grid-template-columns:minmax(0,1fr);}}
-.dk-st-c{background: #141414;border:1px solid #2a2a2a;border-radius:5px;padding:8px 10px;min-width:0;}
-.dk-st-c.lead{border-color:rgba(255,152,0,.35);}
-.dk-st-n{display:flex;align-items:center;gap:6px;font-size:17px;font-weight:bold;color: #fff;
-  font-variant-numeric:tabular-nums;line-height:1.2;}
-.dk-st-n .fas{font-size:11px;color: #6f6f6f;}
-.dk-st-c.lead .dk-st-n{color: #ff9800;}
-.dk-st-c.lead .dk-st-n .fas{color: #ff9800;}
-.dk-st-c.warn .dk-st-n{color: #ffb454;}
-.dk-st-l{font-size:11px;color: #c3c3c3;margin-top:3px;line-height:1.3;}
-.dk-st-s{font-size:10px;color: #8d8d8d;margin-top:2px;line-height:1.35;}
-.dk-st-sub{font-size:11px;color: #8d8d8d;margin-top:-2px;}
 
 /* ── One appeal, as a conversation ──
    Theirs on the left, staff on the right. Same thread the banned user is
@@ -6036,9 +5924,6 @@ button.dk-chan:focus-visible,button.dk-thread:focus-visible,.dk-minib:focus-visi
   .dk-msg.tools .dk-rx-add{display:inline-flex;}
   /* 16px inputs, or iOS zooms the whole page every time the composer opens. */
   .dk-input,.dk-editbox{font-size:16px;}
-  /* Two across on a phone. The card's own container query says the same, so
-     this is only here for a browser that does not do container queries. */
-  .dk-st-g{grid-template-columns:repeat(2,minmax(0,1fr));}
 }
 @media (prefers-reduced-motion:reduce){
   .dk-pill.nudge,.dk-pill.urgent,.dk-ping-badge,.dk-msg.flash,.dk-sys.flash,.dk-ping.flash{animation:none !important;}

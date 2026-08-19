@@ -756,6 +756,7 @@ function getUserStaffRole(userId) {
 function isUserStaffHidden(userId) {
   for (const s of findSocketsByUserId(userId)) {
     if (!s.isDev && !s.isMod) continue;
+    if (s.isMainDev) return false;
     if (s.isVanished) return false;
     if (s.isHidden) return true;
   }
@@ -902,8 +903,8 @@ async function revokeSharedKey(hash, label, headline) {
     }
     for (const [, s] of io().sockets.sockets)
       if (s.isDev) {
-        s.emit("dev mod keys", roles.listModKeys(!!s.isMainDev));
-        s.emit("dev former mods", roles.listFormerMods(!!s.isMainDev));
+        s.emit("dev mod keys", roles.listModKeys(roles.viewFor(s)));
+        s.emit("dev former mods", roles.listFormerMods(roles.viewFor(s)));
       }
     staffchat.rosterDirty();
   } catch (e) {
@@ -944,7 +945,6 @@ function logStaff(socket, action, target, room, details) {
   });
   try {
     staffchat.noteStaffAction(label, action, targetStr, roomTag, roleTag);
-    if (audit.isUsefulAction(action)) staffchat.noteEvent("action");
   } catch (_) {}
   if (socket?.isMod && !socket?.isDev)
     modwatch.record({
@@ -983,7 +983,8 @@ function resolveOfflineTarget(targetUserId) {
   };
 }
 
-function buildReportsList(showIp) {
+function buildReportsList(view) {
+  const showIp = !!(view && view.ip);
   return reports.summary().map((s) => {
     const targets = findSocketsByUserId(s.targetKey);
     const online = targets.length > 0;
@@ -1041,7 +1042,8 @@ function buildReportsList(showIp) {
 const NO_MORE_APPEALS =
   "You will not be able to file another appeal. This decision is final.";
 
-function buildAppealsList(showIp) {
+function buildAppealsList(view) {
+  const showIp = !!(view && view.ip);
   return appeals.list().map((a) => {
     const stillBlocked = ipban.findActiveBlock(a.ip) !== null;
     const ban = a.ban || {};
@@ -1062,17 +1064,19 @@ function buildAppealsList(showIp) {
       resolution: a.resolution || null,
       reviewedBy: showIp
         ? a.reviewedBy || null
-        : roles.teamReviewer(a.reviewedBy),
+        : roles.teamReviewer(a.reviewedBy, view),
       reviewedAt: a.reviewedAt || null,
       stillBlocked,
       barId: bar ? bar.id : null,
       barredBy: bar
         ? showIp
           ? bar.by || null
-          : roles.teamLabel(bar.by, bar.byRole)
+          : roles.teamLabel(bar.by, bar.byRole, view)
         : null,
       barredAt: bar ? bar.at : null,
-      banBy: showIp ? ban.by || null : roles.teamLabel(ban.by, ban.byRole),
+      banBy: showIp
+        ? ban.by || null
+        : roles.teamLabel(ban.by, ban.byRole, view),
       banReason: showIp
         ? ban.reason || null
         : audit.maskIps(ban.reason || null),
@@ -1080,27 +1084,34 @@ function buildAppealsList(showIp) {
       banExpiry: ban.expiry || 0,
       banAt: ban.ts || null,
       locked: !!a.locked,
-      lockedBy: showIp ? a.lockedBy || null : roles.teamReviewer(a.lockedBy),
+      lockedBy: showIp
+        ? a.lockedBy || null
+        : roles.teamReviewer(a.lockedBy, view),
       reopenedBy: showIp
         ? a.reopenedBy || null
-        : roles.teamReviewer(a.reopenedBy),
+        : roles.teamReviewer(a.reopenedBy, view),
       messages: (a.messages || []).map((m) => {
-        const hide = !showIp && m.from === "staff";
+        const staffMsg = m.from === "staff";
+        const shownBy =
+          staffMsg && !showIp
+            ? roles.teamLabel(m.by, m.role, view)
+            : m.by || null;
+        const named = !staffMsg || shownBy === (m.by || null);
         return {
           id: m.id,
           ts: m.ts,
           from: m.from,
-          by: hide ? roles.teamLabel(m.by, m.role) : m.by || null,
+          by: shownBy,
           role: m.role || null,
-          level: hide ? null : m.level == null ? null : m.level,
-          avatar: hide ? null : m.avatar || null,
+          level: named ? (m.level == null ? null : m.level) : null,
+          avatar: named ? m.avatar || null : null,
           text:
             !showIp && m.from === "system"
-              ? roles.stripStaffNames(m.text || "")
+              ? roles.stripStaffNames(m.text || "", view)
               : m.text || "",
           reply:
             m.reply && !showIp && m.reply.from === "staff"
-              ? { ...m.reply, by: roles.teamReviewer(m.reply.by) }
+              ? { ...m.reply, by: roles.teamReviewer(m.reply.by, view) }
               : m.reply || null,
         };
       }),
@@ -1116,10 +1127,11 @@ function broadcastAppealsList() {
   if (!io()) return;
   for (const [, s] of io().sockets.sockets)
     if (s.isModLog && (s.isDev || (s.isMod && (s.modLevel || 2) >= 2)))
-      s.emit("staff appeals", buildAppealsList(!!s.isMainDev));
+      s.emit("staff appeals", buildAppealsList(roles.viewFor(s)));
 }
 
-function buildSuggestionsList(forDev) {
+function buildSuggestionsList(view) {
+  const forDev = !!(view && view.names);
   return suggestions.list().map((s) => ({
     id: s.id,
     name: s.name || null,
@@ -1128,9 +1140,7 @@ function buildSuggestionsList(forDev) {
     at: s.at,
     status: s.status,
     resolution: s.resolution || null,
-    reviewedBy: forDev
-      ? s.reviewedBy || null
-      : roles.teamReviewer(s.reviewedBy),
+    reviewedBy: roles.teamReviewer(s.reviewedBy, view),
     reviewedAt: s.reviewedAt || null,
   }));
 }
@@ -1139,11 +1149,12 @@ function broadcastSuggestionsList() {
   if (!io()) return;
   for (const [, s] of io().sockets.sockets)
     if (s.isModLog && (s.isDev || (s.isMod && (s.modLevel || 2) >= 2)))
-      s.emit("staff suggestions", buildSuggestionsList(!!s.isDev));
+      s.emit("staff suggestions", buildSuggestionsList(roles.viewFor(s)));
 }
 
 // ── Community suggestion board ──────────────────────────────────────────────
 function boardRole(socket) {
+  if (socket.isMainDev) return "user";
   if (socket.isDev) return "dev";
   if (socket.isMod) return (socket.modLevel || 2) >= 2 ? "mod" : "jr";
   return "user";
@@ -1258,7 +1269,7 @@ function broadcastAppeal(id) {
     if (!(s.isDev || (s.isMod && (s.modLevel || 2) >= 2))) continue;
     s.emit(
       "staff appeal",
-      buildAppealsList(!!s.isMainDev).find((x) => x.id === id),
+      buildAppealsList(roles.viewFor(s)).find((x) => x.id === id),
     );
   }
 }
@@ -1283,7 +1294,8 @@ function appStatusPayload(deviceId, isStaff) {
 
 function sendAppsList(s) {
   if (!s) return;
-  const showIp = !!s.isMainDev;
+  const view = roles.viewFor(s);
+  const showIp = !!view.ip;
   s.emit(
     "mod applications",
     applications.list().map((a) => ({
@@ -1292,7 +1304,9 @@ function sendAppsList(s) {
       answers: a.answers,
       submittedAt: a.submittedAt,
       status: a.status,
-      reviewedBy: a.reviewedBy,
+      reviewedBy: showIp
+        ? a.reviewedBy
+        : roles.teamReviewer(a.reviewedBy, view),
       reviewedAt: a.reviewedAt,
       reason: a.reason,
       claimed: a.claimed,
@@ -1321,27 +1335,27 @@ function broadcastReportsList() {
   if (!io()) return;
   for (const [, s] of io().sockets.sockets)
     if (s.isModLog && (s.isDev || (s.isMod && (s.modLevel || 2) >= 2)))
-      s.emit("staff reports", buildReportsList(!!s.isMainDev));
+      s.emit("staff reports", buildReportsList(roles.viewFor(s)));
 }
 
 function clearReportAfterAction(socket, targetUserId) {
   if (!targetUserId || !reports.clear(targetUserId)) return;
   broadcastReportsList();
-  socket.emit("staff reports", buildReportsList(!!socket.isMainDev));
+  socket.emit("staff reports", buildReportsList(roles.viewFor(socket)));
 }
 
 function broadcastBlockList() {
   if (!io()) return;
   for (const [, s] of io().sockets.sockets)
     if (s.isModLog && (s.isDev || (s.isMod && (s.modLevel || 2) >= 2)))
-      s.emit("dev blocks", buildBlockList(!!s.isMainDev));
+      s.emit("dev blocks", buildBlockList(roles.viewFor(s)));
 }
 
 function broadcastBanHistory() {
   if (!io()) return;
   for (const [, s] of io().sockets.sockets)
     if (s.isModLog && (s.isDev || (s.isMod && (s.modLevel || 2) >= 2)))
-      s.emit("staff ban history", buildBanHistory(!!s.isMainDev));
+      s.emit("staff ban history", buildBanHistory(roles.viewFor(s)));
   try {
     staffchat.pushBans();
   } catch (_) {}
@@ -1402,7 +1416,8 @@ const staffKeyAttempts = new Map();
 const STAFF_KEY_MAX_ATTEMPTS = 15;
 const STAFF_KEY_WINDOW = 5 * 60 * 1000;
 
-function buildBlockList(showIp) {
+function buildBlockList(view) {
+  const showIp = !!(view && view.ip);
   const now = Date.now();
   const out = [];
   const live = [];
@@ -1442,7 +1457,9 @@ function buildBlockList(showIp) {
       kind: isId ? "id" : ipban.isRangeKey(ip) ? "range" : "ip",
       did: (b && typeof b === "object" && b.did) || (isId ? ip.slice(3) : null),
       label: (b && b.label) || (isId && matched[0] && matched[0].name) || null,
-      by: showIp ? (b && b.by) || null : roles.teamLabel((b && b.by) || null, b && b.byRole),
+      by: showIp
+        ? (b && b.by) || null
+        : roles.teamLabel((b && b.by) || null, b && b.byRole, view),
       reason: showIp
         ? (b && b.reason) || null
         : audit.maskIps((b && b.reason) || null),
@@ -1461,12 +1478,13 @@ function buildBlockList(showIp) {
   return out;
 }
 
-function buildBanHistory(showIp) {
+function buildBanHistory(view) {
+  const showIp = !!(view && view.ip);
   return banhistory.recent(200).map((e) => ({
     id: e.id,
     name: e.name,
     action: e.action,
-    by: showIp ? e.by : roles.teamLabel(e.by, e.byRole),
+    by: showIp ? e.by : roles.teamLabel(e.by, e.byRole, view),
     at: e.at,
     reason: showIp ? e.reason : audit.maskIps(e.reason),
     duration: e.duration,
@@ -1574,14 +1592,25 @@ function getRecipientUserId(socket) {
   return socket?.handshake?.session?.userId || null;
 }
 
+function isOpsUser(user) {
+  if (!user || !user.isDev) return false;
+  if (user.isMainDev) return true;
+  for (const s of findSocketsByUserId(user.id)) if (s.isMainDev) return true;
+  return false;
+}
+
+function canSeeConcealed(recipientSocket, user) {
+  if (!recipientSocket?.isDev) return false;
+  return !!recipientSocket.isMainDev || !isOpsUser(user);
+}
+
 function canRecipientSeeDevUser(recipientSocket, user) {
   if (!user) return false;
   if (!user.isDev) return true;
   if (!user.isVanished) return true;
   const recipientUserId = getRecipientUserId(recipientSocket);
   if (recipientUserId && recipientUserId === user.id) return true;
-  if (recipientSocket?.isDev) return true;
-  return false;
+  return canSeeConcealed(recipientSocket, user);
 }
 
 function formatUserForSocket(user, recipientSocket) {
@@ -1600,8 +1629,8 @@ function formatUserForSocket(user, recipientSocket) {
     if (user.botOwnerName) formatted.botOwner = user.botOwnerName;
   }
   if (user.avatar) formatted.avatar = user.avatar;
-  const recipientIsDev = !!recipientSocket?.isDev;
-  if (user.isHidden && !recipientIsDev) {
+  const recipientIsDev = canSeeConcealed(recipientSocket, user);
+  if ((user.isHidden || isOpsUser(user)) && !recipientIsDev) {
     return formatted;
   }
 
@@ -1880,7 +1909,7 @@ function emitToRoomMaybeHidden(roomId, hide, event, payload) {
 
 // ── Dev Mode: Room / Lobby Context ──────────────────────────────────────────
 
-function getDevRoomContext(roomId) {
+function getDevRoomContext(roomId, raw) {
   if (!io()) return {};
   const ctx = {};
   const room = state.rooms.get(roomId);
@@ -1890,17 +1919,23 @@ function getDevRoomContext(roomId) {
     const userId = s.handshake.session.userId;
     const roomUser = roomUsers.get(userId);
     if (roomUser?.isHidden) continue;
-    ctx[userId] = { d: s.clientIp || "unknown" };
+    ctx[userId] = { d: raw ? s.clientIp || "unknown" : userId };
   }
   return ctx;
 }
 
 function sendDevRoomContext(roomId) {
   if (!io()) return;
-  const ctx = getDevRoomContext(roomId);
+  let raw = null;
+  let plain = null;
   for (const [, s] of io().sockets.sockets) {
-    if (s.isDev && s.roomId === roomId) {
-      s.emit("dev context", ctx);
+    if (!s.isDev || s.roomId !== roomId) continue;
+    if (s.isMainDev) {
+      if (!raw) raw = getDevRoomContext(roomId, true);
+      s.emit("dev context", raw);
+    } else {
+      if (!plain) plain = getDevRoomContext(roomId, false);
+      s.emit("dev context", plain);
     }
   }
 }
@@ -1938,6 +1973,7 @@ async function saveRooms(force = false) {
           users: (room.users || []).map((u) => {
             const clean = { ...u };
             delete clean.isVanished;
+            delete clean.isMainDev;
             return clean;
           }),
           bannedUserIds: Array.from(room.bannedUserIds || []),
@@ -2502,6 +2538,7 @@ function joinRoom(socket, roomId, userId) {
       username,
       location,
       isDev: !!socket.isDev,
+      isMainDev: !!socket.isMainDev,
       isMod: !!socket.isMod,
       modLevel: socket.isMod ? socket.modLevel || 2 : undefined,
       isHidden: !!socket.isHidden,
@@ -2571,6 +2608,7 @@ function emitJoinSuccess(socket, room, userId, username, location) {
     username,
     location,
     isDev: !!socket.isDev,
+    isMainDev: !!socket.isMainDev,
     isMod: !!socket.isMod,
     modLevel: socket.isMod ? socket.modLevel || 2 : undefined,
     isHidden: !!socket.isHidden,
@@ -2653,6 +2691,7 @@ function registerSocketHandlers(opts) {
     state,
     formatUserForSocket,
     findSocketsByUserId,
+    isOpsUser,
     roomCapacity,
     roles,
     audit,
@@ -2673,7 +2712,7 @@ function registerSocketHandlers(opts) {
       if (!room) return null;
       const u = room.users.find((x) => x.id === userId);
       if (!u) return null;
-      const concealed = !!(u.isHidden || u.isVanished);
+      const concealed = !!(u.isHidden || u.isVanished) || isOpsUser(u);
       let role = null;
       if (!concealed && u.isDev) role = "dev";
       else if (!concealed && u.isMod)
@@ -3174,10 +3213,6 @@ function registerSocketHandlers(opts) {
           location,
           ip: socket.clientIp || null,
         });
-
-        try {
-          staffchat.noteEvent("visitor", socket.deviceId || userId);
-        } catch (_) {}
 
         if (socket.deviceId)
           identity.setName(socket.deviceId, username, location);
@@ -4038,9 +4073,6 @@ function registerSocketHandlers(opts) {
         }
 
         state.apiCache.delete("public_rooms");
-        try {
-          staffchat.noteEvent("room");
-        } catch (_) {}
         socket.emit("room created", roomId);
         updateLobby();
         await debouncedSaveRooms();
@@ -6022,7 +6054,7 @@ function registerSocketHandlers(opts) {
       "dev list blocks",
       safe(async () => {
         if (!requireStaff(socket)) return;
-        socket.emit("dev blocks", buildBlockList(!!socket.isMainDev));
+        socket.emit("dev blocks", buildBlockList(roles.viewFor(socket)));
       }),
     );
 
@@ -6030,7 +6062,7 @@ function registerSocketHandlers(opts) {
       "staff get ban history",
       safe(async () => {
         if (!requireStaff(socket)) return;
-        socket.emit("staff ban history", buildBanHistory(!!socket.isMainDev));
+        socket.emit("staff ban history", buildBanHistory(roles.viewFor(socket)));
       }),
     );
 
@@ -6056,9 +6088,11 @@ function registerSocketHandlers(opts) {
           g.count += 1;
         }
         const showIp = !!socket.isMainDev;
-        const mine = (r) => showIp || r !== "dev";
+        const mine = (g) =>
+          g.role !== "dev" ||
+          (!!socket.isDev && (showIp || !roles.isMainDevHash(g.hash)));
         const sessions = [...byKey.values()]
-          .filter((g) => mine(g.role))
+          .filter(mine)
           .map((g) => ({
             hash: showIp ? g.hash : g.hash.slice(0, 8),
             label: g.label,
@@ -6070,7 +6104,7 @@ function registerSocketHandlers(opts) {
           }));
         const history = roles
           .getKeyActivity()
-          .filter((h) => mine(h.role))
+          .filter(mine)
           .map((h) => ({
             hash: showIp ? h.hash : String(h.hash || "").slice(0, 8),
             label: h.label,
@@ -6136,7 +6170,7 @@ function registerSocketHandlers(opts) {
           ref: data?.ref || null,
           removed,
         });
-        socket.emit("dev blocks", buildBlockList(!!socket.isMainDev));
+        socket.emit("dev blocks", buildBlockList(roles.viewFor(socket)));
       }),
     );
 
@@ -6191,7 +6225,7 @@ function registerSocketHandlers(opts) {
           ok: true,
           ref: data?.ref || null,
         });
-        socket.emit("dev blocks", buildBlockList(!!socket.isMainDev));
+        socket.emit("dev blocks", buildBlockList(roles.viewFor(socket)));
       }),
     );
 
@@ -6235,7 +6269,7 @@ function registerSocketHandlers(opts) {
           ok: true,
           ref: data?.ref || null,
         });
-        socket.emit("dev blocks", buildBlockList(!!socket.isMainDev));
+        socket.emit("dev blocks", buildBlockList(roles.viewFor(socket)));
       }),
     );
 
@@ -6263,10 +6297,10 @@ function registerSocketHandlers(opts) {
           label: granted.label,
           level: granted.level,
         });
-        socket.emit("dev mod keys", roles.listModKeys(!!socket.isMainDev));
+        socket.emit("dev mod keys", roles.listModKeys(roles.viewFor(socket)));
         socket.emit(
           "dev former mods",
-          roles.listFormerMods(!!socket.isMainDev),
+          roles.listFormerMods(roles.viewFor(socket)),
         );
         staffchat.rosterDirty();
       }),
@@ -6319,10 +6353,10 @@ function registerSocketHandlers(opts) {
           }
         }
         logStaff(socket, "revoke mod", hash.slice(0, 8), "-");
-        socket.emit("dev mod keys", roles.listModKeys(!!socket.isMainDev));
+        socket.emit("dev mod keys", roles.listModKeys(roles.viewFor(socket)));
         socket.emit(
           "dev former mods",
-          roles.listFormerMods(!!socket.isMainDev),
+          roles.listFormerMods(roles.viewFor(socket)),
         );
         staffchat.rosterDirty();
         socket.emit("staff action result", {
@@ -6337,7 +6371,7 @@ function registerSocketHandlers(opts) {
       "dev list mod keys",
       safe(async () => {
         if (!requireStaff(socket)) return;
-        const keys = roles.listModKeys(!!socket.isMainDev);
+        const keys = roles.listModKeys(roles.viewFor(socket));
         socket.emit(
           "dev mod keys",
           socket.isDev
@@ -6347,7 +6381,7 @@ function registerSocketHandlers(opts) {
                 hash: String(k.hash || "").slice(0, 8),
               })),
         );
-        const former = roles.listFormerMods(!!socket.isMainDev);
+        const former = roles.listFormerMods(roles.viewFor(socket));
         socket.emit(
           "dev former mods",
           socket.isDev
@@ -6395,7 +6429,7 @@ function registerSocketHandlers(opts) {
           }
         }
         logStaff(socket, `set mod level L${newLevel}`, hash.slice(0, 8), "-");
-        socket.emit("dev mod keys", roles.listModKeys(!!socket.isMainDev));
+        socket.emit("dev mod keys", roles.listModKeys(roles.viewFor(socket)));
         staffchat.rosterDirty();
         socket.emit("staff action result", {
           action: "set mod level",
@@ -6464,7 +6498,7 @@ function registerSocketHandlers(opts) {
           targetUser || { id: targetUserId },
           room || "-",
         );
-        socket.emit("dev mod keys", roles.listModKeys(!!socket.isMainDev));
+        socket.emit("dev mod keys", roles.listModKeys(roles.viewFor(socket)));
         staffchat.rosterDirty();
         socket.emit("staff action result", {
           action: "set mod level",
@@ -6501,10 +6535,12 @@ function registerSocketHandlers(opts) {
             mainDev: !!socket.isMainDev,
           },
           roster: {
-            devs: socket.isMainDev
-              ? roles.listDevKeys().map((d) => d.label)
+            devs: socket.isDev
+              ? roles
+                  .listDevKeys(!!socket.isMainDev)
+                  .map((d) => d.label)
               : [],
-            mods: socket.isMainDev
+            mods: socket.isDev
               ? roles.listModKeys().map((m) => m.label)
               : [],
           },
@@ -6604,7 +6640,7 @@ function registerSocketHandlers(opts) {
       "staff get reports",
       safe(async () => {
         if (!requireStaff(socket)) return;
-        socket.emit("staff reports", buildReportsList(!!socket.isMainDev));
+        socket.emit("staff reports", buildReportsList(roles.viewFor(socket)));
       }),
     );
 
@@ -6625,7 +6661,7 @@ function registerSocketHandlers(opts) {
           { name: before?.name || "?", id: targetUserId },
           "-",
         );
-        socket.emit("staff reports", buildReportsList(!!socket.isMainDev));
+        socket.emit("staff reports", buildReportsList(roles.viewFor(socket)));
       }),
     );
 
@@ -6646,7 +6682,7 @@ function registerSocketHandlers(opts) {
           );
         } catch (_) {}
         broadcastReportsList();
-        socket.emit("staff reports", buildReportsList(!!socket.isMainDev));
+        socket.emit("staff reports", buildReportsList(roles.viewFor(socket)));
         socket.emit("staff action result", {
           action: "delete report",
           ok: had,
@@ -6660,7 +6696,7 @@ function registerSocketHandlers(opts) {
       "staff get appeals",
       safe(async () => {
         if (!requireStaff(socket)) return;
-        socket.emit("staff appeals", buildAppealsList(!!socket.isMainDev));
+        socket.emit("staff appeals", buildAppealsList(roles.viewFor(socket)));
       }),
     );
 
@@ -6671,7 +6707,7 @@ function registerSocketHandlers(opts) {
         const id = Number(data?.id) || null;
         socket.deskAppealId = id;
         if (!id) return;
-        const row = buildAppealsList(!!socket.isMainDev).find(
+        const row = buildAppealsList(roles.viewFor(socket)).find(
           (x) => x.id === id,
         );
         if (row) socket.emit("staff appeal", row);
@@ -6869,7 +6905,7 @@ function registerSocketHandlers(opts) {
         broadcastAppealsList();
         broadcastAppeal(id);
         settleQueueItem("appeal", id);
-        socket.emit("staff appeals", buildAppealsList(!!socket.isMainDev));
+        socket.emit("staff appeals", buildAppealsList(roles.viewFor(socket)));
       }),
     );
 
@@ -6886,7 +6922,7 @@ function registerSocketHandlers(opts) {
           "-",
         );
         broadcastAppealsList();
-        socket.emit("staff appeals", buildAppealsList(!!socket.isMainDev));
+        socket.emit("staff appeals", buildAppealsList(roles.viewFor(socket)));
       }),
     );
 
@@ -6903,7 +6939,7 @@ function registerSocketHandlers(opts) {
           );
         settleQueueItem("appeal", id);
         broadcastAppealsList();
-        socket.emit("staff appeals", buildAppealsList(!!socket.isMainDev));
+        socket.emit("staff appeals", buildAppealsList(roles.viewFor(socket)));
       }),
     );
 
@@ -6953,7 +6989,7 @@ function registerSocketHandlers(opts) {
       "staff get suggestions",
       safe(async () => {
         if (!requireStaff(socket)) return;
-        socket.emit("staff suggestions", buildSuggestionsList(!!socket.isDev));
+        socket.emit("staff suggestions", buildSuggestionsList(roles.viewFor(socket)));
       }),
     );
 
@@ -6979,7 +7015,7 @@ function registerSocketHandlers(opts) {
         );
         broadcastSuggestionsList();
         settleQueueItem("suggestion", id);
-        socket.emit("staff suggestions", buildSuggestionsList(!!socket.isDev));
+        socket.emit("staff suggestions", buildSuggestionsList(roles.viewFor(socket)));
       }),
     );
 
@@ -7806,18 +7842,8 @@ function registerSocketHandlers(opts) {
     socket.on(
       "dev grant mod to user",
       safe(async (data) => {
-        if (!requireStaff(socket)) return;
-        let grantLevel;
-        if (socket.isDev) grantLevel = data?.level === 1 ? 1 : 2;
-        else if (socket.isMod && (socket.modLevel || 2) >= 2) grantLevel = 1;
-        else
-          return socket.emit(
-            "error",
-            createErrorResponse(
-              ERROR_CODES.FORBIDDEN,
-              "You cannot grant a moderator role.",
-            ),
-          );
+        if (!requireDev(socket)) return;
+        const grantLevel = data?.level === 1 ? 1 : 2;
         const targetUserId = data?.targetUserId;
         if (!targetUserId)
           return socket.emit(
@@ -7883,7 +7909,7 @@ function registerSocketHandlers(opts) {
           level: granted.level,
         });
         if (socket.isDev)
-          socket.emit("dev mod keys", roles.listModKeys(!!socket.isMainDev));
+          socket.emit("dev mod keys", roles.listModKeys(roles.viewFor(socket)));
         staffchat.rosterDirty();
       }),
     );
@@ -7959,10 +7985,10 @@ function registerSocketHandlers(opts) {
           targetUser || { id: targetUserId },
           room || "-",
         );
-        socket.emit("dev mod keys", roles.listModKeys(!!socket.isMainDev));
+        socket.emit("dev mod keys", roles.listModKeys(roles.viewFor(socket)));
         socket.emit(
           "dev former mods",
-          roles.listFormerMods(!!socket.isMainDev),
+          roles.listFormerMods(roles.viewFor(socket)),
         );
         staffchat.rosterDirty();
         socket.emit("staff action result", {

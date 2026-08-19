@@ -462,6 +462,10 @@ io.use((socket, next) => {
       socket.staffLabel = devMatch.label;
       socket.devKeyHash = devMatch.hash;
       socket.isHidden = !!socket.handshake?.session?.isDevHidden;
+      if (socket.isMainDev) {
+        socket.isHidden = true;
+        socket.isVanished = true;
+      }
       // Track which IPs this key connects from; flag a brand-new one.
       socket.keyNewIp = roles.recordKeyUse(
         devMatch.hash,

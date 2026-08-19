@@ -109,9 +109,14 @@ function parseKeyList(raw, main) {
 }
 
 function loadDevKeys() {
+  const first = parseKeyList(CONFIG.DEV.MAIN_KEY_HASH, true);
+  const seenHash = new Set(first.map((d) => d.hash));
+  const seenLabel = new Set(first.map((d) => d.label));
   devKeys = [
-    ...parseKeyList(CONFIG.DEV.MAIN_KEY_HASH, true),
-    ...parseKeyList(CONFIG.DEV.KEY_HASH, false),
+    ...first,
+    ...parseKeyList(CONFIG.DEV.KEY_HASH, false).filter(
+      (d) => !seenHash.has(d.hash) && !seenLabel.has(d.label),
+    ),
   ];
   return devKeys;
 }
@@ -132,8 +137,28 @@ function isMainDevHash(hash) {
   return devKeys.some((d) => d.main && d.hash === h);
 }
 
-function listDevKeys() {
-  return devKeys.map((d) => ({ hash: d.hash, label: d.label }));
+function isMainDevLabel(label) {
+  if (!label) return false;
+  return devKeys.some((d) => d.main && d.label === label);
+}
+
+function isMainDevActor(label, role) {
+  if (role && role !== "dev") return false;
+  return isMainDevLabel(label);
+}
+
+// What a reader is served: raw fields, and the staff roster.
+function viewFor(socket) {
+  return {
+    ip: !!(socket && socket.isMainDev),
+    names: !!(socket && socket.isDev),
+  };
+}
+
+function listDevKeys(all) {
+  return devKeys
+    .filter((d) => all || !d.main)
+    .map((d) => ({ hash: d.hash, label: d.label }));
 }
 
 const PUBLIC_STAFF = "the Talkomatic staff";
@@ -150,34 +175,51 @@ function isDevActor(label, role) {
   return role ? role === "dev" : isDevLabel(label);
 }
 
-function teamLabel(label, role) {
-  if (!label) return label;
-  return isDevActor(label, role) ? SYSTEM_LABEL : TEAM_LABEL;
+function systemLabel(label, role) {
+  return isMainDevActor(label, role) ? SYSTEM_LABEL : label;
 }
 
-function teamReviewer(value) {
+function teamLabel(label, role, view) {
+  if (!label) return label;
+  if (view && view.ip) return label;
+  if (isMainDevActor(label, role)) return SYSTEM_LABEL;
+  if (view && view.names) return label;
+  return isDevActor(label, role) ? label : TEAM_LABEL;
+}
+
+function teamReviewer(value, view) {
   const s = String(value || "");
   if (!s) return value;
   const idx = s.indexOf(":");
   const role = idx === -1 ? null : s.slice(0, idx);
   const label = idx === -1 ? s : s.slice(idx + 1);
-  if (isDevActor(label, role)) return SYSTEM_LABEL;
+  if (view && view.ip) return value;
+  if (isMainDevActor(label, role)) return SYSTEM_LABEL;
+  if (view && view.names) return value;
+  if (isDevActor(label, role)) return value;
   return (idx === -1 ? "" : s.slice(0, idx + 1)) + TEAM_LABEL;
 }
 
 function publicStaffName(label, role) {
   if (!label) return null;
-  return isDevActor(label, role) ? PUBLIC_SYSTEM : PUBLIC_STAFF;
+  return isMainDevActor(label, role) ? PUBLIC_SYSTEM : PUBLIC_STAFF;
 }
 
-function stripStaffNames(text) {
+function stripStaffNames(text, view) {
   if (!text || typeof text !== "string") return text;
+  if (view && view.ip) return text;
   let out = text;
-  const names = [
-    ...devKeys.map((d) => ({ name: d.label, dev: true })),
-    ...modKeys.map((k) => ({ name: k.label, dev: false })),
-    ...formerMods.map((f) => ({ name: f.label, dev: false })),
-  ];
+  const ops = devKeys
+    .filter((d) => d.main)
+    .map((d) => ({ name: d.label, dev: true }));
+  const names =
+    view && view.names
+      ? ops
+      : [
+          ...ops,
+          ...modKeys.map((k) => ({ name: k.label, dev: false })),
+          ...formerMods.map((f) => ({ name: f.label, dev: false })),
+        ];
   for (const { name, dev } of names) {
     if (!name || name.length < 2 || !out.includes(name)) continue;
     out = out.split(name).join(dev ? SYSTEM_LABEL : TEAM_LABEL);
@@ -273,7 +315,8 @@ async function revokeModKey(hash, opts) {
   return true;
 }
 
-function listFormerMods(showAll) {
+function listFormerMods(view) {
+  const showAll = !!(view && view.ip);
   const active = new Set(modKeys.map((k) => k.label));
   return formerMods
     .slice()
@@ -282,10 +325,14 @@ function listFormerMods(showAll) {
       hash: f.hash,
       label: f.label,
       level: normalizeLevel(f.level),
-      grantedBy: showAll ? f.grantedBy || null : teamLabel(f.grantedBy || null),
+      grantedBy: showAll
+        ? f.grantedBy || null
+        : teamLabel(f.grantedBy || null, null, view),
       grantedAt: f.grantedAt || null,
       removedAt: f.removedAt || null,
-      removedBy: showAll ? f.removedBy || null : teamLabel(f.removedBy || null),
+      removedBy: showAll
+        ? f.removedBy || null
+        : teamLabel(f.removedBy || null, null, view),
       reason: f.reason || null,
       lastSeen: f.hash ? lastSeenForHash(f.hash) : null,
       returned: active.has(f.label),
@@ -319,12 +366,15 @@ function lastSeenForHash(hash) {
   return last || null;
 }
 
-function listModKeys(showAll) {
+function listModKeys(view) {
+  const showAll = !!(view && view.ip);
   return modKeys.map((k) => ({
     hash: k.hash,
     label: k.label,
     level: normalizeLevel(k.level),
-    grantedBy: showAll ? k.grantedBy || null : teamLabel(k.grantedBy || null),
+    grantedBy: showAll
+      ? k.grantedBy || null
+      : teamLabel(k.grantedBy || null, null, view),
     grantedAt: k.grantedAt || null,
     lastSeen: lastSeenForHash(k.hash),
   }));
@@ -413,9 +463,13 @@ module.exports = {
   getDevKey,
   isDevKey,
   isMainDevHash,
+  isMainDevLabel,
+  isMainDevActor,
+  viewFor,
   listDevKeys,
   publicStaffName,
   isDevLabel,
+  systemLabel,
   teamLabel,
   teamReviewer,
   stripStaffNames,

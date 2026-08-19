@@ -4438,7 +4438,7 @@
     );
     readOnlyNote(
       "tab-bans",
-      "Read-only for junior mods. Placing and lifting blocks are full-mod actions, and a permanent block can only be lifted by a developer. Addresses are only ever shown to developers.",
+      "Read-only for junior mods. Placing and lifting blocks are full-mod actions, and a permanent block can only be lifted by a developer. Addresses are read by site operations.",
     );
     readOnlyNote(
       "tab-mods",
@@ -4446,7 +4446,7 @@
     );
     readOnlyNote(
       "tab-sessions",
-      "Addresses here belong to other staff, so only developers see them. You see how many networks each key is live on.",
+      "Addresses here belong to other staff, so they are read by site operations. You see how many networks each key is live on.",
     );
 
     renderApplicationsToggle();

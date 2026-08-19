@@ -3660,54 +3660,40 @@ function openUserStaffMenu(user) {
 
   const makeModItem = {
     icon: '<i class="fas fa-user-shield"></i>',
-    label: currentUserIsDev ? "Make this user a mod..." : "Make junior mod",
-    desc: currentUserIsDev
-      ? "Promote - choose a level"
-      : "Grant a junior (level 1) mod key",
+    label: "Make this user a mod...",
+    desc: "Promote - choose a level",
     onClick: async () => {
-      if (currentUserIsDev) {
-        StaffUI.menu({
-          title: `Make ${name} a mod`,
-          icon: '<i class="fas fa-user-shield"></i>',
-          subtitle: "Choose a level",
-          groups: [
-            {
-              items: [
-                {
-                  icon: '<i class="fas fa-user-shield"></i>',
-                  label: "Junior mod (L1)",
-                  desc: "Kick, warn, rename, wipe - no ban or IP block",
-                  onClick: () =>
-                    socket.emit("dev grant mod to user", {
-                      targetUserId: user.id,
-                      level: 1,
-                    }),
-                },
-                {
-                  icon: '<i class="fas fa-user-gear"></i>',
-                  label: "Full mod (L2)",
-                  desc: "All mod powers, including ban and IP block",
-                  onClick: () =>
-                    socket.emit("dev grant mod to user", {
-                      targetUserId: user.id,
-                      level: 2,
-                    }),
-                },
-              ],
-            },
-          ],
-        });
-      } else if (
-        await StaffUI.confirm({
-          title: "Make junior mod",
-          message: `Grant ${name} a junior (level 1) mod key? They can moderate immediately.`,
-          confirmText: "Make junior mod",
-        })
-      )
-        socket.emit("dev grant mod to user", {
-          targetUserId: user.id,
-          level: 1,
-        });
+      StaffUI.menu({
+        title: `Make ${name} a mod`,
+        icon: '<i class="fas fa-user-shield"></i>',
+        subtitle: "Choose a level",
+        groups: [
+          {
+            items: [
+              {
+                icon: '<i class="fas fa-user-shield"></i>',
+                label: "Junior mod (L1)",
+                desc: "Kick, warn, rename, wipe - no ban or IP block",
+                onClick: () =>
+                  socket.emit("dev grant mod to user", {
+                    targetUserId: user.id,
+                    level: 1,
+                  }),
+              },
+              {
+                icon: '<i class="fas fa-user-gear"></i>',
+                label: "Full mod (L2)",
+                desc: "All mod powers, including ban and IP block",
+                onClick: () =>
+                  socket.emit("dev grant mod to user", {
+                    targetUserId: user.id,
+                    level: 2,
+                  }),
+              },
+            ],
+          },
+        ],
+      });
     },
   };
 
@@ -3792,8 +3778,6 @@ function openUserStaffMenu(user) {
         },
       });
     }
-  } else if (currentUserIsMod && currentUserModLevel >= 2) {
-    if (!user.isDev && !user.isMod) roles.push(makeModItem);
   }
 
   const groups = [
@@ -4036,8 +4020,8 @@ function openStaffPanel() {
       icon: devShowIP
         ? '<i class="fas fa-globe"></i>'
         : '<i class="fas fa-eye-slash"></i>',
-      label: devShowIP ? "User IPs: showing" : "User IPs: hidden",
-      desc: "Show or hide the IP tag on each user",
+      label: devShowIP ? "User tags: showing" : "User tags: hidden",
+      desc: "Show or hide the tag beside each user",
       onClick: () => {
         devShowIP = !devShowIP;
         localStorage.setItem(
@@ -4046,7 +4030,7 @@ function openStaffPanel() {
         );
         setStaffItemLabel(
           "staffIpItem",
-          devShowIP ? "User IPs: showing" : "User IPs: hidden",
+          devShowIP ? "User tags: showing" : "User tags: hidden",
         );
         renderDevContext();
       },
