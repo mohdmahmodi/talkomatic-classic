@@ -125,6 +125,7 @@ const isReadonly = (key) => {
 
 function canSeeMessage(socket, key, msg) {
   if (!canRead(socket, key)) return false;
+  if (msg.opsOnly && !socket.isMainDev) return false;
   if (msg.devOnly && !socket.isDev) return false;
   if (msg.minLevel && !socket.isDev && (socket.modLevel || 2) < msg.minLevel)
     return false;
@@ -465,6 +466,7 @@ function systemQueues(qkind, text, opts) {
     qkind: qkind || "notice",
     minLevel: (opts && opts.minLevel) || null,
     devOnly: !!(opts && opts.devOnly),
+    opsOnly: !!(opts && opts.opsOnly),
     ...(card ? { card } : {}),
   });
 }

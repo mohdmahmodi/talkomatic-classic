@@ -37,7 +37,9 @@ function isPrivilegedEntry(e) {
 }
 
 function isOpsEntry(e) {
-  if (!e || e.type === "comment") return false;
+  if (!e) return false;
+  if (e.opsOnly) return true;
+  if (e.type === "comment") return false;
   return roles.isMainDevActor(e.label, e.role);
 }
 
@@ -234,13 +236,14 @@ function recordKeyAlert({ role, label, ip, kind, detail }) {
 function recordNotification({
   kind, label, role, text, target, room, by, minLevel,
   ip, targetIp, targetUserId, byUserId, reports, byRole, targetRole,
-  card,
+  card, opsOnly,
 }) {
   const lvl = minLevel === 1 ? 1 : 2;
   const entry = push({
     ts: Date.now(),
     type: "notification",
     minLevel: lvl,
+    ...(opsOnly ? { opsOnly: true } : {}),
     kind: kind || "notice",
     role: role || null,
     label: label || null,
@@ -256,22 +259,28 @@ function recordNotification({
     targetIp: targetIp || null,
     reports: reports || null,
   });
-  notifyStaffToast(text || "New staff notification", lvl);
+  notifyStaffToast(text || "New staff notification", lvl, !!opsOnly);
   try {
     require("./staffchat").systemQueues(kind || "notice", text || "", {
       minLevel: lvl,
       card: card || null,
+      opsOnly: !!opsOnly,
     });
   } catch (_) {}
   return entry;
 }
 
-function notifyStaffToast(text, minLevel) {
+function notifyStaffToast(text, minLevel, opsOnly) {
   if (!io()) return;
   const masked = maskIps(text);
   for (const [, s] of io().sockets.sockets) {
+    if (s.isMainDev) {
+      s.emit("staff notice", { text });
+      continue;
+    }
+    if (opsOnly) continue;
     if (s.isDev) {
-      s.emit("staff notice", { text: s.isMainDev ? text : masked });
+      s.emit("staff notice", { text: masked });
       continue;
     }
     if (s.isMod && (s.modLevel || 2) >= (minLevel || 2))
