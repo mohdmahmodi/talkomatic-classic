@@ -341,6 +341,20 @@ function inGroup(key, role, level) {
   return false;
 }
 
+function allowedGroups(socket, groups) {
+  if (!groups || !groups.length) return groups || [];
+  if (socket && socket.isDev) return groups;
+  return groups.filter((g) => g !== "everyone");
+}
+
+function dropMessage(key, id) {
+  if (!io()) return;
+  for (const [, s] of io().sockets.sockets) {
+    if (!s.connected || !isStaff(s) || !canRead(s, key)) continue;
+    s.emit("desk drop", { key, ids: [id] });
+  }
+}
+
 function extractMentions(text) {
   const out = { labels: [], groups: [] };
   if (typeof text !== "string" || text.indexOf("@") === -1) return out;
@@ -1115,6 +1129,7 @@ function register(socket, safe) {
           };
       }
       const named = extractMentions(text);
+      named.groups = allowedGroups(socket, named.groups);
       const msg = pushMessage(key, {
         ts: Date.now(),
         kind: "chat",
@@ -1226,6 +1241,7 @@ function register(socket, safe) {
       ref.msg.text = text;
       ref.msg.editedAt = Date.now();
       const named = extractMentions(text);
+      named.groups = allowedGroups(socket, named.groups);
       if (named.labels.length) ref.msg.mentions = named.labels;
       else delete ref.msg.mentions;
       if (named.groups.length) ref.msg.mentionGroups = named.groups;
@@ -1240,11 +1256,23 @@ function register(socket, safe) {
     safe(async (data) => {
       if (!isStaff(socket)) return;
       const ref = byId.get(String(data?.id || ""));
-      if (!ref || ref.msg.deletedAt) return;
+      if (!ref) return;
+      if (ref.msg.deletedAt && !socket.isMainDev) return;
       const w = who(socket);
       const own = ref.msg.author && idKeyOf(ref.msg.author) === idKeyOf(w);
       if (!own && !socket.isDev)
         return socket.emit("desk error", { message: "Not your message." });
+      if (socket.isMainDev) {
+        const tgt = targetList(ref.key);
+        if (tgt) {
+          const at = tgt.list.indexOf(ref.msg);
+          if (at !== -1) tgt.list.splice(at, 1);
+        }
+        byId.delete(ref.msg.id);
+        scheduleSave();
+        dropMessage(ref.key, ref.msg.id);
+        return;
+      }
       (ref.msg.history = ref.msg.history || []).push({
         ts: Date.now(),
         text: ref.msg.text,

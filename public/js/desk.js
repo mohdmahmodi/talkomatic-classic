@@ -4260,7 +4260,7 @@
       p: [
         'Type "@" and the team appears - everyone with a key, on or off. Pick one and their name goes in marked, and they are pinged.',
         "Somebody who is off is not a wasted ping: it waits as an unread mention and is the first thing they see when they sign back in. You are told at the time who was off.",
-        "Groups save typing eight names: @everyone, @L2 mods, @L1 mods, @devs. They are exclusive - @L2 mods does not reach developers, and the list tells you how many people each one actually reaches before you send it.",
+        "Groups save typing eight names: @L2 mods, @L1 mods, @devs, and @everyone for developers. They are exclusive - @L2 mods does not reach developers, and the list tells you how many people each one actually reaches before you send it.",
         'Not the same as calling for backup: "@mod" typed in a ROOM raises a card in #help. "@" in here just names a person.',
       ],
     },
@@ -5094,10 +5094,11 @@
 
     const groups = MENTION_GROUPS.filter(
       (g) =>
-        !q ||
-        g.key.startsWith(q) ||
-        g.tokens.some((t) => t.startsWith(q)) ||
-        g.write.toLowerCase().startsWith(q),
+        (g.key !== "everyone" || myRole() === "dev") &&
+        (!q ||
+          g.key.startsWith(q) ||
+          g.tokens.some((t) => t.startsWith(q)) ||
+          g.write.toLowerCase().startsWith(q)),
     );
     const groupRows = groups.map((g) => {
       const reach = groupReach(g.key);
