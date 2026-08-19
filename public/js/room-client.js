@@ -4365,13 +4365,53 @@ function renderSpectate(data) {
   if (!banner) {
     banner = document.createElement("div");
     banner.id = "spectateBanner";
-    document.body.appendChild(banner);
+    // Last child of the flex column, so it takes its own row at the foot of
+    // the page instead of covering the nav the staff button lives in.
+    const page = document.querySelector(".page-container");
+    (page || document.body).appendChild(banner);
   }
-  banner.textContent = currentUserIsDev
-    ? "SPECTATING (invisible, read-only). Dev tools stay active via the Dev button."
-    : currentUserIsMod
-      ? "SPECTATING (invisible, read-only). Mod tools stay active via the Staff button."
-      : "SPECTATING (read-only). You are watching this room. Use Leave to exit.";
+  banner.textContent = "";
+
+  const tag = document.createElement("span");
+  tag.className = "sb-tag";
+  tag.textContent = "SPECTATING";
+  banner.appendChild(tag);
+
+  const note = document.createElement("span");
+  note.className = "sb-note";
+  note.textContent = isStaff()
+    ? "Invisible, read-only."
+    : "Read-only. You are watching this room.";
+  banner.appendChild(note);
+
+  const acts = document.createElement("div");
+  acts.className = "sb-acts";
+  if (isStaff()) {
+    const tools = document.createElement("button");
+    tools.type = "button";
+    tools.className = "sb-btn";
+    tools.innerHTML = currentUserIsDev
+      ? '<i class="fas fa-screwdriver-wrench"></i> Dev tools'
+      : '<i class="fas fa-shield-halved"></i> Staff tools';
+    tools.addEventListener("click", openStaffPanel);
+    acts.appendChild(tools);
+
+    const desk = document.createElement("button");
+    desk.type = "button";
+    desk.className = "sb-btn";
+    desk.innerHTML = '<i class="fas fa-comments"></i> Desk';
+    desk.addEventListener("click", () => {
+      if (window.TalkoDesk) window.TalkoDesk.open();
+    });
+    acts.appendChild(desk);
+  }
+  const leave = document.createElement("button");
+  leave.type = "button";
+  leave.className = "sb-btn sb-leave";
+  leave.innerHTML = '<i class="fas fa-right-from-bracket"></i> Leave';
+  leave.addEventListener("click", () => socket.emit("staff unspectate"));
+  acts.appendChild(leave);
+  banner.appendChild(acts);
 }
 
 socket.on("spectate joined", (data) => renderSpectate(data));
@@ -4631,7 +4671,28 @@ window.addEventListener("hashchange", () => {
     .room-flag.f-locked{background:#e5484d;color:#fff;}
     .room-flag.f-slow{background:#ff9800;color:#3a2c00;}
     #devHud{position:fixed;bottom:12px;left:12px;z-index:100000;background:rgba(10,11,14,.92);border:1px solid #ff9800;border-radius:10px;color:#ffb14d;font-family:monospace;font-size:12px;padding:12px 14px;line-height:1.6;pointer-events:none;white-space:pre;box-shadow:0 8px 30px rgba(0,0,0,.5);}
-    #spectateBanner{position:fixed;top:0;left:0;right:0;z-index:99998;background:#5c2d91;color:#fff;text-align:center;font-size:13px;font-weight:bold;padding:6px 10px;letter-spacing:.5px;box-sizing:border-box;}
+    /* A row of the page column, not an overlay: the top nav keeps its buttons
+       and the chat area simply gives up the height. */
+    #spectateBanner{flex:0 0 auto;display:flex;align-items:center;gap:10px;
+      background:#5c2d91;color:#fff;font-size:13px;padding:6px 10px;
+      box-sizing:border-box;border-top:1px solid rgba(255,255,255,.18);}
+    #spectateBanner .sb-tag{font-weight:bold;letter-spacing:.5px;flex:0 0 auto;}
+    #spectateBanner .sb-note{color:rgba(255,255,255,.82);flex:1 1 auto;min-width:0;
+      overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    #spectateBanner .sb-acts{display:flex;gap:6px;flex:0 0 auto;}
+    #spectateBanner .sb-btn{display:flex;align-items:center;gap:6px;padding:5px 10px;
+      border:1px solid rgba(255,255,255,.55);border-radius:4px;background:transparent;
+      color:#fff;cursor:pointer;font-size:12px;font-weight:bold;font-family:inherit;
+      white-space:nowrap;transition:all .15s ease;}
+    #spectateBanner .sb-btn:hover{background:#fff;color:#5c2d91;}
+    #spectateBanner .sb-leave{border-color:#ffb4b4;color:#ffd8d8;}
+    #spectateBanner .sb-leave:hover{background:#e5484d;border-color:#e5484d;color:#fff;}
+    /* The HUD floats bottom-left; lift it clear of the bar when both are up. */
+    body:has(#spectateBanner) #devHud{bottom:52px;}
+    @media (max-width:600px){
+      #spectateBanner{flex-wrap:wrap;gap:6px;}
+      #spectateBanner .sb-note{flex:1 1 100%;order:3;white-space:normal;}
+    }
   `;
   const style = document.createElement("style");
   style.textContent = css;
