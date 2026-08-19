@@ -4236,7 +4236,7 @@
             ? "No addresses recorded yet."
             : hiddenCount +
               (hiddenCount === 1 ? " address" : " addresses") +
-              " on file. Only developers can see the addresses themselves.",
+              " on file. The addresses themselves are not shown.",
         ),
       );
     } else groups.forEach((g) => nets.appendChild(netRow(g)));
@@ -4438,15 +4438,15 @@
     );
     readOnlyNote(
       "tab-bans",
-      "Read-only for junior mods. Placing and lifting blocks are full-mod actions, and a permanent block can only be lifted by a developer. Addresses are read by site operations.",
+      "Read-only for junior mods. Placing and lifting blocks are full-mod actions, and a permanent block can only be lifted by a developer. Addresses are never shown on this page.",
     );
     readOnlyNote(
       "tab-mods",
-      "Anyone on staff can read the roster. Granting, promoting, and revoking keys are dev-only, and a person's record is read by site operations.",
+      "Anyone on staff can read the roster. Granting, promoting, and revoking keys are dev-only.",
     );
     readOnlyNote(
       "tab-sessions",
-      "Addresses here belong to other staff, so they are read by site operations. You see how many networks each key is live on.",
+      "Addresses here belong to other staff and are never shown. You see how many networks each key is live on.",
     );
 
     renderApplicationsToggle();

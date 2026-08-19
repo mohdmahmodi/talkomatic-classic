@@ -1146,8 +1146,8 @@
       items: [
         [
           "Grant mod key",
-          "mod",
-          "Full mods may mint a junior (L1) key; only devs can grant a full (L2) key.",
+          "dev",
+          "Mints a key at either level. Devs only.",
         ],
         [
           "Manage / revoke mod keys",

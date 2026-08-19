@@ -165,7 +165,8 @@ const PUBLIC_STAFF = "the Talkomatic staff";
 const PUBLIC_SYSTEM = "the system";
 
 const TEAM_LABEL = "Talkomatic staff";
-const SYSTEM_LABEL = "System";
+const SYSTEM_LABEL = "Talkomatic";
+const SYSTEM_ENFORCED = "Talkomatic (Automod)";
 
 function isDevLabel(label) {
   return !!label && devKeys.some((d) => d.label === label);
@@ -185,6 +186,14 @@ function teamLabel(label, role, view) {
   if (isMainDevActor(label, role)) return SYSTEM_LABEL;
   if (view && view.names) return label;
   return isDevActor(label, role) ? label : TEAM_LABEL;
+}
+
+// Blocks and bans, where an unattributed action reads as a rule firing.
+function enforcedLabel(label, role, view) {
+  if (!label) return label;
+  if (view && view.ip) return label;
+  if (isMainDevActor(label, role)) return SYSTEM_ENFORCED;
+  return teamLabel(label, role, view);
 }
 
 function teamReviewer(value, view) {
@@ -470,6 +479,7 @@ module.exports = {
   publicStaffName,
   isDevLabel,
   systemLabel,
+  enforcedLabel,
   teamLabel,
   teamReviewer,
   stripStaffNames,

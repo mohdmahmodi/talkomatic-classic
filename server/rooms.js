@@ -1071,12 +1071,12 @@ function buildAppealsList(view) {
       barredBy: bar
         ? showIp
           ? bar.by || null
-          : roles.teamLabel(bar.by, bar.byRole, view)
+          : roles.enforcedLabel(bar.by, bar.byRole, view)
         : null,
       barredAt: bar ? bar.at : null,
       banBy: showIp
         ? ban.by || null
-        : roles.teamLabel(ban.by, ban.byRole, view),
+        : roles.enforcedLabel(ban.by, ban.byRole, view),
       banReason: showIp
         ? ban.reason || null
         : audit.maskIps(ban.reason || null),
@@ -1459,7 +1459,7 @@ function buildBlockList(view) {
       label: (b && b.label) || (isId && matched[0] && matched[0].name) || null,
       by: showIp
         ? (b && b.by) || null
-        : roles.teamLabel((b && b.by) || null, b && b.byRole, view),
+        : roles.enforcedLabel((b && b.by) || null, b && b.byRole, view),
       reason: showIp
         ? (b && b.reason) || null
         : audit.maskIps((b && b.reason) || null),
@@ -1484,7 +1484,7 @@ function buildBanHistory(view) {
     id: e.id,
     name: e.name,
     action: e.action,
-    by: showIp ? e.by : roles.teamLabel(e.by, e.byRole, view),
+    by: showIp ? e.by : roles.enforcedLabel(e.by, e.byRole, view),
     at: e.at,
     reason: showIp ? e.reason : audit.maskIps(e.reason),
     duration: e.duration,
