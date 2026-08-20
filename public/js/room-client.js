@@ -3086,11 +3086,9 @@ socket.on("dev kick success", (data) => {
 const PFP_ID_RE = /^\d{17,20}$/;
 const PFP_HASH_RE = /^(?:a_)?[a-f0-9]{32}$/i;
 
-const PRESET_COUNT = 9;
-
 function presetNumber(v) {
   const n = Number(v);
-  return Number.isInteger(n) && n >= 1 && n <= PRESET_COUNT ? n : 0;
+  return Number.isInteger(n) && n >= 1 && n <= 999 ? n : 0;
 }
 
 function avatarSrc(av, size) {

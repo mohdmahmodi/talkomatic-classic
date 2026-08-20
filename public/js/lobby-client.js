@@ -495,11 +495,9 @@ function setSignInState(username, location, shouldPersist = true) {
 const PFP_ID_RE = /^\d{17,20}$/;
 const PFP_HASH_RE = /^(?:a_)?[a-f0-9]{32}$/i;
 
-const PRESET_COUNT = 9;
-
 function presetNumber(v) {
   const n = Number(v);
-  return Number.isInteger(n) && n >= 1 && n <= PRESET_COUNT ? n : 0;
+  return Number.isInteger(n) && n >= 1 && n <= 999 ? n : 0;
 }
 
 function presetUrl(n) {
@@ -1535,13 +1533,19 @@ function updatePfpPreview() {
   const card = document.getElementById("presetCard");
   if (!box || !grid) return;
 
+  let available = null;
+  let building = false;
+
   const paint = () => {
     const chosen = storedPreset();
-    for (const btn of grid.querySelectorAll(".preset-opt")) {
+    const opts = grid.querySelectorAll(".preset-opt");
+    let first = true;
+    for (const btn of opts) {
       const on = Number(btn.dataset.preset) === chosen;
       btn.classList.toggle("selected", on);
       btn.setAttribute("aria-checked", on ? "true" : "false");
-      btn.tabIndex = on || (!chosen && btn.dataset.preset === "1") ? 0 : -1;
+      btn.tabIndex = on || (!chosen && first) ? 0 : -1;
+      first = false;
     }
     if (card) card.classList.toggle("pfp-on", box.checked);
     if (body) body.style.display = box.checked ? "block" : "none";
@@ -1559,7 +1563,7 @@ function updatePfpPreview() {
     paint();
   };
 
-  for (let n = 1; n <= PRESET_COUNT; n++) {
+  const addOption = (n) => {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "preset-opt";
@@ -1571,15 +1575,50 @@ function updatePfpPreview() {
     img.src = presetUrl(n);
     img.alt = "";
     img.loading = "lazy";
+    img.decoding = "async";
+    img.onerror = () => btn.remove();
     btn.appendChild(img);
     btn.addEventListener("click", () => choose(n));
     grid.appendChild(btn);
-  }
+  };
 
-  box.addEventListener("change", () => {
+  const build = async () => {
+    if (building || grid.querySelector(".preset-opt")) return;
+    building = true;
+    grid.textContent = "";
+    if (!available) {
+      try {
+        const res = await fetch("/api/v1/avatars");
+        const body2 = res.ok ? await res.json() : null;
+        if (body2 && Array.isArray(body2.presets)) available = body2.presets;
+      } catch (e) {}
+    }
+    building = false;
+    if (!available || !available.length) {
+      grid.textContent = "Pictures could not be loaded. Try again in a moment.";
+      grid.className = "preset-grid preset-empty";
+      return;
+    }
+    grid.className = "preset-grid";
+    for (const n of available) if (presetNumber(n)) addOption(n);
+    const keep = storedPreset();
+    if (keep && available.indexOf(keep) === -1)
+      localStorage.setItem("talkomaticPresetPfp", String(available[0]));
+    paint();
+  };
+
+  box.addEventListener("change", async () => {
     if (box.checked) {
-      if (!storedPreset()) choose(1);
-      else choose(storedPreset());
+      await build();
+      const keep = storedPreset();
+      const pick =
+        keep && (!available || available.indexOf(keep) !== -1)
+          ? keep
+          : available && available.length
+            ? available[0]
+            : 0;
+      if (pick) choose(pick);
+      else box.checked = false;
     } else {
       localStorage.removeItem("talkomaticPresetPfp");
     }
@@ -1587,7 +1626,10 @@ function updatePfpPreview() {
   });
 
   try {
-    if (storedPreset()) box.checked = true;
+    if (storedPreset()) {
+      box.checked = true;
+      build();
+    }
   } catch (e) {}
   paint();
 })();

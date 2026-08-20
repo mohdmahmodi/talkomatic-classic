@@ -29,6 +29,7 @@ const {
   isBlacklisted,
   createIPBasedUser,
   validateObject,
+  isPresetAvatar,
 } = require("./security");
 const roles = require("./roles");
 const audit = require("./audit");
@@ -3192,16 +3193,17 @@ function registerSocketHandlers(opts) {
           !pfpBlocked && data.avatar && typeof data.avatar === "object"
             ? data.avatar
             : null;
-        const presetNo = rawAvatar ? Number(rawAvatar.preset) : 0;
-        const avatar = !rawAvatar
-          ? null
-          : Number.isInteger(presetNo) && presetNo >= 1 && presetNo <= 9
-            ? { preset: presetNo }
-            : {
-                id: String(rawAvatar.discordId),
-                hash: String(rawAvatar.hash).toLowerCase(),
-                animated: !!rawAvatar.animated,
-              };
+        let avatar = null;
+        if (rawAvatar && rawAvatar.preset !== undefined) {
+          const presetNo = Number(rawAvatar.preset);
+          avatar = isPresetAvatar(presetNo) ? { preset: presetNo } : null;
+        } else if (rawAvatar) {
+          avatar = {
+            id: String(rawAvatar.discordId),
+            hash: String(rawAvatar.hash).toLowerCase(),
+            animated: !!rawAvatar.animated,
+          };
+        }
 
         let username = enforceUsernameLimit(sanitizeName(data.username));
         let location = enforceLocationLimit(

@@ -83,7 +83,7 @@
   function avatarNode(av, small) {
     if (!av) return null;
     const preset = Number(av.preset);
-    const isPreset = Number.isInteger(preset) && preset >= 1 && preset <= 9;
+    const isPreset = Number.isInteger(preset) && preset >= 1 && preset <= 999;
     if (!isPreset && (!ID_RE.test(av.id || "") || !HASH_RE.test(av.hash || "")))
       return null;
     const img = el("img", { class: "gm-pfp" + (small ? " gm-pfp-sm" : ""), alt: "" });

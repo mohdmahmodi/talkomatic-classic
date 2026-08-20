@@ -4,6 +4,8 @@
 // ╚═══════════════════════════════════════════════════════════════════════════╝
 
 const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
 const { RateLimiterMemory } = require("rate-limiter-flexible");
 const {
   CONFIG,
@@ -371,7 +373,30 @@ function apiAuth(req, res, next) {
 
 // ── Validation ──────────────────────────────────────────────────────────────
 
-const PRESET_AVATARS = 9;
+const PFP_DIR = path.join(__dirname, "..", "public", "images", "pfp");
+const PFP_RESCAN_MS = 60000;
+let pfpScan = { at: 0, list: [] };
+
+function presetAvatars() {
+  const now = Date.now();
+  if (pfpScan.at && now - pfpScan.at < PFP_RESCAN_MS) return pfpScan.list;
+  let list = [];
+  try {
+    list = fs
+      .readdirSync(PFP_DIR)
+      .map((f) => /^(\d{1,3})\.png$/i.exec(f))
+      .filter(Boolean)
+      .map((m) => Number(m[1]))
+      .filter((n) => n >= 1 && n <= 999)
+      .sort((a, b) => a - b);
+  } catch (_) {}
+  pfpScan = { at: now, list };
+  return list;
+}
+
+function isPresetAvatar(n) {
+  return Number.isInteger(n) && presetAvatars().indexOf(n) !== -1;
+}
 
 const validationRules = {
   username: (v) => {
@@ -421,8 +446,8 @@ const validationRules = {
     if (typeof v !== "object") return "Avatar must be an object.";
     if (v.preset !== undefined) {
       const n = Number(v.preset);
-      if (!Number.isInteger(n) || n < 1 || n > PRESET_AVATARS)
-        return `Avatar preset must be 1-${PRESET_AVATARS}.`;
+      if (!Number.isInteger(n) || n < 1 || n > 999)
+        return "Avatar preset is invalid.";
       return null;
     }
     if (!/^\d{17,20}$/.test(String(v.discordId || "")))
@@ -474,4 +499,6 @@ module.exports = {
   handleBotTokenInfo,
   validate,
   validateObject,
+  presetAvatars,
+  isPresetAvatar,
 };

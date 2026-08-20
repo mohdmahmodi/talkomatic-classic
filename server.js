@@ -41,6 +41,7 @@ const {
   ipRateLimiter,
   enhancedRateLimiters,
   validateObject,
+  presetAvatars,
 } = require("./server/security");
 const rooms = require("./server/rooms");
 const diag = require("./server/diag");
@@ -834,6 +835,11 @@ app.get(`${API}/config`, (req, res) => {
   };
   state.apiCache.set("config", { timestamp: Date.now(), data });
   res.json(data);
+});
+
+app.get(`${API}/avatars`, (req, res) => {
+  res.set("Cache-Control", "public, max-age=60");
+  res.json({ presets: presetAvatars() });
 });
 
 app.get(`${API}/me`, (req, res) => {

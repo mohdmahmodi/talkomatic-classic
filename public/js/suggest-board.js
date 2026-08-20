@@ -118,7 +118,7 @@
   function discordPfp(av, small) {
     if (!av) return null;
     var preset = Number(av.preset);
-    var isPreset = preset >= 1 && preset <= 9 && preset % 1 === 0;
+    var isPreset = preset >= 1 && preset <= 999 && preset % 1 === 0;
     if (!isPreset && (!SB_ID_RE.test(av.id || "") || !SB_HASH_RE.test(av.hash || "")))
       return null;
     var img = el("img", "sb-pfp" + (small ? " sb-pfp-sm" : ""));
