@@ -2275,7 +2275,7 @@ function createUserRow(user, container) {
   }
 
   if (user.avatar) {
-    const url = discordAvatarUrl(user.avatar, 32);
+    const url = avatarSrc(user.avatar, 32);
     if (url) {
       const pfp = document.createElement("img");
       pfp.className = "user-pfp";
@@ -3086,8 +3086,17 @@ socket.on("dev kick success", (data) => {
 const PFP_ID_RE = /^\d{17,20}$/;
 const PFP_HASH_RE = /^(?:a_)?[a-f0-9]{32}$/i;
 
-function discordAvatarUrl(av, size) {
+const PRESET_COUNT = 9;
+
+function presetNumber(v) {
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 1 && n <= PRESET_COUNT ? n : 0;
+}
+
+function avatarSrc(av, size) {
   if (!av) return null;
+  const preset = presetNumber(av.preset);
+  if (preset) return "/images/pfp/" + preset + ".png";
   const id = av.discordId || av.id;
   if (!PFP_ID_RE.test(id || "") || !PFP_HASH_RE.test(av.hash || "")) return null;
   return (
@@ -3098,6 +3107,8 @@ function discordAvatarUrl(av, size) {
 
 function storedAvatar() {
   try {
+    const preset = presetNumber(localStorage.getItem("talkomaticPresetPfp"));
+    if (preset) return { preset };
     if (localStorage.getItem("talkomaticPfpEnabled") !== "1") return null;
     const c = JSON.parse(localStorage.getItem("talkomaticPfp") || "null");
     if (c && PFP_ID_RE.test(c.discordId) && PFP_HASH_RE.test(c.hash))

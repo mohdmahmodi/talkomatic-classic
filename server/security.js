@@ -371,6 +371,8 @@ function apiAuth(req, res, next) {
 
 // ── Validation ──────────────────────────────────────────────────────────────
 
+const PRESET_AVATARS = 9;
+
 const validationRules = {
   username: (v) => {
     if (!v || typeof v !== "string")
@@ -417,6 +419,12 @@ const validationRules = {
   avatar: (v) => {
     if (v === undefined || v === null) return null;
     if (typeof v !== "object") return "Avatar must be an object.";
+    if (v.preset !== undefined) {
+      const n = Number(v.preset);
+      if (!Number.isInteger(n) || n < 1 || n > PRESET_AVATARS)
+        return `Avatar preset must be 1-${PRESET_AVATARS}.`;
+      return null;
+    }
     if (!/^\d{17,20}$/.test(String(v.discordId || "")))
       return "Avatar Discord ID must be 17-20 digits.";
     if (!/^(?:a_)?[a-f0-9]{32}$/i.test(String(v.hash || "")))

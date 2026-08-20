@@ -116,17 +116,21 @@
   var SB_HASH_RE = /^(?:a_)?[a-f0-9]{32}$/i;
 
   function discordPfp(av, small) {
-    if (!av || !SB_ID_RE.test(av.id || "") || !SB_HASH_RE.test(av.hash || ""))
+    if (!av) return null;
+    var preset = Number(av.preset);
+    var isPreset = preset >= 1 && preset <= 9 && preset % 1 === 0;
+    if (!isPreset && (!SB_ID_RE.test(av.id || "") || !SB_HASH_RE.test(av.hash || "")))
       return null;
     var img = el("img", "sb-pfp" + (small ? " sb-pfp-sm" : ""));
     img.alt = "";
-    img.src =
-      "https://cdn.discordapp.com/avatars/" +
-      av.id +
-      "/" +
-      av.hash +
-      ".webp?size=64" +
-      (av.animated ? "&animated=true" : "");
+    img.src = isPreset
+      ? "/images/pfp/" + preset + ".png"
+      : "https://cdn.discordapp.com/avatars/" +
+        av.id +
+        "/" +
+        av.hash +
+        ".webp?size=64" +
+        (av.animated ? "&animated=true" : "");
     img.onerror = function () {
       img.style.display = "none";
     };

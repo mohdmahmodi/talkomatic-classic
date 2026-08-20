@@ -289,6 +289,37 @@ function weakRanges(scanned, out) {
   );
 }
 
+const WEAK_ONE = /[-_‐-―⁃־－＿]/;
+const SPELL = new RegExp(
+  "(?:[a-z0-9.][ \\t]*" +
+    "[-_\\u2010-\\u2015\\u2043\\u05be\\uff0d\\uff3f]" +
+    "[ \\t]*){2,}[a-z0-9.]",
+  "g",
+);
+
+function unspell(scanned) {
+  SPELL.lastIndex = 0;
+  if (!SPELL.test(scanned.text)) return null;
+  SPELL.lastIndex = 0;
+  const drop = new Array(scanned.text.length).fill(false);
+  let m;
+  while ((m = SPELL.exec(scanned.text)) !== null) {
+    for (let i = m.index; i < m.index + m[0].length; i++) {
+      const c = scanned.text[i];
+      if (WEAK_ONE.test(c) || c === " " || c === "\t") drop[i] = true;
+    }
+  }
+  let text = "";
+  const map = [];
+  for (let i = 0; i < scanned.text.length; i++) {
+    if (drop[i]) continue;
+    text += scanned.text[i];
+    map.push(scanned.map[i]);
+  }
+  map.push(scanned.map[scanned.map.length - 1]);
+  return { text, map };
+}
+
 const TOLD = [
   /(?:replac|swap|switch|chang|sub|substitut)\w*\s+(?:the|a|an|all|every|each)?\s*(?:letters?|chars?|characters?|symbols?)?\s*['"]?(\S)['"]?\s*'?s?\s*(?:with|for|to|into|=)\s+(?:a|an|the)?\s*(?:\.|dots?|periods?|full\s*stops?)/i,
   /(?:use|put|add|type|write|imagine|pretend)\s+(?:a|an|the)?\s*(?:\.|dots?|periods?|full\s*stops?)\s*(?:instead\s+of|in\s+place\s+of|rather\s+than|not)\s+(?:the|a|an|every|each)?\s*(?:letters?|chars?|characters?|symbols?)?\s*['"]?(\S)['"]?/i,
@@ -325,6 +356,11 @@ function findRanges(value) {
   swapRanges(loose, extra);
   weakRanges(loose, extra);
   toldRanges(loose, chars, extra);
+  const spelled = unspell(loose);
+  if (spelled) {
+    rangesIn(spelled, extra);
+    markerRange(spelled, extra);
+  }
   if (JUNK.test(loose.text)) rangesIn(stripJunk(loose), extra);
   if (SPACE.test(loose.text)) {
     rangesIn(tighten(loose), found);

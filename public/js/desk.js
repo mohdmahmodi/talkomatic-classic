@@ -102,6 +102,9 @@
   const PFP_HASH_RE = /^(?:a_)?[a-f0-9]{32}$/i;
   function avatarUrl(av, size) {
     if (!av) return null;
+    const preset = Number(av.preset);
+    if (Number.isInteger(preset) && preset >= 1 && preset <= 9)
+      return "/images/pfp/" + preset + ".png";
     const id = av.discordId || av.id;
     if (!PFP_ID_RE.test(id || "") || !PFP_HASH_RE.test(av.hash || ""))
       return null;

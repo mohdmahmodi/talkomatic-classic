@@ -49,6 +49,7 @@ ban-history.json
 service.json
 service.json.tmp
 controls.html
+sessions.html
 
 # Dependency directories
 node_modules/

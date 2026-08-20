@@ -596,6 +596,43 @@
               placeholder="Location (optional)"
               maxlength="20"
             />
+            <!-- Optional preset picture -->
+            <div class="pfp-card preset-card" id="presetCard">
+              <div class="pfp-card-head">
+                <span class="pfp-ico preset-ico"
+                  ><i class="fas fa-user-astronaut"></i
+                ></span>
+                <span class="pfp-card-text">
+                  <span class="pfp-card-title">Profile picture</span>
+                  <span class="pfp-card-sub"
+                    >Optional. Pick one of ours to show next to your
+                    name.</span
+                  >
+                </span>
+                <img
+                  id="presetPreview"
+                  class="pfp-preview preset-preview"
+                  alt=""
+                  style="display: none"
+                />
+                <label class="pfp-switch" title="Use a preset picture">
+                  <input type="checkbox" id="presetEnable" />
+                  <span class="pfp-slider"></span>
+                </label>
+              </div>
+              <div
+                class="pfp-card-body"
+                id="presetBody"
+                style="display: none"
+              >
+                <div
+                  class="preset-grid"
+                  id="presetGrid"
+                  role="radiogroup"
+                  aria-label="Choose a profile picture"
+                ></div>
+              </div>
+            </div>
             <!-- Optional Discord avatar -->
             <div class="pfp-card">
               <div class="pfp-card-head">

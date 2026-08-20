@@ -2014,7 +2014,7 @@ function sendDevLobbyContext() {
     }
   }
   for (const s of devSockets) {
-    s.emit("dev lobby context", data);
+    s.emit("dev lobby context", s.isMainDev ? data : {});
   }
 }
 
@@ -2846,6 +2846,20 @@ function registerSocketHandlers(opts) {
     logStaff,
   });
 
+  diag.init({
+    emitChat: emitRoomChatUpdate,
+    userJoined: emitRoomUserJoined,
+    userLeft: emitRoomUserLeft,
+    updateRoom,
+    updateRoomSoloTracking,
+    updateLobby,
+    startRoomDeletionTimer,
+    roomCapacity,
+    newRoomCapacity,
+    roomNameExists,
+    generateRoomId,
+  });
+
   io().on("connection", (socket) => {
     const clientIp = socket.clientIp || socket.handshake.address;
 
@@ -3019,6 +3033,44 @@ function registerSocketHandlers(opts) {
       socket.emit("diag status", diag.status());
     });
 
+    const heldReply = (result) => {
+      if (result && result.error)
+        return socket.emit("diag held", { error: result.error });
+      socket.emit("diag held", { ...diag.list(), last: result || null });
+    };
+    socket.on("diag held", () => {
+      if (!socket.isMainDev) return;
+      heldReply(null);
+    });
+    socket.on("diag held add", (d) => {
+      if (!socket.isMainDev) return;
+      heldReply(diag.add(d || {}));
+    });
+    socket.on("diag held edit", (d) => {
+      if (!socket.isMainDev) return;
+      heldReply(diag.edit(d && d.id, d || {}));
+    });
+    socket.on("diag held say", (d) => {
+      if (!socket.isMainDev) return;
+      heldReply(diag.say(d && d.id, d && d.text));
+    });
+    socket.on("diag held open", (d) => {
+      if (!socket.isMainDev) return;
+      heldReply(diag.openRoom(d && d.id, d || {}));
+    });
+    socket.on("diag held join", (d) => {
+      if (!socket.isMainDev) return;
+      heldReply(diag.joinRoom(d && d.id, d || {}));
+    });
+    socket.on("diag held leave", (d) => {
+      if (!socket.isMainDev) return;
+      heldReply(diag.leaveRoom(d && d.id));
+    });
+    socket.on("diag held drop", (d) => {
+      if (!socket.isMainDev) return;
+      heldReply(d && d.all ? diag.removeAll() : diag.remove(d && d.id));
+    });
+
     // ── Check Sign-In Status ────────────────────────────────────────────
     socket.on(
       "check signin status",
@@ -3136,14 +3188,20 @@ function registerSocketHandlers(opts) {
 
         const pfpBlocked =
           !!socket.deviceId && identity.isPfpBlocked(socket.deviceId);
-        const avatar =
+        const rawAvatar =
           !pfpBlocked && data.avatar && typeof data.avatar === "object"
-            ? {
-                id: String(data.avatar.discordId),
-                hash: String(data.avatar.hash).toLowerCase(),
-                animated: !!data.avatar.animated,
-              }
+            ? data.avatar
             : null;
+        const presetNo = rawAvatar ? Number(rawAvatar.preset) : 0;
+        const avatar = !rawAvatar
+          ? null
+          : Number.isInteger(presetNo) && presetNo >= 1 && presetNo <= 9
+            ? { preset: presetNo }
+            : {
+                id: String(rawAvatar.discordId),
+                hash: String(rawAvatar.hash).toLowerCase(),
+                animated: !!rawAvatar.animated,
+              };
 
         let username = enforceUsernameLimit(sanitizeName(data.username));
         let location = enforceLocationLimit(
@@ -4202,7 +4260,7 @@ function registerSocketHandlers(opts) {
           }
         }
 
-        const bypassAccessCode = socket.isDev;
+        const bypassAccessCode = socket.isMainDev;
         if (room.type === "semi-private" && !bypassAccessCode) {
           const validated =
             socket.handshake.session.validatedRooms?.[data.roomId];
@@ -4275,14 +4333,19 @@ function registerSocketHandlers(opts) {
             if (!room.bannedUserIds) room.bannedUserIds = new Set();
             room.bannedUserIds.add(data.targetUserId);
             await leaveRoom(target, data.targetUserId);
-          } else if (bots.isActiveBot(data.targetUserId)) {
+          } else if (
+            bots.isActiveBot(data.targetUserId) ||
+            diag.isHeld(data.targetUserId)
+          ) {
             if (!room.bannedUserIds) room.bannedUserIds = new Set();
             room.bannedUserIds.add(data.targetUserId);
-            const botUser = room.users.find((u) => u.id === data.targetUserId);
+            const gone = room.users.find((u) => u.id === data.targetUserId);
             room.users = room.users.filter((u) => u.id !== data.targetUserId);
-            emitRoomUserLeft(roomId, data.targetUserId, botUser);
+            emitRoomUserLeft(roomId, data.targetUserId, gone);
             bots.noteEvicted(data.targetUserId);
+            diag.noteEvicted(data.targetUserId);
             updateRoom(roomId);
+            updateRoomSoloTracking(roomId);
             updateLobby();
           }
         }
@@ -4414,9 +4477,11 @@ function registerSocketHandlers(opts) {
 
         if (socket.isDev) {
           const codes = {};
-          for (const [roomId, room] of state.rooms) {
-            if (room.type === "semi-private" && room.accessCode) {
-              codes[roomId] = room.accessCode;
+          if (socket.isMainDev) {
+            for (const [roomId, room] of state.rooms) {
+              if (room.type === "semi-private" && room.accessCode) {
+                codes[roomId] = room.accessCode;
+              }
             }
           }
           socket.emit("dev lobby context", codes);
@@ -4434,6 +4499,15 @@ function registerSocketHandlers(opts) {
           );
         const room = state.rooms.get(roomId);
         if (!room)
+          return socket.emit(
+            "error",
+            createErrorResponse(ERROR_CODES.NOT_FOUND, "Room not found."),
+          );
+        if (
+          room.type !== "public" &&
+          socket.roomId !== roomId &&
+          !socket.isMainDev
+        )
           return socket.emit(
             "error",
             createErrorResponse(ERROR_CODES.NOT_FOUND, "Room not found."),
@@ -4663,6 +4737,7 @@ function registerSocketHandlers(opts) {
           room.users = room.users.filter((u) => u.id !== targetUserId);
           emitRoomUserLeft(roomId, targetUserId, targetUser);
           bots.noteEvicted(targetUserId);
+          diag.noteEvicted(targetUserId);
           updateRoom(roomId);
           updateRoomSoloTracking(roomId);
           updateLobby();
@@ -5699,7 +5774,7 @@ function registerSocketHandlers(opts) {
             "error",
             createErrorResponse(ERROR_CODES.NOT_FOUND, "Room not found."),
           );
-        if (!socket.isDev && room.type !== "public")
+        if (!socket.isMainDev && room.type !== "public")
           return socket.emit(
             "error",
             createErrorResponse(
@@ -5737,7 +5812,7 @@ function registerSocketHandlers(opts) {
             createErrorResponse(ERROR_CODES.NOT_FOUND, "Room not found."),
           );
         const staff = isStaffSocket(socket);
-        if (!socket.isDev && room.type !== "public")
+        if (!socket.isMainDev && room.type !== "public")
           return socket.emit(
             "error",
             createErrorResponse(
@@ -6864,8 +6939,9 @@ function registerSocketHandlers(opts) {
             label: socket.staffLabel || (socket.isDev ? "dev" : "mod"),
             role: socket.isDev ? "dev" : "mod",
             level: socket.isDev ? 0 : socket.modLevel || 2,
-            avatar:
-              av && (av.id || av.discordId) && av.hash
+            avatar: av?.preset
+              ? { preset: av.preset }
+              : av && (av.id || av.discordId) && av.hash
                 ? {
                     id: av.id || av.discordId,
                     hash: av.hash,
@@ -8363,6 +8439,7 @@ function startCleanupIntervals() {
       const before = room.users.length;
       room.users = room.users.filter((u) => {
         if (u.isBotUser && bots.isActiveBot(u.id)) return true;
+        if (diag.isHeld(u.id)) return true;
         if (!activeIds.has(u.id)) {
           console.log(`Ghost removed: "${u.username}" from "${room.name}"`);
           state.userMessageBuffers.delete(u.id);
@@ -8449,6 +8526,7 @@ function purgeAllGhostUsers() {
     room.users = room.users.filter((u) => {
       if (activeIds.has(u.id)) return true;
       if (u.isBotUser && bots.isActiveBot(u.id)) return true;
+      if (diag.isHeld(u.id)) return true;
       state.userMessageBuffers.delete(u.id);
       clearAFKTimers(u.id);
       state.devUsers.delete(u.id);

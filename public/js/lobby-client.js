@@ -495,7 +495,28 @@ function setSignInState(username, location, shouldPersist = true) {
 const PFP_ID_RE = /^\d{17,20}$/;
 const PFP_HASH_RE = /^(?:a_)?[a-f0-9]{32}$/i;
 
+const PRESET_COUNT = 9;
+
+function presetNumber(v) {
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 1 && n <= PRESET_COUNT ? n : 0;
+}
+
+function presetUrl(n) {
+  return "/images/pfp/" + n + ".png";
+}
+
+function storedPreset() {
+  try {
+    return presetNumber(localStorage.getItem("talkomaticPresetPfp"));
+  } catch (e) {
+    return 0;
+  }
+}
+
 function storedAvatar() {
+  const preset = storedPreset();
+  if (preset) return { preset };
   try {
     if (localStorage.getItem("talkomaticPfpEnabled") !== "1") return null;
     const c = JSON.parse(localStorage.getItem("talkomaticPfp") || "null");
@@ -506,6 +527,9 @@ function storedAvatar() {
 }
 
 function avatarUrl(av, size) {
+  if (!av) return null;
+  const preset = presetNumber(av.preset);
+  if (preset) return presetUrl(preset);
   const id = av.discordId || av.id;
   if (!PFP_ID_RE.test(id || "") || !PFP_HASH_RE.test(av.hash || "")) return null;
   return (
@@ -1419,7 +1443,10 @@ logForm.addEventListener("submit", async (e) => {
 
     const pfpEnable = document.getElementById("pfpEnable");
     const pfpIdInput = document.getElementById("pfpDiscordId");
-    if (pfpEnable && pfpEnable.checked) {
+    const presetEnable = document.getElementById("presetEnable");
+    if (presetEnable && presetEnable.checked && storedPreset()) {
+      localStorage.removeItem("talkomaticPfpEnabled");
+    } else if (pfpEnable && pfpEnable.checked) {
       const rawId = (pfpIdInput ? pfpIdInput.value : "").trim();
       if (!PFP_ID_RE.test(rawId)) {
         lobbyNotify(
@@ -1467,17 +1494,103 @@ logForm.addEventListener("submit", async (e) => {
 
 function updatePfpPreview() {
   const img = document.getElementById("pfpPreview");
-  if (!img) return;
-  const av = storedAvatar();
-  const url = av && avatarUrl(av, 32);
-  if (url) {
-    img.src = url;
-    img.style.display = "inline-block";
-  } else {
-    img.removeAttribute("src");
-    img.style.display = "none";
+  if (img) {
+    let url = null;
+    try {
+      if (localStorage.getItem("talkomaticPfpEnabled") === "1") {
+        const c = JSON.parse(localStorage.getItem("talkomaticPfp") || "null");
+        if (c && PFP_ID_RE.test(c.discordId) && PFP_HASH_RE.test(c.hash))
+          url = avatarUrl(
+            { discordId: c.discordId, hash: c.hash, animated: !!c.animated },
+            32,
+          );
+      }
+    } catch (e) {}
+    if (url) {
+      img.src = url;
+      img.style.display = "inline-block";
+    } else {
+      img.removeAttribute("src");
+      img.style.display = "none";
+    }
+  }
+
+  const pre = document.getElementById("presetPreview");
+  if (pre) {
+    const n = storedPreset();
+    if (n) {
+      pre.src = presetUrl(n);
+      pre.style.display = "inline-block";
+    } else {
+      pre.removeAttribute("src");
+      pre.style.display = "none";
+    }
   }
 }
+
+(function initPresetControls() {
+  const box = document.getElementById("presetEnable");
+  const body = document.getElementById("presetBody");
+  const grid = document.getElementById("presetGrid");
+  const card = document.getElementById("presetCard");
+  if (!box || !grid) return;
+
+  const paint = () => {
+    const chosen = storedPreset();
+    for (const btn of grid.querySelectorAll(".preset-opt")) {
+      const on = Number(btn.dataset.preset) === chosen;
+      btn.classList.toggle("selected", on);
+      btn.setAttribute("aria-checked", on ? "true" : "false");
+      btn.tabIndex = on || (!chosen && btn.dataset.preset === "1") ? 0 : -1;
+    }
+    if (card) card.classList.toggle("pfp-on", box.checked);
+    if (body) body.style.display = box.checked ? "block" : "none";
+    updatePfpPreview();
+  };
+
+  const choose = (n) => {
+    localStorage.setItem("talkomaticPresetPfp", String(n));
+    const discordBox = document.getElementById("pfpEnable");
+    if (discordBox && discordBox.checked) {
+      discordBox.checked = false;
+      discordBox.dispatchEvent(new Event("change"));
+    }
+    localStorage.removeItem("talkomaticPfpEnabled");
+    paint();
+  };
+
+  for (let n = 1; n <= PRESET_COUNT; n++) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "preset-opt";
+    btn.dataset.preset = String(n);
+    btn.setAttribute("role", "radio");
+    btn.title = "Picture " + n;
+    btn.setAttribute("aria-label", "Profile picture " + n);
+    const img = document.createElement("img");
+    img.src = presetUrl(n);
+    img.alt = "";
+    img.loading = "lazy";
+    btn.appendChild(img);
+    btn.addEventListener("click", () => choose(n));
+    grid.appendChild(btn);
+  }
+
+  box.addEventListener("change", () => {
+    if (box.checked) {
+      if (!storedPreset()) choose(1);
+      else choose(storedPreset());
+    } else {
+      localStorage.removeItem("talkomaticPresetPfp");
+    }
+    paint();
+  });
+
+  try {
+    if (storedPreset()) box.checked = true;
+  } catch (e) {}
+  paint();
+})();
 
 (function initPfpControls() {
   const box = document.getElementById("pfpEnable");
@@ -1486,13 +1599,24 @@ function updatePfpPreview() {
   const helpBtn = document.getElementById("pfpHelpBtn");
   const help = document.getElementById("pfpHelp");
   if (!box || !input) return;
-  const card = document.querySelector(".pfp-card");
+  const card = box.closest(".pfp-card");
   const sync = () => {
     if (body) body.style.display = box.checked ? "block" : "none";
     if (!box.checked && help) help.style.display = "none";
     if (card) card.classList.toggle("pfp-on", box.checked);
   };
-  box.addEventListener("change", sync);
+  box.addEventListener("change", () => {
+    if (box.checked) {
+      const presetBox = document.getElementById("presetEnable");
+      if (presetBox && presetBox.checked) {
+        presetBox.checked = false;
+        presetBox.dispatchEvent(new Event("change"));
+      }
+      localStorage.removeItem("talkomaticPresetPfp");
+      updatePfpPreview();
+    }
+    sync();
+  });
   if (helpBtn && help)
     helpBtn.addEventListener("click", () => {
       help.style.display = help.style.display === "none" ? "block" : "none";
@@ -2303,6 +2427,7 @@ function openDevPanel() {
             onClick: () => window.open("/mod.html", "_blank"),
           },
           myKeyItem(),
+          removeKeyItem(),
         ],
       },
     ],
@@ -2328,6 +2453,7 @@ function openModLobbyPanel() {
             onClick: () => window.open("/mod.html", "_blank"),
           },
           myKeyItem(),
+          removeKeyItem(),
         ],
       },
     ],
@@ -2341,6 +2467,46 @@ function myKeyItem() {
     desc: "Reveal and copy the key this browser uses",
     onClick: () => openMyKey(),
   };
+}
+
+function removeKeyItem() {
+  return {
+    icon: '<i class="fas fa-key"></i>',
+    label: "Remove my staff key",
+    danger: true,
+    desc: "Forget it here and go back to being an ordinary user",
+    onClick: () => removeMyKey(),
+  };
+}
+
+async function removeMyKey() {
+  if (!window.StaffUI) return;
+  const devKey = localStorage.getItem("talkomatic_devKey");
+  const modKey = localStorage.getItem("talkomatic_modKey");
+  if (!devKey && !modKey) {
+    lobbyNotify("This browser has no staff key saved.", "info");
+    return;
+  }
+
+  const ok = await StaffUI.confirm({
+    title: "Remove your staff key",
+    icon: '<i class="fas fa-key"></i>',
+    danger: true,
+    subtitle: "This browser only",
+    message:
+      "This browser will forget your " +
+      (devKey ? "developer" : "moderator") +
+      " key and you will go back to being an ordinary user here. The key itself is not revoked and still works everywhere else, so make sure you have a copy before you do this: getting back in means pasting it again with Enter staff key. If you think the key has leaked, tell a developer instead so it can be properly revoked.",
+    confirmText: "Remove key",
+  });
+  if (!ok) return;
+
+  localStorage.removeItem("talkomatic_devKey");
+  localStorage.removeItem("talkomatic_modKey");
+  lobbyNotify("Staff key removed from this browser. Reloading...", "success", {
+    title: "Key removed",
+  });
+  setTimeout(() => window.location.reload(), 1200);
 }
 
 function openMyKey() {

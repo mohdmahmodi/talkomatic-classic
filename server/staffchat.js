@@ -1453,6 +1453,8 @@ function register(socket, safe) {
       const room = ctx.state.rooms.get(roomId);
       if (!room)
         return socket.emit("desk room info", { roomId, gone: true });
+      if (room.type !== "public" && !socket.isMainDev)
+        return socket.emit("desk room info", { roomId, gone: true });
       const users = (room.users || [])
         .filter(
           (u) =>

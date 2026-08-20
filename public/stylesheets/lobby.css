@@ -2081,6 +2081,92 @@ button:disabled {
   color: #777;
 }
 
+/* Preset pictures */
+.preset-card.pfp-on {
+  border-color: #ff9800;
+  box-shadow: 0 1px 8px rgba(255, 152, 0, 0.24);
+}
+
+.preset-ico {
+  background: linear-gradient(135deg, #ffb14d, #e07b00);
+  box-shadow: 0 2px 6px rgba(255, 152, 0, 0.35);
+}
+
+.preset-preview {
+  border-color: #ff9800;
+}
+
+.preset-card .pfp-switch input:checked + .pfp-slider {
+  background: #ff9800;
+}
+
+.preset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
+  gap: 8px;
+}
+
+/* Keep the #logform prefix: it overrides #logform button. */
+#logform .preset-grid .preset-opt {
+  position: relative;
+  bottom: auto;
+  right: auto;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 2px solid #ddd3bd;
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+  transition:
+    border-color 0.15s ease,
+    transform 0.12s ease,
+    box-shadow 0.15s ease;
+}
+
+#logform .preset-grid .preset-opt img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+#logform .preset-grid .preset-opt:hover {
+  border-color: #ffb14d;
+  background: #fff;
+  transform: translateY(-1px);
+}
+
+#logform .preset-grid .preset-opt:focus-visible {
+  outline: 2px solid #ff9800;
+  outline-offset: 2px;
+}
+
+#logform .preset-grid .preset-opt.selected {
+  border-color: #ff9800;
+  box-shadow: 0 0 0 3px rgba(255, 152, 0, 0.22);
+}
+
+#logform .preset-grid .preset-opt.selected::after {
+  content: "\2713";
+  position: absolute;
+  right: 3px;
+  bottom: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #ff9800;
+  color: #fff;
+  font-size: 10px;
+  font-weight: bold;
+  line-height: 16px;
+  text-align: center;
+}
+
 /* Avatar shown next to names in the lobby room list */
 .lobby-pfp {
   width: 18px;

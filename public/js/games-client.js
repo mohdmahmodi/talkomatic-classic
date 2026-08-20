@@ -81,11 +81,16 @@
   }
 
   function avatarNode(av, small) {
-    if (!av || !ID_RE.test(av.id || "") || !HASH_RE.test(av.hash || "")) return null;
+    if (!av) return null;
+    const preset = Number(av.preset);
+    const isPreset = Number.isInteger(preset) && preset >= 1 && preset <= 9;
+    if (!isPreset && (!ID_RE.test(av.id || "") || !HASH_RE.test(av.hash || "")))
+      return null;
     const img = el("img", { class: "gm-pfp" + (small ? " gm-pfp-sm" : ""), alt: "" });
-    img.src =
-      "https://cdn.discordapp.com/avatars/" + av.id + "/" + av.hash +
-      ".webp?size=64" + (av.animated ? "&animated=true" : "");
+    img.src = isPreset
+      ? "/images/pfp/" + preset + ".png"
+      : "https://cdn.discordapp.com/avatars/" + av.id + "/" + av.hash +
+        ".webp?size=64" + (av.animated ? "&animated=true" : "");
     img.onerror = () => img.remove();
     return img;
   }
