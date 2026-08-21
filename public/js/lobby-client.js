@@ -1963,7 +1963,7 @@ function createRoomElement(room) {
         ? "mod-lobby-badge mod-lobby-badge-jr"
         : "mod-lobby-badge";
       mb.textContent = jr ? "JR MOD" : "MOD";
-      mb.title = jr ? "Junior moderator (level 1)" : "Moderator";
+      mb.title = jr ? "Junior Moderator (L1)" : "Moderator (L2)";
       userDiv.appendChild(mb);
     }
 

@@ -502,7 +502,7 @@ async function loadEmotes() {
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const pairs = parseJSONC(await resp.text());
     const validCode = /^[A-Za-z0-9_.-]+$/;
-    const validExt = /^(?:png|gif|webp|jpe?g|avif|heif|tiff|bmp|svg)$/i;
+    const validExt = /^(?:png|gif|webp|jpe?g|avif|bmp|svg)$/i;
     const next = Object.fromEntries(
       Object.entries(pairs)
         .filter(([name, ext]) =>
@@ -671,6 +671,9 @@ function createEmoteNode(emoteCode, isOverlay = false) {
   if (isOverlay) img.dataset.emoteOverlay = "true";
   else delete img.dataset.emoteOverlay;
   img.decoding = "async";
+  img.addEventListener("error", () => {
+    if (img.parentNode) img.replaceWith(document.createTextNode(img.alt));
+  });
   return img;
 }
 

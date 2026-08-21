@@ -746,7 +746,7 @@
   flex: 1;
   display: flex;
   align-items: center;
-  background: var(--tk-input-bg, var(--tk-tile));
+  background: var(--tk-tile);
   border: 1px solid var(--tk-border);
   border-radius: 6px;
   padding: 0 12px;

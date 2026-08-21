@@ -410,7 +410,7 @@
   // ── Emotes ────────────────────────────────────────────────────────────────
   const EMOTE_BASE =
     "https://raw.githubusercontent.com/ZackiBoiz/Multiplayer-Piano-Optimizations/refs/heads/main/emotes";
-  const EMOTE_EXT = /^(?:png|gif|webp|jpe?g|avif|heif|tiff|bmp|svg)$/i;
+  const EMOTE_EXT = /^(?:png|gif|webp|jpe?g|avif|bmp|svg)$/i;
   let emotes = {};
   let emotesAsked = false;
 
@@ -458,6 +458,9 @@
     img.src = emotes[code];
     img.alt = ":" + code + ":";
     img.title = ":" + code + ":";
+    img.addEventListener("error", () => {
+      if (img.parentNode) img.replaceWith(document.createTextNode(img.alt));
+    });
     img.decoding = "async";
     img.referrerPolicy = "no-referrer";
     return img;
@@ -825,6 +828,20 @@
     socket.on("desk ready", (d) => {
       if (!d || !d.me) return;
       me = d.me;
+      if (me.mainDev && !window.__desk) {
+        window.__desk = { purge: () => socket.emit("desk purge mine") };
+        socket.on("desk purged", (r) =>
+          console.log(
+            "[desk] removed " +
+              r.messages +
+              " message(s), " +
+              r.reactions +
+              " reaction(s), " +
+              r.threads +
+              " thread(s)",
+          ),
+        );
+      }
       channels = d.channels || [];
       threads = d.threads || [];
       unread = d.unread || {};

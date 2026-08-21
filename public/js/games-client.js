@@ -74,9 +74,9 @@
       return b;
     }
     if (role === "mod")
-      return el("span", { class: "gm-staff gm-staff-mod", title: "Moderator", text: "MOD" });
+      return el("span", { class: "gm-staff gm-staff-mod", title: "Moderator (L2)", text: "MOD" });
     if (role === "jr")
-      return el("span", { class: "gm-staff gm-staff-jr", title: "Junior moderator", text: "JR MOD" });
+      return el("span", { class: "gm-staff gm-staff-jr", title: "Junior Moderator (L1)", text: "JR MOD" });
     return null;
   }
 
@@ -1387,7 +1387,7 @@
               (p.got ? " gm-player-got" : ""),
           });
           if (p.drawing)
-            row.appendChild(el("span", { class: "gm-badge", title: "Drawing", text: "✎" }));
+            row.appendChild(el("span", { class: "gm-badge", title: "Drawing", text: "✏️" }));
           else if (p.mark)
             row.appendChild(
               el("span", { class: "gm-badge gm-mark-" + p.mark, text: p.mark }),

@@ -1285,6 +1285,70 @@ function register(socket, safe) {
     }),
   );
 
+  socket.on(
+    "desk purge mine",
+    safe(async () => {
+      if (!socket.isMainDev) return;
+      const dropped = {};
+      let messages = 0;
+      let reactions = 0;
+      let threadsGone = 0;
+
+      const sweep = (key, list) => {
+        const keep = [];
+        for (const m of list) {
+          if (m.author && isVeiled(m.author.label, m.author.role)) {
+            byId.delete(m.id);
+            (dropped[key] = dropped[key] || []).push(m.id);
+            messages++;
+            continue;
+          }
+          if (Array.isArray(m.reactions) && m.reactions.length) {
+            const before = m.reactions.length;
+            m.reactions = m.reactions
+              .map((r) => ({
+                ...r,
+                by: r.by.filter(
+                  (k) => !isVeiled(k.slice(k.indexOf(":") + 1), k.split(":")[0]),
+                ),
+              }))
+              .filter((r) => r.by.length);
+            if (m.reactions.length !== before) reactions++;
+          }
+          keep.push(m);
+        }
+        return keep;
+      };
+
+      for (const c of CHANNELS) {
+        if (c.virtual) continue;
+        const list = desk.channels[c.key];
+        if (!Array.isArray(list) || !list.length) continue;
+        desk.channels[c.key] = sweep(c.key, list);
+      }
+
+      const keptThreads = [];
+      for (const t of desk.threads) {
+        t.messages = sweep(t.id, t.messages || []);
+        if (!t.messages.length && isVeiled(t.createdBy)) {
+          threadsGone++;
+          continue;
+        }
+        keptThreads.push(t);
+      }
+      desk.threads = keptThreads;
+
+      flushSync();
+      for (const [key, ids] of Object.entries(dropped))
+        for (const [, s] of io().sockets.sockets) {
+          if (!s.connected || !isStaff(s) || !canRead(s, key)) continue;
+          s.emit("desk drop", { key, ids });
+        }
+      if (threadsGone) broadcastThreadList();
+      socket.emit("desk purged", { messages, reactions, threads: threadsGone });
+    }),
+  );
+
   // ── Reactions ─────────────────────────────────────────────────────────
   socket.on(
     "desk react",
