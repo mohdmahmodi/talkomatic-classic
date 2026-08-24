@@ -5,7 +5,10 @@
     bots, a guided "start from an idea" wizard) and a focused editor where a
     bot is a stack of colored blocks you can drag around, with a live Test
     Room beside it. Flat, solid styling; no translucency anywhere.
-    Tier 2 (real code) is documented on its own page for the older builders.
+    Tier 2 (real code) is fully documented on the For coders tab: the whole
+    socket protocol, tokens, working Node and Python bots. Code blocks are
+    highlighted by the self-hosted js/prism.min.js and verified against the
+    battle-tested originals; edit code samples with care.
 -->
 <!doctype html>
 <html lang="en">
@@ -744,99 +747,1313 @@
 
       <!-- ── For coders (tier 2) ── -->
       <div class="bc-view" id="apiView">
-        <div class="bc-card">
-          <div class="bc-card-head">
-            <i class="fas fa-code"></i>For coders: the bot API
-          </div>
+        <p class="bc-doc-lede">
+          Drive a bot with real code instead of blocks. Your program connects
+          over Socket.IO, takes an ordinary seat with a
+          <span class="bot-badge-demo">BOT</span> badge, and talks the same
+          protocol the site itself uses. Node, Python, or anything else with a
+          Socket.IO client. Everything is documented on this page, and both
+          example bots at the bottom run as-is.
+        </p>
+
+        <div class="bc-toc">
+          <a href="#cd-1"><span class="n">1</span>What you can build</a>
+          <a href="#cd-2"><span class="n">2</span>Get a token</a>
+          <a href="#cd-3"><span class="n">3</span>Five minute start</a>
+          <a href="#cd-4"><span class="n">4</span>Tokens that renew themselves</a>
+          <a href="#cd-5"><span class="n">5</span>Connecting</a>
+          <a href="#cd-6"><span class="n">6</span>Signing in</a>
+          <a href="#cd-7"><span class="n">7</span>Rooms</a>
+          <a href="#cd-8"><span class="n">8</span>Talking</a>
+          <a href="#cd-9"><span class="n">9</span>Reading the room</a>
+          <a href="#cd-10"><span class="n">10</span>Staying connected</a>
+          <a href="#cd-11"><span class="n">11</span>Full bot in Node</a>
+          <a href="#cd-12"><span class="n">12</span>Full bot in Python</a>
+          <a href="#cd-13"><span class="n">13</span>Event reference</a>
+          <a href="#cd-14"><span class="n">14</span>The numbers</a>
+          <a href="#cd-15"><span class="n">15</span>FAQ</a>
+        </div>
+
+        <div class="bc-card bc-chapter" id="cd-1">
+          <div class="bc-card-head"><span class="n">1</span>What a coded bot can do</div>
           <div class="bc-card-body bc-doc">
             <p>
-              Already writing Node or Python? You can skip the editor and
-              drive a bot with real code. Your program gets an ordinary seat
-              with a <span class="bot-badge-demo">BOT</span> badge, and
-              follows the same rules: bot seats by room size (1 per 5 seats,
-              up to 5), the word filter, and moderation.
+              There are two ways to make a bot. The block editor on this page
+              (tier 1) runs your bot on the Talkomatic server itself: no code,
+              no hosting, and it follows you around. A coded bot (tier 2) is a
+              program <b>you</b> run, on your own machine or server, connected
+              from the outside. It stays up as long as your program does.
             </p>
-
-            <h4><i class="fas fa-key"></i>1. Get a token</h4>
+            <p>A coded bot can do everything a person at a keyboard can:</p>
+            <ul>
+              <li>Sign in with a name, a location line, and an avatar.</li>
+              <li>List the public rooms, create rooms, join rooms (including semi-private ones with the code).</li>
+              <li>Read everyone's textbox live, keystroke by keystroke, exactly as people see it.</li>
+              <li>Type into its own box: instantly, or letter by letter like the hosted bots.</li>
+              <li>Show the "typing" indicator.</li>
+              <li>See people join and leave, see votes change, and vote itself.</li>
+              <li>Read the public REST endpoints (server status, config, avatar list).</li>
+            </ul>
             <p>
-              Tokens are requested from code, not from a browser (that is
-              deliberate). Three per IP, valid 30 days:
+              What it cannot do: read rooms it has not joined, join a room
+              that disallows bots or is already at its bot limit (rooms get 1
+              bot seat per 5 people they hold, up to 5), or escape moderation.
+              Everyone sees the BOT badge, rooms can vote a bot out, staff can
+              disconnect any bot, and <b>whatever your bot does counts as you
+              doing it</b>.
             </p>
-            <pre>curl -X POST <span class="js-origin"></span>/api/v1/bot-tokens/request \
-  -H "User-Agent: my-bot/1.0"</pre>
+          </div>
+        </div>
 
-            <h4><i class="fas fa-plug"></i>2. Connect and join</h4>
-            <pre>// npm install socket.io-client
+        <div class="bc-card bc-chapter" id="cd-2">
+          <div class="bc-card-head"><span class="n">2</span>Get a token</div>
+          <div class="bc-card-body bc-doc">
+            <p>
+              Every automated connection needs a bot token. You request one
+              <b>from code</b>, not from a browser (requests that look like a
+              browser are refused on purpose):
+            </p>
+            <div class="bc-codebox">
+              <div class="bc-codebox-bar"><span class="lang">terminal</span><button class="bc-copy" type="button"><i class="fas fa-copy"></i>Copy</button></div>
+<pre><code class="language-bash">curl -X POST https://classic.talkomatic.co/api/v1/bot-tokens/request \
+  -H "User-Agent: my-bot/1.0"</code></pre>
+            </div>
+            <div class="bc-codebox">
+              <div class="bc-codebox-bar"><span class="lang">response</span><button class="bc-copy" type="button"><i class="fas fa-copy"></i>Copy</button></div>
+<pre><code class="language-json">{
+  "token": "tk_a1b2c3...64 hex characters",
+  "expiresIn": 2592000000,
+  "expiresAt": "2026-09-23T12:00:00.000Z",
+  "usage": { "rateLimit": "500 req/min", "headers": "Authorization: Bearer {token}" }
+}</code></pre>
+            </div>
+            <p>The rules around tokens, worth knowing before anything surprises you:</p>
+            <div class="bc-chip-table">
+              <code>30 days</code>
+              <span>How long a token lasts from the moment it is made.</span>
+              <code>3 per IP</code>
+              <span>At most 3 live tokens per IP address at once.</span>
+              <code>3 requests/hour</code>
+              <span>The request endpoint allows 3 calls per hour per IP. A 4th
+              is blocked for an hour, so do not request a token on every
+              start. Save it to a file and reuse it (section 4).</span>
+              <code>Dies on restart</code>
+              <span>Tokens live in the server's memory. Every Talkomatic
+              update or restart forgets them all. This is the top cause of
+              "my bot suddenly can't connect": the token is gone and must be
+              re-requested. Section 4 makes that automatic.</span>
+              <code>Not in browsers</code>
+              <span>Tokens are for programs. Browser page code never needs
+              one, and a browser presenting a token is refused.</span>
+            </div>
+            <p>Check any token's state (also the cleanest way to test whether a saved token is still good):</p>
+            <div class="bc-codebox">
+              <div class="bc-codebox-bar"><span class="lang">terminal</span><button class="bc-copy" type="button"><i class="fas fa-copy"></i>Copy</button></div>
+<pre><code class="language-bash">curl https://classic.talkomatic.co/api/v1/bot-tokens/info \
+  -H "User-Agent: my-bot/1.0" \
+  -H "Authorization: Bearer tk_your_token_here"</code></pre>
+            </div>
+            <p>
+              A good token answers 200 with <code>createdAt</code>,
+              <code>lastUsed</code>, <code>expiresAt</code> and a
+              <code>uses</code> count. A dead one answers 401.
+            </p>
+          </div>
+        </div>
+
+        <div class="bc-card bc-chapter" id="cd-3">
+          <div class="bc-card-head"><span class="n">3</span>Five minute start</div>
+          <div class="bc-card-body bc-doc">
+            <p>
+              The smallest bot that does something. Paste your token in, put a
+              real room id in (the 6-digit number in the room page's address),
+              run it, and type <code>!ping</code> in that room:
+            </p>
+            <div class="bc-codebox">
+              <div class="bc-codebox-bar"><span class="lang">quickstart.js</span><button class="bc-copy" type="button"><i class="fas fa-copy"></i>Copy</button></div>
+<pre><code class="language-javascript">// npm install socket.io-client        (Node 18 or newer)
 const { io } = require("socket.io-client");
 
-const socket = io("<span class="js-origin"></span>", {
-  transports: ["websocket"],
-  auth: { token: "YOUR_TOKEN" },
+const socket = io("https://classic.talkomatic.co", {
+  transports: ["websocket"],              // the server speaks websocket only
+  auth: { token: "tk_paste_your_token_here" },
 });
 
-socket.on("connect", () => {
-  socket.emit("join lobby", { username: "MarketBot", location: "Bot" });
+socket.on("connect", () =&gt; {
+  socket.emit("join lobby", { username: "MyFirstBot", location: "Bot" });
 });
 
-socket.on("signin status", (s) => {
+socket.on("signin status", (s) =&gt; {
   if (s.isSignedIn) socket.emit("join room", { roomId: "123456" });
 });
 
-socket.on("room joined", (d) => console.log("seated in", d.roomName));</pre>
+socket.on("room joined", (d) =&gt; console.log("Seated in", d.roomName));
 
-            <h4>
-              <i class="fas fa-comments"></i>3. Read the room, type replies
-            </h4>
-            <pre>
-// Everyone's textbox, live. data.diff.text is their full box.
-socket.on("chat update", (data) => {
-  const line = (data.diff?.text || "").split("\n").pop().trim();
-  if (line === "!price") say(socket, "Fish is 3 coins today.");
+// Everyone's box streams in live. Answer anyone whose line becomes "!ping".
+socket.on("chat update", (d) =&gt; {
+  const line = (d.diff.text || "").split("\n").filter((l) =&gt; l.trim()).pop() || "";
+  if (line.trim() === "!ping") {
+    socket.emit("chat update", {
+      diff: { type: "full-replace", text: "pong, " + d.username + "!" },
+    });
+  }
 });
 
-// Your own box: send the full text (send it in pieces to "type").
-function say(socket, text) {
-  socket.emit("chat update", {
-    diff: { type: "full-replace", text },
-  });
-}</pre
-            >
+socket.on("afk warning", () =&gt; socket.emit("afk response")); // keep the seat
+socket.on("error", (e) =&gt; console.log("Server said:", e?.error?.message));</code></pre>
+            </div>
+            <p>
+              Two things in there deserve a look before you build bigger. The
+              <code>chat update</code> handler fires on <b>every keystroke</b>,
+              not once per message, because Talkomatic has no send button:
+              section 9 shows the proper way to read lines. And the
+              <code>afk warning</code> line at the bottom is what keeps your
+              bot from quietly vanishing after 3 minutes: section 10 explains.
+            </p>
+          </div>
+        </div>
 
-            <h4><i class="fab fa-python"></i>The same thing in Python</h4>
-            <pre># pip install "python-socketio[client]"
+        <div class="bc-card bc-chapter" id="cd-4">
+          <div class="bc-card-head"><span class="n">4</span>Tokens that renew themselves</div>
+          <div class="bc-card-body bc-doc">
+            <p>
+              Hardcoded tokens die twice: after 30 days, and every time the
+              server restarts. The fix is one function that your bot calls on
+              every connection attempt. It reuses the saved token while the
+              server still accepts it, and requests a fresh one the moment it
+              is refused:
+            </p>
+            <div class="bc-codebox">
+              <div class="bc-codebox-bar"><span class="lang">Node</span><button class="bc-copy" type="button"><i class="fas fa-copy"></i>Copy</button></div>
+<pre><code class="language-javascript">const fs = require("fs");
+
+const SERVER = "https://classic.talkomatic.co";
+const TOKEN_FILE = "talkomatic-token.json";
+
+// Reuse the saved token while the server still accepts it. If it expired,
+// or the server restarted and forgot it, request a fresh one and save it.
+async function getToken() {
+  try {
+    const saved = JSON.parse(fs.readFileSync(TOKEN_FILE, "utf8"));
+    const res = await fetch(SERVER + "/api/v1/bot-tokens/info", {
+      headers: { Authorization: "Bearer " + saved.token, "User-Agent": "my-bot/1.0" },
+    });
+    if (res.ok) return saved.token;
+  } catch (err) {}
+  const res = await fetch(SERVER + "/api/v1/bot-tokens/request", {
+    method: "POST",
+    headers: { "User-Agent": "my-bot/1.0" },
+  });
+  if (!res.ok) throw new Error("Token request failed: " + res.status);
+  const data = await res.json();
+  fs.writeFileSync(TOKEN_FILE, JSON.stringify(data, null, 2));
+  console.log("Fresh token saved, good until", data.expiresAt);
+  return data.token;
+}</code></pre>
+            </div>
+            <p>
+              Wire it into the connection with an auth <b>callback</b> instead
+              of a plain object. Socket.IO runs the callback on every attempt,
+              including automatic reconnects, so a token that died while your
+              bot was running heals on the next retry without a restart:
+            </p>
+            <div class="bc-codebox">
+              <div class="bc-codebox-bar"><span class="lang">Node</span><button class="bc-copy" type="button"><i class="fas fa-copy"></i>Copy</button></div>
+<pre><code class="language-javascript">const socket = io(SERVER, {
+  transports: ["websocket"],
+  // Runs on every attempt, first connect and every reconnect alike.
+  auth: (cb) =&gt; getToken().then((token) =&gt; cb({ token })).catch(() =&gt; cb({})),
+});
+
+socket.on("connect_error", (e) =&gt; console.log("Connect refused:", e.message));</code></pre>
+            </div>
+            <p>The same function in Python (the run loop in section 12 calls it on every attempt):</p>
+            <div class="bc-codebox">
+              <div class="bc-codebox-bar"><span class="lang">Python</span><button class="bc-copy" type="button"><i class="fas fa-copy"></i>Copy</button></div>
+<pre><code class="language-python">import json
+import requests
+
+SERVER = "https://classic.talkomatic.co"
+TOKEN_FILE = "talkomatic-token.json"
+UA = {"User-Agent": "my-bot/1.0"}
+
+# Reuse the saved token while the server still accepts it. If it expired,
+# or the server restarted and forgot it, request a fresh one and save it.
+def get_token():
+    try:
+        with open(TOKEN_FILE) as f:
+            saved = json.load(f)
+        r = requests.get(SERVER + "/api/v1/bot-tokens/info", timeout=10,
+                         headers={**UA, "Authorization": "Bearer " + saved["token"]})
+        if r.ok:
+            return saved["token"]
+    except (OSError, ValueError, requests.RequestException):
+        pass
+    r = requests.post(SERVER + "/api/v1/bot-tokens/request", timeout=10, headers=UA)
+    r.raise_for_status()
+    data = r.json()
+    with open(TOKEN_FILE, "w") as f:
+        json.dump(data, f)
+    print("Fresh token saved, good until", data["expiresAt"])
+    return data["token"]</code></pre>
+            </div>
+            <p>
+              Because the check goes through <code>/bot-tokens/info</code>
+              first, a healthy saved token costs one cheap read and no request
+              slot. The 3-per-hour request limit only ever gets touched when
+              the token is truly dead.
+            </p>
+          </div>
+        </div>
+
+        <div class="bc-card bc-chapter" id="cd-5">
+          <div class="bc-card-head"><span class="n">5</span>Connecting</div>
+          <div class="bc-card-body bc-doc">
+            <p>
+              The server speaks Socket.IO v4 over <b>websocket only</b>. There
+              is no HTTP long-polling fallback, so every client must say so
+              explicitly, and the token goes in the handshake's
+              <code>auth</code> field:
+            </p>
+            <div class="bc-codebox">
+              <div class="bc-codebox-bar"><span class="lang">Node</span><button class="bc-copy" type="button"><i class="fas fa-copy"></i>Copy</button></div>
+<pre><code class="language-javascript">const socket = io("https://classic.talkomatic.co", {
+  transports: ["websocket"],
+  auth: { token: "tk_your_token_here" },
+});</code></pre>
+            </div>
+            <div class="bc-codebox">
+              <div class="bc-codebox-bar"><span class="lang">Python</span><button class="bc-copy" type="button"><i class="fas fa-copy"></i>Copy</button></div>
+<pre><code class="language-python">sio.connect("https://classic.talkomatic.co",
+            auth={"token": "tk_your_token_here"},
+            transports=["websocket"])</code></pre>
+            </div>
+            <p>
+              Send an honest <code>User-Agent</code> like
+              <code>my-bot/1.0</code> on the HTTP calls, and do not dress your
+              program up in browser headers. The server sorts connections into
+              "browser" and "program" by their headers: programs need a token,
+              browsers must not have one. A program wearing a fake browser
+              User-Agent lands in the browser rules and gets refused
+              <i>for</i> carrying a token.
+            </p>
+            <p>When a connection is refused, the reason arrives in <code>connect_error</code>:</p>
+            <div class="bc-chip-table">
+              <code>Bot token required</code>
+              <span>No token reached the server. Check the field name: it is
+              <code>auth.token</code>.</span>
+              <code>Invalid bot token</code>
+              <span>Expired, mistyped, or forgotten in a server restart.
+              Request a fresh one (section 4 automates this).</span>
+              <code>Bot tokens not allowed in browsers</code>
+              <span>The handshake looked like a browser. Drop the fake
+              browser headers.</span>
+              <code>Too many connections</code>
+              <span>One IP can hold 8 sockets at once, and your own browser
+              tabs on the same network count. Close some.</span>
+              <code>IP rate limit exceeded</code>
+              <span>More than 20 connection attempts in 15 seconds from one
+              IP. Back off for 30 seconds. A reconnect loop with no delay
+              does this to itself.</span>
+              <code>IP blocked</code>
+              <span>The IP is banned from Talkomatic. The error's
+              <code>data</code> carries the ban details.</span>
+            </div>
+            <p>
+              The server pings every socket every 25 seconds and drops
+              connections that stay silent for 60. Socket.IO clients answer
+              pings automatically, so this only bites when your process
+              blocks its own event loop for a minute (a busy while-loop, a
+              stuck synchronous call). Keep long work off the socket's
+              thread.
+            </p>
+          </div>
+        </div>
+
+        <div class="bc-card bc-chapter" id="cd-6">
+          <div class="bc-card-head"><span class="n">6</span>Signing in</div>
+          <div class="bc-card-body bc-doc">
+            <p>
+              A connected socket is nobody until it signs in. Send
+              <code>join lobby</code> and wait for <code>signin status</code>:
+            </p>
+            <div class="bc-codebox">
+              <div class="bc-codebox-bar"><span class="lang">Node</span><button class="bc-copy" type="button"><i class="fas fa-copy"></i>Copy</button></div>
+<pre><code class="language-javascript">socket.emit("join lobby", {
+  username: "MarketBot",   // up to 15 characters
+  location: "the docks",   // up to 20, shows under the name; defaults to "On The Web"
+  avatar: { preset: 3 },   // optional; ids from GET /api/v1/avatars
+});
+
+socket.on("signin status", (s) => {
+  // { isSignedIn: true, username, location, userId, isBot: true, ... }
+  console.log("I am", s.username, "with id", s.userId);
+});</code></pre>
+            </div>
+            <p>Names go through the same door people use, so all of this is refused:</p>
+            <ul>
+              <li>Names on the word filter, names containing a link or an IP address.</li>
+              <li>Guest-style names (<code>guest123</code>, <code>anonymous</code>, <code>someone</code>, <code>unknown</code>).</li>
+              <li>Reserved names and close lookalikes (<code>talkomatic</code>, <code>admin</code>, <code>mod</code>, <code>dev</code>, <code>mohd</code>).</li>
+              <li>Exotic unicode. Ordinary letters, numbers and punctuation only.</li>
+            </ul>
+            <p>
+              A refusal arrives as an <code>error</code> event (or
+              <code>validation_error</code> with a per-field breakdown), and
+              you stay signed out. There is no reserved-name protection
+              between bots and people beyond that list: pick a name that says
+              what the bot is.
+            </p>
+            <p>
+              The <code>userId</code> you get belongs to this connection's
+              session. Connect again and you are somebody new. Nothing
+              follows the old id around, but room bans stick to it, so a
+              vote-kicked bot that reconnects for a new id and walks back in
+              is ban evasion. Do not build that.
+            </p>
+          </div>
+        </div>
+
+        <div class="bc-card bc-chapter" id="cd-7">
+          <div class="bc-card-head"><span class="n">7</span>Rooms</div>
+          <div class="bc-card-body bc-doc">
+            <h4><i class="fas fa-list"></i>Finding one</h4>
+            <div class="bc-codebox">
+              <div class="bc-codebox-bar"><span class="lang">Node</span><button class="bc-copy" type="button"><i class="fas fa-copy"></i>Copy</button></div>
+<pre><code class="language-javascript">socket.emit("get rooms");
+
+socket.on("initial rooms", (rooms) => {
+  for (const r of rooms) {
+    // r: { id, name, type, userCount, capacity, isFull, allowBots,
+    //      locked, users: [{ id, username, location, isBotUser? }, ...] }
+    console.log(r.id, r.name, r.userCount + "/" + r.capacity,
+                r.allowBots ? "" : "(no bots)");
+  }
+});</code></pre>
+            </div>
+            <p>
+              While you sit in the lobby (signed in, not in a room) the same
+              list keeps arriving as <code>lobby update</code> whenever it
+              changes. Private rooms are never listed; you can still join one
+              if you know its id.
+            </p>
+            <h4><i class="fas fa-plus"></i>Making one</h4>
+            <div class="bc-codebox">
+              <div class="bc-codebox-bar"><span class="lang">Node</span><button class="bc-copy" type="button"><i class="fas fa-copy"></i>Copy</button></div>
+<pre><code class="language-javascript">socket.emit("create room", {
+  name: "fish market",        // up to 25 characters, must be unused
+  type: "public",             // or "semi-private" (+ accessCode) or "private"
+  // accessCode: "123456",    // exactly 6 digits, for semi-private
+  // maxSize: 10,             // 5 to 10 seats; default 5
+  // allowBots: false,        // to keep OTHER bots out of your bot's room
+});
+
+socket.on("room created", (roomId) => {
+  socket.emit("join room", { roomId }); // creating does not seat you
+});</code></pre>
+            </div>
+            <p>
+              Creation is throttled: 10 seconds between rooms per person, 30
+              seconds and at most 2 standing rooms per IP. An empty room is
+              deleted after 30 seconds, so join what you make.
+            </p>
+            <h4><i class="fas fa-door-open"></i>Joining and sitting down</h4>
+            <div class="bc-codebox">
+              <div class="bc-codebox-bar"><span class="lang">Node</span><button class="bc-copy" type="button"><i class="fas fa-copy"></i>Copy</button></div>
+<pre><code class="language-javascript">socket.emit("join room", { roomId: "123456" }); // accessCode: "..." if semi-private
+
+socket.on("room joined", (d) => {
+  // d.users            everyone seated, you included
+  // d.currentMessages  { userId: "their current box text", ... }
+  // d.votes            { voterId: targetUserId, ... }
+  // d.roomName, d.roomType, d.layout, d.maxSize, d.locked, d.slowMode
+});</code></pre>
+            </div>
+            <p>
+              You can be in <b>one room at a time</b>. Joining while seated
+              elsewhere is refused until you <code>leave room</code>. A join
+              can also be refused with:
+            </p>
+            <div class="bc-chip-table">
+              <code>room not found</code>
+              <span>Bad id, or the room is gone. Room ids are 6 digits.</span>
+              <code>room full</code>
+              <span>All seats taken. Its own event, not an error.</span>
+              <code>access code required</code>
+              <span>Semi-private room, no code sent. Resend with
+              <code>accessCode</code>.</span>
+              <code>bot limit</code>
+              <span>Rooms hold 1 bot per 5 seats (a default 5-seat room holds
+              one bot, a 10-seat room two). Arrives as an
+              <code>error</code>.</span>
+              <code>does not allow bots</code>
+              <span>The room was made with bots switched off.</span>
+              <code>banned</code>
+              <span>This identity was vote-kicked from that room
+              earlier.</span>
+              <code>locked / maintenance</code>
+              <span>Staff locked the room, or the whole site is in
+              maintenance mode.</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="bc-card bc-chapter" id="cd-8">
+          <div class="bc-card-head"><span class="n">8</span>Talking</div>
+          <div class="bc-card-body bc-doc">
+            <p>
+              Talkomatic has no messages and no send button. Every person owns
+              one textbox, the room watches it change live, and "sending" is
+              just editing your box. You edit yours with
+              <code>chat update</code> diffs:
+            </p>
+            <div class="bc-chip-table">
+              <code>full-replace</code>
+              <span><code>{ type: "full-replace", text }</code> replaces your
+              whole box. The only one most bots need.</span>
+              <code>add</code>
+              <span><code>{ type: "add", index, text }</code> inserts at a
+              position in your current text.</span>
+              <code>delete</code>
+              <span><code>{ type: "delete", index, count }</code> removes
+              characters.</span>
+              <code>replace</code>
+              <span><code>{ type: "replace", index, text }</code> overwrites
+              characters in place.</span>
+            </div>
+            <div class="bc-codebox">
+              <div class="bc-codebox-bar"><span class="lang">Node</span><button class="bc-copy" type="button"><i class="fas fa-copy"></i>Copy</button></div>
+<pre><code class="language-javascript">let myBox = ""; // your box's current text; the server never echoes it back
+
+// Instant: one event, the whole message.
+function say(text) {
+  myBox = text;
+  socket.emit("chat update", { diff: { type: "full-replace", text } });
+}
+
+// A line under what is already there, like the hosted bots' "add a line
+// below" block. Oldest lines scroll away as the 5000 character cap nears.
+function appendLine(line) {
+  let next = myBox ? myBox + "\n" + line : line;
+  while (next.length &gt; 4500 &amp;&amp; next.includes("\n")) {
+    next = next.slice(next.indexOf("\n") + 1);
+  }
+  say(next);
+}
+
+// Typewriter: the hosted bots' pace, 4 letters every 120ms. Each tick is
+// one socket event, so keep this for short lines and say() the long ones.
+async function type(text) {
+  socket.emit("typing", { isTyping: true });
+  for (let at = 4; at &lt; text.length + 4; at += 4) {
+    say(text.slice(0, at));
+    await new Promise((r) =&gt; setTimeout(r, 120));
+  }
+  socket.emit("typing", { isTyping: false });
+}</code></pre>
+            </div>
+            <p>Facts that matter here:</p>
+            <ul>
+              <li>Your box holds <b>5000 characters</b>. Anything past that is cut off.</li>
+              <li>The server never echoes your own edits back, so track your
+              box's text yourself (the <code>appendLine</code> helper above
+              does).</li>
+              <li>The room sees your edits as you make them. A slow trickle of
+              <code>full-replace</code> prefixes looks like typing; the
+              <code>type()</code> helper above matches the hosted bots' pace,
+              4 letters every 120ms.</li>
+              <li>Each edit is one socket event, and a bot gets <b>500 events
+              per minute</b>. An instant <code>say()</code> costs 1. A 1000
+              character typewriter message costs 250. Budget accordingly:
+              typewriter the short lines, <code>say()</code> the walls.</li>
+              <li><code>typing</code> events (<code>{ isTyping: true }</code>)
+              drive the little typing indicator. Optional, free of the 500
+              cap, and auto-clears 2 seconds after your last one.</li>
+              <li>Swearing is filtered <b>per viewer</b> by each person's own
+              automod setting, the same as for people. Links get scrubbed out
+              of boxes shortly after they appear (you also get a
+              <code>links not allowed</code> event), and IP addresses are
+              masked for everyone.</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="bc-card bc-chapter" id="cd-9">
+          <div class="bc-card-head"><span class="n">9</span>Reading the room</div>
+          <div class="bc-card-body bc-doc">
+            <p>
+              Everyone else's box arrives the same way yours leaves:
+              <code>chat update</code>, on every keystroke. The server always
+              normalizes what you receive to a <code>full-replace</code>
+              carrying the person's <b>entire box</b>, so you never apply
+              diffs yourself:
+            </p>
+            <div class="bc-codebox">
+              <div class="bc-codebox-bar"><span class="lang">payload</span><button class="bc-copy" type="button"><i class="fas fa-copy"></i>Copy</button></div>
+<pre><code class="language-json">{ "userId": "abc...", "username": "sara", "diff": { "type": "full-replace", "text": "hello\nis anyone" } }</code></pre>
+            </div>
+            <p>
+              The catch: with no send button there is no "message received"
+              moment. You decide when a line counts as said. The hosted bots,
+              and the example bots below, wait until a person's <b>last
+              non-empty line</b> has stopped changing for 1.5 seconds, then
+              treat it as spoken, and key it by line number plus text so the
+              same utterance never fires twice:
+            </p>
+            <div class="bc-codebox">
+              <div class="bc-codebox-bar"><span class="lang">Node</span><button class="bc-copy" type="button"><i class="fas fa-copy"></i>Copy</button></div>
+<pre><code class="language-javascript">// Wait until a person's last line has been still for 1.5 seconds, then
+// treat it as said. The line number + text key makes one line fire once.
+const settleTimers = new Map();
+const lastHandled = new Map();
+
+socket.on("chat update", (d) =&gt; {
+  clearTimeout(settleTimers.get(d.userId));
+  settleTimers.set(d.userId, setTimeout(() =&gt; {
+    const lines = String(d.diff.text || "").split("\n");
+    for (let i = lines.length - 1; i &gt;= 0; i--) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      const key = i + ":" + line;
+      if (key === lastHandled.get(d.userId)) return;
+      lastHandled.set(d.userId, key);
+      return onLine(d.userId, d.username, line);
+    }
+  }, 1500));
+});
+
+socket.on("user left", (userId) =&gt; {
+  settleTimers.delete(userId);
+  lastHandled.delete(userId);
+});
+
+function onLine(userId, username, line) {
+  // line is that person's settled last line. Commands go here.
+  if (line.toLowerCase().split(/\s+/).includes("!roll")) {
+    say(username + " rolls a " + (1 + Math.floor(Math.random() * 6)) + "!");
+  }
+}</code></pre>
+            </div>
+            <p>
+              One honest edge: if a person goes back and extends a settled
+              line ("!roll" into "!roll again"), that is a new key and fires
+              again. The hosted bots behave the same way. People learn to
+              press Enter, and your commands should tolerate a rerun.
+            </p>
+            <p>The rest of the room reaches you as events:</p>
+            <div class="bc-chip-table">
+              <code>user joined</code>
+              <span>Someone sat down: a user object plus
+              <code>roomName</code>. Bots carry <code>isBotUser: true</code>,
+              hosted bots also a <code>botOwner</code> name. Check that flag
+              before greeting so two greeters do not greet each other
+              forever.</span>
+              <code>user left</code>
+              <span>Just the departed <code>userId</code>. Clean up any
+              per-user state you keep.</span>
+              <code>user typing</code>
+              <span><code>{ userId, username, isTyping }</code>.</span>
+              <code>update votes</code>
+              <span><code>{ voterId: targetUserId, ... }</code>, the full map
+              each time it changes. Voting needs 3+ people; a majority
+              removes the target. Your bot can <code>vote</code> too:
+              <code>{ targetUserId }</code> to place or take back its
+              vote.</span>
+              <code>room update</code>
+              <span>A full room snapshot (same shape as
+              <code>room joined</code>) after bigger changes.</span>
+              <code>error / message</code>
+              <span><code>error</code> is
+              <code>{ error: { code, message } }</code>. <code>message</code>
+              is a soft warning, for example when you edit faster than the
+              chat limiter likes.</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="bc-card bc-chapter" id="cd-10">
+          <div class="bc-card-head"><span class="n">10</span>Staying connected (why bots "randomly" vanish)</div>
+          <div class="bc-card-body bc-doc">
+            <p>
+              Nothing about it is random. A bot leaves a room, or loses its
+              socket, for exactly one of these reasons, each with its fix.
+              The two at the top cover nearly every report.
+            </p>
+            <div class="bc-chip-table">
+              <code>The inactivity check</code>
+              <span><b>The big one.</b> The server treats anyone whose box has
+              not changed for 2.5 minutes as idle: it sends
+              <code>afk warning</code>, and 30 seconds later
+              <code>afk timeout</code> and removes them from the room. Your
+              own edits reset the clock, so chatty bots never notice, but a
+              bot that mostly listens gets removed 3 minutes after its last
+              word. The socket stays connected; the seat is gone. Fix, one
+              line: <code>socket.on("afk warning", () =&gt;
+              socket.emit("afk response"))</code>. Handle
+              <code>afk timeout</code> too by rejoining, for the cases
+              below.</span>
+              <code>Server restarts</code>
+              <span><b>The other big one.</b> Talkomatic deploys and restarts
+              without notice beyond a <code>server restarting</code> event 5
+              seconds ahead. Your socket drops, and your token died with the
+              restart, so plain reconnects fail with "Invalid bot token"
+              forever. Fix: the auth callback from section 4, plus rejoining
+              your room on <code>connect</code>, makes restarts a 10 second
+              hiccup.</span>
+              <code>The room closed</code>
+              <span>Rooms are not permanent. An empty room lives 30 seconds.
+              A room where one occupant sits <b>alone</b> (your bot counts)
+              is closed after roughly 20 minutes, faster when the server is
+              busy. You get <code>afk timeout</code> with a room-closed
+              message. Fix: recreate or pick a livelier room.</span>
+              <code>Voted out</code>
+              <span>3+ people, a majority against the bot: it gets
+              <code>kicked</code>, loses the seat, and that identity is
+              banned from that room. The right response is to stay gone, not
+              to reconnect around it.</span>
+              <code>Staff</code>
+              <span>Moderators see every running bot and its owner and can
+              disconnect any of them, or turn all bots off. Repeat offenders
+              collect IP bans.</span>
+              <code>Ping timeout</code>
+              <span>Block your process's event loop for 60+ seconds and the
+              server drops you as dead. Keep heavy work off the socket
+              thread.</span>
+              <code>Connection and event caps</code>
+              <span>8 sockets per IP, 20 connection attempts per 15 seconds,
+              500 events per minute per bot. The caps do not disconnect you
+              (events over the line are dropped with an
+              <code>error</code>), but a hot reconnect loop will lock the IP
+              out for 30 seconds at a time.</span>
+            </div>
+            <p>The whole survival kit is four handlers:</p>
+            <div class="bc-codebox">
+              <div class="bc-codebox-bar"><span class="lang">Node</span><button class="bc-copy" type="button"><i class="fas fa-copy"></i>Copy</button></div>
+<pre><code class="language-javascript">// 1. Answer the inactivity check, or lose the seat 3 minutes after
+//    your bot's last word.
+socket.on("afk warning", () =&gt; socket.emit("afk response"));
+
+// 2. If removed anyway (idle before you added #1, or the room closed),
+//    take the seat back.
+socket.on("afk timeout", () =&gt; {
+  setTimeout(() =&gt; socket.emit("join room", { roomId }), 1000);
+});
+
+// 3. After any reconnect you are signed out and roomless. Walk back in.
+//    (With the section 4 auth callback, this also covers server restarts.)
+socket.on("connect", () =&gt; {
+  socket.emit("join lobby", { username: BOT_NAME, location: "Bot" });
+});
+socket.on("signin status", (s) =&gt; {
+  if (s.isSignedIn &amp;&amp; roomId) socket.emit("join room", { roomId });
+});
+
+// 4. Respect a vote-kick. The room said no.
+socket.on("kicked", () =&gt; process.exit(0));</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="bc-card bc-chapter" id="cd-11">
+          <div class="bc-card-head"><span class="n">11</span>A full bot in Node</div>
+          <div class="bc-card-body bc-doc">
+            <p>
+              Everything above in one file that runs as-is: self-renewing
+              token, reconnects, the inactivity handshake, settled-line
+              reading, a typewriter, and two commands. Point
+              <code>TALKOMATIC_SERVER</code> at a test server if you run one;
+              it defaults to the real site.
+            </p>
+            <div class="bc-codebox">
+              <div class="bc-codebox-bar"><span class="lang">dicebot.js</span><button class="bc-copy" type="button"><i class="fas fa-copy"></i>Copy</button></div>
+<pre><code class="language-javascript">// DiceBot: a complete Talkomatic bot.
+// Handles its own token, reconnects, survives the inactivity check,
+// and answers !roll and !help.
+//
+//   npm install socket.io-client     (Node 18 or newer)
+//   node dicebot.js 123456           (a room id, or none to make a room)
+
+const fs = require("fs");
+const { io } = require("socket.io-client");
+
+const SERVER = process.env.TALKOMATIC_SERVER || "https://classic.talkomatic.co";
+const BOT_NAME = "DiceBot";
+const TOKEN_FILE = "talkomatic-token.json";
+const ROOM_ID = process.argv[2] || null;
+
+// ── The token, self-renewing ────────────────────────────────────────────────
+// Reuse the saved token while the server still accepts it. If it expired,
+// or the server restarted and forgot it, request a fresh one and save it.
+async function getToken() {
+  try {
+    const saved = JSON.parse(fs.readFileSync(TOKEN_FILE, "utf8"));
+    const res = await fetch(SERVER + "/api/v1/bot-tokens/info", {
+      headers: { Authorization: "Bearer " + saved.token, "User-Agent": BOT_NAME + "/1.0" },
+    });
+    if (res.ok) return saved.token;
+  } catch (err) {}
+  const res = await fetch(SERVER + "/api/v1/bot-tokens/request", {
+    method: "POST",
+    headers: { "User-Agent": BOT_NAME + "/1.0" },
+  });
+  if (!res.ok) throw new Error("Token request failed: " + res.status + " " + (await res.text()));
+  const data = await res.json();
+  fs.writeFileSync(TOKEN_FILE, JSON.stringify(data, null, 2));
+  console.log("Fresh token saved, good until", data.expiresAt);
+  return data.token;
+}
+
+// ── Connect ─────────────────────────────────────────────────────────────────
+// The auth callback runs on every attempt, so a dead token heals itself:
+// getToken() checks it against the server and replaces it when refused.
+const socket = io(SERVER, {
+  transports: ["websocket"],
+  auth: (cb) =&gt; getToken().then((token) =&gt; cb({ token })).catch(() =&gt; cb({})),
+});
+
+let roomId = ROOM_ID;
+
+socket.on("connect", () =&gt; {
+  console.log("Connected. Signing in...");
+  socket.emit("join lobby", { username: BOT_NAME, location: "Bot" });
+});
+
+socket.on("signin status", (s) =&gt; {
+  if (!s.isSignedIn) return;
+  if (roomId) socket.emit("join room", { roomId });
+  else socket.emit("create room", { name: BOT_NAME + "'s corner", type: "public" });
+});
+
+socket.on("room created", (id) =&gt; socket.emit("join room", { roomId: id }));
+
+socket.on("room joined", (d) =&gt; {
+  roomId = d.roomId;
+  console.log("Seated in", d.roomName, "with", d.users.length - 1, "others");
+});
+
+socket.on("connect_error", (e) =&gt; console.log("Connect refused:", e.message));
+socket.on("error", (e) =&gt; console.log("Server said:", e?.error?.message || e));
+socket.on("kicked", () =&gt; { console.log("Voted out. Leaving for good."); process.exit(0); });
+
+// The inactivity check. A bot that only listens looks idle, so the server
+// asks after 2.5 quiet minutes and removes anyone silent at 3. Answering
+// "afk response" resets the clock. Your own messages also reset it.
+socket.on("afk warning", () =&gt; socket.emit("afk response"));
+socket.on("afk timeout", () =&gt; {
+  // Removed anyway (or the room closed). Take the seat again.
+  console.log("Removed for inactivity, rejoining...");
+  setTimeout(() =&gt; socket.emit("join room", { roomId }), 1000);
+});
+
+// ── Reading the room ────────────────────────────────────────────────────────
+// There is no send button. Everyone's textbox streams in live, keystroke by
+// keystroke, as "chat update" with the person's whole box. Wait until their
+// last line has been still for 1.5 seconds, then treat it as said. The
+// index:text key makes sure one line only fires once.
+const settleTimers = new Map();
+const lastHandled = new Map();
+
+socket.on("chat update", (d) =&gt; {
+  clearTimeout(settleTimers.get(d.userId));
+  settleTimers.set(d.userId, setTimeout(() =&gt; {
+    const lines = String(d.diff.text || "").split("\n");
+    for (let i = lines.length - 1; i &gt;= 0; i--) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      const key = i + ":" + line;
+      if (key === lastHandled.get(d.userId)) return;
+      lastHandled.set(d.userId, key);
+      return onLine(d.username, line);
+    }
+  }, 1500));
+});
+
+socket.on("user joined", (u) =&gt; say("Welcome, " + u.username + "! Type !roll to roll a die."));
+socket.on("user left", (userId) =&gt; { settleTimers.delete(userId); lastHandled.delete(userId); });
+
+// ── The bot itself ──────────────────────────────────────────────────────────
+function onLine(username, line) {
+  const words = line.toLowerCase().split(/\s+/);
+  if (words.includes("!roll")) {
+    const n = 1 + Math.floor(Math.random() * 6);
+    type(username + " rolls a " + n + "!");
+  } else if (words.includes("!help")) {
+    say("I know !roll and !help. That's it, I'm a die.");
+  }
+}
+
+// ── Talking ─────────────────────────────────────────────────────────────────
+// Your box works like everyone's: send its full text and the room sees it.
+function say(text) {
+  socket.emit("chat update", { diff: { type: "full-replace", text } });
+}
+
+// The typewriter version: same pace as hosted bots (4 letters per 120ms).
+// Each tick is one event, so keep long messages for say().
+let typeQueue = Promise.resolve();
+function type(text) {
+  typeQueue = typeQueue.then(async () =&gt; {
+    socket.emit("typing", { isTyping: true });
+    for (let at = 4; at &lt; text.length + 4; at += 4) {
+      say(text.slice(0, at));
+      await new Promise((r) =&gt; setTimeout(r, 120));
+    }
+    socket.emit("typing", { isTyping: false });
+  });
+}</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="bc-card bc-chapter" id="cd-12">
+          <div class="bc-card-head"><span class="n">12</span>The same bot in Python</div>
+          <div class="bc-card-body bc-doc">
+            <p>
+              Identical shape on <code>python-socketio</code>. The reconnect
+              loop at the bottom re-checks the token on every attempt, which
+              is the Python version of the auth callback:
+            </p>
+            <div class="bc-codebox">
+              <div class="bc-codebox-bar"><span class="lang">pricebot.py</span><button class="bc-copy" type="button"><i class="fas fa-copy"></i>Copy</button></div>
+<pre><code class="language-python"># PriceBot: a complete Talkomatic bot in Python.
+# Handles its own token, reconnects, survives the inactivity check,
+# and answers !price and !help.
+#
+#   pip install "python-socketio[client]" requests
+#   python pricebot.py 123456        (a room id, or none to make a room)
+
+import json
+import os
+import sys
+import threading
+import time
+
+import requests
 import socketio
 
-sio = socketio.Client()
+SERVER = os.environ.get("TALKOMATIC_SERVER", "https://classic.talkomatic.co")
+BOT_NAME = "PriceBot"
+TOKEN_FILE = "talkomatic-token.json"
+UA = {"User-Agent": BOT_NAME + "/1.0"}
+
+room_id = sys.argv[1] if len(sys.argv) &gt; 1 else None
+stopped = False
+
+
+# ── The token, self-renewing ────────────────────────────────────────────────
+# Reuse the saved token while the server still accepts it. If it expired,
+# or the server restarted and forgot it, request a fresh one and save it.
+def get_token():
+    try:
+        with open(TOKEN_FILE) as f:
+            saved = json.load(f)
+        r = requests.get(SERVER + "/api/v1/bot-tokens/info", timeout=10,
+                         headers={**UA, "Authorization": "Bearer " + saved["token"]})
+        if r.ok:
+            return saved["token"]
+    except (OSError, ValueError, requests.RequestException):
+        pass
+    r = requests.post(SERVER + "/api/v1/bot-tokens/request", timeout=10, headers=UA)
+    r.raise_for_status()
+    data = r.json()
+    with open(TOKEN_FILE, "w") as f:
+        json.dump(data, f)
+    print("Fresh token saved, good until", data["expiresAt"])
+    return data["token"]
+
+
+sio = socketio.Client(reconnection=False)
+
 
 @sio.event
 def connect():
-    sio.emit("join lobby", {"username": "MarketBot", "location": "Bot"})
+    print("Connected. Signing in...")
+    sio.emit("join lobby", {"username": BOT_NAME, "location": "Bot"})
+
 
 @sio.on("signin status")
-def signin(s):
-    if s.get("isSignedIn"):
-        sio.emit("join room", {"roomId": "123456"})
+def signed_in(s):
+    if not s.get("isSignedIn"):
+        return
+    if room_id:
+        sio.emit("join room", {"roomId": room_id})
+    else:
+        sio.emit("create room", {"name": BOT_NAME + " stand", "type": "public"})
+
+
+@sio.on("room created")
+def room_created(rid):
+    sio.emit("join room", {"roomId": rid})
+
+
+@sio.on("room joined")
+def room_joined(d):
+    global room_id
+    room_id = d["roomId"]
+    print("Seated in", d["roomName"], "with", len(d["users"]) - 1, "others")
+
+
+@sio.on("error")
+def server_error(e):
+    print("Server said:", (e.get("error") or {}).get("message", e))
+
+
+@sio.on("kicked")
+def kicked():
+    global stopped
+    stopped = True
+    print("Voted out. Leaving for good.")
+    sio.disconnect()
+
+
+# The inactivity check. A bot that only listens looks idle, so the server
+# asks after 2.5 quiet minutes and removes anyone silent at 3. Answering
+# "afk response" resets the clock. Your own messages also reset it.
+@sio.on("afk warning")
+def afk_warning(data):
+    sio.emit("afk response")
+
+
+@sio.on("afk timeout")
+def afk_timeout(data):
+    print("Removed for inactivity, rejoining...")
+    time.sleep(1)
+    sio.emit("join room", {"roomId": room_id})
+
+
+# ── Reading the room ────────────────────────────────────────────────────────
+# There is no send button. Everyone's textbox streams in live, keystroke by
+# keystroke, as "chat update" with the person's whole box. Wait until their
+# last line has been still for 1.5 seconds, then treat it as said. The
+# index:text key makes sure one line only fires once.
+settle_timers = {}
+last_handled = {}
+
 
 @sio.on("chat update")
-def chat(data):
-    line = (data.get("diff", {}).get("text") or "").split("\n")[-1].strip()
-    if line == "!price":
-        sio.emit("chat update", {"diff": {"type": "full-replace", "text": "Fish is 3 coins today."}})
+def chat_update(d):
+    user_id = d["userId"]
+    old = settle_timers.pop(user_id, None)
+    if old:
+        old.cancel()
+    t = threading.Timer(1.5, settled, args=(user_id, d["username"], d["diff"]["text"]))
+    settle_timers[user_id] = t
+    t.start()
 
-sio.connect("<span class="js-origin"></span>", auth={"token": "YOUR_TOKEN"},
-            transports=["websocket"])
-sio.wait()</pre>
 
-            <h4><i class="fas fa-triangle-exclamation"></i>Worth knowing</h4>
+def settled(user_id, username, text):
+    lines = (text or "").split("\n")
+    for i in range(len(lines) - 1, -1, -1):
+        line = lines[i].strip()
+        if not line:
+            continue
+        key = str(i) + ":" + line
+        if last_handled.get(user_id) == key:
+            return
+        last_handled[user_id] = key
+        on_line(username, line)
+        return
+
+
+@sio.on("user joined")
+def user_joined(u):
+    say("Hello, " + u["username"] + ". Ask me !price.")
+
+
+@sio.on("user left")
+def user_left(user_id):
+    settle_timers.pop(user_id, None)
+    last_handled.pop(user_id, None)
+
+
+# ── The bot itself ──────────────────────────────────────────────────────────
+def on_line(username, line):
+    words = line.lower().split()
+    if "!price" in words:
+        say("Fish is 3 coins today, " + username + ". Firm but fair.")
+    elif "!help" in words:
+        say("I know !price and !help. I am a fish salesman, not a library.")
+
+
+# Your box works like everyone's: send its full text and the room sees it.
+def say(text):
+    sio.emit("chat update", {"diff": {"type": "full-replace", "text": text}})
+
+
+# ── Run forever ─────────────────────────────────────────────────────────────
+# get_token() checks the saved token against the server on every attempt,
+# so a token that died in a server restart heals itself here.
+while not stopped:
+    try:
+        sio.connect(SERVER, auth={"token": get_token()}, transports=["websocket"])
+        sio.wait()
+    except (socketio.exceptions.ConnectionError, requests.RequestException) as e:
+        print("Connect refused:", e)
+    if not stopped:
+        time.sleep(3)</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="bc-card bc-chapter" id="cd-13">
+          <div class="bc-card-head"><span class="n">13</span>Event reference</div>
+          <div class="bc-card-body bc-doc">
+            <h4><i class="fas fa-arrow-up"></i>You send</h4>
+            <div class="bc-tablewrap">
+              <table class="bc-events">
+                <thead><tr><th>Event</th><th>Payload</th><th>What it does</th></tr></thead>
+                <tbody>
+                  <tr><td><code>join lobby</code></td><td><code>{ username, location?, avatar? }</code></td><td>Sign in. Answered by <code>signin status</code>.</td></tr>
+                  <tr><td><code>check signin status</code></td><td>none</td><td>Re-ask who you are. Same answer event.</td></tr>
+                  <tr><td><code>get rooms</code></td><td>none</td><td>Answered by <code>initial rooms</code> (plus <code>lobby ticker</code>, <code>maintenance status</code>).</td></tr>
+                  <tr><td><code>get room state</code></td><td><code>roomId</code> (string)</td><td>Snapshot of one public room, or the room you are in. Answered by <code>room state</code>.</td></tr>
+                  <tr><td><code>create room</code></td><td><code>{ name, type, accessCode?, maxSize?, allowBots? }</code></td><td>Make a room. Answered by <code>room created</code> with the id.</td></tr>
+                  <tr><td><code>join room</code></td><td><code>{ roomId, accessCode? }</code></td><td>Take a seat. Answered by <code>room joined</code> or a refusal (section 7).</td></tr>
+                  <tr><td><code>leave room</code></td><td>none</td><td>Stand up. No answer event.</td></tr>
+                  <tr><td><code>chat update</code></td><td><code>{ diff: { type, text?, index?, count? } }</code></td><td>Edit your box (section 8).</td></tr>
+                  <tr><td><code>typing</code></td><td><code>{ isTyping }</code></td><td>The typing indicator. Auto-clears after 2s.</td></tr>
+                  <tr><td><code>vote</code></td><td><code>{ targetUserId }</code></td><td>Place or take back your kick vote.</td></tr>
+                  <tr><td><code>afk response</code></td><td>none</td><td>Answer the inactivity check, keep the seat.</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <h4><i class="fas fa-arrow-down"></i>You receive</h4>
+            <div class="bc-tablewrap">
+              <table class="bc-events">
+                <thead><tr><th>Event</th><th>Payload</th><th>When</th></tr></thead>
+                <tbody>
+                  <tr><td><code>signin status</code></td><td><code>{ isSignedIn, username, location, userId, isBot, avatar }</code></td><td>After <code>join lobby</code> or <code>check signin status</code>.</td></tr>
+                  <tr><td><code>validation_error</code></td><td><code>{ field: "why", ... }</code></td><td>A sign-in or room form failed field checks.</td></tr>
+                  <tr><td><code>initial rooms</code> / <code>lobby update</code></td><td>array of rooms</td><td>On request / while you sit in the lobby.</td></tr>
+                  <tr><td><code>room created</code></td><td><code>roomId</code> (string)</td><td>Your room exists. Now join it.</td></tr>
+                  <tr><td><code>room joined</code></td><td><code>{ roomId, roomName, users, currentMessages, votes, maxSize, layout, ... }</code></td><td>You are seated.</td></tr>
+                  <tr><td><code>room state</code> / <code>room update</code></td><td>same shape</td><td>On request / after bigger room changes.</td></tr>
+                  <tr><td><code>chat update</code></td><td><code>{ userId, username, diff: { type: "full-replace", text } }</code></td><td>Someone's box changed. Never your own.</td></tr>
+                  <tr><td><code>user joined</code></td><td>user object + <code>roomName</code></td><td>Someone sat down.</td></tr>
+                  <tr><td><code>user left</code></td><td><code>userId</code> (string)</td><td>Someone left.</td></tr>
+                  <tr><td><code>user typing</code></td><td><code>{ userId, username, isTyping }</code></td><td>The indicator.</td></tr>
+                  <tr><td><code>update votes</code></td><td><code>{ voterId: targetId, ... }</code></td><td>The vote map changed.</td></tr>
+                  <tr><td><code>kicked</code></td><td>none</td><td>The room voted you out. You are also banned from it.</td></tr>
+                  <tr><td><code>room full</code> / <code>room not found</code> / <code>access code required</code></td><td>error-shaped / none</td><td>Join refusals with their own names.</td></tr>
+                  <tr><td><code>afk warning</code></td><td><code>{ message, secondsRemaining }</code></td><td>2.5 quiet minutes. Answer with <code>afk response</code>.</td></tr>
+                  <tr><td><code>afk timeout</code></td><td><code>{ message }</code></td><td>Removed from the room (idle, or the room closed).</td></tr>
+                  <tr><td><code>links not allowed</code></td><td>none</td><td>A link you posted was scrubbed.</td></tr>
+                  <tr><td><code>message</code></td><td><code>{ type, text }</code></td><td>Soft warnings, e.g. editing too fast.</td></tr>
+                  <tr><td><code>error</code></td><td><code>{ error: { code, message, details? } }</code></td><td>Anything refused without its own event.</td></tr>
+                  <tr><td><code>server restarting</code></td><td><code>{ seconds }</code></td><td>The server is going down in about 5 seconds. Expect the token to be gone when it returns.</td></tr>
+                  <tr><td><code>maintenance status</code> / <code>lobby ticker</code></td><td><code>{ enabled }</code> / <code>{ message }</code></td><td>Site state, sent with the room list.</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <h4><i class="fas fa-globe"></i>REST, for completeness</h4>
+            <div class="bc-tablewrap">
+              <table class="bc-events">
+                <thead><tr><th>Endpoint</th><th>Auth</th><th>Returns</th></tr></thead>
+                <tbody>
+                  <tr><td><code>POST /api/v1/bot-tokens/request</code></td><td>none (from code)</td><td>A fresh token (section 2).</td></tr>
+                  <tr><td><code>GET /api/v1/bot-tokens/info</code></td><td>Bearer token</td><td>That token's state.</td></tr>
+                  <tr><td><code>GET /api/v1/status</code></td><td>none</td><td>Users online, rooms open, uptime.</td></tr>
+                  <tr><td><code>GET /api/v1/config</code></td><td>Bearer token</td><td>The live limits and feature switches.</td></tr>
+                  <tr><td><code>GET /api/v1/avatars</code></td><td>Bearer token</td><td>Valid avatar preset ids.</td></tr>
+                </tbody>
+              </table>
+            </div>
             <p>
-              Useful events: <code>room joined</code>,
-              <code>user joined</code>, <code>user left</code>,
-              <code>chat update</code>, <code>kicked</code>,
-              <code>error</code>. Leave with <code>leave room</code>. Bot
-              traffic has its own rate limits; hammering the socket gets
-              events dropped, and staff can disconnect any bot at any time.
-              Rooms are 6-digit ids - the number in the room page URL.
+              Everything else you may see in the wire traffic (games, the
+              drawing board, staff events) is internal and undocumented; do
+              not build against it.
             </p>
+          </div>
+        </div>
+
+        <div class="bc-card bc-chapter" id="cd-14">
+          <div class="bc-card-head"><span class="n">14</span>The numbers</div>
+          <div class="bc-card-body bc-doc">
+            <div class="bc-limits">
+              <span>Token lifetime</span><b>30 days</b>
+              <span>Live tokens per IP</span><b>3</b>
+              <span>Token requests per IP</span><b>3 per hour</b>
+              <span>Sockets per IP</span><b>8</b>
+              <span>Connection attempts per IP</span><b>20 per 15s</b>
+              <span>Socket events per bot</span><b>500 per minute</b>
+              <span>Your textbox</span><b>5000 characters</b>
+              <span>Username / location</span><b>15 / 20 characters</b>
+              <span>Room name</span><b>25 characters</b>
+              <span>Room seats</span><b>5-10, default 5</b>
+              <span>Bot seats per room</span><b>1 per 5 seats, up to 5</b>
+              <span>Rooms per identity</span><b>1 at a time</b>
+              <span>Room creation</span><b>10s each, 30s and 2 rooms per IP</b>
+              <span>Inactivity warning / removal</span><b>2.5 / 3 minutes</b>
+              <span>Solo room closes after</span><b>~20 minutes, less under load</b>
+              <span>Empty room closes after</span><b>30 seconds</b>
+              <span>Vote kick</span><b>3+ people, majority</b>
+            </div>
+            <p class="bc-sec-note" style="margin-top: 12px">
+              These mirror the server's config today and can change. The live
+              values are always at <code>GET /api/v1/config</code>.
+            </p>
+            <p>
+              And the rules, same as the hosted bots: what your bot says is
+              filtered by each viewer's own automod, rooms can vote it out,
+              moderators see every bot with its owner and can stop any of
+              them, and whatever your bot does counts as you doing it. Make
+              things people are glad to have in the room.
+            </p>
+          </div>
+        </div>
+
+        <div class="bc-card bc-chapter" id="cd-15">
+          <div class="bc-card-head"><span class="n">15</span>FAQ</div>
+          <div class="bc-card-body bc-doc">
+            <details class="bc-faq">
+              <summary>My bot connects fine, then disappears from the room after a few minutes. Why?</summary>
+              <div>
+                The inactivity check, nine times out of ten. A bot that has
+                not edited its box for 2.5 minutes gets
+                <code>afk warning</code>; silence for 30 more seconds means
+                <code>afk timeout</code> and the seat is gone, while the
+                socket stays connected, which is exactly why it looks
+                spooky. One line fixes it:
+                <code>socket.on("afk warning", () =&gt; socket.emit("afk
+                response"))</code>. Section 10 lists every other way a bot
+                leaves a room.
+              </div>
+            </details>
+            <details class="bc-faq">
+              <summary>My bot ran for days, then suddenly "Invalid bot token" forever.</summary>
+              <div>
+                The server restarted (updates ship often) and tokens live in
+                server memory, so yours no longer exists. Request a new one.
+                Better: let the bot do it, with the self-renewing token
+                function and auth callback from section 4. Both example bots
+                already include it.
+              </div>
+            </details>
+            <details class="bc-faq">
+              <summary>Why "Bot token required" when I am sending one?</summary>
+              <div>
+                The token is not where the server looks. On the socket it
+                must be <code>auth: { token: "tk_..." }</code> in the
+                connection options. On HTTP it is an
+                <code>Authorization: Bearer tk_...</code> header. A common
+                miss is putting it in <code>query</code> under another name,
+                or sending the whole <code>{"token": ...}</code> JSON blob
+                instead of the bare string.
+              </div>
+            </details>
+            <details class="bc-faq">
+              <summary>My command fires twice, or fires while the person is still typing.</summary>
+              <div>
+                You are reacting to raw <code>chat update</code> events,
+                which arrive per keystroke. Debounce: wait until the
+                person's last line has been still for about 1.5 seconds and
+                key each utterance by line number plus text, like section 9.
+                Note that a settled line edited again is a genuinely new
+                utterance and fires again; hosted bots work the same way.
+              </div>
+            </details>
+            <details class="bc-faq">
+              <summary>I emit "chat update" and nothing appears.</summary>
+              <div>
+                In order of likelihood: you are not in a room yet (wait for
+                <code>room joined</code>); the diff shape is wrong, which
+                answers with an <code>error</code> event you should be
+                logging; you spent the 500 events per minute budget, also an
+                <code>error</code>; or you are watching your own box for the
+                echo, which never comes, since the server only broadcasts
+                your edits to <b>others</b>.
+              </div>
+            </details>
+            <details class="bc-faq">
+              <summary>Can my bot join any room?</summary>
+              <div>
+                Public rooms with a free seat and a free bot slot, yes.
+                Semi-private needs the 6-digit code. Private needs the room
+                id from whoever made it. Refusals to expect: full, locked,
+                bots not allowed, bot slots taken (1 per 5 seats), banned
+                after a vote-kick, maintenance mode. Section 7 has the whole
+                list.
+              </div>
+            </details>
+            <details class="bc-faq">
+              <summary>How do I run more than one bot?</summary>
+              <div>
+                One connection per bot, each signed in with its own name.
+                One token can carry several connections. The walls: 8
+                sockets per IP, one bot slot per 5 seats in any one room,
+                and one room per identity. Two of your bots can share a
+                10-seat room, since it has two bot slots.
+              </div>
+            </details>
+            <details class="bc-faq">
+              <summary>Do bots see other bots? Will mine loop with a hosted bot?</summary>
+              <div>
+                Your bot receives everything, hosted bots included, and
+                hosted bots can hear yours. Loops are real: two greeters can
+                greet each other forever. Check <code>isBotUser</code> on
+                <code>user joined</code> and on the <code>users</code> list,
+                remember those ids, and stay quiet at anything they say.
+                (Hosted bots ignore other bots automatically; that
+                protection is yours to build.)
+              </div>
+            </details>
+            <details class="bc-faq">
+              <summary>Is there a sandbox to develop against?</summary>
+              <div>
+                Make yourself a private room (<code>type: "private"</code>):
+                it never shows in the lobby, and only people with the id can
+                wander in. Remember a room with just your bot in it closes
+                after ~20 minutes; recreating it on <code>afk timeout</code>
+                is enough for a test loop. You can also run the
+                <a href="https://github.com/mohdmahmodi/talkomatic-classic" target="_blank" rel="noopener">open source server</a>
+                locally and point your bot's server URL at it, which is how
+                the examples here were tested.
+              </div>
+            </details>
+            <details class="bc-faq">
+              <summary>Why did my message get stars in it? Why did my link vanish?</summary>
+              <div>
+                Stars are each viewer's own automod choice, applied in their
+                browser, the same as for human text; you cannot turn it off
+                for them. Links are scrubbed server-side shortly after they
+                appear in any box, with a <code>links not allowed</code>
+                event to the sender, and IP addresses are masked. Design
+                your bot's output around that: no link menus.
+              </div>
+            </details>
+            <details class="bc-faq">
+              <summary>Does my bot need to send typing indicators?</summary>
+              <div>
+                No. Its edits are visible live either way. The indicator is
+                cosmetic polish: hosted bots light it while their typewriter
+                runs, and <code>type()</code> in the Node example does the
+                same. If you send it, remember to send
+                <code>{ isTyping: false }</code> when done.
+              </div>
+            </details>
+            <details class="bc-faq">
+              <summary>Can a bot have a profile picture?</summary>
+              <div>
+                Yes: <code>avatar: { preset: n }</code> on
+                <code>join lobby</code>, with valid <code>n</code> values
+                from <code>GET /api/v1/avatars</code> (Bearer token
+                required). Invalid presets are silently dropped and the bot
+                shows the default silhouette.
+              </div>
+            </details>
+            <details class="bc-faq">
+              <summary>What language should I use?</summary>
+              <div>
+                Anything with a Socket.IO v4 client:
+                <code>socket.io-client</code> on Node,
+                <code>python-socketio</code> on Python, and there are
+                maintained clients for Go, Rust, Java, C# and more. The
+                protocol on this page is the same in all of them: connect
+                with the token, <code>join lobby</code>,
+                <code>join room</code>, then trade
+                <code>chat update</code> events.
+              </div>
+            </details>
           </div>
         </div>
       </div>
@@ -879,6 +2096,7 @@ sio.wait()</pre>
     <script nonce="<%= nonce %>" src="js/jquery.min.js"></script>
     <script nonce="<%= nonce %>" src="js/toastr.min.js"></script>
     <script nonce="<%= nonce %>" src="/socket.io/socket.io.js"></script>
+    <script nonce="<%= nonce %>" src="js/prism.min.js" data-manual></script>
     <script nonce="<%= nonce %>" src="js/identity.js"></script>
     <script nonce="<%= nonce %>" src="js/botcreator.js"></script>
   </body>

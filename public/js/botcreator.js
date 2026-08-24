@@ -3187,8 +3187,9 @@
 
   // ── What's new ────────────────────────────────────────────────────────────
 
-  const NEWS_VERSION = 5;
+  const NEWS_VERSION = 6;
   const NEWS = [
+    "The For coders page is now the real manual: every socket event documented, tokens that renew themselves, working Node and Python bots to copy, and answers for the classic \"my bot vanished\" mysteries.",
     "Automod no longer stars out what bots say for everyone: it is each viewer's own choice now, exactly like for people. Turn your filter off, see the real text.",
     "The small limits are gone: up to 200 rules, 20 blocks per rule, 1000-letter says, 20 saved bots. Build the whole game.",
     'New "add a line below" block: says WITHOUT erasing, so a greeter can stack arrivals and a game can keep its board up.',
@@ -3238,6 +3239,17 @@
         "Memories are chips in the palette: make one, click it into a box. No curly brackets to type.",
         "Start from an idea builds a working bot from three questions.",
         "Saving points at exactly what is missing. Drafts survive closing the tab.",
+      ],
+    },
+    {
+      title: "For coders",
+      icon: "fa-code",
+      items: [
+        "The whole bot API is documented on the For coders tab now: tokens, connecting, rooms, the diff protocol, and every event both ways.",
+        "Two complete bots to copy, one in Node and one in Python. Both run as-is and were tested against a live server.",
+        "A token helper that renews itself when the token expires or a server restart forgets it.",
+        "Why bots \"randomly\" disconnect, explained and fixed: the inactivity check, restarts, room closures, all of it in one section.",
+        "Code blocks have syntax colors and a copy button.",
       ],
     },
     {
@@ -3376,9 +3388,36 @@
     if (me && deployedInfo()) socket.emit("bots status");
   }, 5000);
 
-  document
-    .querySelectorAll(".js-origin")
-    .forEach((el) => (el.textContent = window.location.origin));
+  // ── For coders: copy buttons + syntax colors ──────────────────────────────
+
+  document.querySelectorAll("#apiView .bc-copy").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const code = btn.closest(".bc-codebox")?.querySelector("pre code");
+      if (!code) return;
+      const done = () => {
+        btn.classList.add("copied");
+        btn.innerHTML = '<i class="fas fa-check"></i>Copied';
+        setTimeout(() => {
+          btn.classList.remove("copied");
+          btn.innerHTML = '<i class="fas fa-copy"></i>Copy';
+        }, 1600);
+      };
+      if (navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(code.textContent).then(done, done);
+      } else {
+        const range = document.createRange();
+        range.selectNodeContents(code);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        document.execCommand("copy");
+        sel.removeAllRanges();
+        done();
+      }
+    });
+  });
+
+  if (window.Prism) Prism.highlightAll();
 
   socket.on("error", (e) => {
     const msg = e?.error?.message;

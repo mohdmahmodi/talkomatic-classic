@@ -1896,3 +1896,175 @@ body.bc-test-hidden .bc-workspace {
     grid-template-columns: 1fr;
   }
 }
+
+/* ── For coders: code boxes, tables, FAQ ── */
+
+.bc-codebox {
+  border: 1px solid var(--tk-border);
+  border-radius: 6px;
+  background: var(--tk-card);
+  margin: 12px 0;
+  overflow: hidden;
+}
+
+.bc-codebox-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px 6px 14px;
+  border-bottom: 1px solid var(--tk-border);
+  background: var(--tk-tile);
+}
+
+.bc-codebox-bar .lang {
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--tk-muted);
+}
+
+.bc-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: 1px solid var(--tk-border);
+  border-radius: 4px;
+  color: var(--tk-muted);
+  font-family: inherit;
+  font-size: 11.5px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.bc-copy:hover {
+  border-color: var(--tk-accent);
+  color: var(--tk-accent);
+}
+
+.bc-copy.copied {
+  border-color: var(--tk-ok);
+  color: var(--tk-ok);
+}
+
+.bc-codebox pre {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  background: var(--tk-card);
+  padding: 14px;
+  overflow-x: auto;
+  font-family: Consolas, Monaco, monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #d8d8d8;
+}
+
+.bc-codebox pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: inherit;
+  color: inherit;
+  white-space: pre;
+}
+
+/* Prism tokens, tuned to the page palette */
+.bc-codebox .token.comment {
+  color: #8a8a8a;
+}
+.bc-codebox .token.string,
+.bc-codebox .token.triple-quoted-string,
+.bc-codebox .token.char {
+  color: #a5d6a7;
+}
+.bc-codebox .token.keyword,
+.bc-codebox .token.rule,
+.bc-codebox .token.important {
+  color: var(--tk-accent);
+}
+.bc-codebox .token.function,
+.bc-codebox .token.function-name,
+.bc-codebox .token.decorator {
+  color: #82cfff;
+}
+.bc-codebox .token.number,
+.bc-codebox .token.boolean {
+  color: #ce93d8;
+}
+.bc-codebox .token.operator,
+.bc-codebox .token.punctuation {
+  color: #bdbdbd;
+  background: none;
+}
+.bc-codebox .token.property,
+.bc-codebox .token.parameter,
+.bc-codebox .token.builtin,
+.bc-codebox .token.class-name {
+  color: var(--tk-detail);
+}
+
+/* Event reference tables */
+.bc-tablewrap {
+  overflow-x: auto;
+  margin: 12px 0;
+}
+
+.bc-events {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12.5px;
+  min-width: 560px;
+}
+
+.bc-events th {
+  text-align: left;
+  color: var(--tk-accent);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--tk-border);
+  padding: 7px 12px 7px 0;
+}
+
+.bc-events td {
+  border-bottom: 1px solid #333;
+  padding: 8px 12px 8px 0;
+  vertical-align: top;
+  line-height: 1.55;
+}
+
+.bc-events td:first-child {
+  white-space: nowrap;
+}
+
+/* FAQ accordions */
+.bc-faq {
+  border: 1px solid var(--tk-border);
+  border-radius: 6px;
+  background: var(--tk-tile);
+  margin: 0 0 10px;
+}
+
+.bc-faq summary {
+  cursor: pointer;
+  padding: 11px 14px;
+  font-weight: bold;
+  color: var(--tk-text);
+  font-size: 13.5px;
+  list-style-position: inside;
+}
+
+.bc-faq summary:hover {
+  color: var(--tk-accent);
+}
+
+.bc-faq[open] summary {
+  border-bottom: 1px solid var(--tk-border);
+}
+
+.bc-faq > div {
+  padding: 11px 14px;
+  line-height: 1.65;
+}
