@@ -9,9 +9,12 @@ const { DATA_DIR } = require("./datadir");
 
 const STORE_PATH = path.join(DATA_DIR, "identity.json");
 
-const ACTIVE_DAYS = 2;
-const ACTIVE_SEC = 15 * 60;
-const ACTIVE_ACTS = 10;
+// Bar for "active member" (currently only gates mod applications).
+// acts tick at most once per 30s of typing, so 200 acts is roughly
+// 100 minutes of actually chatting.
+const ACTIVE_DAYS = 7;
+const ACTIVE_SEC = 5 * 60 * 60;
+const ACTIVE_ACTS = 200;
 
 const MAX_DEVICES = 50000;
 const MAX_IPS = 8;

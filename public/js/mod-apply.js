@@ -472,35 +472,88 @@
     isFormOpen = false;
   }
 
+  function fmtMin(m) {
+    m = Math.floor(m);
+    if (m < 60) return m + " min";
+    var h = Math.floor(m / 60);
+    var r = m % 60;
+    return r ? h + "h " + r + "m" : h + "h";
+  }
+
   function showActivityGate(act) {
-    var need = (act && act.need) || { days: 2, minutes: 15, acts: 10 };
+    var need = (act && act.need) || { days: 7, minutes: 300, acts: 200 };
     var have = {
       days: (act && act.days) || 0,
       minutes: (act && act.minutes) || 0,
       acts: (act && act.acts) || 0,
     };
-    var body = document.createElement("div");
-    var p = document.createElement("p");
-    p.textContent =
-      "Moderator applications open up once you are an active member. Keep chatting across a few days and this unlocks automatically. Your progress:";
-    body.appendChild(p);
-    var list = document.createElement("div");
-    list.style.cssText = "margin-top:12px;font-size:14px;line-height:2.1;";
-    var line = function (label, h, w) {
-      var row = document.createElement("div");
+    var body = el("div", "ma-gate");
+    body.appendChild(
+      el(
+        "p",
+        "ma-gate-intro",
+        "Moderator applications are open to established members. Once your activity reaches the levels below, the application form unlocks on its own.",
+      ),
+    );
+    var row = function (icon, label, desc, haveText, h, w) {
       var done = h >= w;
-      row.textContent =
-        (done ? "✓ " : "• ") + label + ": " + Math.min(h, w) + " of " + w;
-      row.style.color = done ? "#57d9a3" : "#cfd3da";
-      return row;
+      var r = el("div", "ma-gate-row" + (done ? " done" : ""));
+      var top = el("div", "ma-gate-top");
+      var l = el("span", "ma-gate-label");
+      l.innerHTML =
+        '<i class="fas ' + (done ? "fa-circle-check" : icon) + '"></i>' + label;
+      top.appendChild(l);
+      top.appendChild(el("span", "ma-gate-count", done ? "Done" : haveText));
+      r.appendChild(top);
+      r.appendChild(el("div", "ma-gate-desc", desc));
+      var bar = el("div", "ma-gate-bar");
+      var fill = el("div", "ma-gate-fill");
+      fill.style.width = Math.round((Math.min(h, w) / w) * 100) + "%";
+      bar.appendChild(fill);
+      r.appendChild(bar);
+      return r;
     };
-    list.appendChild(line("Days visited", have.days, need.days));
-    list.appendChild(line("Active minutes", have.minutes, need.minutes));
-    list.appendChild(line("Chat activity", have.acts, need.acts));
-    body.appendChild(list);
+    body.appendChild(
+      row(
+        "fa-calendar-days",
+        "Separate days visited",
+        "Each day you show up counts once. The days do not need to be in a row.",
+        Math.min(have.days, need.days) + " of " + need.days + " days",
+        have.days,
+        need.days,
+      ),
+    );
+    body.appendChild(
+      row(
+        "fa-stopwatch",
+        "Time in rooms",
+        "Total time spent inside chat rooms.",
+        fmtMin(Math.min(have.minutes, need.minutes)) + " of " + fmtMin(need.minutes),
+        have.minutes,
+        need.minutes,
+      ),
+    );
+    body.appendChild(
+      row(
+        "fa-keyboard",
+        "Time spent chatting",
+        "Counts up only while you are typing in a room, not while sitting idle.",
+        fmtMin(Math.min(have.acts, need.acts) / 2) + " of " + fmtMin(need.acts / 2),
+        have.acts,
+        need.acts,
+      ),
+    );
+    body.appendChild(
+      el(
+        "div",
+        "ma-gate-note",
+        "Activity counts up on its own while you chat. There is nothing to request and nobody to ask. Come back once all three are met.",
+      ),
+    );
     StaffUI.modal({
       title: "Apply to be a mod",
-      icon: '<i class="fas fa-user-clock"></i>',
+      subtitle: "Applications are open to established members",
+      icon: '<i class="fas fa-user-shield"></i>',
       body: body,
       actions: [{ label: "Got it", kind: "primary", onClick: function () {} }],
     });

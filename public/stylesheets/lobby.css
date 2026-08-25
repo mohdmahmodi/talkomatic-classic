@@ -290,7 +290,6 @@ html {
 .panel-header-about {
   display: block;
   margin-top: 12px;
-  margin-bottom: 12px;
   color: var(--lobby-label-color);
   opacity: 1;
   font-size: 16px;
@@ -325,7 +324,6 @@ html {
   justify-content: center;
   align-items: center;
   gap: 4px;
-  margin-top: 12px;
   margin-bottom: 14px;
   width: 100%;
 }
