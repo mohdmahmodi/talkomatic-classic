@@ -1626,7 +1626,8 @@ function updateVotesUI(votes) {
         if (!counter) {
           counter = document.createElement("div");
           counter.className = "votes-counter";
-          row.querySelector(".user-info").appendChild(counter);
+          const ui = row.querySelector(".user-info");
+          ui.insertBefore(counter, ui.querySelector(".ui-tools"));
         }
         counter.textContent = `\uD83D\uDC4E ${count}`;
         counter.style.color = "#ff6b6b";
@@ -1748,12 +1749,27 @@ function adjustMuteButtonVisibility() {
       if (mutedUsers.has(uid)) {
         btn.innerHTML = "\uD83D\uDD07";
         btn.classList.add("muted");
+        row.classList.add("user-muted");
         const ci = row.querySelector(".chat-input");
         if (ci) ci.style.opacity = "0.3";
       }
     }
   });
 }
+
+// Only one tool tray open at a time; clicking anywhere else closes it.
+function closeToolTrays(except) {
+  document.querySelectorAll(".user-info.tools-open").forEach((ui) => {
+    if (ui === except) return;
+    ui.classList.remove("tools-open");
+    const t = ui.querySelector(".ui-tools-toggle");
+    if (t) t.setAttribute("aria-expanded", "false");
+  });
+}
+document.addEventListener("click", (e) => {
+  if (e.target.closest(".user-info.tools-open")) return;
+  closeToolTrays(null);
+});
 
 // ── 10. CHAT PROCESSING ─────────────────────────────────────────────────────
 
@@ -2040,7 +2056,7 @@ function applyDevAppearanceToRow(row, user) {
     (user.isHidden || user.isVanished);
   if (showMarker) {
     const fresh = makeStaffConcealedMarker(user);
-    if (!marker) info.appendChild(fresh);
+    if (!marker) info.insertBefore(fresh, info.querySelector(".ui-tools"));
     else if (marker.dataset.state !== fresh.dataset.state)
       marker.replaceWith(fresh);
   } else if (marker) {
@@ -2148,7 +2164,7 @@ function renderDevContext() {
       const span = document.createElement("span");
       span.className = "dev-meta";
       span.textContent = meta.d;
-      info.appendChild(span);
+      info.insertBefore(span, info.querySelector(".ui-tools"));
     }
   });
 }
@@ -2303,6 +2319,7 @@ function createUserRow(user, container) {
       mutedUsers.delete(user.id);
       muteBtn.innerHTML = "\uD83D\uDD0A";
       muteBtn.classList.remove("muted");
+      row.classList.remove("user-muted");
       const ci = row.querySelector(".chat-input");
       if (ci) ci.style.opacity = "1";
       const queued = storedMessagesForMutedUsers.get(user.id);
@@ -2314,6 +2331,7 @@ function createUserRow(user, container) {
       mutedUsers.add(user.id);
       muteBtn.innerHTML = "\uD83D\uDD07";
       muteBtn.classList.add("muted");
+      row.classList.add("user-muted");
       const ci = row.querySelector(".chat-input");
       if (ci) ci.style.opacity = "0.3";
     }
@@ -2329,8 +2347,11 @@ function createUserRow(user, container) {
     );
   }
 
-  info.appendChild(muteBtn);
-  info.appendChild(voteBtn);
+  // Low-frequency actions live in a slide-out tray behind a chevron, so the
+  // bar itself stays name + dislike.
+  const tools = document.createElement("span");
+  tools.className = "ui-tools";
+  if (user.id !== currentUserId) tools.appendChild(muteBtn);
 
   const targetVisibleRole =
     user.isDev && !user.isHidden
@@ -2352,7 +2373,7 @@ function createUserRow(user, container) {
       const note = row.dataset.note || "";
       openUserNoteDialog({ ...user, note }, { viewOnly: false });
     });
-    info.appendChild(noteBtn);
+    tools.appendChild(noteBtn);
 
     if (user.id !== currentUserId && canActOnTarget) {
       const staffBtn = document.createElement("button");
@@ -2360,7 +2381,7 @@ function createUserRow(user, container) {
       staffBtn.innerHTML = '<i class="fas fa-gear"></i>';
       staffBtn.title = "Staff actions";
       staffBtn.addEventListener("click", () => openUserStaffMenu(user));
-      info.appendChild(staffBtn);
+      tools.appendChild(staffBtn);
     }
   }
   if (user.id !== currentUserId) {
@@ -2369,7 +2390,26 @@ function createUserRow(user, container) {
     reportBtn.innerHTML = '<i class="fas fa-flag"></i>';
     reportBtn.title = "Report to staff";
     reportBtn.addEventListener("click", () => openReportPrompt(user));
-    info.appendChild(reportBtn);
+    tools.appendChild(reportBtn);
+  }
+
+  info.appendChild(tools);
+  info.appendChild(voteBtn);
+
+  if (tools.childElementCount) {
+    const toolsToggle = document.createElement("button");
+    toolsToggle.className = "ui-tools-toggle";
+    toolsToggle.innerHTML = '<i class="fas fa-chevron-left"></i>';
+    toolsToggle.title = "More options";
+    toolsToggle.setAttribute("aria-label", "More options");
+    toolsToggle.setAttribute("aria-expanded", "false");
+    toolsToggle.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const open = info.classList.toggle("tools-open");
+      toolsToggle.setAttribute("aria-expanded", open ? "true" : "false");
+      if (open) closeToolTrays(info);
+    });
+    info.appendChild(toolsToggle);
   }
 
   const wrapper = document.createElement("div");

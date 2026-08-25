@@ -291,6 +291,8 @@ html {
   font-size: 16px;
   cursor: pointer;
   margin-left: auto; /* Push it to the right */
+  white-space: nowrap; /* Keep the count next to the thumb */
+  flex: 0 0 auto;
 }
 
 /* Style when the user has voted for this user */
@@ -313,6 +315,60 @@ html {
   cursor: pointer;
   background: #414141;
   transition: background-color 0.2s ease;
+  flex: 0 0 auto;
+}
+
+/* ── Slide-out tool tray ────────────────────────────────────────────────────
+   Mute, staff note, staff actions and report sit behind the chevron at the
+   right end of the bar, so the name and location keep the space. The dislike
+   button stays outside the tray because its count is information. */
+
+.ui-tools {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  max-width: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition:
+    max-width 0.18s ease,
+    opacity 0.15s ease;
+}
+
+.user-info.tools-open .ui-tools {
+  max-width: 180px;
+  opacity: 1;
+}
+
+.ui-tools-toggle {
+  background: none;
+  border: none;
+  color: inherit;
+  opacity: 0.55;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 3px 3px 3px 7px;
+  flex: 0 0 auto;
+  transition: opacity 0.15s ease;
+}
+
+.ui-tools-toggle:hover {
+  opacity: 1;
+}
+
+.ui-tools-toggle i {
+  display: inline-block;
+  transition: transform 0.18s ease;
+}
+
+.user-info.tools-open .ui-tools-toggle i {
+  transform: rotate(180deg);
+}
+
+/* Muted rows keep a visible hint while the tray is closed */
+.chat-row.user-muted .ui-tools-toggle {
+  color: #ff5252;
+  opacity: 1;
 }
 
 .mute-button.muted {
