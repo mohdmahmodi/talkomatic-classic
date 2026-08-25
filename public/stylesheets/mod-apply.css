@@ -1,0 +1,531 @@
+/* Moderator application modal, same visual language as the suggestion board:
+   flat dark tiles (var(--tk-tile)), var(--tk-border) borders, black cards,
+   cream section strips, orange accent. No gradients, no glows. */
+
+.ma-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgba(0, 0, 0, 0.8);
+}
+
+.ma-overlay.show {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: maFadeIn 0.2s ease-out;
+}
+
+@keyframes maFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.ma-modal {
+  background: var(--background-color, var(--tk-bg));
+  border-radius: 8px;
+  width: 96%;
+  max-width: 780px;
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── Header ── */
+
+.ma-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--tk-border);
+  flex-shrink: 0;
+}
+
+.ma-title-wrap {
+  min-width: 0;
+}
+
+.ma-title {
+  color: var(--primary, var(--tk-accent));
+  font-size: 24px;
+  font-weight: bold;
+}
+
+.ma-title i {
+  margin-right: 10px;
+  color: #64b5f6;
+}
+
+.ma-sub {
+  color: var(--tk-detail);
+  font-size: 12px;
+  margin-top: 3px;
+}
+
+.ma-close {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--tk-muted);
+  font-size: 30px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+  transition: color 0.15s ease;
+}
+
+.ma-close:hover {
+  color: var(--primary, var(--tk-accent));
+}
+
+/* ── Scrolling body ── */
+
+.ma-body {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.ma-body::-webkit-scrollbar {
+  width: 10px;
+}
+.ma-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+.ma-body::-webkit-scrollbar-thumb {
+  background: var(--tk-border);
+  border-radius: 5px;
+}
+.ma-body::-webkit-scrollbar-thumb:hover {
+  background: var(--primary, var(--tk-accent));
+}
+
+/* ── Cream section strips, same as "Be Known As..." ── */
+
+.ma-strip {
+  background: var(--known-as-section-background-color, var(--tk-cream));
+  color: var(--known-as-section-color, #000);
+  font-size: 16px;
+  font-weight: bold;
+  padding: 9px 24px;
+}
+
+.ma-section {
+  padding: 14px 24px 18px;
+}
+
+.ma-intro {
+  color: var(--tk-text);
+  font-size: 14px;
+  line-height: 1.55;
+  margin: 0 0 12px;
+}
+
+/* ── The role: two tool cards ── */
+
+.ma-cols {
+  display: flex;
+  gap: 10px;
+}
+
+.ma-col {
+  flex: 1;
+  background: var(--room-background-color, #000);
+  border: 1px solid var(--tk-border);
+  border-radius: 5px;
+  padding: 12px 14px;
+}
+
+.ma-col-title {
+  font-size: 11px;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: 8px;
+}
+
+.ma-col-can .ma-col-title {
+  color: var(--tk-success, #4caf50);
+}
+
+.ma-col-cant .ma-col-title {
+  color: var(--tk-muted);
+}
+
+.ma-col ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--tk-text);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+/* ── "Before you apply" checklist ── */
+
+.ma-req {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ma-req-row {
+  display: flex;
+  gap: 11px;
+  align-items: flex-start;
+  background: var(--tk-tile);
+  border-radius: 5px;
+  padding: 10px 13px;
+  color: var(--tk-text);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.ma-req-row > i {
+  margin-top: 2px;
+  width: 16px;
+  text-align: center;
+  color: var(--primary, var(--tk-accent));
+  flex-shrink: 0;
+}
+
+.ma-req-row.ok > i {
+  color: var(--tk-success, #4caf50);
+}
+
+.ma-req-row b {
+  color: var(--tk-text);
+}
+
+/* ── Fields ── */
+
+.ma-field {
+  margin-bottom: 14px;
+}
+
+.ma-field:last-child {
+  margin-bottom: 0;
+}
+
+.ma-label {
+  display: block;
+  color: var(--tk-text);
+  font-size: 13px;
+  font-weight: bold;
+  margin-bottom: 6px;
+}
+
+.ma-req-star {
+  color: var(--primary, var(--tk-accent));
+}
+
+.ma-optional {
+  color: var(--tk-muted);
+  font-weight: normal;
+  font-size: 12px;
+}
+
+.ma-input {
+  width: 100%;
+  background: var(--tk-card);
+  color: var(--tk-text);
+  border: 1px solid var(--tk-border);
+  border-radius: 5px;
+  padding: 11px 13px;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.ma-input:focus {
+  outline: none;
+  border-color: var(--primary, var(--tk-accent));
+}
+
+.ma-input.bad {
+  border-color: var(--tk-error, #ff5252);
+}
+
+.ma-help {
+  color: var(--tk-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  margin-top: 5px;
+}
+
+.ma-count {
+  float: right;
+  color: var(--tk-muted);
+  font-size: 12px;
+  font-weight: normal;
+}
+
+.ma-count.bad {
+  color: var(--tk-error, #ff5252);
+}
+
+/* ── Discord toggle ── */
+
+.ma-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.ma-toggle-label {
+  color: var(--tk-text);
+  font-size: 13px;
+  font-weight: bold;
+  margin-right: 4px;
+}
+
+.ma-toggle-btn {
+  border: 1px solid var(--tk-border);
+  border-radius: 6px;
+  background: var(--tk-tile);
+  color: var(--tk-text);
+  font-size: 13px;
+  font-weight: bold;
+  padding: 8px 16px;
+  cursor: pointer;
+  font-family: inherit;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.ma-toggle-btn:hover {
+  background: var(--tk-tile-hover);
+}
+
+.ma-toggle-btn.active {
+  background: #5865f2;
+  border-color: #5865f2;
+  color: #fff;
+}
+
+.ma-toggle-btn.ma-toggle-no.active {
+  background: var(--tk-panel);
+  border-color: var(--tk-panel);
+  color: var(--tk-text);
+}
+
+.ma-discord-note {
+  background: var(--tk-tile);
+  border-left: 3px solid #5865f2;
+  border-radius: 5px;
+  padding: 10px 13px;
+  color: var(--tk-text);
+  font-size: 13px;
+  line-height: 1.55;
+  margin-bottom: 12px;
+}
+
+.ma-no-discord-line {
+  color: var(--tk-success, #4caf50);
+  font-size: 13px;
+}
+
+.ma-no-discord-line i {
+  margin-right: 6px;
+}
+
+/* ── Terms ── */
+
+.ma-terms {
+  background: var(--room-background-color, #000);
+  border: 1px solid var(--tk-border);
+  border-radius: 5px;
+  padding: 13px 16px;
+  max-height: 260px;
+  overflow-y: auto;
+  margin-bottom: 12px;
+}
+
+.ma-terms ol {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--tk-text);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.ma-terms li {
+  margin-bottom: 8px;
+}
+
+.ma-terms li:last-child {
+  margin-bottom: 0;
+}
+
+.ma-check-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: var(--tk-tile);
+  border: 1px solid transparent;
+  border-radius: 5px;
+  padding: 10px 13px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  color: var(--tk-text);
+  font-size: 13px;
+  line-height: 1.5;
+  transition: border-color 0.15s ease;
+}
+
+.ma-check-row:hover {
+  border-color: var(--tk-border);
+}
+
+.ma-check-row.bad {
+  border-color: var(--tk-error, #ff5252);
+}
+
+.ma-check-row input[type="checkbox"] {
+  width: 17px;
+  height: 17px;
+  margin: 1px 0 0;
+  accent-color: var(--primary, var(--tk-accent));
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* ── Footer ── */
+
+.ma-foot {
+  flex-shrink: 0;
+  border-top: 1px solid var(--tk-border);
+  padding: 13px 24px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ma-err {
+  color: var(--tk-error, #ff5252);
+  font-size: 13px;
+  flex: 1;
+  min-width: 0;
+}
+
+.ma-cancel-btn {
+  border: 1px solid var(--tk-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--tk-text);
+  font-size: 13px;
+  font-weight: bold;
+  padding: 10px 18px;
+  cursor: pointer;
+  font-family: inherit;
+  margin-left: auto;
+}
+
+.ma-cancel-btn:hover {
+  background: var(--tk-tile-hover);
+}
+
+.ma-submit-btn {
+  background: var(--tk-card);
+  color: var(--tk-text);
+  border: 1px solid var(--primary, var(--tk-accent));
+  border-radius: 6px;
+  padding: 10px 24px;
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+  font-family: inherit;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.ma-submit-btn:hover:not(:disabled) {
+  background: var(--primary, var(--tk-accent));
+  color: var(--tk-card);
+}
+
+.ma-submit-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── Decision / status modal bits (rendered inside StaffUI modals) ── */
+
+.ma-staff-msg {
+  margin-top: 14px;
+  padding: 11px 13px;
+  background: #161616;
+  border: 1px solid #333;
+  border-radius: 0;
+  text-align: left;
+}
+
+.ma-staff-msg-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  font-weight: bold;
+  margin-bottom: 5px;
+}
+
+.ma-staff-msg-text {
+  color: #e6e6e6;
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.ma-by-line {
+  margin-top: 10px;
+  color: #8d8d8d;
+  font-size: 13px;
+}
+
+.ma-by-line b {
+  color: #cfd3da;
+}
+
+/* ── Mobile ── */
+
+@media (max-width: 640px) {
+  .ma-modal {
+    width: 100%;
+    height: 100%;
+    max-height: 100%;
+    border-radius: 0;
+  }
+  .ma-head {
+    padding: 12px 14px;
+  }
+  .ma-title {
+    font-size: 20px;
+  }
+  .ma-strip {
+    padding: 8px 14px;
+  }
+  .ma-section {
+    padding: 12px 14px 14px;
+  }
+  .ma-cols {
+    flex-direction: column;
+  }
+  .ma-foot {
+    padding: 11px 14px;
+    flex-wrap: wrap;
+  }
+  .ma-err {
+    flex-basis: 100%;
+  }
+}

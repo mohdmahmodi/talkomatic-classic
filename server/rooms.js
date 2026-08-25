@@ -1281,6 +1281,15 @@ function broadcastAppeal(id) {
   }
 }
 
+function reviewerPublicName(value) {
+  const s = String(value || "");
+  if (!s) return null;
+  const idx = s.indexOf(":");
+  const role = idx === -1 ? null : s.slice(0, idx);
+  const label = idx === -1 ? s : s.slice(idx + 1);
+  return roles.teamLabel(label, role, null) || null;
+}
+
 function appStatusPayload(deviceId, isStaff) {
   const a = applications.latestForDevice(deviceId);
   if (!a) return { has: false };
@@ -1294,6 +1303,10 @@ function appStatusPayload(deviceId, isStaff) {
     has: true,
     status,
     reason,
+    by:
+      status === "approved" || status === "rejected"
+        ? reviewerPublicName(a.reviewedBy)
+        : null,
     reviewedAt: a.reviewedAt || null,
     submittedAt: a.submittedAt || null,
   };
@@ -7788,38 +7801,67 @@ function registerSocketHandlers(opts) {
         const why = sanitizeMessage(
           typeof data?.why === "string" ? data.why : "",
         ).slice(0, 500);
+        const experience = sanitizeMessage(
+          typeof data?.experience === "string" ? data.experience : "",
+        ).slice(0, 300);
         const availability = sanitizeMessage(
           typeof data?.availability === "string" ? data.availability : "",
         ).slice(0, 120);
-        if (!why)
-          return socket.emit("mod application result", {
-            ok: false,
-            error: "Please say why you'd like to help moderate.",
-          });
-        const discord = sanitizeMessage(
-          typeof data?.discord === "string" ? data.discord : "",
-        )
-          .replace(/^@+/, "")
-          .replace(/[^A-Za-z0-9._-]/g, "")
-          .slice(0, 40);
-        if (!discord)
+        if (!why || why.trim().length < 20)
           return socket.emit("mod application result", {
             ok: false,
             error:
-              "Please enter your Discord username so we can reach you in the Talkomatic server.",
+              "Please write a little more about why you want to moderate.",
           });
+        if (data?.age14 !== true)
+          return socket.emit("mod application result", {
+            ok: false,
+            error: "You must confirm you are 14 or older to apply.",
+          });
+        if (data?.agree !== true)
+          return socket.emit("mod application result", {
+            ok: false,
+            error: "Please read the moderator terms and agree to them.",
+          });
+        const hasDiscord = data?.hasDiscord === true;
+        let discord = null;
+        if (hasDiscord) {
+          discord = sanitizeMessage(
+            typeof data?.discord === "string" ? data.discord : "",
+          )
+            .replace(/^@+/, "")
+            .replace(/[^A-Za-z0-9._-]/g, "")
+            .slice(0, 40);
+          if (!discord || discord.length < 2)
+            return socket.emit("mod application result", {
+              ok: false,
+              error:
+                "Please enter your Discord username, or pick the No Discord option.",
+            });
+        }
         const res = applications.submit({
           deviceId: socket.deviceId,
           ip: socket.clientIp,
           username: socket.handshake.session?.username,
           discord,
-          answers: { why, availability },
+          answers: {
+            why,
+            experience,
+            availability,
+            hasDiscord,
+            age14: true,
+            agreed: true,
+          },
           discordId:
             socket.handshake.session?.avatar?.id ||
             socket.handshake.session?.avatar?.discordId ||
             null,
         });
         if (!res.ok) return socket.emit("mod application result", res);
+        const cardLines = [];
+        if (experience) cardLines.push("Experience: " + experience);
+        if (availability) cardLines.push("Around: " + availability);
+        if (!hasDiscord) cardLines.push("Says they have no Discord");
         audit.recordNotification({
           kind: "application",
           text: `New mod application from ${socket.handshake.session?.username || "a user"}`,
@@ -7832,7 +7874,7 @@ function registerSocketHandlers(opts) {
             deviceId: socket.deviceId || null,
             discord,
             reason: why,
-            lines: availability ? ["Around: " + availability] : null,
+            lines: cardLines.length ? cardLines : null,
           },
         });
         broadcastAppsList();
@@ -7893,6 +7935,11 @@ function registerSocketHandlers(opts) {
           for (const [, s] of io().sockets.sockets)
             if (s.deviceId === app.deviceId && !s.isDev && !s.isMod)
               targets.push(s);
+          const live = Object.assign(
+            { live: true },
+            appStatusPayload(app.deviceId, false),
+          );
+          for (const s of targets) s.emit("mod application status", live);
           if (targets.length) {
             const granted = await roles.grantModKey(
               app.username || "mod",

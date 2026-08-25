@@ -2978,6 +2978,11 @@ socket.on("staff key result", (d) => {
 socket.on("you are now mod", (d) => {
   if (!d || !d.key) return;
   localStorage.setItem("talkomatic_modKey", d.key);
+  if (window.ModApply && ModApply.decisionOpen()) {
+    // The approval popup is on screen; reload when the user closes it.
+    ModApply.reloadOnClose();
+    return;
+  }
   lobbyNotify(
     d.level === 2
       ? "You've been promoted to Moderator (full)! Reloading…"
@@ -3073,170 +3078,17 @@ function updateModApplyLink() {
   }
 }
 
-function showAppStatus() {
-  const st = myAppStatus;
-  if (!st || !st.has) return openModApply();
-  if (!window.StaffUI) return;
-  const m = APP_STATUS_META[st.status] || APP_STATUS_META.pending;
-  const body = document.createElement("div");
-  const p = document.createElement("p");
-  p.style.margin = "0 0 6px";
-  p.textContent =
-    st.status === "approved"
-      ? "Good news - your application was approved. Your moderator access is delivered to this browser automatically; reload if you do not see it yet."
-      : st.status === "rejected"
-        ? "Your application was reviewed and not approved this time."
-        : st.status === "revoked"
-          ? "Your moderator access has been revoked. If you would like to help out again, you can apply again below."
-          : "Your application is in the queue. A developer or full moderator will review it soon. Thanks for your patience.";
-  body.appendChild(p);
-  if (st.submittedAt) {
-    const s = document.createElement("p");
-    s.style.cssText = "margin:6px 0 0;color:#8d8d8d;font-size:13px;";
-    s.textContent = "Submitted " + new Date(st.submittedAt).toLocaleString();
-    body.appendChild(s);
-  }
-  if (st.reason && st.status !== "revoked") {
-    const note = document.createElement("div");
-    note.style.cssText =
-      "margin-top:14px;padding:11px 13px;background:#161616;border:1px solid #333;border-left:3px solid " +
-      m.color +
-      ";border-radius:0;text-align:left;";
-    const nl = document.createElement("div");
-    nl.style.cssText =
-      "font-size:11px;text-transform:uppercase;letter-spacing:.6px;font-weight:bold;margin-bottom:5px;color:" +
-      m.color +
-      ";";
-    nl.textContent = "Message from staff";
-    const nt = document.createElement("div");
-    nt.style.cssText =
-      "color:#e6e6e6;font-size:14px;line-height:1.5;white-space:pre-wrap;";
-    nt.textContent = st.reason;
-    note.appendChild(nl);
-    note.appendChild(nt);
-    body.appendChild(note);
-  }
-  const actions = [{ label: "Close", kind: "primary", onClick: () => {} }];
-  if (st.status === "rejected" || st.status === "revoked")
-    actions.unshift({ label: "Apply again", onClick: () => openModApply() });
-  StaffUI.modal({
-    title: m.title,
-    icon: '<i class="fas ' + m.fa + '" style="color:' + m.color + '"></i>',
-    body: body,
-    actions: actions,
-  });
-}
-
-async function openModApply() {
-  if (currentUserIsDev || currentUserIsMod) {
-    lobbyNotify("You're already staff.", "info");
-    return;
-  }
-  if (!window.StaffUI) return;
-  const act = window.TalkomaticIdentity && window.TalkomaticIdentity.activity;
-  if (!act || !act.active) {
-    const need = (act && act.need) || { days: 2, minutes: 15, acts: 10 };
-    const have = {
-      days: (act && act.days) || 0,
-      minutes: (act && act.minutes) || 0,
-      acts: (act && act.acts) || 0,
-    };
-    const body = document.createElement("div");
-    const p = document.createElement("p");
-    p.textContent =
-      "Moderator applications open up once you are an active member. Keep chatting across a few days and this unlocks automatically. Your progress:";
-    body.appendChild(p);
-    const list = document.createElement("div");
-    list.style.cssText = "margin-top:12px;font-size:14px;line-height:2.1;";
-    const line = (label, h, w) => {
-      const row = document.createElement("div");
-      const done = h >= w;
-      row.textContent =
-        (done ? "✓ " : "• ") +
-        label +
-        ": " +
-        Math.min(h, w) +
-        " of " +
-        w;
-      row.style.color = done ? "#57d9a3" : "#cfd3da";
-      return row;
-    };
-    list.appendChild(line("Days visited", have.days, need.days));
-    list.appendChild(line("Active minutes", have.minutes, need.minutes));
-    list.appendChild(line("Chat activity", have.acts, need.acts));
-    body.appendChild(list);
-    StaffUI.modal({
-      title: "Apply to be a mod",
-      icon: '<i class="fas fa-user-clock"></i>',
-      body: body,
-      actions: [{ label: "Got it", kind: "primary", onClick: () => {} }],
-    });
-    return;
-  }
-  const r = await StaffUI.prompt({
-    title: "Apply to moderate",
-    icon: '<i class="fas fa-user-pen"></i>',
-    subtitle: "Junior moderators help keep rooms friendly",
-    message:
-      "If approved you get the junior moderator role: you can warn and kick, clear what someone has typed, reset a bad name, location or profile picture, and rename, lock or slow a room. Bans and IP blocks stay with full mods. Misuse loses the role; trusted juniors may be promoted later by a dev.\n\nLink your Discord picture and join the Talkomatic Discord before applying. We can only reach you there, applicants we can reach are much likelier to be accepted, and once approved you get the site mod role in the server so you can talk to the other moderators and the devs.",
-    fields: [
-      {
-        name: "why",
-        label: "Why do you want to help moderate?",
-        type: "textarea",
-        maxLength: 500,
-        required: true,
-        placeholder: "Tell us a little about yourself…",
-      },
-      {
-        name: "discord",
-        label: "Your Discord username",
-        type: "text",
-        maxLength: 40,
-        required: true,
-        placeholder: "e.g. zacki",
-        help: "So we can find you in the Talkomatic Discord and give you the mod role if you are accepted. Your @username, not your display name.",
-      },
-      {
-        name: "availability",
-        label: "When are you usually online? (optional)",
-        type: "text",
-        maxLength: 120,
-        placeholder: "e.g. evenings, UTC",
-      },
-    ],
-    confirmText: "Send application",
-  });
-  if (r && r.why)
-    socket.emit("mod application submit", {
-      why: r.why,
-      availability: r.availability,
-      discord: r.discord,
-    });
-}
+// The application form, status view, and decision popups live in mod-apply.js.
 const modApplyLink = document.getElementById("modApplyLink");
 if (modApplyLink)
   modApplyLink.addEventListener("click", (e) => {
     e.preventDefault();
-    if (myAppStatus && myAppStatus.has) {
-      socket.emit("mod application status");
-      showAppStatus();
-    } else openModApply();
+    if (window.ModApply) ModApply.open();
   });
 socket.on("mod application result", (d) => {
-  if (!d) return;
-  if (d.ok) {
-    lobbyNotify(
-      "Application sent! Staff will review it. Thanks for stepping up.",
-      "success",
-      { timeout: 7000 },
-    );
-    myAppStatus = { has: true, status: "pending", submittedAt: Date.now() };
-    updateModApplyLink();
-  } else
-    lobbyNotify(d.error || "Could not send your application.", "error", {
-      timeout: 7000,
-    });
+  if (!d || !d.ok) return;
+  myAppStatus = { has: true, status: "pending", submittedAt: Date.now() };
+  updateModApplyLink();
 });
 
 async function openSuggestBox() {
@@ -3288,19 +3140,6 @@ socket.on("applications state", (d) => {
 socket.on("mod application status", (d) => {
   myAppStatus = d && d.has ? d : null;
   updateModApplyLink();
-  if (d && d.live && d.has) {
-    if (d.status === "approved")
-      lobbyNotify("Your moderator application was approved!", "success", {
-        timeout: 10000,
-      });
-    else if (d.status === "rejected")
-      lobbyNotify(
-        "Your moderator application was declined." +
-          (d.reason ? " Reason: " + d.reason : " Open Check status for details."),
-        "info",
-        { timeout: 12000 },
-      );
-  }
 });
 
 function updateStaffLink() {

@@ -3900,8 +3900,17 @@
     );
     dbadge.title = hasDiscord
       ? "Search this in the Talkomatic Discord. If you approve them, give them the site mod role there."
-      : "This applicant gave no Discord account.";
+      : a.answers && a.answers.hasDiscord === false
+        ? "They said they do not have Discord. That is allowed; decisions reach them on the site."
+        : "This applicant gave no Discord account.";
     meta.appendChild(dbadge);
+    if (a.answers && a.answers.agreed) {
+      const abadge = span("rbadge on");
+      abadge.appendChild(icon("fa-file-signature"));
+      abadge.appendChild(document.createTextNode(" 14+ & terms"));
+      abadge.title = "Confirmed they are 14 or older and agreed to the moderator terms.";
+      meta.appendChild(abadge);
+    }
     if (a.submittedAt) {
       const t = span(null, "applied " + relTime(a.submittedAt));
       t.title = fmtTime(a.submittedAt);
@@ -3919,6 +3928,14 @@
         (a.answers && a.answers.why) || "",
       ),
     );
+    if (a.answers && a.answers.experience !== undefined)
+      qa.appendChild(
+        qaBlock(
+          "fa-clipboard-list",
+          "Past moderation experience",
+          a.answers.experience || "",
+        ),
+      );
     qa.appendChild(
       qaBlock(
         "fa-clock",
@@ -4105,6 +4122,7 @@
         [
           a.username,
           a.answers && a.answers.why,
+          a.answers && a.answers.experience,
           a.answers && a.answers.availability,
           a.reason,
           a.reviewedBy,
