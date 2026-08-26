@@ -2456,7 +2456,7 @@ function createUserRow(user, container) {
     div.style.setProperty("color", user.devColor, "important");
   }
 
-  div.contentEditable = user.id === currentUserId;
+  div.contentEditable = user.id === currentUserId && !fakeAfkActive;
   div.style.cssText =
     "width:100%;height:100%;background:black;color:orange;overflow-x:hidden;overflow-y:auto;padding:6px 8px;box-sizing:border-box;outline:none;white-space:pre-wrap;word-break:break-word;position:absolute;top:0;left:0;z-index:2";
   div.spellcheck = false;
@@ -2547,6 +2547,8 @@ function createUserRow(user, container) {
   if (user.id !== currentUserId) {
     if (user.isAfk) afkUsers.add(user.id);
     if (afkUsers.has(user.id)) applyAfkOverlay(row, true);
+  } else if (fakeAfkActive) {
+    renderSelfFakeOverlay(row);
   }
   container.appendChild(row);
   adjustVoteButtonVisibility();
@@ -2903,6 +2905,7 @@ function armAfkTimer() {
 }
 
 document.addEventListener("visibilitychange", () => {
+  if (fakeAfkActive) return;
   if (document.hidden) {
     armAfkTimer();
   } else {
@@ -2918,6 +2921,92 @@ socket.on("afk update", (data) => {
   if (!data || !data.userId) return;
   setRowAfk(data.userId, !!data.isAfk);
 });
+
+// ── Fake AFK (staff): typing locks right away, and a minute later the room
+//    sees the same overlay as a real tab-away. Indistinguishable to users. ──
+
+let fakeAfkActive = false;
+let fakeAfkBroadcast = false;
+let fakeAfkTimer = null;
+
+function renderSelfFakeOverlay(row) {
+  const wrapper = row?.querySelector(".chat-input-wrapper");
+  if (!wrapper) return;
+  let overlay = wrapper.querySelector(".afk-overlay");
+  if (!fakeAfkActive) {
+    if (overlay) overlay.remove();
+    return;
+  }
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.className = "afk-overlay";
+    wrapper.appendChild(overlay);
+  }
+  overlay.innerHTML = "";
+  const main = document.createElement("div");
+  main.textContent = "([AFK] [On Other Window] ...)";
+  const sub = document.createElement("div");
+  sub.className = "afk-overlay-sub";
+  sub.textContent = fakeAfkBroadcast
+    ? "Fake AFK - the room sees you as away"
+    : "Fake AFK - the room sees it in about a minute";
+  overlay.appendChild(main);
+  overlay.appendChild(sub);
+}
+
+function refreshSelfFakeOverlay() {
+  const row = document.querySelector(
+    `.chat-row[data-user-id="${currentUserId}"]`,
+  );
+  if (row) renderSelfFakeOverlay(row);
+}
+
+function applyFakeAfkTypingLock() {
+  if (chatInput) chatInput.contentEditable = fakeAfkActive ? "false" : "true";
+}
+
+function toggleFakeAfk() {
+  fakeAfkActive = !fakeAfkActive;
+  if (fakeAfkActive) {
+    fakeAfkBroadcast = false;
+    if (afkHiddenTimer) {
+      clearTimeout(afkHiddenTimer);
+      afkHiddenTimer = null;
+    }
+    applyFakeAfkTypingLock();
+    refreshSelfFakeOverlay();
+    fakeAfkTimer = setTimeout(() => {
+      fakeAfkTimer = null;
+      if (!fakeAfkActive) return;
+      fakeAfkBroadcast = true;
+      sendAfkState(true);
+      refreshSelfFakeOverlay();
+    }, AFK_TAB_HIDDEN_DELAY);
+    if (window.toastr)
+      toastr.info(
+        "Typing is locked. In about a minute the room sees you as away.",
+      );
+  } else {
+    if (fakeAfkTimer) {
+      clearTimeout(fakeAfkTimer);
+      fakeAfkTimer = null;
+    }
+    if (fakeAfkBroadcast || selfTabAfk) sendAfkState(false);
+    fakeAfkBroadcast = false;
+    applyFakeAfkTypingLock();
+    refreshSelfFakeOverlay();
+    if (chatInput)
+      setTimeout(() => {
+        chatInput.focus();
+        placeCursorAtEnd(chatInput);
+      }, 0);
+    if (window.toastr) toastr.info("Fake AFK is off. You can type again.");
+  }
+  setStaffItemLabel(
+    "staffFakeAfkItem",
+    fakeAfkActive ? "Fake AFK: ON" : "Fake AFK: OFF",
+  );
+}
 
 socket.on("links not allowed", () => {
   if (window.StaffUI)
@@ -2975,7 +3064,13 @@ socket.on("room joined", (data) => {
   currentUserIsVanished = !!data.isVanished;
 
   selfTabAfk = false;
-  armAfkTimer();
+  if (fakeAfkActive) {
+    // Rejoined (reconnect/handoff) while faking: the server-side flag was
+    // rebuilt clean, so put it back rather than falling back to real AFK.
+    if (fakeAfkBroadcast) sendAfkState(true);
+  } else {
+    armAfkTimer();
+  }
   afkUsers.clear();
   (data.users || []).forEach((u) => {
     if (u.isAfk && u.id !== currentUserId) afkUsers.add(u.id);
@@ -4121,6 +4216,13 @@ function openStaffPanel() {
         : "Hide/show your MOD badge",
       onClick: () =>
         socket.emit("dev set hide", { isHidden: !currentUserIsHidden }),
+    },
+    {
+      id: "staffFakeAfkItem",
+      icon: '<i class="fas fa-user-clock"></i>',
+      label: fakeAfkActive ? "Fake AFK: ON" : "Fake AFK: OFF",
+      desc: "Locks your typing; a minute later the room sees you as away",
+      onClick: () => toggleFakeAfk(),
     },
   ];
   if (currentUserIsDev) {

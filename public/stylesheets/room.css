@@ -406,6 +406,8 @@ html {
   bottom: 0;
   z-index: 3;
   display: flex;
+  flex-direction: column;
+  gap: 4px;
   align-items: center;
   justify-content: center;
   padding: 6px 8px;
@@ -420,6 +422,13 @@ html {
   font-style: italic;
   opacity: 0.9;
   pointer-events: none;
+}
+
+/* Second line on the staff member's own fake-AFK overlay */
+.chat-input-wrapper .afk-overlay .afk-overlay-sub {
+  font-size: 12px;
+  font-style: normal;
+  opacity: 0.75;
 }
 
 /* =============================================================================

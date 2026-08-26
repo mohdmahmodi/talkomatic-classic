@@ -3669,7 +3669,7 @@ function registerSocketHandlers(opts) {
         if (
           !data ||
           typeof data.color !== "string" ||
-          typeof data.size !== "number"
+          !Number.isFinite(data.size)
         )
           return;
         if (
@@ -3699,7 +3699,10 @@ function registerSocketHandlers(opts) {
           owner: userId,
           points: [{ x: data.point.x, y: data.point.y }],
           color: data.color.slice(0, 7),
-          size: Math.min(Math.max(data.size, 1), 50),
+          // Brush sizes are world units and zoom-relative on the client
+          // (screen px / zoom), so deep zoom sends tiny fractions and far
+          // zoom-out sends large ones.
+          size: Math.min(Math.max(data.size, 1e-9), 5000),
           eraser: !!data.eraser,
           gradient: data.eraser ? null : sanitizeGradient(data.gradient),
         };
@@ -3889,7 +3892,7 @@ function registerSocketHandlers(opts) {
           owner: userId,
           points,
           color: typeof s.color === "string" ? s.color.slice(0, 7) : "#000000",
-          size: Math.min(Math.max(Number(s.size) || 3, 1), 50),
+          size: Math.min(Math.max(Number(s.size) || 3, 1e-9), 5000),
           eraser: !!s.eraser,
           gradient: s.eraser ? null : sanitizeGradient(s.gradient),
           fill: !!s.fill,

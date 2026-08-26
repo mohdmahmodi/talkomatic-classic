@@ -26,10 +26,25 @@ class Talkoboard {
     this.zoom = 1;
     this.isPanning = false;
     this.panStart = null;
-    this.MIN_ZOOM = 0.05;
-    this.MAX_ZOOM = 5;
+    this.MIN_ZOOM = 0.01;
+    this.MAX_ZOOM = 1e9;
     this._redrawRaf = null;
     this._gesturing = false;
+
+    // Render origin: world coords of the view centre, subtracted from all
+    // geometry before it reaches the canvas. Canvas paths are float32
+    // internally, so at deep zoom the raw world*zoom numbers lose enough
+    // precision to visibly break; small re-centred numbers do not.
+    this._rox = 0;
+    this._roy = 0;
+    // Above this many device px of local coordinate, a stroke is drawn via
+    // the clipping renderer instead of trusting float32 with huge numbers.
+    this.CLIP_DEVICE_LIMIT = 1e6;
+    // The canvas matrix itself breaks down somewhere past scale 1e7 (Skia is
+    // float32 inside), so the ctx never scales beyond this; the rest of the
+    // zoom is pre-multiplied into the geometry in JS doubles.
+    this.SAFE_CANVAS_SCALE = 1e6;
+    this._rs = 1;
 
     // ── Completed strokes (for redraw on pan/zoom) ──────────────────
     this.strokes = [];
@@ -935,7 +950,7 @@ class Talkoboard {
             this.panX = ax - (ax - this.panX) * (nz / oldZoom);
             this.panY = ay - (ay - this.panY) * (nz / oldZoom);
             this.zoom = nz;
-            this.zoomLabel.textContent = Math.round(this.zoom * 100) + "%";
+            this.updateZoomLabel();
           }
           gesture = g;
           this.scheduleRedraw();
@@ -1447,7 +1462,7 @@ class Talkoboard {
       owner: this.userId,
       points: this.shapePoints(kind, a, end),
       color: this.color,
-      size: this.size,
+      size: this.worldBrushSize(),
       eraser: false,
       gradient: this.gradient ? this.gradient.slice() : null,
       fill: closed && this.fillShapes,
@@ -2015,6 +2030,19 @@ class Talkoboard {
   // ═══════════════════════════════════════════════════════════════════════════
   // ═══════════════════════════════════════════════════════════════════════════
 
+  formatZoom() {
+    const z = this.zoom;
+    if (z < 10) return Math.round(z * 100) + "%";
+    if (z < 1000) return Math.round(z) + "×";
+    if (z < 1e6) return (z / 1000).toPrecision(3).replace(/\.?0+$/, "") + "k×";
+    if (z < 1e9) return (z / 1e6).toPrecision(3).replace(/\.?0+$/, "") + "M×";
+    return (z / 1e9).toPrecision(3).replace(/\.?0+$/, "") + "B×";
+  }
+
+  updateZoomLabel() {
+    this.zoomLabel.textContent = this.formatZoom();
+  }
+
   adjustZoom(delta, e) {
     const oldZoom = this.zoom;
     this.zoom = Math.min(
@@ -2030,7 +2058,7 @@ class Talkoboard {
       this.panY = my - (my - this.panY) * (this.zoom / oldZoom);
     }
 
-    this.zoomLabel.textContent = Math.round(this.zoom * 100) + "%";
+    this.updateZoomLabel();
     this.scheduleRedraw();
   }
 
@@ -2038,7 +2066,7 @@ class Talkoboard {
     this.panX = 0;
     this.panY = 0;
     this.zoom = 1;
-    this.zoomLabel.textContent = "100%";
+    this.updateZoomLabel();
     this.redraw();
   }
 
@@ -2067,8 +2095,8 @@ class Talkoboard {
     }
 
     const pad = 60;
-    const bw = Math.max(1, maxX - minX);
-    const bh = Math.max(1, maxY - minY);
+    const bw = Math.max(1e-9, maxX - minX);
+    const bh = Math.max(1e-9, maxY - minY);
     const z = Math.min(
       this.MAX_ZOOM,
       Math.max(
@@ -2082,7 +2110,7 @@ class Talkoboard {
     this.zoom = z;
     this.panX = this.displayWidth / 2 - ((minX + maxX) / 2) * z;
     this.panY = this.displayHeight / 2 - ((minY + maxY) / 2) * z;
-    this.zoomLabel.textContent = Math.round(this.zoom * 100) + "%";
+    this.updateZoomLabel();
     this.redraw();
   }
 
@@ -2127,9 +2155,18 @@ class Talkoboard {
     const lctx = layer.getContext("2d");
     lctx.scale(scale, scale);
     lctx.translate(pad - minX, pad - minY);
+    const prevRox = this._rox,
+      prevRoy = this._roy,
+      prevRs = this._rs;
+    this._rox = 0;
+    this._roy = 0;
+    this._rs = 1;
     for (const s of this.strokes) this.renderStrokeSmooth(lctx, s);
     for (const [, s] of this.remoteActiveStrokes) this.renderStrokeSmooth(lctx, s);
     if (this.currentStroke) this.renderStrokeSmooth(lctx, this.currentStroke);
+    this._rox = prevRox;
+    this._roy = prevRoy;
+    this._rs = prevRs;
 
     const out = document.createElement("canvas");
     out.width = W;
@@ -2174,20 +2211,31 @@ class Talkoboard {
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, w, h);
 
+    const centre = this.screenToWorld(w / 2, h / 2);
+    this._rox = centre.x;
+    this._roy = centre.y;
+    const S = Math.min(this.zoom, this.SAFE_CANVAS_SCALE);
+    this._rs = this.zoom / S;
+
     ctx.save();
-    ctx.translate(this.panX, this.panY);
-    ctx.scale(this.zoom, this.zoom);
+    ctx.translate(
+      this.panX + this._rox * this.zoom,
+      this.panY + this._roy * this.zoom,
+    );
+    ctx.scale(S, S);
+
+    const view = this.viewWorldRect();
 
     for (const stroke of this.strokes) {
-      this.renderStrokeSmooth(ctx, stroke);
+      this.renderStrokeCulled(ctx, stroke, view);
     }
 
     for (const [, stroke] of this.remoteActiveStrokes) {
-      this.renderStrokeSmooth(ctx, stroke);
+      this.renderStrokeCulled(ctx, stroke, view);
     }
 
     if (this.currentStroke) {
-      this.renderStrokeSmooth(ctx, this.currentStroke);
+      this.renderStrokeCulled(ctx, this.currentStroke, view);
     }
 
     for (const c of this.claims) this.renderClaim(ctx, c);
@@ -2211,7 +2259,7 @@ class Talkoboard {
           this.preview.b,
         ),
         color: this.color,
-        size: this.size,
+        size: this.worldBrushSize(),
         eraser: false,
         gradient: this.gradient,
         fill:
@@ -2227,6 +2275,252 @@ class Talkoboard {
 
   // ═══════════════════════════════════════════════════════════════════════════
   // ═══════════════════════════════════════════════════════════════════════════
+
+  viewWorldRect() {
+    const a = this.screenToWorld(0, 0);
+    const b = this.screenToWorld(this.displayWidth, this.displayHeight);
+    return {
+      minX: Math.min(a.x, b.x),
+      minY: Math.min(a.y, b.y),
+      maxX: Math.max(a.x, b.x),
+      maxY: Math.max(a.y, b.y),
+    };
+  }
+
+  strokeBB(s) {
+    const pts = s.points || [];
+    if (s._bb && s._bbN === pts.length) return s._bb;
+    let minX = Infinity,
+      minY = Infinity,
+      maxX = -Infinity,
+      maxY = -Infinity;
+    const scan = (arr) => {
+      for (const p of arr) {
+        if (p.x < minX) minX = p.x;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.y > maxY) maxY = p.y;
+      }
+    };
+    if (Array.isArray(s.rings) && s.rings.length)
+      for (const r of s.rings) scan(r);
+    else scan(pts);
+    s._bb = { minX, minY, maxX, maxY };
+    s._bbN = pts.length;
+    return s._bb;
+  }
+
+  renderStrokeCulled(ctx, stroke, view) {
+    if (!stroke.points || !stroke.points.length) return;
+    const bb = this.strokeBB(stroke);
+    const pad = (stroke.size || 1) / 2 + 4 / this.zoom;
+    if (
+      bb.maxX + pad < view.minX ||
+      bb.minX - pad > view.maxX ||
+      bb.maxY + pad < view.minY ||
+      bb.minY - pad > view.maxY
+    )
+      return;
+    // Far corners turn into device-pixel numbers float32 cannot hold; those
+    // strokes get clipped in JS (doubles) before the canvas sees them.
+    const far = Math.max(
+      Math.abs(bb.minX - this._rox),
+      Math.abs(bb.maxX - this._rox),
+      Math.abs(bb.minY - this._roy),
+      Math.abs(bb.maxY - this._roy),
+    );
+    if (far * this.zoom > this.CLIP_DEVICE_LIMIT) {
+      this.renderStrokeClipped(ctx, stroke, view);
+      return;
+    }
+    this.renderStrokeSmooth(ctx, stroke);
+  }
+
+  clipSegToRect(a, b, r) {
+    let t0 = 0,
+      t1 = 1;
+    const dx = b.x - a.x,
+      dy = b.y - a.y;
+    const p = [-dx, dx, -dy, dy];
+    const q = [a.x - r.minX, r.maxX - a.x, a.y - r.minY, r.maxY - a.y];
+    for (let i = 0; i < 4; i++) {
+      if (p[i] === 0) {
+        if (q[i] < 0) return null;
+        continue;
+      }
+      const t = q[i] / p[i];
+      if (p[i] < 0) {
+        if (t > t1) return null;
+        if (t > t0) t0 = t;
+      } else {
+        if (t < t0) return null;
+        if (t < t1) t1 = t;
+      }
+    }
+    return [
+      { x: a.x + t0 * dx, y: a.y + t0 * dy },
+      { x: a.x + t1 * dx, y: a.y + t1 * dy },
+    ];
+  }
+
+  clipRingToRect(ring, r) {
+    const clipHalf = (pts, inside, intersect) => {
+      const out = [];
+      for (let i = 0; i < pts.length; i++) {
+        const cur = pts[i];
+        const prev = pts[(i + pts.length - 1) % pts.length];
+        const cin = inside(cur),
+          pin = inside(prev);
+        if (cin) {
+          if (!pin) out.push(intersect(prev, cur));
+          out.push(cur);
+        } else if (pin) {
+          out.push(intersect(prev, cur));
+        }
+      }
+      return out;
+    };
+    const ix = (a, b, x) => {
+      const t = (x - a.x) / (b.x - a.x);
+      return { x, y: a.y + (b.y - a.y) * t };
+    };
+    const iy = (a, b, y) => {
+      const t = (y - a.y) / (b.y - a.y);
+      return { x: a.x + (b.x - a.x) * t, y };
+    };
+    let out = ring;
+    out = clipHalf(out, (p) => p.x >= r.minX, (a, b) => ix(a, b, r.minX));
+    if (!out.length) return out;
+    out = clipHalf(out, (p) => p.x <= r.maxX, (a, b) => ix(a, b, r.maxX));
+    if (!out.length) return out;
+    out = clipHalf(out, (p) => p.y >= r.minY, (a, b) => iy(a, b, r.minY));
+    if (!out.length) return out;
+    out = clipHalf(out, (p) => p.y <= r.maxY, (a, b) => iy(a, b, r.maxY));
+    return out;
+  }
+
+  distPointToSeg(p, a, b) {
+    const dx = b.x - a.x,
+      dy = b.y - a.y;
+    const len2 = dx * dx + dy * dy;
+    const t =
+      len2 > 0
+        ? Math.max(
+            0,
+            Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2),
+          )
+        : 0;
+    const px = a.x + t * dx - p.x,
+      py = a.y + t * dy - p.y;
+    return Math.hypot(px, py);
+  }
+
+  renderStrokeClipped(ctx, stroke, view) {
+    const z = this.zoom;
+    const rox = this._rox,
+      roy = this._roy,
+      k = this._rs;
+    const halfW = (stroke.size || 1) / 2;
+    const padCap = this.CLIP_DEVICE_LIMIT / z;
+    const padWorld = Math.min(halfW, padCap) + 40 / z;
+    const rect = {
+      minX: view.minX - padWorld,
+      minY: view.minY - padWorld,
+      maxX: view.maxX + padWorld,
+      maxY: view.maxY + padWorld,
+    };
+
+    if (stroke.fill && !stroke.eraser) {
+      const rings =
+        Array.isArray(stroke.rings) && stroke.rings.length
+          ? stroke.rings
+          : [stroke.points];
+      const path = new Path2D();
+      let any = false;
+      for (const ring of rings) {
+        if (!ring || ring.length < 3) continue;
+        const cl = this.clipRingToRect(ring, rect);
+        if (cl.length < 3) continue;
+        any = true;
+        path.moveTo((cl[0].x - rox) * k, (cl[0].y - roy) * k);
+        for (let i = 1; i < cl.length; i++)
+          path.lineTo((cl[i].x - rox) * k, (cl[i].y - roy) * k);
+        path.closePath();
+      }
+      if (any) {
+        ctx.save();
+        ctx.globalCompositeOperation = "source-over";
+        ctx.fillStyle = stroke.color;
+        ctx.fill(path, "evenodd");
+        ctx.restore();
+      }
+      if (!(stroke.size > 1)) return;
+    }
+
+    const pts = stroke.points;
+    if (!pts || pts.length < 2) return;
+
+    // When the brush is wider than the clip pad allows, a segment whose
+    // centreline misses the padded rect can still paint the whole view (you
+    // are zoomed deep inside the fat stroke). Detect that and flood the view.
+    let coverAll = false;
+    if (halfW > padCap) {
+      const centre = { x: rox, y: roy };
+      for (let i = 1; i < pts.length; i++) {
+        if (this.distPointToSeg(centre, pts[i - 1], pts[i]) <= halfW) {
+          coverAll = true;
+          break;
+        }
+      }
+    }
+    ctx.save();
+    ctx.globalCompositeOperation = stroke.eraser
+      ? "destination-out"
+      : "source-over";
+    if (coverAll) {
+      const fx = (rect.minX - rox) * k,
+        fy = (rect.minY - roy) * k;
+      ctx.fillStyle = stroke.eraser
+        ? "rgba(0,0,0,1)"
+        : stroke.gradient && stroke.gradient.length
+          ? this.strokeSegmentColor(stroke, 1)
+          : stroke.color;
+      ctx.fillRect(
+        fx,
+        fy,
+        (rect.maxX - rect.minX) * k,
+        (rect.maxY - rect.minY) * k,
+      );
+      ctx.restore();
+      return;
+    }
+
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.lineWidth = (stroke.size || 1) * k;
+    const grad =
+      !stroke.eraser && stroke.gradient && stroke.gradient.length >= 2;
+    if (!grad) ctx.strokeStyle = stroke.color;
+    if (!grad) ctx.beginPath();
+    let open = false;
+    for (let i = 1; i < pts.length; i++) {
+      const seg = this.clipSegToRect(pts[i - 1], pts[i], rect);
+      if (!seg) continue;
+      if (grad) {
+        ctx.strokeStyle = this.strokeSegmentColor(stroke, i);
+        ctx.beginPath();
+        ctx.moveTo((seg[0].x - rox) * k, (seg[0].y - roy) * k);
+        ctx.lineTo((seg[1].x - rox) * k, (seg[1].y - roy) * k);
+        ctx.stroke();
+      } else {
+        ctx.moveTo((seg[0].x - rox) * k, (seg[0].y - roy) * k);
+        ctx.lineTo((seg[1].x - rox) * k, (seg[1].y - roy) * k);
+        open = true;
+      }
+    }
+    if (!grad && open) ctx.stroke();
+    ctx.restore();
+  }
 
   renderStrokeSmooth(ctx, stroke) {
     const pts = stroke.points;
@@ -2247,10 +2541,14 @@ class Talkoboard {
       return;
     }
 
+    const ox = this._rox,
+      oy = this._roy,
+      k = this._rs;
+
     ctx.save();
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
-    ctx.lineWidth = stroke.size;
+    ctx.lineWidth = stroke.size * k;
 
     if (stroke.eraser) {
       ctx.globalCompositeOperation = "destination-out";
@@ -2261,26 +2559,32 @@ class Talkoboard {
 
     if (pts.length === 1) {
       ctx.beginPath();
-      ctx.arc(pts[0].x, pts[0].y, stroke.size / 2, 0, Math.PI * 2);
+      ctx.arc(
+        (pts[0].x - ox) * k,
+        (pts[0].y - oy) * k,
+        (stroke.size / 2) * k,
+        0,
+        Math.PI * 2,
+      );
       ctx.fillStyle = stroke.eraser ? "rgba(0,0,0,1)" : stroke.color;
       ctx.fill();
     } else if (pts.length === 2) {
       ctx.beginPath();
-      ctx.moveTo(pts[0].x, pts[0].y);
-      ctx.lineTo(pts[1].x, pts[1].y);
+      ctx.moveTo((pts[0].x - ox) * k, (pts[0].y - oy) * k);
+      ctx.lineTo((pts[1].x - ox) * k, (pts[1].y - oy) * k);
       ctx.stroke();
     } else {
       ctx.beginPath();
-      ctx.moveTo(pts[0].x, pts[0].y);
+      ctx.moveTo((pts[0].x - ox) * k, (pts[0].y - oy) * k);
 
       for (let i = 1; i < pts.length - 1; i++) {
-        const mx = (pts[i].x + pts[i + 1].x) * 0.5;
-        const my = (pts[i].y + pts[i + 1].y) * 0.5;
-        ctx.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
+        const mx = ((pts[i].x + pts[i + 1].x) * 0.5 - ox) * k;
+        const my = ((pts[i].y + pts[i + 1].y) * 0.5 - oy) * k;
+        ctx.quadraticCurveTo((pts[i].x - ox) * k, (pts[i].y - oy) * k, mx, my);
       }
 
       const last = pts[pts.length - 1];
-      ctx.lineTo(last.x, last.y);
+      ctx.lineTo((last.x - ox) * k, (last.y - oy) * k);
       ctx.stroke();
     }
 
@@ -2291,10 +2595,17 @@ class Talkoboard {
     const pts = stroke.points;
     ctx.save();
     if (pts.length === 1) {
-      ctx.lineWidth = stroke.size;
+      const k = this._rs;
+      ctx.lineWidth = stroke.size * k;
       ctx.globalCompositeOperation = "source-over";
       ctx.beginPath();
-      ctx.arc(pts[0].x, pts[0].y, stroke.size / 2, 0, Math.PI * 2);
+      ctx.arc(
+        (pts[0].x - this._rox) * k,
+        (pts[0].y - this._roy) * k,
+        (stroke.size / 2) * k,
+        0,
+        Math.PI * 2,
+      );
       ctx.fillStyle = this.strokeSegmentColor(stroke, 0);
       ctx.fill();
     } else {
@@ -2309,14 +2620,17 @@ class Talkoboard {
     if (n < 2) return;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
-    ctx.lineWidth = stroke.size;
+    const ox = this._rox,
+      oy = this._roy,
+      k = this._rs;
+    ctx.lineWidth = stroke.size * k;
     ctx.globalCompositeOperation = "source-over";
     const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
     if (n === 2) {
       ctx.strokeStyle = this.strokeSegmentColor(stroke, 1);
       ctx.beginPath();
-      ctx.moveTo(pts[0].x, pts[0].y);
-      ctx.lineTo(pts[1].x, pts[1].y);
+      ctx.moveTo((pts[0].x - ox) * k, (pts[0].y - oy) * k);
+      ctx.lineTo((pts[1].x - ox) * k, (pts[1].y - oy) * k);
       ctx.stroke();
       return;
     }
@@ -2326,40 +2640,94 @@ class Talkoboard {
       const e = mid(pts[i], pts[i + 1]);
       ctx.strokeStyle = this.strokeSegmentColor(stroke, i);
       ctx.beginPath();
-      ctx.moveTo(s.x, s.y);
-      ctx.quadraticCurveTo(pts[i].x, pts[i].y, e.x, e.y);
+      ctx.moveTo((s.x - ox) * k, (s.y - oy) * k);
+      ctx.quadraticCurveTo(
+        (pts[i].x - ox) * k,
+        (pts[i].y - oy) * k,
+        (e.x - ox) * k,
+        (e.y - oy) * k,
+      );
       ctx.stroke();
     }
     const fs = mid(pts[n - 2], pts[n - 1]);
     ctx.strokeStyle = this.strokeSegmentColor(stroke, n - 1);
     ctx.beginPath();
-    ctx.moveTo(fs.x, fs.y);
-    ctx.lineTo(pts[n - 1].x, pts[n - 1].y);
+    ctx.moveTo((fs.x - ox) * k, (fs.y - oy) * k);
+    ctx.lineTo((pts[n - 1].x - ox) * k, (pts[n - 1].y - oy) * k);
     ctx.stroke();
   }
 
   renderClaim(ctx, c) {
     const mine = c.owner === this.userId;
     const z = this.zoom;
+    const ox = this._rox,
+      oy = this._roy;
+
+    const view = this.viewWorldRect();
+    const margin = 24 / z;
+    if (
+      c.x + c.w + margin < view.minX ||
+      c.x - margin > view.maxX ||
+      c.y + c.h + margin < view.minY ||
+      c.y - margin > view.maxY
+    )
+      return;
+
+    const k = this._rs;
     ctx.save();
-    ctx.setLineDash([8 / z, 6 / z]);
-    ctx.lineWidth = 1.5 / z;
+    ctx.setLineDash([(8 / z) * k, (6 / z) * k]);
+    ctx.lineWidth = (1.5 / z) * k;
     ctx.strokeStyle = mine ? "#ff9800" : "#8d8d8d";
-    ctx.strokeRect(c.x, c.y, c.w, c.h);
+
+    const far = Math.max(
+      Math.abs(c.x - ox),
+      Math.abs(c.x + c.w - ox),
+      Math.abs(c.y - oy),
+      Math.abs(c.y + c.h - oy),
+    );
+    if (far * z > this.CLIP_DEVICE_LIMIT) {
+      // Deep zoom inside/near a huge claim: draw its border edges clipped so
+      // the canvas never sees float32-breaking numbers.
+      const pad = 40 / z;
+      const rect = {
+        minX: view.minX - pad,
+        minY: view.minY - pad,
+        maxX: view.maxX + pad,
+        maxY: view.maxY + pad,
+      };
+      const corners = [
+        { x: c.x, y: c.y },
+        { x: c.x + c.w, y: c.y },
+        { x: c.x + c.w, y: c.y + c.h },
+        { x: c.x, y: c.y + c.h },
+      ];
+      ctx.beginPath();
+      for (let i = 0; i < 4; i++) {
+        const seg = this.clipSegToRect(corners[i], corners[(i + 1) % 4], rect);
+        if (!seg) continue;
+        ctx.moveTo((seg[0].x - ox) * k, (seg[0].y - oy) * k);
+        ctx.lineTo((seg[1].x - ox) * k, (seg[1].y - oy) * k);
+      }
+      ctx.stroke();
+      ctx.restore();
+      return;
+    }
+
+    ctx.strokeRect((c.x - ox) * k, (c.y - oy) * k, c.w * k, c.h * k);
     ctx.setLineDash([]);
 
     const label =
       (mine ? "Your area" : (c.name || "Someone") + "'s area") +
       (c.away ? " (away)" : "");
-    const pad = 4 / z;
-    ctx.font = "bold " + 11 / z + "px sans-serif";
+    const pad = (4 / z) * k;
+    ctx.font = "bold " + (11 / z) * k + "px sans-serif";
     const w = ctx.measureText(label).width + pad * 2;
-    const h = 16 / z;
+    const h = (16 / z) * k;
     ctx.fillStyle = mine ? "#ff9800" : "#5a5a5a";
-    ctx.fillRect(c.x, c.y - h, w, h);
+    ctx.fillRect((c.x - ox) * k, (c.y - oy) * k - h, w, h);
     ctx.fillStyle = mine ? "#000000" : "#ffffff";
     ctx.textBaseline = "middle";
-    ctx.fillText(label, c.x + pad, c.y - h / 2);
+    ctx.fillText(label, (c.x - ox) * k + pad, (c.y - oy) * k - h / 2);
     ctx.restore();
   }
 
@@ -2372,12 +2740,17 @@ class Talkoboard {
     ctx.lineCap = "round";
     ctx.lineJoin = "miter";
     ctx.miterLimit = 6;
-    ctx.lineWidth = stroke.size;
+    const ox = this._rox,
+      oy = this._roy,
+      k = this._rs;
+    ctx.lineWidth = stroke.size * k;
     ctx.strokeStyle = stroke.color;
     ctx.beginPath();
-    ctx.moveTo(pts[0].x, pts[0].y);
-    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-    if (pts.length === 1) ctx.lineTo(pts[0].x + 0.01, pts[0].y);
+    ctx.moveTo((pts[0].x - ox) * k, (pts[0].y - oy) * k);
+    for (let i = 1; i < pts.length; i++)
+      ctx.lineTo((pts[i].x - ox) * k, (pts[i].y - oy) * k);
+    if (pts.length === 1)
+      ctx.lineTo((pts[0].x - ox) * k + (0.01 / this.zoom) * k, (pts[0].y - oy) * k);
     ctx.stroke();
     ctx.restore();
   }
@@ -2387,11 +2760,15 @@ class Talkoboard {
       Array.isArray(stroke.rings) && stroke.rings.length
         ? stroke.rings
         : [stroke.points];
+    const ox = this._rox,
+      oy = this._roy,
+      k = this._rs;
     const path = new Path2D();
     for (const ring of rings) {
       if (!ring || ring.length < 3) continue;
-      path.moveTo(ring[0].x, ring[0].y);
-      for (let i = 1; i < ring.length; i++) path.lineTo(ring[i].x, ring[i].y);
+      path.moveTo((ring[0].x - ox) * k, (ring[0].y - oy) * k);
+      for (let i = 1; i < ring.length; i++)
+        path.lineTo((ring[i].x - ox) * k, (ring[i].y - oy) * k);
       path.closePath();
     }
     ctx.save();
@@ -2399,7 +2776,7 @@ class Talkoboard {
     ctx.fillStyle = stroke.color;
     ctx.fill(path, "evenodd");
     if (stroke.size > 1) {
-      ctx.lineWidth = stroke.size;
+      ctx.lineWidth = stroke.size * k;
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
       ctx.strokeStyle = stroke.color;
@@ -2419,14 +2796,39 @@ class Talkoboard {
     const ctx = this.ctx;
     const dpr = this.dpr;
 
+    const centre = this.screenToWorld(
+      this.displayWidth / 2,
+      this.displayHeight / 2,
+    );
+    this._rox = centre.x;
+    this._roy = centre.y;
+    const S = Math.min(this.zoom, this.SAFE_CANVAS_SCALE);
+    this._rs = this.zoom / S;
+    const ox = this._rox,
+      oy = this._roy,
+      k = this._rs;
+
+    // A remote stroke far outside a deep-zoomed view would hand the canvas
+    // float32-breaking numbers; let the full redraw cull/clip it instead.
+    const start = Math.max(0, fromIndex);
+    let far = 0;
+    for (let i = Math.max(0, start - 2); i < pts.length; i++) {
+      const d = Math.max(Math.abs(pts[i].x - ox), Math.abs(pts[i].y - oy));
+      if (d > far) far = d;
+    }
+    if (far * this.zoom > this.CLIP_DEVICE_LIMIT) {
+      this.scheduleRedraw();
+      return;
+    }
+
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.save();
-    ctx.translate(this.panX, this.panY);
-    ctx.scale(this.zoom, this.zoom);
+    ctx.translate(this.panX + ox * this.zoom, this.panY + oy * this.zoom);
+    ctx.scale(S, S);
 
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
-    ctx.lineWidth = stroke.size;
+    ctx.lineWidth = stroke.size * k;
 
     if (stroke.eraser) {
       ctx.globalCompositeOperation = "destination-out";
@@ -2435,8 +2837,6 @@ class Talkoboard {
       ctx.strokeStyle = stroke.color;
     }
 
-    const start = Math.max(0, fromIndex);
-
     if (!stroke.eraser && stroke.gradient && stroke.gradient.length >= 2) {
       this.renderGradientPieces(ctx, stroke, Math.max(1, start - 2));
       ctx.restore();
@@ -2444,9 +2844,9 @@ class Talkoboard {
     }
 
     ctx.beginPath();
-    ctx.moveTo(pts[start].x, pts[start].y);
+    ctx.moveTo((pts[start].x - ox) * k, (pts[start].y - oy) * k);
     for (let i = start + 1; i < pts.length; i++) {
-      ctx.lineTo(pts[i].x, pts[i].y);
+      ctx.lineTo((pts[i].x - ox) * k, (pts[i].y - oy) * k);
     }
     ctx.stroke();
 
@@ -2523,6 +2923,12 @@ class Talkoboard {
     this.startStrokeAt(this.getCanvasPoint(e));
   }
 
+  // The size slider is in screen pixels at the moment you paint: a size-3 pen
+  // looks 3px wide at any zoom, so zooming deep in gives finer world detail.
+  worldBrushSize() {
+    return this.size / this.zoom;
+  }
+
   startStrokeAt(pt) {
     this.drawing = true;
     this._penLifted = false;
@@ -2530,12 +2936,13 @@ class Talkoboard {
 
     const id = this.nextStrokeId();
     const gradient = this.eraser ? null : this.gradient;
+    const size = this.worldBrushSize();
     this.currentStroke = {
       id,
       owner: this.userId,
       points: [pt],
       color: this.color,
-      size: this.size,
+      size,
       eraser: this.eraser,
       gradient,
     };
@@ -2544,7 +2951,7 @@ class Talkoboard {
       id,
       point: pt,
       color: this.color,
-      size: this.size,
+      size,
       eraser: this.eraser,
       gradient,
     });
@@ -2627,7 +3034,10 @@ class Talkoboard {
         this.currentStroke.points[this.currentStroke.points.length - 1];
       const dx = pt.x - last.x;
       const dy = pt.y - last.y;
-      if (dx * dx + dy * dy < this.MIN_POINT_DISTANCE_SQ) return;
+      // Screen-space threshold: world distances shrink with zoom, so the
+      // comparison has to shrink too or deep-zoom strokes lose every point.
+      const zz = this.zoom * this.zoom;
+      if ((dx * dx + dy * dy) * zz < this.MIN_POINT_DISTANCE_SQ) return;
     }
 
     if (this.currentStroke) {

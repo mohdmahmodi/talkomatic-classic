@@ -401,6 +401,14 @@ a {
   font-size: 16px;
   margin: 0 0 4px;
   color: var(--tk-text);
+  display: flex;
+  align-items: center;
+}
+
+.bc-h2-btn {
+  margin-left: auto;
+  font-size: 12px;
+  padding: 4px 10px;
 }
 
 .bc-home-sec h2 i {

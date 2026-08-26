@@ -1393,6 +1393,94 @@
     showView("home");
   });
 
+  // ── Import / export: carry a bot between devices as a file ────────────────
+
+  $("exportBotBtn").addEventListener("click", () => {
+    if (!edit) return;
+    const payload = {
+      format: "talkomatic-bot",
+      version: 1,
+      bot: {
+        name: edit.name || "Unnamed bot",
+        location: edit.location || "Bot",
+        rules: edit.rules || [],
+      },
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json",
+    });
+    const safe =
+      (edit.name || "bot")
+        .replace(/[^\w\- ]+/g, "")
+        .trim()
+        .replace(/\s+/g, "-")
+        .toLowerCase() || "bot";
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = safe + ".talkobot.json";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    toastr.success("Bot saved as a file. Import it on your other device.");
+  });
+
+  const importInput = document.createElement("input");
+  importInput.type = "file";
+  importInput.accept = ".json,application/json";
+  importInput.style.display = "none";
+  document.body.appendChild(importInput);
+
+  $("importBotBtn").addEventListener("click", () => {
+    if (!me) return showView("gate");
+    importInput.value = "";
+    importInput.click();
+  });
+
+  importInput.addEventListener("change", () => {
+    const file = importInput.files && importInput.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      let data;
+      try {
+        data = JSON.parse(reader.result);
+      } catch (e) {
+        return toastr.error("That file could not be read as a bot file.");
+      }
+      const bot =
+        data && data.format === "talkomatic-bot" && data.bot
+          ? data.bot
+          : data && Array.isArray(data.rules)
+            ? data
+            : null;
+      if (!bot || !Array.isArray(bot.rules) || !bot.rules.length)
+        return toastr.error("That file does not contain a bot.");
+      if (bot.rules.length > 200)
+        return toastr.error("That file has too many rules to be a real bot.");
+      try {
+        loadBot({
+          id: null,
+          name:
+            typeof bot.name === "string" && bot.name.trim()
+              ? bot.name.slice(0, 14)
+              : "Imported bot",
+          location:
+            typeof bot.location === "string" && bot.location.trim()
+              ? bot.location.slice(0, 20)
+              : "Bot",
+          rules: bot.rules,
+        });
+        toastr.info(
+          "Bot imported. Look it over, then press Save to keep it on this device.",
+        );
+      } catch (e) {
+        toastr.error("That bot file is damaged or from an unknown version.");
+      }
+    };
+    reader.readAsText(file);
+  });
+
   // ── The palette ───────────────────────────────────────────────────────────
 
   const PAL_ITEMS = [

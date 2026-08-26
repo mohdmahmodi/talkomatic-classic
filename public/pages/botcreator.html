@@ -113,7 +113,16 @@
         <div id="continueHost"></div>
 
         <section class="bc-home-sec">
-          <h2><i class="fas fa-robot"></i>My bots</h2>
+          <h2>
+            <i class="fas fa-robot"></i>My bots
+            <button
+              class="bc-btn bc-h2-btn"
+              id="importBotBtn"
+              title="Bring in a bot exported from another device"
+            >
+              <i class="fas fa-file-import"></i>Import
+            </button>
+          </h2>
           <div class="bc-grid" id="botList"></div>
         </section>
 
@@ -160,6 +169,13 @@
             </button>
             <button class="bc-btn" id="testToggleBtn">
               <i class="fas fa-flask"></i>Test room
+            </button>
+            <button
+              class="bc-btn"
+              id="exportBotBtn"
+              title="Download this bot as a file to use on another device"
+            >
+              <i class="fas fa-file-export"></i>Export
             </button>
             <button
               class="bc-btn danger"
