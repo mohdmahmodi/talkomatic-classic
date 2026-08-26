@@ -397,6 +397,31 @@ html {
   outline: none; /* Remove default focus outline */
 }
 
+/* Shown over a user's textbox once their tab has been hidden for a while */
+.chat-input-wrapper .afk-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 8px;
+  box-sizing: border-box;
+  text-align: center;
+  background: rgba(0, 0, 0, 0.6);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+  color: var(--tk-accent, orange);
+  font-family: talkoText, Arial, sans-serif;
+  font-size: 16px;
+  font-style: italic;
+  opacity: 0.9;
+  pointer-events: none;
+}
+
 /* =============================================================================
      Invite Section Styles
      -----------------------------------------------------------------------------

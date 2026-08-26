@@ -57,6 +57,7 @@ let selfRawText = "";
 let selfIsFiltered = false;
 
 const mutedUsers = new Set();
+const afkUsers = new Set();
 const devContext = new Map();
 const storedMessagesForMutedUsers = new Map();
 
@@ -2248,6 +2249,30 @@ function syncUserRowNote(row, user) {
   if (noteBtn) noteBtn.classList.toggle("has-note", !!note);
 }
 
+function applyAfkOverlay(row, isAfk) {
+  const wrapper = row.querySelector(".chat-input-wrapper");
+  if (!wrapper) return;
+  let overlay = wrapper.querySelector(".afk-overlay");
+  if (isAfk) {
+    if (!overlay) {
+      overlay = document.createElement("div");
+      overlay.className = "afk-overlay";
+      overlay.textContent = "([AFK] [On Other Window] ...)";
+      wrapper.appendChild(overlay);
+    }
+  } else if (overlay) {
+    overlay.remove();
+  }
+}
+
+function setRowAfk(userId, isAfk) {
+  if (!userId || userId === currentUserId) return;
+  if (isAfk) afkUsers.add(userId);
+  else afkUsers.delete(userId);
+  const row = document.querySelector(`.chat-row[data-user-id="${userId}"]`);
+  if (row) applyAfkOverlay(row, isAfk);
+}
+
 function createUserRow(user, container) {
   const row = document.createElement("div");
   row.classList.add("chat-row");
@@ -2519,6 +2544,10 @@ function createUserRow(user, container) {
   wrapper.appendChild(div);
   row.appendChild(info);
   row.appendChild(wrapper);
+  if (user.id !== currentUserId) {
+    if (user.isAfk) afkUsers.add(user.id);
+    if (afkUsers.has(user.id)) applyAfkOverlay(row, true);
+  }
   container.appendChild(row);
   adjustVoteButtonVisibility();
   adjustMuteButtonVisibility();
@@ -2853,6 +2882,43 @@ function msToTime(duration) {
 
 socket.on("chat update", displayChatMessage);
 
+// ── Tab-away AFK: after a minute on another tab/window, everyone else sees
+//    the overlay on this user's textbox instead of their frozen text ────────
+
+const AFK_TAB_HIDDEN_DELAY = 60000;
+let afkHiddenTimer = null;
+let selfTabAfk = false;
+
+function sendAfkState(isAfk) {
+  if (isSpectating || !currentRoomId) return;
+  selfTabAfk = isAfk;
+  socket.emit("afk state", { isAfk });
+}
+
+function armAfkTimer() {
+  if (afkHiddenTimer) clearTimeout(afkHiddenTimer);
+  afkHiddenTimer = document.hidden
+    ? setTimeout(() => sendAfkState(true), AFK_TAB_HIDDEN_DELAY)
+    : null;
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    armAfkTimer();
+  } else {
+    if (afkHiddenTimer) {
+      clearTimeout(afkHiddenTimer);
+      afkHiddenTimer = null;
+    }
+    if (selfTabAfk) sendAfkState(false);
+  }
+});
+
+socket.on("afk update", (data) => {
+  if (!data || !data.userId) return;
+  setRowAfk(data.userId, !!data.isAfk);
+});
+
 socket.on("links not allowed", () => {
   if (window.StaffUI)
     StaffUI.toast(
@@ -2907,6 +2973,13 @@ socket.on("room joined", (data) => {
   currentUserModLevel = data.modLevel || 0;
   currentUserIsHidden = !!data.isHidden;
   currentUserIsVanished = !!data.isVanished;
+
+  selfTabAfk = false;
+  armAfkTimer();
+  afkUsers.clear();
+  (data.users || []).forEach((u) => {
+    if (u.isAfk && u.id !== currentUserId) afkUsers.add(u.id);
+  });
 
   updateRoomInfo(data);
   updateRoomUI(data);
@@ -2984,9 +3057,11 @@ socket.on("user joined", (data) => {
       }
     }
   }
+  setRowAfk(data.id, !!data.isAfk);
 });
 
 socket.on("user left", (userId) => {
+  afkUsers.delete(userId);
   if (userId !== currentUserId) {
     const row = document.querySelector(`.chat-row[data-user-id="${userId}"]`);
     if (row) {
@@ -3046,6 +3121,7 @@ socket.on("room update", (roomData) => {
       if (!row) return;
       applyDevAppearanceToRow(row, u);
       syncUserRowNote(row, u);
+      setRowAfk(u.id, !!u.isAfk);
     });
   }
 

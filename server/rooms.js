@@ -1671,6 +1671,7 @@ function formatUserForSocket(user, recipientSocket) {
     location: user.location,
     deviceType: user.deviceType || "unknown",
   };
+  if (user.isAfk) formatted.isAfk = true;
   if (user.isBotUser) {
     formatted.isBotUser = true;
     if (user.botOwnerName) formatted.botOwner = user.botOwnerName;
@@ -1945,6 +1946,19 @@ function emitRoomChatUpdate(socket, payload) {
     if (socket.silenced && getRecipientUserId(recipient) !== payload.userId)
       continue;
     recipient.emit("chat update", recipient.isMainDev ? payload : safe);
+  }
+}
+
+function emitRoomAfkUpdate(socket, userId, isAfk) {
+  if (!socket.roomId || !io()) return;
+  const room = state.rooms.get(socket.roomId);
+  if (!room) return;
+  const senderUser = room.users?.find((u) => u.id === userId);
+  for (const [, recipient] of io().sockets.sockets) {
+    if (!recipient.connected || recipient.roomId !== socket.roomId) continue;
+    if (getRecipientUserId(recipient) === userId) continue;
+    if (!canRecipientSeeDevUser(recipient, senderUser)) continue;
+    recipient.emit("afk update", { userId, isAfk });
   }
 }
 
@@ -4375,6 +4389,30 @@ function registerSocketHandlers(opts) {
           clearAFKTimers(userId);
           await leaveRoom(socket, userId);
         }
+      }),
+    );
+
+    // ── Tab-away AFK flag (client reports via Page Visibility API) ──────
+    socket.on(
+      "afk state",
+      safe(async (data) => {
+        if (!socket.roomId || !socket.handshake.session?.userId) return;
+        if (socket.spectating || socket.isBot) return;
+        const userId = socket.handshake.session.userId;
+        const room = state.rooms.get(socket.roomId);
+        const user = room?.users?.find((u) => u.id === userId);
+        if (!user) return;
+        const isAfk = !!data?.isAfk;
+        if (!!user.isAfk === isAfk) return;
+        // Going AFK is throttled; coming back never is, so a user can't get
+        // stuck showing as away.
+        if (isAfk) {
+          const now = Date.now();
+          if (now - (socket._afkStateTick || 0) < 5000) return;
+          socket._afkStateTick = now;
+        }
+        user.isAfk = isAfk;
+        emitRoomAfkUpdate(socket, userId, isAfk);
       }),
     );
 
