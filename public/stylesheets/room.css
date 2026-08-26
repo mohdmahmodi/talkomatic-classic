@@ -932,32 +932,45 @@ html {
    server-side and cannot be faked by clients.
    =============================================================================*/
 
+/* ── Animated Gradient Borders ─────────────────────────────────────────────
+   Staff rows get a rotating conic sweep in the role color: a gradient painted
+   in the border box, with a padding-box fill covering the middle so only the
+   ring shows. Rotation animates a registered custom property; browsers
+   without @property fall back to a static gradient ring. */
+
+@property --tk-border-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes tk-border-spin {
+  to {
+    --tk-border-angle: 360deg;
+  }
+}
+
 /* ── Neon Red Glow Border ──────────────────────────────────────────────────── */
 
 .chat-row.dev-user {
-  border: 2px solid #ff2222;
+  border: 2px solid transparent;
+  background:
+    linear-gradient(var(--tk-chat-bg, #000), var(--tk-chat-bg, #000))
+      padding-box,
+    conic-gradient(
+        from var(--tk-border-angle),
+        #ff2222,
+        #ffb3b3 25%,
+        #ff2222 50%,
+        #7a0d0d 75%,
+        #ff2222
+      )
+      border-box;
   box-shadow:
     0 0 8px rgba(255, 34, 34, 0.6),
     0 0 20px rgba(255, 34, 34, 0.3),
     inset 0 0 8px rgba(255, 34, 34, 0.1);
-  animation: dev-neon-pulse 2s ease-in-out infinite;
-}
-
-@keyframes dev-neon-pulse {
-  0%,
-  100% {
-    box-shadow:
-      0 0 8px rgba(255, 34, 34, 0.6),
-      0 0 20px rgba(255, 34, 34, 0.3),
-      inset 0 0 8px rgba(255, 34, 34, 0.1);
-  }
-  50% {
-    box-shadow:
-      0 0 12px rgba(255, 34, 34, 0.9),
-      0 0 30px rgba(255, 34, 34, 0.5),
-      0 0 50px rgba(255, 34, 34, 0.2),
-      inset 0 0 12px rgba(255, 34, 34, 0.15);
-  }
+  animation: tk-border-spin 3s linear infinite;
 }
 
 /* Dev user info bar gets a subtle red gradient */
@@ -971,63 +984,53 @@ html {
    purple. Set server-side from the mod key, so it cannot be faked. */
 
 .chat-row.mod-user {
-  border: 2px solid #5aa9ff;
+  border: 2px solid transparent;
+  background:
+    linear-gradient(var(--tk-chat-bg, #000), var(--tk-chat-bg, #000))
+      padding-box,
+    conic-gradient(
+        from var(--tk-border-angle),
+        #5aa9ff,
+        #d6eaff 25%,
+        #5aa9ff 50%,
+        #17395e 75%,
+        #5aa9ff
+      )
+      border-box;
   box-shadow:
     0 0 8px rgba(90, 169, 255, 0.55),
     0 0 20px rgba(90, 169, 255, 0.28),
     inset 0 0 8px rgba(90, 169, 255, 0.1);
-  animation: mod-neon-pulse 2s ease-in-out infinite;
+  animation: tk-border-spin 3s linear infinite;
 }
 
 .chat-row.mod-user .user-info {
   background: linear-gradient(to bottom, #17395e, #0e1f33);
 }
 
-@keyframes mod-neon-pulse {
-  0%,
-  100% {
-    box-shadow:
-      0 0 8px rgba(90, 169, 255, 0.55),
-      0 0 20px rgba(90, 169, 255, 0.28),
-      inset 0 0 8px rgba(90, 169, 255, 0.1);
-  }
-  50% {
-    box-shadow:
-      0 0 12px rgba(90, 169, 255, 0.85),
-      0 0 30px rgba(90, 169, 255, 0.45),
-      0 0 50px rgba(90, 169, 255, 0.18),
-      inset 0 0 12px rgba(90, 169, 255, 0.15);
-  }
-}
-
 .chat-row.jrmod-user {
-  border: 2px solid #c08bff;
+  border: 2px solid transparent;
+  background:
+    linear-gradient(var(--tk-chat-bg, #000), var(--tk-chat-bg, #000))
+      padding-box,
+    conic-gradient(
+        from var(--tk-border-angle),
+        #c08bff,
+        #ecdcff 25%,
+        #c08bff 50%,
+        #40265e 75%,
+        #c08bff
+      )
+      border-box;
   box-shadow:
     0 0 8px rgba(192, 139, 255, 0.55),
     0 0 20px rgba(192, 139, 255, 0.28),
     inset 0 0 8px rgba(192, 139, 255, 0.1);
-  animation: jrmod-neon-pulse 2s ease-in-out infinite;
+  animation: tk-border-spin 3s linear infinite;
 }
 
 .chat-row.jrmod-user .user-info {
   background: linear-gradient(to bottom, #40265e, #221333);
-}
-
-@keyframes jrmod-neon-pulse {
-  0%,
-  100% {
-    box-shadow:
-      0 0 8px rgba(192, 139, 255, 0.55),
-      0 0 20px rgba(192, 139, 255, 0.28),
-      inset 0 0 8px rgba(192, 139, 255, 0.1);
-  }
-  50% {
-    box-shadow:
-      0 0 12px rgba(192, 139, 255, 0.85),
-      0 0 30px rgba(192, 139, 255, 0.45),
-      0 0 50px rgba(192, 139, 255, 0.18),
-      inset 0 0 12px rgba(192, 139, 255, 0.15);
-  }
 }
 
 /* Glow on the typed text, matching the dev treatment */
