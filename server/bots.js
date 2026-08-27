@@ -274,7 +274,12 @@ function validateConfig(input, existingId) {
         error: "Put the blocks to repeat ABOVE the repeat block.",
       };
 
-    rules.push({ on: trig, if: conds, do: actions });
+    const rule = { on: trig, if: conds, do: actions };
+    // Owner-only rules ("admin commands"): only the person running the bot
+    // can trigger them. Absent on old bots, so nothing changes for those.
+    // Timers have no speaker, so the flag means nothing there.
+    if (r.who === "owner" && on.type !== "timer") rule.who = "owner";
+    rules.push(rule);
   }
   if (!rules.length)
     return { ok: false, error: "The bot needs at least one valid rule." };
@@ -368,11 +373,27 @@ function expand(rt, template, ctx) {
       return row && row[n] != null ? String(row[n]) : "0";
     }
     if (low === "bot") return rt.name;
+    if (low === "owner") return rt.ownerName || "the owner";
     if (low === "newline") return "\n";
     if (low === "commands") {
       const seen = [];
       for (const r of rt.bot.rules)
-        if (r.on.type === "command" && seen.indexOf("!" + r.on.word) === -1)
+        if (
+          r.on.type === "command" &&
+          r.who !== "owner" &&
+          seen.indexOf("!" + r.on.word) === -1
+        )
+          seen.push("!" + r.on.word);
+      return seen.join("\n");
+    }
+    if (low === "ownercommands" || low === "admincommands") {
+      const seen = [];
+      for (const r of rt.bot.rules)
+        if (
+          r.on.type === "command" &&
+          r.who === "owner" &&
+          seen.indexOf("!" + r.on.word) === -1
+        )
           seen.push("!" + r.on.word);
       return seen.join("\n");
     }
@@ -543,10 +564,17 @@ function commandIndex(lowerLine, word) {
   return -1;
 }
 
+// Owner-only rules fire only for the person who deployed the bot. Matched by
+// session userId, never by name, so nobody can trigger them by renaming.
+function allowedBy(rt, rule, userId) {
+  return rule.who !== "owner" || (!!userId && userId === rt.ownerId);
+}
+
 function onUtterance(rt, userId, username, line, fullText) {
   const lower = line.toLowerCase();
   for (let ri = 0; ri < rt.bot.rules.length; ri++) {
     const rule = rt.bot.rules[ri];
+    if (!allowedBy(rt, rule, userId)) continue;
     const on = rule.on;
     const ctx = { userId, username, line, args: [] };
     if (on.type === "command") {
@@ -937,7 +965,8 @@ function onJoin(roomId, user) {
   for (const rt of active.values()) {
     if (rt.roomId !== roomId) continue;
     for (const rule of rt.bot.rules)
-      if (rule.on.type === "join") fireRule(rt, rule, ctx);
+      if (rule.on.type === "join" && allowedBy(rt, rule, user.id))
+        fireRule(rt, rule, ctx);
   }
 }
 
@@ -949,7 +978,8 @@ function onLeave(roomId, userId, user) {
   for (const rt of active.values()) {
     if (rt.roomId !== roomId) continue;
     for (const rule of rt.bot.rules)
-      if (rule.on.type === "leave") fireRule(rt, rule, ctx);
+      if (rule.on.type === "leave" && allowedBy(rt, rule, userId))
+        fireRule(rt, rule, ctx);
   }
 }
 
@@ -1258,7 +1288,10 @@ function register(socket, safe) {
       const ctx = { userId: "friend", username: "Testy", line: "", args: [] };
       if (kind === "join" || kind === "leave") {
         for (let ri = 0; ri < rt.bot.rules.length; ri++)
-          if (rt.bot.rules[ri].on.type === kind)
+          if (
+            rt.bot.rules[ri].on.type === kind &&
+            allowedBy(rt, rt.bot.rules[ri], ctx.userId)
+          )
             fireRule(rt, rt.bot.rules[ri], ctx, ri);
       } else if (kind === "timer") {
         for (let ri = 0; ri < rt.bot.rules.length; ri++)
@@ -1386,6 +1419,10 @@ function makeSandbox(bot, username) {
     dropped: 0,
     deployedAt: Date.now(),
     tester: username || "You",
+    // In the test room you are the owner, so owner-only rules fire for you
+    // (utterances arrive as "tester") and not for Testy ("friend").
+    ownerId: "tester",
+    ownerName: username || "You",
   };
 }
 

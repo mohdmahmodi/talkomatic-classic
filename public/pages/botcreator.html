@@ -407,6 +407,25 @@
                 and its timers go with it.
               </span>
             </div>
+            <h4>Admin commands (the "who can trigger it" dropdown)</h4>
+            <p>
+              Next to every WHEN there is a second dropdown:
+              <b>anyone can trigger it</b> (normal) or <b>only me (admin)</b>.
+              Set it to "only me" and that rule ignores everybody except
+              <i>you</i>, the person who sent the bot to the room. That is how
+              you give your bot admin commands: a
+              <code>!say</code> rule that makes it talk, a
+              <code>!clear</code> rule that wipes its box, a
+              <code>!gohome</code> rule that sends it home - all commands only
+              you can use.
+            </p>
+            <p>
+              It is matched by your Talkomatic session, not your name, so
+              someone renaming themselves to your name gets nothing. In the
+              Test room YOU count as the owner, so your admin rules fire when
+              you test them (and Testy can't trigger them). Open the
+              ready-made <b>Admin commands</b> bot to see a working set.
+            </p>
 
           </div>
         </div>
@@ -527,8 +546,19 @@
               >
               <code>{commands}</code>
               <span
-                >Every !command this bot answers to, one per line. Put it in
-                a !help say and the list never goes stale.</span
+                >Every PUBLIC !command this bot answers to, one per line
+                (admin-only commands stay off this list). Put it in a !help
+                say and the list never goes stale.</span
+              >
+              <code>{ownercommands}</code>
+              <span
+                >Every admin-only !command, one per line. Put it in an
+                admin-only !admin rule so only you see the private list.</span
+              >
+              <code>{owner}</code>
+              <span
+                >The name of the person running the bot - you. "I only take
+                orders from {owner}."</span
               >
               <code>{runtime}</code>
               <span
@@ -696,6 +726,30 @@
               waiting.)
             </p>
 
+            <h4>Admin controls (commands only you can use)</h4>
+            <ol>
+              <li>
+                Rule 1: WHEN someone types <code>!say</code>, set to
+                <b>only me (admin)</b> &rarr; DO say <code>{words}</code>. Now
+                <code>!say good morning everyone</code> makes the bot talk,
+                but only when YOU type it.
+              </li>
+              <li>
+                Rule 2: WHEN someone types <code>!gohome</code>, set to
+                <b>only me (admin)</b> &rarr; DO say "Off I go. 👋", wait 2
+                seconds, leave the room.
+              </li>
+              <li>
+                Rule 3: WHEN someone types <code>!admin</code>, set to
+                <b>only me (admin)</b> &rarr; DO say
+                "{ownercommands}" - your private command list, on demand.
+              </li>
+            </ol>
+            <p>
+              The ready-made <b>Admin commands</b> bot is exactly this, plus
+              <code>!clear</code>.
+            </p>
+
           </div>
         </div>
 
@@ -736,6 +790,13 @@
               <span
                 >Your bot goes home when: you leave Talkomatic, its room
                 empties, the room votes it out, or a moderator stops it.</span
+              >
+              <code>Only works for me</code>
+              <span
+                >That rule's "who can trigger it" dropdown is set to
+                <b>only me (admin)</b>. That is the point - flip it back to
+                "anyone can trigger it" if everyone should be able to use
+                it.</span
               >
             </div>
 

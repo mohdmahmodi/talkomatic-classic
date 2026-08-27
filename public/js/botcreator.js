@@ -106,6 +106,57 @@
       },
     },
     {
+      key: "admin",
+      icon: "fa-user-shield",
+      level: "easy",
+      name: "Admin commands",
+      blurb: "Owner-only controls: !say, !clear, !gohome. Only you can use them.",
+      bot: {
+        name: "AdminBot",
+        location: "on duty",
+        rules: [
+          {
+            on: { type: "command", word: "admin" },
+            who: "owner",
+            if: [],
+            do: [
+              {
+                type: "say",
+                text: "My admin commands (only {owner} can use these):{newline}{ownercommands}",
+              },
+            ],
+          },
+          {
+            on: { type: "command", word: "say" },
+            who: "owner",
+            if: [],
+            do: [{ type: "say", text: "{words}" }],
+          },
+          {
+            on: { type: "command", word: "clear" },
+            who: "owner",
+            if: [],
+            do: [{ type: "clear" }],
+          },
+          {
+            on: { type: "command", word: "gohome" },
+            who: "owner",
+            if: [],
+            do: [
+              { type: "say", text: "Off I go. 👋" },
+              { type: "wait", seconds: 1.5 },
+              { type: "leave" },
+            ],
+          },
+          {
+            on: { type: "command", word: "help" },
+            if: [],
+            do: [{ type: "say", text: "I only take orders from {owner}." }],
+          },
+        ],
+      },
+    },
+    {
       key: "8ball",
       icon: "fa-circle-question",
       level: "easy",
@@ -477,6 +528,11 @@
     { v: "timer", label: "every X minutes" },
   ];
 
+  const WHO_OPTIONS = [
+    { v: "", label: "anyone can trigger it" },
+    { v: "owner", label: "only me (admin)" },
+  ];
+
   const ACTION_OPTIONS = [
     { v: "say", label: "say something", desc: "The bot types into its box" },
     {
@@ -530,7 +586,9 @@
     { tok: "{rand:1-6}", desc: "random number, new every time" },
     { tok: "{pick:red|green|blue}", desc: "random choice, new every time" },
     { tok: "{newline}", desc: "start a new line mid-message" },
-    { tok: "{commands}", desc: "every !command this bot has, one per line" },
+    { tok: "{commands}", desc: "every public !command this bot has, one per line" },
+    { tok: "{ownercommands}", desc: "every admin-only !command, one per line" },
+    { tok: "{owner}", desc: "who runs the bot (you)" },
     { tok: "{runtime}", desc: "how long the bot has been in the room" },
     { tok: "{bot}", desc: "the bot's name" },
     { tok: "{room}", desc: "the room's name" },
@@ -2215,6 +2273,7 @@
     const acts = (rule.do || []).length;
     return (
       t +
+      (rule.who === "owner" ? " · admin only" : "") +
       " · " +
       (checks ? checks + (checks === 1 ? " check · " : " checks · ") : "") +
       acts +
@@ -2255,7 +2314,10 @@
           rule.on = { type: v };
           if (v === "command") rule.on.word = "hello";
           if (v === "says") rule.on.text = "";
-          if (v === "timer") rule.on.minutes = 5;
+          if (v === "timer") {
+            rule.on.minutes = 5;
+            delete rule.who;
+          }
           renderRules();
         },
         "w-trig",
@@ -2298,6 +2360,22 @@
       lbl.className = "bc-unit";
       lbl.textContent = "minutes";
       head.appendChild(lbl);
+    }
+
+    if (rule.on.type !== "timer") {
+      head.appendChild(
+        mkSelect(
+          WHO_OPTIONS,
+          rule.who === "owner" ? "owner" : "",
+          (v) => {
+            if (v === "owner") rule.who = "owner";
+            else delete rule.who;
+            renderRules();
+          },
+          "w-per",
+          "Admin commands: pick “only me” and this rule ignores everyone but you",
+        ),
+      );
     }
 
     const summary = document.createElement("span");
@@ -3275,8 +3353,9 @@
 
   // ── What's new ────────────────────────────────────────────────────────────
 
-  const NEWS_VERSION = 6;
+  const NEWS_VERSION = 7;
   const NEWS = [
+    'Admin commands: every rule now has a "who can trigger it" choice. Pick "only me (admin)" and that rule ignores everyone but you, matched by your session, not your name. New magic words {owner} and {ownercommands}, and an "Admin commands" ready-made bot to start from.',
     "The For coders page is now the real manual: every socket event documented, tokens that renew themselves, working Node and Python bots to copy, and answers for the classic \"my bot vanished\" mysteries.",
     "Automod no longer stars out what bots say for everyone: it is each viewer's own choice now, exactly like for people. Turn your filter off, see the real text.",
     "The small limits are gone: up to 200 rules, 20 blocks per rule, 1000-letter says, 20 saved bots. Build the whole game.",
@@ -3287,6 +3366,18 @@
   ];
 
   const CHANGELOG = [
+    {
+      title: "Admin commands",
+      icon: "fa-user-shield",
+      items: [
+        'Every rule has a "who can trigger it" dropdown: anyone (the default, exactly as before) or only me (admin).',
+        "Admin-only rules ignore everyone but the person who deployed the bot, matched by session, never by name.",
+        "{ownercommands} lists your admin commands; {commands} now lists only the public ones. {owner} is your name.",
+        'A ready-made "Admin commands" bot: !say, !clear, !gohome, !admin, all owner-only.',
+        "In the Test room you count as the owner, so admin rules fire when you test them; Testy cannot trigger them.",
+        "Existing bots are untouched: no dropdown flipped, no behavior changed.",
+      ],
+    },
     {
       title: "The limits, out of the way",
       icon: "fa-unlock",
