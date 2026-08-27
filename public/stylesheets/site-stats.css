@@ -1,0 +1,351 @@
+/* Public site stats modal, styled like the lobby itself: flat dark tiles
+   (var(--tk-tile)), var(--tk-border) borders, cream section strips, orange
+   accent. No gradients, no glows. talkoSS font. */
+
+.ss-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgba(0, 0, 0, 0.8);
+}
+
+.ss-overlay.show {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: ssFadeIn 0.2s ease-out;
+}
+
+@keyframes ssFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.ss-modal {
+  background: var(--background-color, var(--tk-bg));
+  border-radius: 8px;
+  width: 96%;
+  max-width: 680px;
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── Header ── */
+
+.ss-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--tk-border);
+  flex-shrink: 0;
+}
+
+.ss-title-wrap {
+  min-width: 0;
+}
+
+.ss-title {
+  color: var(--primary, var(--tk-accent));
+  font-size: 24px;
+  font-weight: bold;
+}
+
+.ss-title i {
+  margin-right: 10px;
+  color: #ffc107;
+}
+
+.ss-sub {
+  color: var(--tk-detail);
+  font-size: 12px;
+  margin-top: 3px;
+}
+
+.ss-close {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--tk-muted);
+  font-size: 30px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+  transition: color 0.15s ease;
+}
+
+.ss-close:hover {
+  color: var(--primary, var(--tk-accent));
+}
+
+/* ── Date bar ── */
+
+.ss-datebar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--tk-border);
+  flex-shrink: 0;
+}
+
+.ss-nav {
+  background: var(--tk-tile);
+  color: var(--tk-text);
+  border: 1px solid transparent;
+  border-radius: 5px;
+  width: 36px;
+  height: 34px;
+  font-size: 14px;
+  cursor: pointer;
+  font-family: inherit;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.ss-nav:hover:not(:disabled) {
+  background: var(--tk-tile-hover);
+  border-color: var(--tk-border);
+}
+
+.ss-nav:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.ss-date-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+}
+
+.ss-date-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--tk-text);
+  font-size: 15px;
+  font-weight: bold;
+  padding: 7px 12px;
+  border-radius: 5px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  transition: background-color 0.15s ease;
+}
+
+.ss-date-label:hover {
+  background: var(--tk-tile);
+}
+
+.ss-date-label i {
+  color: var(--tk-muted);
+  font-size: 13px;
+}
+
+.ss-today-chip {
+  background: var(--primary, var(--tk-accent));
+  color: var(--tk-card);
+  font-size: 10px;
+  font-weight: bold;
+  border-radius: 4px;
+  padding: 2px 6px;
+  letter-spacing: 0.5px;
+}
+
+/* Invisible native date input stretched over the label so clicking the
+   label opens the picker even where showPicker() is unavailable. */
+.ss-date-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  border: 0;
+  padding: 0;
+}
+
+.ss-today-btn {
+  background: var(--tk-tile);
+  color: var(--tk-text);
+  border: 1px solid transparent;
+  border-radius: 5px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: bold;
+  cursor: pointer;
+  font-family: inherit;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.ss-today-btn:hover {
+  background: var(--tk-tile-hover);
+  border-color: var(--tk-border);
+}
+
+/* ── Body ── */
+
+.ss-body {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.ss-state {
+  padding: 40px 24px;
+  text-align: center;
+  color: var(--tk-muted);
+  font-size: 14px;
+}
+
+.ss-state.ss-error {
+  color: var(--tk-error, #ff5252);
+}
+
+.ss-strip {
+  background: var(--known-as-section-background-color, var(--tk-cream));
+  color: var(--known-as-section-color, #000);
+  font-size: 15px;
+  font-weight: bold;
+  padding: 8px 24px;
+}
+
+.ss-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  padding: 14px 24px 18px;
+}
+
+.ss-tile {
+  background: var(--tk-tile);
+  border-radius: 5px;
+  padding: 13px 14px;
+}
+
+.ss-tile-val {
+  color: var(--tk-text);
+  font-size: 26px;
+  font-weight: bold;
+  line-height: 1.1;
+}
+
+.ss-tile-label {
+  color: var(--tk-muted);
+  font-size: 12px;
+  margin-top: 5px;
+}
+
+.ss-tile-label i {
+  margin-right: 5px;
+  color: #ffc107;
+}
+
+.ss-tile-live .ss-tile-label i {
+  color: var(--tk-success, #4caf50);
+}
+
+.ss-tile-mod .ss-tile-label i {
+  color: var(--primary, var(--tk-accent));
+}
+
+.ss-tile-com .ss-tile-label i {
+  color: var(--tk-detail);
+}
+
+/* ── Hour chart ── */
+
+.ss-chart {
+  margin: 0 24px 18px;
+  background: var(--tk-tile);
+  border-radius: 5px;
+  padding: 13px 14px 10px;
+}
+
+.ss-chart-title {
+  color: var(--tk-muted);
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+
+.ss-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 64px;
+}
+
+.ss-bar {
+  flex: 1;
+  min-height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--primary, var(--tk-accent));
+}
+
+.ss-bar.ss-bar-zero {
+  background: var(--tk-border);
+  opacity: 0.5;
+}
+
+.ss-axis {
+  display: flex;
+  justify-content: space-between;
+  color: var(--tk-muted);
+  font-size: 10px;
+  margin-top: 6px;
+}
+
+/* ── Footer note ── */
+
+.ss-foot {
+  padding: 10px 24px 14px;
+  color: var(--tk-muted);
+  font-size: 11px;
+  border-top: 1px solid var(--tk-border);
+  flex-shrink: 0;
+}
+
+@media (max-width: 600px) {
+  .ss-head,
+  .ss-datebar,
+  .ss-strip,
+  .ss-foot {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .ss-grid {
+    padding: 12px 14px 14px;
+    grid-template-columns: repeat(auto-fit, minmax(105px, 1fr));
+    gap: 8px;
+  }
+
+  .ss-chart {
+    margin: 0 14px 14px;
+  }
+
+  .ss-tile-val {
+    font-size: 21px;
+  }
+
+  .ss-title {
+    font-size: 20px;
+  }
+
+  .ss-date-label {
+    font-size: 13px;
+  }
+}

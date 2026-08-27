@@ -799,6 +799,80 @@ app.get(`${API}/status`, (req, res) => {
   });
 });
 
+// Public per-day site stats for the lobby stats modal. Anonymous totals from
+// the accountability log (audit.publicDayStats applies the staff visibility
+// rules), plus live numbers when the requested day is the current one. Days
+// run on US Pacific time like the rest of the site.
+const DAILY_STATS_RE = /^\d{4}-\d{2}-\d{2}$/;
+const dailyStatsCache = new Map();
+app.get(`${API}/daily-stats`, (req, res) => {
+  const audit = require("./server/audit");
+  const pad = (n) => String(n).padStart(2, "0");
+  const dstr = (p) => `${p.y}-${pad(p.m)}-${pad(p.d)}`;
+  const today = dstr(audit.pacificDateParts());
+  let date = String(req.query.date || today);
+  if (!DAILY_STATS_RE.test(date))
+    return res.status(400).json({ ok: false, error: "Bad date" });
+  if (date > today) date = today;
+  const firstTs = audit.firstEntryTs();
+  const firstDate = firstTs ? dstr(audit.pacificDateParts(firstTs)) : today;
+  if (date < firstDate) date = firstDate;
+  const isToday = date === today;
+
+  const cached = dailyStatsCache.get(date);
+  const ttl = isToday ? 30 * 1000 : 5 * 60 * 1000;
+  let day = cached && Date.now() - cached.at < ttl ? cached.data : null;
+  if (!day) {
+    const [y, m, d] = date.split("-").map(Number);
+    const start = audit.pacificMidnightUTC(y, m, d);
+    const end = audit.pacificMidnightUTC(y, m, d + 1);
+    day = audit.publicDayStats(start, end);
+    dailyStatsCache.set(date, { at: Date.now(), data: day });
+    if (dailyStatsCache.size > 100)
+      for (const k of dailyStatsCache.keys()) {
+        if (dailyStatsCache.size <= 60) break;
+        dailyStatsCache.delete(k);
+      }
+  }
+
+  const out = {
+    ok: true,
+    date,
+    today,
+    firstDate,
+    isToday,
+    tz: "America/Los_Angeles",
+    people: {
+      signIns: day.signIns,
+      unique: day.unique,
+      nameChanges: day.nameChanges,
+      byHour: day.byHour,
+    },
+    moderation: {
+      total: day.modTotal,
+      warnings: day.warnings,
+      kicks: day.kicks,
+      bans: day.bans,
+      roomUpkeep: day.roomUpkeep,
+      queueWork: day.queueWork,
+    },
+    community: {
+      reports: day.reports,
+      suggestions: day.suggestions,
+      appeals: day.appeals,
+    },
+  };
+  if (isToday) {
+    const stats = rooms.getRoomStatistics();
+    out.live = {
+      usersOnline: io.engine.clientsCount,
+      usersInRooms: stats.totalUsers,
+      activeRooms: stats.totalRooms,
+    };
+  }
+  res.json(out);
+});
+
 app.post(`${API}/bot-tokens/request`, handleBotTokenRequest);
 app.get(`${API}/bot-tokens/info`, handleBotTokenInfo);
 app.use("/api", antibotMiddleware);

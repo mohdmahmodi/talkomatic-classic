@@ -1240,6 +1240,128 @@ function buildFlags(acts, who) {
   return signals.map((s) => applyReview(s, who));
 }
 
+// ── Public daily stats ────────────────────────────────────────────────────
+// Anonymous per-day totals for the public stats modal. Filtered at least as
+// hard as the most public staff view: no ops entries, no dev actions, no
+// names or targets, just counts.
+
+const PUBLIC_BAN_ACTIONS = new Set(["ban", "ban ip", "ip block", "kick+ban"]);
+
+function pacificHour(ts) {
+  if (PACIFIC_FMT) {
+    try {
+      for (const p of PACIFIC_FMT.formatToParts(new Date(ts)))
+        if (p.type === "hour") return Number(p.value) % 24;
+    } catch (_) {}
+  }
+  return new Date(ts).getUTCHours();
+}
+
+function pacificMidnightUTC(y, m, d) {
+  if (!PACIFIC_FMT) return Date.UTC(y, m - 1, d);
+  try {
+    const partsAt = (t) =>
+      PACIFIC_FMT.formatToParts(new Date(t)).reduce(
+        (a, p) => ((a[p.type] = p.value), a),
+        {},
+      );
+    const offsetAt = (t) => {
+      const p = partsAt(t);
+      return (
+        Date.UTC(
+          +p.year,
+          +p.month - 1,
+          +p.day,
+          +p.hour,
+          +p.minute,
+          +p.second,
+        ) -
+        Math.floor(t / 1000) * 1000
+      );
+    };
+    const localMidnight = Date.UTC(y, m - 1, d);
+    let guess = localMidnight - offsetAt(localMidnight);
+    guess = localMidnight - offsetAt(guess);
+    return guess;
+  } catch (_) {
+    return Date.UTC(y, m - 1, d);
+  }
+}
+
+function pacificDateParts(ts = Date.now()) {
+  if (PACIFIC_FMT) {
+    try {
+      const p = PACIFIC_FMT.formatToParts(new Date(ts)).reduce(
+        (a, x) => ((a[x.type] = x.value), a),
+        {},
+      );
+      return { y: +p.year, m: +p.month, d: +p.day };
+    } catch (_) {}
+  }
+  const dt = new Date(ts);
+  return { y: dt.getUTCFullYear(), m: dt.getUTCMonth() + 1, d: dt.getUTCDate() };
+}
+
+function publicDayStats(startTs, endTs) {
+  const out = {
+    signIns: 0,
+    unique: 0,
+    nameChanges: 0,
+    byHour: new Array(24).fill(0),
+    modTotal: 0,
+    warnings: 0,
+    kicks: 0,
+    bans: 0,
+    roomUpkeep: 0,
+    queueWork: 0,
+    reports: 0,
+    suggestions: 0,
+    appeals: 0,
+  };
+  const uids = new Set();
+  for (const e of entries) {
+    const ts = e.ts || 0;
+    if (ts < startTs || ts >= endTs) continue;
+    if (e.type === "identity") {
+      if (e.userId) uids.add(e.userId);
+      if (e.event === "signin") {
+        out.signIns++;
+        out.byHour[pacificHour(ts)]++;
+      } else if (e.event === "rename") out.nameChanges++;
+      continue;
+    }
+    if (e.type === "notification") {
+      if (e.opsOnly) continue;
+      if (e.kind === "report") out.reports++;
+      else if (e.kind === "suggestion") out.suggestions++;
+      else if (e.kind === "appeal") out.appeals++;
+      continue;
+    }
+    if (e.type !== "action") continue;
+    if (e.devOnly || isPrivilegedEntry(e) || isOpsEntry(e)) continue;
+    const group = groupOf(e.action);
+    if (group === "passive") continue;
+    out.modTotal++;
+    const base = baseAction(e.action);
+    if (base === "warn") out.warnings++;
+    else if (base === "kick") out.kicks++;
+    if (PUBLIC_BAN_ACTIONS.has(base)) out.bans++;
+    if (group === "rooms") out.roomUpkeep++;
+    else if (group === "queues") out.queueWork++;
+  }
+  out.unique = uids.size;
+  return out;
+}
+
+function firstEntryTs() {
+  let min = 0;
+  for (const e of entries) {
+    const ts = e.ts || 0;
+    if (ts && (!min || ts < min)) min = ts;
+  }
+  return min;
+}
+
 function lastActiveByLabel() {
   const by = new Map();
   for (const e of entries) {
@@ -1305,6 +1427,10 @@ module.exports = {
   clearFlagReview,
   startOfPacificDay,
   pacificDayStarts,
+  publicDayStats,
+  pacificMidnightUTC,
+  pacificDateParts,
+  firstEntryTs,
   setAuditSub,
   load,
 };
