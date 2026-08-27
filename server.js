@@ -873,6 +873,85 @@ app.get(`${API}/daily-stats`, (req, res) => {
   res.json(out);
 });
 
+// Same idea per calendar month: monthly totals plus a per-day breakdown so
+// the modal can chart sign-ins for the whole month at once.
+const MONTHLY_STATS_RE = /^\d{4}-\d{2}$/;
+app.get(`${API}/monthly-stats`, (req, res) => {
+  const audit = require("./server/audit");
+  const pad = (n) => String(n).padStart(2, "0");
+  const todayParts = audit.pacificDateParts();
+  const today = `${todayParts.y}-${pad(todayParts.m)}-${pad(todayParts.d)}`;
+  const thisMonth = today.slice(0, 7);
+  let month = String(req.query.month || thisMonth);
+  if (!MONTHLY_STATS_RE.test(month))
+    return res.status(400).json({ ok: false, error: "Bad month" });
+  if (month > thisMonth) month = thisMonth;
+  const firstTs = audit.firstEntryTs();
+  const fp = audit.pacificDateParts(firstTs || Date.now());
+  const firstMonth = firstTs ? `${fp.y}-${pad(fp.m)}` : thisMonth;
+  if (month < firstMonth) month = firstMonth;
+  const isCurrentMonth = month === thisMonth;
+
+  const cacheKey = "m:" + month;
+  const cached = dailyStatsCache.get(cacheKey);
+  const ttl = isCurrentMonth ? 30 * 1000 : 5 * 60 * 1000;
+  let data = cached && Date.now() - cached.at < ttl ? cached.data : null;
+  if (!data) {
+    const [y, m] = month.split("-").map(Number);
+    data = audit.publicMonthStats(y, m);
+    dailyStatsCache.set(cacheKey, { at: Date.now(), data });
+    if (dailyStatsCache.size > 100)
+      for (const k of dailyStatsCache.keys()) {
+        if (dailyStatsCache.size <= 60) break;
+        dailyStatsCache.delete(k);
+      }
+  }
+
+  const t = data.totals;
+  const out = {
+    ok: true,
+    month,
+    thisMonth,
+    firstMonth,
+    today,
+    isCurrentMonth,
+    tz: "America/Los_Angeles",
+    days: data.days.map((d, i) => ({
+      date: `${month}-${pad(i + 1)}`,
+      signIns: d.signIns,
+      unique: d.unique,
+      modActions: d.modActions,
+    })),
+    people: {
+      signIns: t.signIns,
+      unique: t.unique,
+      nameChanges: t.nameChanges,
+    },
+    moderation: {
+      total: t.modTotal,
+      warnings: t.warnings,
+      kicks: t.kicks,
+      bans: t.bans,
+      roomUpkeep: t.roomUpkeep,
+      queueWork: t.queueWork,
+    },
+    community: {
+      reports: t.reports,
+      suggestions: t.suggestions,
+      appeals: t.appeals,
+    },
+  };
+  if (isCurrentMonth) {
+    const stats = rooms.getRoomStatistics();
+    out.live = {
+      usersOnline: io.engine.clientsCount,
+      usersInRooms: stats.totalUsers,
+      activeRooms: stats.totalRooms,
+    };
+  }
+  res.json(out);
+});
+
 app.post(`${API}/bot-tokens/request`, handleBotTokenRequest);
 app.get(`${API}/bot-tokens/info`, handleBotTokenInfo);
 app.use("/api", antibotMiddleware);

@@ -1302,12 +1302,11 @@ function pacificDateParts(ts = Date.now()) {
   return { y: dt.getUTCFullYear(), m: dt.getUTCMonth() + 1, d: dt.getUTCDate() };
 }
 
-function publicDayStats(startTs, endTs) {
-  const out = {
+function collectPublicStats(startTs, endTs, bucketCount, bucketIndexOf) {
+  const totals = {
     signIns: 0,
     unique: 0,
     nameChanges: 0,
-    byHour: new Array(24).fill(0),
     modTotal: 0,
     warnings: 0,
     kicks: 0,
@@ -1319,38 +1318,89 @@ function publicDayStats(startTs, endTs) {
     appeals: 0,
   };
   const uids = new Set();
+  const perBucket = Array.from({ length: bucketCount }, () => ({
+    signIns: 0,
+    uids: new Set(),
+    modActions: 0,
+  }));
+  const bucketAt = (ts) => {
+    const i = bucketIndexOf(ts);
+    return i >= 0 && i < bucketCount ? perBucket[i] : null;
+  };
   for (const e of entries) {
     const ts = e.ts || 0;
     if (ts < startTs || ts >= endTs) continue;
     if (e.type === "identity") {
-      if (e.userId) uids.add(e.userId);
+      const b = bucketAt(ts);
+      if (e.userId) {
+        uids.add(e.userId);
+        if (b) b.uids.add(e.userId);
+      }
       if (e.event === "signin") {
-        out.signIns++;
-        out.byHour[pacificHour(ts)]++;
-      } else if (e.event === "rename") out.nameChanges++;
+        totals.signIns++;
+        if (b) b.signIns++;
+      } else if (e.event === "rename") totals.nameChanges++;
       continue;
     }
     if (e.type === "notification") {
       if (e.opsOnly) continue;
-      if (e.kind === "report") out.reports++;
-      else if (e.kind === "suggestion") out.suggestions++;
-      else if (e.kind === "appeal") out.appeals++;
+      if (e.kind === "report") totals.reports++;
+      else if (e.kind === "suggestion") totals.suggestions++;
+      else if (e.kind === "appeal") totals.appeals++;
       continue;
     }
     if (e.type !== "action") continue;
     if (e.devOnly || isPrivilegedEntry(e) || isOpsEntry(e)) continue;
     const group = groupOf(e.action);
     if (group === "passive") continue;
-    out.modTotal++;
+    totals.modTotal++;
+    const b = bucketAt(ts);
+    if (b) b.modActions++;
     const base = baseAction(e.action);
-    if (base === "warn") out.warnings++;
-    else if (base === "kick") out.kicks++;
-    if (PUBLIC_BAN_ACTIONS.has(base)) out.bans++;
-    if (group === "rooms") out.roomUpkeep++;
-    else if (group === "queues") out.queueWork++;
+    if (base === "warn") totals.warnings++;
+    else if (base === "kick") totals.kicks++;
+    if (PUBLIC_BAN_ACTIONS.has(base)) totals.bans++;
+    if (group === "rooms") totals.roomUpkeep++;
+    else if (group === "queues") totals.queueWork++;
   }
-  out.unique = uids.size;
-  return out;
+  totals.unique = uids.size;
+  return { totals, perBucket };
+}
+
+function publicDayStats(startTs, endTs) {
+  const { totals, perBucket } = collectPublicStats(
+    startTs,
+    endTs,
+    24,
+    pacificHour,
+  );
+  return { ...totals, byHour: perBucket.map((b) => b.signIns) };
+}
+
+function publicMonthStats(y, m) {
+  const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const bounds = [];
+  for (let d = 1; d <= daysInMonth + 1; d++)
+    bounds.push(pacificMidnightUTC(y, m, d));
+  const dayIndexOf = (ts) => {
+    for (let i = daysInMonth - 1; i >= 0; i--) if (ts >= bounds[i]) return i;
+    return -1;
+  };
+  const { totals, perBucket } = collectPublicStats(
+    bounds[0],
+    bounds[daysInMonth],
+    daysInMonth,
+    dayIndexOf,
+  );
+  return {
+    daysInMonth,
+    totals,
+    days: perBucket.map((b) => ({
+      signIns: b.signIns,
+      unique: b.uids.size,
+      modActions: b.modActions,
+    })),
+  };
 }
 
 function firstEntryTs() {
@@ -1428,6 +1478,7 @@ module.exports = {
   startOfPacificDay,
   pacificDayStarts,
   publicDayStats,
+  publicMonthStats,
   pacificMidnightUTC,
   pacificDateParts,
   firstEntryTs,

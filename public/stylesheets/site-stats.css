@@ -90,10 +90,42 @@
 .ss-datebar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 12px 24px;
   border-bottom: 1px solid var(--tk-border);
   flex-shrink: 0;
+}
+
+/* Segmented Day / Month toggle */
+
+.ss-mode {
+  display: flex;
+  border-radius: 5px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.ss-mode-btn {
+  background: var(--tk-tile);
+  color: var(--tk-text);
+  border: 1px solid transparent;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: bold;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background-color 0.15s ease;
+}
+
+.ss-mode-btn:hover:not(.active) {
+  background: var(--tk-tile-hover);
+}
+
+.ss-mode-btn.active {
+  background: var(--primary, var(--tk-accent));
+  color: var(--tk-card);
+  cursor: default;
 }
 
 .ss-nav {
@@ -211,6 +243,17 @@
   font-size: 14px;
 }
 
+/* While new data loads, the old numbers stay on screen, just dimmed, so the
+   modal never collapses to a spinner between days. */
+.ss-content {
+  transition: opacity 0.12s ease;
+}
+
+.ss-content.ss-refreshing {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
 .ss-state.ss-error {
   color: var(--tk-error, #ff5252);
 }
@@ -298,6 +341,12 @@
 .ss-bar.ss-bar-zero {
   background: var(--tk-border);
   opacity: 0.5;
+}
+
+/* Days that have not happened yet in the current month */
+.ss-bar.ss-bar-future {
+  background: var(--tk-border);
+  opacity: 0.2;
 }
 
 .ss-axis {
