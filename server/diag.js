@@ -292,6 +292,7 @@ function list() {
 function roomList() {
   const out = [];
   for (const [id, room] of state.rooms) {
+    if (simRooms.has(id)) continue;
     out.push({
       id,
       name: room.name,
@@ -336,7 +337,7 @@ function entryOf(rec) {
 }
 
 function isHeld(userId) {
-  return held.has(userId);
+  return held.has(userId) || sim.has(userId);
 }
 
 function reconcile() {
@@ -352,6 +353,12 @@ function reconcile() {
 }
 
 function noteEvicted(userId) {
+  if (sim.has(userId)) {
+    sim.get(userId).roomId = null;
+    sim.delete(userId);
+    state.userMessageBuffers.delete(userId);
+    return;
+  }
   const rec = held.get(userId);
   if (!rec) return;
   rec.roomId = null;
@@ -618,6 +625,430 @@ function restore() {
   if (held.size) console.log(`[diag] restored ${held.size} held session(s)`);
 }
 
+// ── Load simulation ─────────────────────────────────────────────────────────
+
+const NAMES = (
+  "Aaliyah Adam Adrian Aisha Alex Alina Amara Amir Ana Andre Anika Anton " +
+  "Ariel Asha Aurora Bea Ben Bianca Bruno Caleb Cara Carlos Cassie Chen " +
+  "Chloe Cian Clara Cole Dana Daniel Dara Dev Diana Dmitri Eden Eli Elif " +
+  "Ella Emeka Emil Emma Enzo Esme Ethan Eva Ezra Farah Felix Finn Fiona " +
+  "Gabe Gemma Grace Gus Hana Hannah Hassan Hugo Ibrahim Ida Imani Ines " +
+  "Iris Isaac Ivan Jade Jamal Jasmine Javi Jonas Jude Julia Kai Kaito " +
+  "Kara Kenji Khalid Kira Lars Layla Leo Lena Liam Lila Lior Luca Lucia " +
+  "Mads Maia Marco Maria Mateo Maya Mei Micah Mila Mira Nadia Nate Nia " +
+  "Niko Nora Omar Oscar Paloma Pedro Petra Priya Quinn Rafa Rania Reza " +
+  "Rhea Rin Rosa Ruben Sana Sasha Sean Selin Sofia Soren Tara Theo Tomas " +
+  "Uma Vera Viktor Wren Yara Yusuf Zaid Zara Zoe"
+).split(/\s+/);
+
+const PLACES = (
+  "Dublin|Lisbon|Porto|Madrid|Seville|Lyon|Nice|Milan|Turin|Naples|" +
+  "Athens|Krakow|Prague|Vienna|Zurich|Munich|Hamburg|Bremen|Utrecht|" +
+  "Ghent|Bruges|Oslo|Bergen|Malmo|Turku|Tallinn|Riga|Vilnius|Sofia|" +
+  "Zagreb|Ljubljana|Cluj|Iasi|Odesa|Tbilisi|Yerevan|Baku|Ankara|Izmir|" +
+  "Beirut|Amman|Doha|Muscat|Karachi|Lahore|Pune|Kochi|Jaipur|Dhaka|" +
+  "Colombo|Hanoi|Danang|Cebu|Surabaya|Penang|Busan|Sapporo|Osaka|" +
+  "Kyoto|Taipei|Chengdu|Perth|Hobart|Wellington|Christchurch|Suva|" +
+  "Vancouver|Calgary|Halifax|Quebec|Portland|Boise|Reno|Tucson|Omaha|" +
+  "Tulsa|Wichita|Boulder|Fargo|Duluth|Buffalo|Providence|Richmond|" +
+  "Savannah|Mobile|Waco|El Paso|Merida|Puebla|Bogota|Medellin|Quito|" +
+  "Lima|Cusco|Rosario|Recife|Salvador|Curitiba|Montevideo|Accra|Lagos|" +
+  "Nairobi|Kigali|Dakar|Rabat|Tunis|Alexandria|Windhoek|Gaborone"
+).split("|");
+
+const ROOM_WORDS_A = (
+  "late night|quiet|slow|open|corner|back|third|small|early|midnight|" +
+  "sunday|weekday|after hours|rainy day|first|second|spare|old|new|" +
+  "friendly|sleepy|casual|honest|random|long|short|warm|cold|bright"
+).split("|");
+
+const ROOM_WORDS_B = (
+  "chat|room|table|lounge|corner|bench|porch|window|hangout|circle|" +
+  "club|spot|booth|meetup|talk|space|shelter|landing|hall|nook"
+).split("|");
+
+// Each entry is one conversation, taken a line at a time by whoever speaks
+// next in the room, so a room reads like people actually talking.
+const TALK = [
+  [
+    "hey", "hey, how's it going", "not bad, just got in", "long day?",
+    "yeah pretty long", "same here honestly", "what were you up to",
+    "work mostly, nothing exciting", "fair enough", "you?",
+    "just got home too", "nice", "gonna make something to eat in a bit",
+  ],
+  [
+    "anyone here", "yep", "oh nice, wasn't sure", "it's quiet tonight",
+    "usually is around now", "makes sense", "where are you from",
+    "up north, you?", "other side of the country", "long way then",
+    "haha yeah", "still counts", "true",
+  ],
+  [
+    "what's everyone listening to", "nothing right now actually",
+    "put something on then", "any suggestions", "depends what you like",
+    "anything calm", "got a few of those", "send them over",
+    "will do in a sec", "no rush", "cool",
+  ],
+  [
+    "weather's been strange", "same here", "rained all morning",
+    "it cleared up later though", "yeah it did", "hoping it holds",
+    "supposed to be nice tomorrow", "we'll see", "always do",
+  ],
+  [
+    "first time on here", "welcome", "thanks", "it's pretty simple",
+    "yeah I noticed", "you just type and it shows up", "that's neat",
+    "old school", "kind of the point", "I like it",
+  ],
+  [
+    "anyone play anything lately", "a bit", "what kind",
+    "mostly puzzle stuff", "same actually", "small ones are the best",
+    "agreed", "easier to put down", "that's the trick",
+  ],
+  [
+    "gonna head off soon", "already?", "yeah early start",
+    "fair enough", "good talking", "you too", "see you around", "later",
+  ],
+  [
+    "coffee or tea", "tea", "coffee", "both", "not at the same time though",
+    "obviously", "haha", "tea in the evening though", "that's the rule",
+  ],
+];
+
+const DEVICE_POOL = DEVICE_MIX;
+
+const sim = new Map();
+const simRooms = new Set();
+const simNames = new Set();
+let simCfg = null;
+let simTimer = null;
+let simSeq = 0;
+let lagMon = null;
+let simStat = {
+  added: 0,
+  removed: 0,
+  said: 0,
+  ticks: 0,
+  paused: null,
+  startedAt: 0,
+};
+
+const TICK_MS = 500;
+const SPEAK_CAP = 300;
+const TYPE_CHARS = 7;
+
+function pick(a) {
+  return a[Math.floor(Math.random() * a.length)];
+}
+
+function isSimRoom(roomId) {
+  return simRooms.has(roomId);
+}
+
+function simRoomCount() {
+  return simRooms.size;
+}
+
+function loopLagMs() {
+  if (!lagMon) return 0;
+  return Math.round(lagMon.percentile(99) / 1e6);
+}
+
+function heapMB() {
+  return Math.round(process.memoryUsage().heapUsed / 1048576);
+}
+
+function simRoomName() {
+  for (let i = 0; i < 40; i++) {
+    const n = pick(ROOM_WORDS_A) + " " + pick(ROOM_WORDS_B);
+    const key = n.toLowerCase();
+    if (!simNames.has(key)) {
+      simNames.add(key);
+      return n;
+    }
+  }
+  return "room " + ++simSeq;
+}
+
+function newSimRoom() {
+  let roomId = null;
+  for (let i = 0; i < 60; i++) {
+    const c = deps.generateRoomId();
+    if (!state.rooms.has(c)) {
+      roomId = c;
+      break;
+    }
+  }
+  if (!roomId) return null;
+  const now = ms();
+  const room = {
+    id: roomId,
+    name: simRoomName(),
+    type: simCfg.roomType,
+    layout: "vertical",
+    maxSize: simCfg.perRoom,
+    allowBots: false,
+    users: [],
+    accessCode: null,
+    votes: {},
+    bannedUserIds: new Set(),
+    lastActiveTime: now,
+    createdAt: now,
+    thread: Math.floor(Math.random() * TALK.length),
+    line: 0,
+  };
+  state.rooms.set(roomId, room);
+  simRooms.add(roomId);
+  return room;
+}
+
+// Fill one room at a time and move on when it is full. Scanning the whole set
+// for a free slot is O(rooms) per person added, which stops the ramp dead once
+// there are tens of thousands of them.
+let fillRoomId = null;
+
+function roomWithSpace() {
+  if (fillRoomId) {
+    const room = state.rooms.get(fillRoomId);
+    if (room && (room.users || []).length < simCfg.perRoom) return room;
+  }
+  const room = newSimRoom();
+  fillRoomId = room ? room.id : null;
+  return room;
+}
+
+function addSimUser() {
+  const room = roomWithSpace();
+  if (!room) return false;
+  const id = newId();
+  const rec = {
+    id,
+    username: pick(NAMES) + (Math.random() < 0.25 ? Math.floor(Math.random() * 90 + 10) : ""),
+    location: pick(PLACES),
+    roomId: room.id,
+    say: null,
+  };
+  sim.set(id, rec);
+  room.users.push({
+    id,
+    username: rec.username,
+    location: rec.location,
+    deviceType: pick(DEVICE_POOL),
+    deviceId: null,
+    avatar: Math.random() < 0.55 ? { preset: 1 + Math.floor(Math.random() * 9) } : null,
+  });
+  room.lastActiveTime = ms();
+  state.userMessageBuffers.set(id, "");
+  simStat.added++;
+  return true;
+}
+
+function dropSimUser(id) {
+  const rec = sim.get(id);
+  if (!rec) return;
+  const room = rec.roomId ? state.rooms.get(rec.roomId) : null;
+  if (room) {
+    room.users = (room.users || []).filter((u) => u.id !== id);
+    if (room.votes) delete room.votes[id];
+    if (!room.users.length && simRooms.has(room.id)) {
+      simRooms.delete(room.id);
+      simNames.delete(String(room.name).toLowerCase());
+      if (fillRoomId === room.id) fillRoomId = null;
+      state.rooms.delete(room.id);
+      state.roomSoloSince.delete(room.id);
+      state.roomLastChatActivity.delete(room.id);
+      if (state.roomDeletionTimers.has(room.id)) {
+        clearTimeout(state.roomDeletionTimers.get(room.id));
+        state.roomDeletionTimers.delete(room.id);
+      }
+    }
+  }
+  state.userMessageBuffers.delete(id);
+  sim.delete(id);
+  simStat.removed++;
+}
+
+function simSpeak(rec) {
+  const room = state.rooms.get(rec.roomId);
+  if (!room) return;
+  if (!rec.say) {
+    const thread = TALK[room.thread % TALK.length];
+    rec.say = { text: thread[room.line % thread.length], at: 0 };
+    room.line++;
+  }
+  const t = rec.say;
+  t.at = Math.min(t.text.length, t.at + TYPE_CHARS);
+  const partial = t.text.slice(0, t.at);
+  state.userMessageBuffers.set(rec.id, partial);
+  state.roomLastChatActivity.set(rec.roomId, ms());
+  room.lastActiveTime = ms();
+  if (simCfg.roomType !== "private")
+    deps.emitChat(socketFor({ ...rec }), {
+      userId: rec.id,
+      username: rec.username,
+      diff: { type: "full-replace", text: partial },
+    });
+  if (t.at >= t.text.length) {
+    rec.say = null;
+    simStat.said++;
+  }
+}
+
+function simTick() {
+  if (!simCfg) return;
+  simStat.ticks++;
+
+  // Read the delay for the tick just gone, then start a fresh window, so the
+  // gauge tracks how the server is doing now and not the worst it ever was.
+  const lag = loopLagMs();
+  simStat.lag = lag;
+  if (lagMon) lagMon.reset();
+  const heap = heapMB();
+  const overLag = lag > simCfg.maxLagMs;
+  const overHeap = heap > simCfg.maxHeapMB;
+
+  if (overLag || overHeap) {
+    simStat.paused = overHeap
+      ? `heap ${heap}MB over ${simCfg.maxHeapMB}MB`
+      : `event loop ${lag}ms over ${simCfg.maxLagMs}ms`;
+    if (simCfg.autoDrain) {
+      const shed = Math.min(sim.size, Math.max(50, simCfg.rate));
+      const ids = [];
+      for (const id of sim.keys()) {
+        ids.push(id);
+        if (ids.length >= shed) break;
+      }
+      for (const id of ids) dropSimUser(id);
+      deps.updateLobby();
+      return;
+    }
+  } else if (simStat.paused) simStat.paused = null;
+
+  let touched = false;
+
+  if (!simStat.paused && sim.size < simCfg.target) {
+    const want = Math.min(simCfg.rate, simCfg.target - sim.size);
+    for (let i = 0; i < want; i++) if (!addSimUser()) break;
+    touched = true;
+  }
+
+  if (simCfg.chat && sim.size) {
+    const ids = [...sim.keys()];
+    const n = Math.min(SPEAK_CAP, Math.max(1, Math.round(ids.length * 0.02)));
+    for (let i = 0; i < n; i++) {
+      const rec = sim.get(ids[Math.floor(Math.random() * ids.length)]);
+      if (rec) simSpeak(rec);
+    }
+  }
+
+  if (simCfg.churn && sim.size > 20 && Math.random() < 0.5) {
+    const ids = [...sim.keys()];
+    const n = Math.min(20, Math.round(ids.length * 0.001) + 1);
+    for (let i = 0; i < n; i++)
+      dropSimUser(ids[Math.floor(Math.random() * ids.length)]);
+    touched = true;
+  }
+
+  if (touched) deps.updateLobby();
+}
+
+function simStart(o) {
+  if (!deps) return { error: "Not ready." };
+  o = o || {};
+  const target = num(o.target, 1, 2000000, 1000);
+  const cfg = {
+    target,
+    rate: num(o.rate, 1, 20000, 250),
+    perRoom: num(o.perRoom, 2, 500, 5),
+    roomType: ROOM_TYPES.includes(o.roomType) ? o.roomType : "private",
+    chat: o.chat !== false,
+    churn: o.churn !== false,
+    maxHeapMB: num(o.maxHeapMB, 8, 16384, 1400),
+    maxLagMs: num(o.maxLagMs, 20, 5000, 250),
+    autoDrain: o.autoDrain !== false,
+  };
+  simCfg = cfg;
+  if (!simStat.startedAt) simStat.startedAt = ms();
+  if (!lagMon) {
+    try {
+      lagMon = require("perf_hooks").monitorEventLoopDelay({ resolution: 20 });
+      lagMon.enable();
+    } catch (_) {}
+  }
+  if (!simTimer) {
+    simTimer = setInterval(simTick, TICK_MS);
+    simTimer.unref && simTimer.unref();
+  }
+  return { ok: true, ...simStatus() };
+}
+
+function simRetarget(o) {
+  if (!simCfg) return { error: "No test running." };
+  if (o && o.target !== undefined)
+    simCfg.target = num(o.target, 0, 2000000, simCfg.target);
+  if (o && o.rate !== undefined) simCfg.rate = num(o.rate, 1, 20000, simCfg.rate);
+  if (o && o.chat !== undefined) simCfg.chat = !!o.chat;
+  if (o && o.churn !== undefined) simCfg.churn = !!o.churn;
+  return { ok: true, ...simStatus() };
+}
+
+function simStop(o) {
+  const hard = !!(o && o.now);
+  if (hard) {
+    for (const id of [...sim.keys()]) dropSimUser(id);
+    for (const id of [...simRooms]) {
+      simRooms.delete(id);
+      state.rooms.delete(id);
+      state.roomSoloSince.delete(id);
+      state.roomLastChatActivity.delete(id);
+      if (state.roomDeletionTimers.has(id)) {
+        clearTimeout(state.roomDeletionTimers.get(id));
+        state.roomDeletionTimers.delete(id);
+      }
+    }
+    simNames.clear();
+    fillRoomId = null;
+    simCfg = null;
+    if (simTimer) {
+      clearInterval(simTimer);
+      simTimer = null;
+    }
+    simStat = { added: 0, removed: 0, said: 0, ticks: 0, paused: null, startedAt: 0 };
+    if (deps) deps.updateLobby();
+    return { ok: true, drained: true, ...simStatus() };
+  }
+  if (!simCfg) return { error: "No test running." };
+  simCfg.target = 0;
+  simCfg.chat = false;
+  simCfg.churn = false;
+  simCfg.autoDrain = true;
+  simCfg.maxLagMs = 1;
+  return { ok: true, draining: true, ...simStatus() };
+}
+
+function simStatus() {
+  return {
+    running: !!simCfg,
+    users: sim.size,
+    rooms: simRooms.size,
+    target: simCfg ? simCfg.target : 0,
+    rate: simCfg ? simCfg.rate : 0,
+    perRoom: simCfg ? simCfg.perRoom : 0,
+    roomType: simCfg ? simCfg.roomType : null,
+    chat: simCfg ? simCfg.chat : false,
+    churn: simCfg ? simCfg.churn : false,
+    paused: simStat.paused,
+    lagMs: simStat.lag || 0,
+    heapMB: heapMB(),
+    maxHeapMB: simCfg ? simCfg.maxHeapMB : 0,
+    maxLagMs: simCfg ? simCfg.maxLagMs : 0,
+    added: simStat.added,
+    removed: simStat.removed,
+    said: simStat.said,
+    realRooms: state.rooms.size - simRooms.size,
+    online: io() ? io().sockets.sockets.size : 0,
+    upMs: simStat.startedAt ? ms() - simStat.startedAt : 0,
+  };
+}
+
 function init(injected) {
   deps = injected;
   restore();
@@ -647,4 +1078,10 @@ module.exports = {
   leaveRoom,
   remove,
   removeAll,
+  isSimRoom,
+  simRoomCount,
+  simStart,
+  simRetarget,
+  simStop,
+  simStatus,
 };

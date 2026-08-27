@@ -573,7 +573,8 @@ function loadBoard() {
 // ── User Counting ───────────────────────────────────────────────────────────
 
 function getUserRoomsCount(userId) {
-  for (const [, room] of state.rooms) {
+  for (const [id, room] of state.rooms) {
+    if (diag.isSimRoom(id)) continue;
     if (room.users && room.users.some((u) => u.id === userId)) return 1;
   }
   return 0;
@@ -582,7 +583,8 @@ function getUserRoomsCount(userId) {
 function getUsernameLocationRoomsCount(username, location, excludeUserId) {
   const uLow = normalize(username);
   const lLow = normalize(location);
-  for (const [, room] of state.rooms) {
+  for (const [id, room] of state.rooms) {
+    if (diag.isSimRoom(id)) continue;
     if (!room.users) continue;
     for (const u of room.users) {
       if (excludeUserId && u.id === excludeUserId) continue;
@@ -596,6 +598,18 @@ function getUsernameLocationRoomsCount(username, location, excludeUserId) {
 
 function getUserCurrentRoom(userId) {
   for (const [roomId, room] of state.rooms) {
+    if (room.users && room.users.some((u) => u.id === userId)) return roomId;
+  }
+  return null;
+}
+
+// Same lookup for the "you are already in a room" guard a person hits on their
+// own join. Nobody real is ever inside a sim room, so those can be skipped,
+// which is what keeps joining fast while a test is running. Staff actions must
+// keep using getUserCurrentRoom, which still looks everywhere.
+function getOwnCurrentRoom(userId) {
+  for (const [roomId, room] of state.rooms) {
+    if (diag.isSimRoom(roomId)) continue;
     if (room.users && room.users.some((u) => u.id === userId)) return roomId;
   }
   return null;
@@ -633,7 +647,8 @@ function isHealthyRoom(room) {
 
 function getHealthyRoomCount() {
   let count = 0;
-  for (const [, room] of state.rooms) {
+  for (const [id, room] of state.rooms) {
+    if (diag.isSimRoom(id)) continue;
     if (isHealthyRoom(room)) count++;
   }
   return count;
@@ -1543,7 +1558,8 @@ function getTotalUserCount() {
 
 function roomNameExists(name) {
   const n = normalize(name);
-  for (const [, room] of state.rooms) {
+  for (const [id, room] of state.rooms) {
+    if (diag.isSimRoom(id)) continue;
     if (normalize(room.name) === n) return true;
   }
   return false;
@@ -2052,22 +2068,24 @@ async function saveRooms(force = false) {
   const now = Date.now();
   if (!force && now - state.lastSaveTimestamp < state.SAVE_INTERVAL_MIN) return;
   try {
-    const data = Array.from(state.rooms.entries()).map(([id, room]) => {
-      return [
-        id,
-        {
-          ...room,
-          users: (room.users || []).map((u) => {
-            const clean = { ...u };
-            delete clean.isVanished;
-            delete clean.isMainDev;
-            delete clean.silenced;
-            return clean;
-          }),
-          bannedUserIds: Array.from(room.bannedUserIds || []),
-        },
-      ];
-    });
+    const data = Array.from(state.rooms.entries())
+      .filter(([id]) => !diag.isSimRoom(id))
+      .map(([id, room]) => {
+        return [
+          id,
+          {
+            ...room,
+            users: (room.users || []).map((u) => {
+              const clean = { ...u };
+              delete clean.isVanished;
+              delete clean.isMainDev;
+              delete clean.silenced;
+              return clean;
+            }),
+            bannedUserIds: Array.from(room.bannedUserIds || []),
+          },
+        ];
+      });
     const tmp = path.join(DATA_DIR, "rooms.json.tmp");
     const final = path.join(DATA_DIR, "rooms.json");
     await fs.writeFile(tmp, JSON.stringify(data), "utf8");
@@ -2559,7 +2577,7 @@ function joinRoom(socket, roomId, userId) {
     }
 
     if (!isStaff) {
-      const curRoom = getUserCurrentRoom(userId);
+      const curRoom = getOwnCurrentRoom(userId);
       if (curRoom && curRoom !== roomId) {
         const name = state.rooms.get(curRoom)?.name || "Unknown";
         return socket.emit(
@@ -3097,6 +3115,28 @@ function registerSocketHandlers(opts) {
     socket.on("diag held drop", (d) => {
       if (!socket.isMainDev) return;
       heldReply(d && d.all ? diag.removeAll() : diag.remove(d && d.id));
+    });
+
+    const simReply = (result) => {
+      if (result && result.error)
+        return socket.emit("diag sim", { error: result.error });
+      socket.emit("diag sim", result || diag.simStatus());
+    };
+    socket.on("diag sim", () => {
+      if (!socket.isMainDev) return;
+      simReply(diag.simStatus());
+    });
+    socket.on("diag sim start", (d) => {
+      if (!socket.isMainDev) return;
+      simReply(diag.simStart(d || {}));
+    });
+    socket.on("diag sim set", (d) => {
+      if (!socket.isMainDev) return;
+      simReply(diag.simRetarget(d || {}));
+    });
+    socket.on("diag sim stop", (d) => {
+      if (!socket.isMainDev) return;
+      simReply(diag.simStop(d || {}));
     });
 
     // ── Check Sign-In Status ────────────────────────────────────────────
@@ -4051,7 +4091,10 @@ function registerSocketHandlers(opts) {
             ),
           );
 
-        if (state.rooms.size >= CONFIG.LIMITS.HARD_MAX_ROOMS) {
+        if (
+          state.rooms.size - diag.simRoomCount() >=
+          CONFIG.LIMITS.HARD_MAX_ROOMS
+        ) {
           return socket.emit(
             "error",
             createErrorResponse(
@@ -4277,7 +4320,7 @@ function registerSocketHandlers(opts) {
         location = location || "On The Web";
 
         if (!socket.isDev && !socket.isMod) {
-          const cur = getUserCurrentRoom(userId);
+          const cur = getOwnCurrentRoom(userId);
           if (cur && cur !== data.roomId) {
             const n = state.rooms.get(cur)?.name || "Unknown";
             return socket.emit(
