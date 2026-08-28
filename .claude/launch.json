@@ -7,6 +7,12 @@
       "runtimeArgs": ["server.js"],
       "port": 3000,
       "autoPort": true
+    },
+    {
+      "name": "talkocraft-static",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["--yes", "http-server", "-p", "8087", "-c-1", "."],
+      "port": 8087
     }
   ]
 }

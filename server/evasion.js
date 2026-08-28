@@ -5,9 +5,16 @@ const { state } = require("./state");
 const ipban = require("./ipban");
 const identity = require("./identity");
 const audit = require("./audit");
+const blocklist = require("./blocklist");
+const banhistory = require("./banhistory");
 
 const ALERT_COOLDOWN_MS = 60 * 60 * 1000;
 const recentAlerts = new Map();
+
+// A device is auto-blocked only when it used the blocked address more than
+// once, so a single stray connection from a recycled address does not ban an
+// unrelated person.
+const AUTO_BLOCK_MIN_SEEN = 2;
 
 const CACHE_MS = 60 * 1000;
 let cache = null;
@@ -54,6 +61,64 @@ function describeBlock(key) {
   return bits.join(", ");
 }
 
+// Blocks the evading device (and its current address) with the same lifetime
+// as the block it slipped past. Returns what was placed, or null.
+function placeAutoBlock({ deviceId, ip, username, signal }) {
+  const live = (signal.blockKeys || []).filter((k) =>
+    ipban.isActiveBlock(state.blockedIPs.get(k)),
+  );
+  if (!live.length) return null;
+
+  let permanent = false;
+  let expiry = 0;
+  for (const k of live) {
+    const b = state.blockedIPs.get(k);
+    if (ipban.isPermanentBlock(b)) permanent = true;
+    else {
+      const e = b && typeof b === "object" ? b.expiry : b;
+      if (e > expiry) expiry = e;
+    }
+  }
+  if (permanent) expiry = Number.MAX_SAFE_INTEGER;
+  if (!expiry) return null;
+
+  const rec = identity.getRecord(deviceId);
+  const entry = {
+    expiry,
+    label: username || (rec && rec.name) || null,
+    by: null,
+    ts: Date.now(),
+    reason: "Ban evasion.",
+    did: deviceId,
+  };
+
+  const targets = [ipban.idKey(deviceId)];
+  if (ip && ipban.isValidIp(ip)) targets.push(ipban.autoRangeCidr(ip) || ip);
+
+  const placed = [];
+  for (const key of targets) {
+    const held = state.blockedIPs.get(key);
+    if (held !== undefined && ipban.isActiveBlock(held)) {
+      const heldExpiry = held && typeof held === "object" ? held.expiry : held;
+      if (!heldExpiry || heldExpiry >= expiry) continue;
+    }
+    state.blockedIPs.set(key, { ...entry });
+    placed.push(key);
+  }
+  if (!placed.length) return null;
+
+  blocklist.saveSoon();
+  cache = null;
+  banhistory.record({
+    ip: placed.find((k) => !ipban.isIdKey(k)) || placed[0],
+    name: entry.label,
+    action: "ban",
+    reason: "Ban evasion.",
+    duration: permanent ? "permanent" : "inherited",
+  });
+  return { keys: placed, expiry, permanent };
+}
+
 function check({ deviceId, ip, username }) {
   if (!deviceId && !ip) return null;
   if (!state.blockedIPs.size) return null;
@@ -66,20 +131,23 @@ function check({ deviceId, ip, username }) {
   if (deviceId) {
     const rec = identity.getRecord(deviceId);
     const known = rec && rec.ips ? Object.keys(rec.ips) : [];
+    let best = null;
     for (const seen of known) {
       if (seen === ip) continue;
       const covering = ipban.keysCovering(seen, snap.prepared);
-      if (covering.length) {
-        signal = {
-          kind: "history",
-          text: "has connected before from an address that is blocked now",
-          priorIp: seen,
-          blocks: covering.map(describeBlock),
-          seenCount: (rec.ips && rec.ips[seen]) || null,
-        };
-        break;
-      }
+      if (!covering.length) continue;
+      const count = (rec.ips && rec.ips[seen]) || 0;
+      if (!best || count > best.count) best = { seen, covering, count };
     }
+    if (best)
+      signal = {
+        kind: "history",
+        text: "has connected before from an address that is blocked now",
+        priorIp: best.seen,
+        blockKeys: best.covering,
+        blocks: best.covering.map(describeBlock),
+        seenCount: best.count || null,
+      };
   }
 
   if (!signal && ip) {
@@ -129,6 +197,21 @@ function check({ deviceId, ip, username }) {
   if (signal.blocks && signal.blocks.length)
     for (const b of signal.blocks) lines.push("Block: " + b);
 
+  if (
+    signal.kind === "history" &&
+    deviceId &&
+    (signal.seenCount || 0) >= AUTO_BLOCK_MIN_SEEN
+  )
+    signal.autoBlocked = placeAutoBlock({ deviceId, ip, username, signal });
+  if (signal.autoBlocked)
+    lines.push(
+      "Auto-block placed: " +
+        signal.autoBlocked.keys.join(", ") +
+        (signal.autoBlocked.permanent
+          ? " (permanent)"
+          : " (for " + shortAgo(signal.autoBlocked.expiry - Date.now()) + ")"),
+    );
+
   audit.recordNotification({
     kind: "evasion",
     minLevel: 2,
@@ -141,7 +224,9 @@ function check({ deviceId, ip, username }) {
       ids: deviceId ? [deviceId] : [],
       target: username || "(no name yet)",
       deviceId: deviceId || null,
-      category: "possible ban evasion",
+      category: signal.autoBlocked
+        ? "ban evasion, blocked automatically"
+        : "possible ban evasion",
       reason: signal.text,
     },
   });

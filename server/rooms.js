@@ -1447,6 +1447,30 @@ async function settleNamePolicy(socket, username) {
   }
 }
 
+async function kickEvasionBlocked(keys, did) {
+  if (!io()) return;
+  const affected = new Set();
+  for (const [, s] of io().sockets.sockets) {
+    if (s.isDev || s.isMod) continue;
+    if (did && s.deviceId === did) affected.add(s);
+    else if (
+      s.clientIp &&
+      keys.some((k) => ipban.matchesKey(s.clientIp, k))
+    )
+      affected.add(s);
+  }
+  for (const s of affected) {
+    try {
+      const uid = s.handshake?.session?.userId;
+      s.emit("kicked", {
+        message: "Your connection has been blocked by staff.",
+      });
+      if (s.roomId && uid) await leaveRoom(s, uid);
+      s.disconnect(true);
+    } catch (_) {}
+  }
+}
+
 const staffKeyAttempts = new Map();
 const STAFF_KEY_MAX_ATTEMPTS = 15;
 const STAFF_KEY_WINDOW = 5 * 60 * 1000;
@@ -2956,11 +2980,18 @@ function registerSocketHandlers(opts) {
         socket.emit("identity status", identity.summary(socket.deviceId));
         if (!socket.isDev && !socket.isMod)
           try {
-            evasion.check({
+            const hit = evasion.check({
               deviceId: socket.deviceId,
               ip: clientIp,
               username: socket.handshake?.session?.username || null,
             });
+            if (hit && hit.autoBlocked) {
+              broadcastBlockList();
+              broadcastBanHistory();
+              kickEvasionBlocked(hit.autoBlocked.keys, socket.deviceId).catch(
+                () => {},
+              );
+            }
           } catch (e) {
             console.error("evasion check failed:", e.message);
           }
