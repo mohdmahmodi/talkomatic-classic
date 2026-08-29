@@ -3351,6 +3351,18 @@ function registerSocketHandlers(opts) {
             ),
           );
         }
+        if (
+          username.trim().length < 3 ||
+          (username.match(/[\p{L}\p{N}]/gu) || []).length < 2
+        ) {
+          return socket.emit(
+            "error",
+            createErrorResponse(
+              ERROR_CODES.VALIDATION_ERROR,
+              "Usernames need at least 3 characters, mostly letters or numbers.",
+            ),
+          );
+        }
 
         if (CONFIG.FEATURES.ENABLE_WORD_FILTER) {
           if (wordFilter.checkText(username).hasOffensiveWord)

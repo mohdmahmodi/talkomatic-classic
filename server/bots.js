@@ -163,7 +163,8 @@ function activeBotOfActor(actorKey) {
 
 // ── Rule validation ─────────────────────────────────────────────────────────
 
-const TRIGGERS = ["command", "says", "mention", "join", "leave", "timer"];
+const TRIGGERS = ["command", "says", "mention", "join", "leave", "timer", "arrive"];
+const PREFIX_RE = /^[!?.,;:~#$%^&*+=/\\<>@|-]{1,2}$/;
 const ACTIONS = ["say", "append", "wait", "set", "add", "random", "repeat", "clear", "leave"];
 const OPS = ["is", "not", "gt", "lt", "has"];
 const MATH_OPS = ["add", "sub", "mul", "div"];
@@ -214,6 +215,14 @@ function validateConfig(input, existingId) {
     };
   if (!location) location = "Bot";
 
+  let prefix = String(input.prefix == null ? "!" : input.prefix).trim();
+  if (!prefix) prefix = "!";
+  if (!PREFIX_RE.test(prefix))
+    return {
+      ok: false,
+      error: "Prefixes are 1-2 symbols, like ! or ? or >> (no letters or spaces).",
+    };
+
   const rulesIn = Array.isArray(input.rules) ? input.rules : [];
   if (!rulesIn.length)
     return { ok: false, error: "The bot needs at least one rule." };
@@ -229,7 +238,9 @@ function validateConfig(input, existingId) {
 
     const trig = { type: on.type };
     if (on.type === "command") {
-      const word = String(on.word || "").trim().replace(/^!/, "");
+      let word = String(on.word || "").trim();
+      if (word.startsWith(prefix)) word = word.slice(prefix.length);
+      word = word.replace(/^!/, "");
       if (!CMD_WORD.test(word))
         return {
           ok: false,
@@ -346,6 +357,7 @@ function validateConfig(input, existingId) {
     id: existingId || "b" + crypto.randomBytes(5).toString("hex"),
     name,
     location,
+    prefix,
     rules,
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -480,27 +492,30 @@ function resolveToken(rt, body, ctx) {
   if (low === "owner") return rt.ownerName || "the owner";
   if (low === "newline") return "\n";
   if (low === "commands") {
+    const p = rt.bot.prefix || "!";
     const seen = [];
     for (const r of rt.bot.rules)
       if (
         r.on.type === "command" &&
         r.who !== "owner" &&
-        seen.indexOf("!" + r.on.word) === -1
+        seen.indexOf(p + r.on.word) === -1
       )
-        seen.push("!" + r.on.word);
+        seen.push(p + r.on.word);
     return seen.join("\n");
   }
   if (low === "ownercommands" || low === "admincommands") {
+    const p = rt.bot.prefix || "!";
     const seen = [];
     for (const r of rt.bot.rules)
       if (
         r.on.type === "command" &&
         r.who === "owner" &&
-        seen.indexOf("!" + r.on.word) === -1
+        seen.indexOf(p + r.on.word) === -1
       )
-        seen.push("!" + r.on.word);
+        seen.push(p + r.on.word);
     return seen.join("\n");
   }
+  if (low === "prefix") return rt.bot.prefix || "!";
   if (low === "runtime")
     return fmtRuntime(Date.now() - (rt.deployedAt || Date.now()));
   if (low === "room") return rt.roomName || "";
@@ -671,8 +686,8 @@ function takeToken(rt) {
   return true;
 }
 
-function commandIndex(lowerLine, word) {
-  const token = "!" + word;
+function commandIndex(lowerLine, word, prefix) {
+  const token = (prefix || "!") + word;
   let i = lowerLine.indexOf(token);
   while (i !== -1) {
     const okBefore = i === 0 || /\s/.test(lowerLine[i - 1]);
@@ -690,17 +705,51 @@ function allowedBy(rt, rule, userId) {
   return rule.who !== "owner" || (!!userId && userId === rt.ownerId);
 }
 
+// Runs when the bot lands in a room. "arrive" rules take over completely;
+// without one the bot introduces itself and lists its public commands. An
+// arrive rule with only a wait block keeps the bot silent on arrival.
+function greetOnArrival(rt) {
+  const ctx = { userId: null, username: "", line: "", args: [] };
+  let fired = false;
+  for (let ri = 0; ri < rt.bot.rules.length; ri++)
+    if (rt.bot.rules[ri].on.type === "arrive") {
+      fireRule(rt, rt.bot.rules[ri], ctx, ri);
+      fired = true;
+    }
+  if (fired) return;
+  const p = rt.bot.prefix || "!";
+  const words = [];
+  for (const r of rt.bot.rules)
+    if (
+      r.on.type === "command" &&
+      r.who !== "owner" &&
+      words.indexOf(p + r.on.word) === -1
+    )
+      words.push(p + r.on.word);
+  const list = words.slice(0, 6).join("  ");
+  const text = list ? "🤖 Hi! I'm {bot}. Try: " + list : "🤖 Hi! I'm {bot}.";
+  rt.queue.push({
+    conds: [],
+    acts: [{ type: "say", text }],
+    ctx,
+    i: 0,
+    checked: false,
+    ri: -1,
+  });
+}
+
 function onUtterance(rt, userId, username, line, fullText) {
   const lower = line.toLowerCase();
+  const prefix = rt.bot.prefix || "!";
   for (let ri = 0; ri < rt.bot.rules.length; ri++) {
     const rule = rt.bot.rules[ri];
     if (!allowedBy(rt, rule, userId)) continue;
     const on = rule.on;
     const ctx = { userId, username, line, args: [] };
     if (on.type === "command") {
-      const at = commandIndex(lower, on.word);
+      const at = commandIndex(lower, on.word, prefix);
       if (at === -1) continue;
-      const after = line.slice(at + 1 + on.word.length).trim();
+      const after = line.slice(at + prefix.length + on.word.length).trim();
       ctx.after = after;
       ctx.args = after ? after.split(/\s+/).slice(0, 8) : [];
     } else if (on.type === "says") {
@@ -866,6 +915,7 @@ function deploy(socket, bot, room, ownerKey) {
   deps.userJoined(room, entry);
   deps.updateRoom(room.id);
   deps.updateLobby();
+  greetOnArrival(rt);
   startTick();
   return rt;
 }
@@ -1141,6 +1191,7 @@ function ownerStatus(ownerKey) {
       id: b.id,
       name: b.name,
       location: b.location || "Bot",
+      prefix: b.prefix || "!",
       rules: b.rules,
       updatedAt: b.updatedAt,
       vars: b.vars || {},
@@ -1152,6 +1203,7 @@ function ownerStatus(ownerKey) {
       id: b.id,
       name: b.name,
       location: b.location || "Bot",
+      prefix: b.prefix || "!",
       rules: b.rules,
       updatedAt: b.updatedAt,
       vars: b.vars || {},
@@ -1576,6 +1628,8 @@ function register(socket, safe) {
               { userId: null, username: "", line: "", args: [] },
               ri,
             );
+      } else if (kind === "arrive") {
+        greetOnArrival(rt);
       } else return;
       testReply(socket, { about: kind, ...drainTest(rt) });
     }),

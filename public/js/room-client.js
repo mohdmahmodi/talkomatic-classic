@@ -31,6 +31,7 @@ function isGuestUsername(name) {
   if (typeof name !== "string") return true;
   const n = name.trim();
   if (!n) return true;
+  if (n.length < 3 || (n.match(/[\p{L}\p{N}]/gu) || []).length < 2) return true;
   return (
     /^guest[\s._-]*[0-9a-f]*$/i.test(n) || /^(anonymous|someone|unknown)$/i.test(n)
   );
@@ -1631,7 +1632,9 @@ function updateVotesUI(votes) {
           const ui = row.querySelector(".user-info");
           ui.insertBefore(counter, ui.querySelector(".ui-tools"));
         }
-        counter.textContent = `\uD83D\uDC4E ${count}`;
+        const counterText = `\uD83D\uDC4E ${count}`;
+        if (counter.textContent !== counterText)
+          counter.textContent = counterText;
         counter.style.color = "#ff6b6b";
         counter.style.cursor = "pointer";
         counter.title = "Click to see who disliked you";
@@ -1649,7 +1652,8 @@ function updateVotesUI(votes) {
     }
 
     if (voteBtn) {
-      voteBtn.innerHTML = `\uD83D\uDC4E ${count}`;
+      const btnText = `\uD83D\uDC4E ${count}`;
+      if (voteBtn.textContent !== btnText) voteBtn.textContent = btnText;
       voteBtn.classList.toggle(
         "voted",
         votingActive && currentVotes[currentUserId] === uid,
@@ -2138,6 +2142,8 @@ function createDevHideToggle() {
 }
 
 let devShowIP = localStorage.getItem("talkomatic_devShowIP") !== "false";
+// Leaves an unchanged tag alone so a dev can select and copy it; replacing
+// the span on every room update kept clearing the selection.
 function renderDevContext() {
   if (!currentUserIsDev) return;
   document.querySelectorAll(".chat-row").forEach((row) => {
@@ -2146,16 +2152,20 @@ function renderDevContext() {
     if (!info) return;
 
     const existing = info.querySelector(".dev-meta");
-    if (existing) existing.remove();
-    if (!devShowIP) return;
-
     const meta = devContext.get(uid);
-    if (meta && meta.d) {
-      const span = document.createElement("span");
-      span.className = "dev-meta";
-      span.textContent = meta.d;
-      info.insertBefore(span, info.querySelector(".ui-tools"));
+    const want = devShowIP && meta && meta.d ? meta.d : null;
+    if (!want) {
+      if (existing) existing.remove();
+      return;
     }
+    if (existing) {
+      if (existing.textContent !== want) existing.textContent = want;
+      return;
+    }
+    const span = document.createElement("span");
+    span.className = "dev-meta";
+    span.textContent = want;
+    info.insertBefore(span, info.querySelector(".ui-tools"));
   });
 }
 
@@ -3274,7 +3284,7 @@ socket.on("room update", (roomData) => {
       ci.textContent = display;
       replaceEmotes(ci);
       selfIsFiltered = wordFilterEnabled && clientWordFilter?.ready;
-    } else {
+    } else if (ci.dataset.rawText !== rawVal) {
       renderOtherUserMessage(ci, rawVal);
     }
   });

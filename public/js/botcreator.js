@@ -574,13 +574,16 @@
   // ── Vocabulary ────────────────────────────────────────────────────────────
 
   const TRIGGER_OPTIONS = [
-    { v: "command", label: "someone types !command" },
+    { v: "command", label: "someone types a command" },
     { v: "says", label: "someone says a phrase" },
     { v: "mention", label: "someone says the bot's name" },
     { v: "join", label: "someone joins the room" },
     { v: "leave", label: "someone leaves the room" },
+    { v: "arrive", label: "the bot arrives in the room" },
     { v: "timer", label: "every X minutes" },
   ];
+
+  const PREFIX_RE = /^[!?.,;:~#$%^&*+=/\\<>@|-]{1,2}$/;
 
   const WHO_OPTIONS = [
     { v: "", label: "anyone can trigger it" },
@@ -649,8 +652,9 @@
     { tok: "{rand:1-6}", desc: "random number, new every time" },
     { tok: "{pick:red|green|blue}", desc: "random choice, new every time" },
     { tok: "{newline}", desc: "start a new line mid-message" },
-    { tok: "{commands}", desc: "every public !command this bot has, one per line" },
-    { tok: "{ownercommands}", desc: "every admin-only !command, one per line" },
+    { tok: "{commands}", desc: "every public command this bot has, one per line" },
+    { tok: "{ownercommands}", desc: "every admin-only command, one per line" },
+    { tok: "{prefix}", desc: "the bot's command prefix (like !)" },
     { tok: "{owner}", desc: "who runs the bot (you)" },
     { tok: "{runtime}", desc: "how long the bot has been in the room" },
     { tok: "{bot}", desc: "the bot's name" },
@@ -1162,6 +1166,7 @@
           id: b.id,
           name: b.name,
           location: b.location || "Bot",
+          prefix: b.prefix || "!",
           rules: b.rules,
         }),
       );
@@ -1193,6 +1198,7 @@
           id: b.id,
           name: b.name,
           location: b.location || "Bot",
+          prefix: b.prefix || "!",
           rules: b.rules,
           shared: true,
           sharedBy: b.sharedBy,
@@ -1352,6 +1358,7 @@
           id: edit.id || null,
           name: edit.name,
           location: edit.location,
+          prefix: edit.prefix || "!",
           rules: edit.rules,
           at: Date.now(),
         }),
@@ -1422,12 +1429,14 @@
   function loadBot(bot) {
     edit = JSON.parse(JSON.stringify(bot));
     if (!edit.location) edit.location = "Bot";
+    if (!edit.prefix) edit.prefix = "!";
     dirty = false;
     testDirty = true;
     saveDraftNow();
     showView("editor");
     $("botName").value = edit.name || "";
     $("botLocation").value = edit.location;
+    $("botPrefix").value = edit.prefix;
     setSaveNote("", "");
     updateNamePreview();
     resetTestRoom();
@@ -1472,6 +1481,13 @@
     updateNamePreview();
   });
 
+  $("botPrefix").addEventListener("input", () => {
+    if (!edit) return;
+    edit.prefix = $("botPrefix").value.trim();
+    touch();
+    renderRules();
+  });
+
   $("testToggleBtn").addEventListener("click", () => {
     if (window.innerWidth <= 1250)
       document.body.classList.toggle("bc-test-open");
@@ -1503,11 +1519,18 @@
       return { ok: false, msg: "Give the bot a name first (2-14 characters)." };
     if (!(edit.rules || []).length)
       return { ok: false, msg: "The bot needs at least one rule." };
+    if (edit.prefix && edit.prefix !== "!" && !PREFIX_RE.test(edit.prefix))
+      return {
+        ok: false,
+        msg: "The command prefix is 1-2 symbols, like ! or ? or >> (no letters or spaces).",
+      };
     for (let ri = 0; ri < edit.rules.length; ri++) {
       const r = edit.rules[ri];
       const n = "Rule " + (ri + 1);
       if (r.on.type === "command") {
-        const w = String(r.on.word || "").trim();
+        const w = String(r.on.word || "")
+          .trim()
+          .replace(/^[!?.,;:~#$%^&*+=/\\<>@|-]+/, "");
         if (/\s/.test(w))
           return {
             ok: false,
@@ -1596,7 +1619,12 @@
     setSaveNote("", "Saving...");
     socket.emit("bots save", {
       id: edit.id || undefined,
-      bot: { name: edit.name, location: edit.location, rules: edit.rules },
+      bot: {
+        name: edit.name,
+        location: edit.location,
+        prefix: edit.prefix || "!",
+        rules: edit.rules,
+      },
     });
   });
 
@@ -1759,6 +1787,7 @@
       bot: {
         name: edit.name || "Unnamed bot",
         location: edit.location || "Bot",
+        prefix: edit.prefix || "!",
         rules: edit.rules || [],
       },
     };
@@ -1825,6 +1854,10 @@
             typeof bot.location === "string" && bot.location.trim()
               ? bot.location.slice(0, 20)
               : "Bot",
+          prefix:
+            typeof bot.prefix === "string" && bot.prefix.trim()
+              ? bot.prefix.slice(0, 2)
+              : "!",
           rules: bot.rules,
         });
         toastr.info(
@@ -2616,6 +2649,7 @@
             rule.on.minutes = 5;
             delete rule.who;
           }
+          if (v === "arrive") delete rule.who;
           renderRules();
         },
         "w-trig",
@@ -2624,13 +2658,13 @@
     if (rule.on.type === "command") {
       const bang = document.createElement("span");
       bang.className = "bc-unit bc-bang";
-      bang.textContent = "!";
+      bang.textContent = (edit && edit.prefix) || "!";
       head.appendChild(bang);
       head.appendChild(
         mkInput(
           rule.on.word,
           "word",
-          (v) => (rule.on.word = v.replace(/^!/, "")),
+          (v) => (rule.on.word = v.replace(/^[!?.,;:~#$%^&*+=/\\<>@|-]+/, "")),
           "w-word",
         ),
       );
@@ -2660,7 +2694,7 @@
       head.appendChild(lbl);
     }
 
-    if (rule.on.type !== "timer") {
+    if (rule.on.type !== "timer" && rule.on.type !== "arrive") {
       head.appendChild(
         mkSelect(
           WHO_OPTIONS,
@@ -3226,7 +3260,12 @@
     if (!testDirty) return then();
     testWaiting = then;
     socket.emit("bots test start", {
-      bot: { name: edit.name, location: edit.location, rules: edit.rules },
+      bot: {
+        name: edit.name,
+        location: edit.location,
+        prefix: edit.prefix || "!",
+        rules: edit.rules,
+      },
       keepMemory: true,
     });
   }
@@ -3397,6 +3436,11 @@
     if (!edit) return;
     setTestStatus("Every timer rule goes off right now.");
     ensureTest(() => socket.emit("bots test event", { kind: "timer" }));
+  });
+  $("testArriveBtn").addEventListener("click", () => {
+    if (!edit) return;
+    setTestStatus("The bot lands in the room...");
+    ensureTest(() => socket.emit("bots test event", { kind: "arrive" }));
   });
   $("testResetBtn").addEventListener("click", () => {
     if (!edit) return;
@@ -3651,8 +3695,10 @@
 
   // ── What's new ────────────────────────────────────────────────────────────
 
-  const NEWS_VERSION = 8;
+  const NEWS_VERSION = 9;
   const NEWS = [
+    "Custom command prefixes: the little box next to your bot's name sets the symbol people type before commands. Keep ! or pick ? . ~ >> or any 1-2 symbols. {commands} lists them with the right prefix, and {prefix} says what it is.",
+    'Bots now say hello: when a bot lands in a room it introduces itself and lists its public commands, so people know it exists. Want your own greeting? Add a rule with the new "the bot arrives in the room" trigger and it replaces the built-in hello completely. Want silence? Make an arrive rule with only a wait block. Preview it with the "Bot arrives" button in the Test room.',
     "Memories can now be picked by name at runtime: {memory:note_{word1}} reads whatever the first word names, and a memory block can WRITE to note_{word1} too. So !remember pizza extra cheese saves it, and !recall pizza reads it back. Add |your own text for when nothing is stored: {memory:note_{word1}|I have no note about that}. {words2} grabs everything from the 2nd word on, and writing an empty value forgets a memory.",
     'Admin commands: every rule now has a "who can trigger it" choice. Pick "only me (admin)" and that rule ignores everyone but you, matched by your session, not your name. New magic words {owner} and {ownercommands}, and an "Admin commands" ready-made bot to start from.',
     "The For coders page is now the real manual: every socket event documented, tokens that renew themselves, working Node and Python bots to copy, and answers for the classic \"my bot vanished\" mysteries.",
@@ -3665,6 +3711,29 @@
   ];
 
   const CHANGELOG = [
+    {
+      title: "Command prefixes",
+      icon: "fa-terminal",
+      items: [
+        "The small box beside the bot's name sets its command prefix: 1-2 symbols, like ! (the default), ?, ., ~, or >>.",
+        "Every command rule uses it: with prefix ? a rule on the word roll fires on ?roll. Nothing else about the rule changes.",
+        "Type the word with or without the prefix in the rule; the editor and the server both strip it for you.",
+        "{commands} and {ownercommands} list commands with the right prefix, and the new {prefix} magic word prints the prefix itself.",
+        "Old bots keep ! without any change; the prefix travels with Export, Import, and shared bots.",
+      ],
+    },
+    {
+      title: "Bots say hello",
+      icon: "fa-door-open",
+      items: [
+        "When a bot lands in a room it now introduces itself: a short hello plus up to 6 of its public commands, so people know what to type.",
+        'To write your own greeting, add a rule with the "the bot arrives in the room" trigger. Your rule replaces the built-in hello completely, and you can use every block and magic word in it ({commands}, {room}, memories, waits).',
+        "Nobody triggered an arrive rule, so {name} is empty there; {bot}, {room} and {humans} all work.",
+        "Want the bot to arrive silently, like before? Make an arrive rule with only a wait block in it.",
+        'Preview the whole thing with the new "Bot arrives" button in the Test room.',
+        "This runs once per deploy, when the bot walks in - not when people join later (that is still the \"someone joins the room\" trigger).",
+      ],
+    },
     {
       title: "Memories by name",
       icon: "fa-book-open",

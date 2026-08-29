@@ -439,6 +439,7 @@ function isGuestUsername(name) {
   if (typeof name !== "string") return true;
   const n = name.trim();
   if (!n) return true;
+  if (n.length < 3 || (n.match(/[\p{L}\p{N}]/gu) || []).length < 2) return true;
   return (
     /^guest[\s._-]*[0-9a-f]*$/i.test(n) || /^(anonymous|someone|unknown)$/i.test(n)
   );
@@ -1426,6 +1427,15 @@ logForm.addEventListener("submit", async (e) => {
 
   if (!newUsername) {
     window.showErrorModal("Please enter a username.");
+    return;
+  }
+  if (
+    newUsername.length < 3 ||
+    (newUsername.match(/[\p{L}\p{N}]/gu) || []).length < 2
+  ) {
+    window.showErrorModal(
+      "Usernames need at least 3 characters, mostly letters or numbers.",
+    );
     return;
   }
   if (isGuestUsername(newUsername)) {

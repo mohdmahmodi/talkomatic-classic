@@ -157,6 +157,14 @@
               placeholder="Bot"
             />
             <span class="bot-badge-demo">BOT</span>
+            <input
+              class="bc-input"
+              id="botPrefix"
+              maxlength="2"
+              placeholder="!"
+              title="Command prefix: the symbol people type before every command, like ! or ? or >>"
+              style="width: 44px; text-align: center"
+            />
           </div>
           <span class="bc-save-note" id="saveNote"></span>
           <div class="bc-editbar-btns">
@@ -273,6 +281,13 @@
                 title="Make every timer rule go off right now"
               >
                 <i class="fas fa-clock"></i> Ring the timers
+              </button>
+              <button
+                class="bc-mini-btn"
+                id="testArriveBtn"
+                title="Replay what the bot says when it lands in a room"
+              >
+                <i class="fas fa-door-open"></i> Bot arrives
               </button>
               <button
                 class="bc-mini-btn"

@@ -319,6 +319,8 @@ function isGuestName(name) {
   if (typeof name !== "string") return true;
   const n = name.trim();
   if (!n) return true;
+  if (n.length < 3) return true;
+  if ((n.match(/[\p{L}\p{N}]/gu) || []).length < 2) return true;
   if (/^guest[\s._-]*[0-9a-f]*$/i.test(n)) return true;
   if (/^(anonymous|someone|unknown)$/i.test(n)) return true;
   return false;
