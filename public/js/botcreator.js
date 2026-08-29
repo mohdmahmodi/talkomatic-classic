@@ -587,7 +587,7 @@
 
   const WHO_OPTIONS = [
     { v: "", label: "anyone can trigger it" },
-    { v: "owner", label: "only me (admin)" },
+    { v: "owner", label: "admins only (me + bot managers)" },
   ];
 
   const ACTION_OPTIONS = [
@@ -968,9 +968,27 @@
 
   socket.on("bots status", (st) => {
     status = st;
+    if (pendingReloadId) {
+      const rb =
+        (st.bots || []).find((x) => x.id === pendingReloadId) ||
+        (st.shared || []).find((x) => x.id === pendingReloadId);
+      pendingReloadId = null;
+      if (rb && edit?.id === rb.id)
+        loadBot({
+          id: rb.id,
+          name: rb.name,
+          location: rb.location || "Bot",
+          prefix: rb.prefix || "!",
+          rules: rb.rules,
+          updatedAt: rb.updatedAt,
+          shared: edit.shared,
+          sharedBy: edit.sharedBy,
+        });
+    }
     renderHome();
     renderEditorChrome();
     refreshManagersModal();
+    refreshHistoryModal();
     renderNewsTab();
     maybeShowNews();
   });
@@ -1078,6 +1096,7 @@
   socket.on("bots saved", (d) => {
     dirty = false;
     if (edit && !edit.id) edit.id = d.id;
+    if (edit && d.updatedAt) edit.baseUpdatedAt = d.updatedAt;
     setSaveNote("ok", "Saved ✓");
     saveDraftNow();
     renderEditorChrome();
@@ -1143,7 +1162,10 @@
         b.rules.length +
         (b.rules.length === 1 ? " rule" : " rules") +
         " · " +
-        (b.location || "Bot");
+        (b.location || "Bot") +
+        (b.managers && b.managers.length
+          ? " · shared with " + b.managers.length
+          : "");
       card.appendChild(name);
       card.appendChild(meta);
       if (b.lastStop && deployedInfo()?.botId !== b.id) {
@@ -1168,6 +1190,7 @@
           location: b.location || "Bot",
           prefix: b.prefix || "!",
           rules: b.rules,
+          updatedAt: b.updatedAt,
         }),
       );
       host.appendChild(card);
@@ -1200,6 +1223,7 @@
           location: b.location || "Bot",
           prefix: b.prefix || "!",
           rules: b.rules,
+          updatedAt: b.updatedAt,
           shared: true,
           sharedBy: b.sharedBy,
         }),
@@ -1227,8 +1251,8 @@
     const p = document.createElement("p");
     p.textContent =
       "If another user gave you their bot's share code, enter it here. You " +
-      "become a manager: you can edit the bot and send it to rooms, but only " +
-      "the owner can delete it.";
+      "become a manager: you can edit the bot, send it to rooms, and use " +
+      "its admin commands, but only the owner can delete it.";
     const input = document.createElement("input");
     input.className = "bc-input";
     input.placeholder = "BOT-XXXXXXXX";
@@ -1360,6 +1384,8 @@
           location: edit.location,
           prefix: edit.prefix || "!",
           rules: edit.rules,
+          shared: edit.shared || undefined,
+          baseUpdatedAt: edit.baseUpdatedAt || null,
           at: Date.now(),
         }),
       );
@@ -1430,6 +1456,7 @@
     edit = JSON.parse(JSON.stringify(bot));
     if (!edit.location) edit.location = "Bot";
     if (!edit.prefix) edit.prefix = "!";
+    if (edit.baseUpdatedAt == null) edit.baseUpdatedAt = edit.updatedAt || null;
     dirty = false;
     testDirty = true;
     saveDraftNow();
@@ -1456,6 +1483,7 @@
     if (!edit) return;
     $("deleteBtn").style.display = edit.id && !edit.shared ? "" : "none";
     $("managersBtn").style.display = edit.id && !edit.shared ? "" : "none";
+    $("historyBtn").style.display = edit.id ? "" : "none";
     const d = deployedInfo();
     const label = $("deployOpenLabel");
     if (d && d.botId === edit.id) label.textContent = "Live · manage";
@@ -1619,6 +1647,7 @@
     setSaveNote("", "Saving...");
     socket.emit("bots save", {
       id: edit.id || undefined,
+      baseUpdatedAt: edit.baseUpdatedAt || undefined,
       bot: {
         name: edit.name,
         location: edit.location,
@@ -1657,8 +1686,9 @@
 
     const p = document.createElement("p");
     p.textContent =
-      "Managers can edit this bot and send it to rooms. Only you can " +
-      "delete it, remove managers, or hand it over.";
+      "Managers can edit this bot, send it to rooms, and use its " +
+      "admin-only commands in rooms. Only you can delete it, remove " +
+      "managers, or hand it over.";
     box.appendChild(p);
 
     const codeRow = document.createElement("div");
@@ -1760,6 +1790,145 @@
       openManagersModal(botId);
     else closeModal();
   }
+
+  // ── History: who made it, who did what, and earlier versions ─────────────
+
+  function agoText(ts) {
+    if (!ts) return "";
+    const m = Math.max(0, Math.round((Date.now() - ts) / 60000));
+    if (m < 1) return "just now";
+    if (m < 60) return m + " min ago";
+    const h = Math.round(m / 60);
+    if (h < 48) return h + "h ago";
+    return Math.round(h / 24) + "d ago";
+  }
+
+  $("historyBtn").addEventListener("click", () => {
+    if (edit?.id) openHistoryModal(edit.id);
+  });
+
+  function openHistoryModal(botId) {
+    const own = (status?.bots || []).find((x) => x.id === botId);
+    const b = own || (status?.shared || []).find((x) => x.id === botId);
+    if (!b) return;
+    const isOwn = !!own;
+    const box = openModal(true);
+    box.id = "bcHistoryBox";
+    box.dataset.botId = botId;
+
+    const h = document.createElement("h3");
+    h.innerHTML = '<i class="fas fa-clock-rotate-left"></i> ';
+    h.appendChild(document.createTextNode("History of " + b.name));
+    box.appendChild(h);
+
+    const whoBits = [];
+    whoBits.push("Made by " + (b.createdBy || (isOwn ? "you" : b.sharedBy)));
+    whoBits.push("Owned by " + (isOwn ? "you" : b.sharedBy));
+    if (b.managers && b.managers.length)
+      whoBits.push(
+        "Managers: " + b.managers.map((m) => m.name).join(", "),
+      );
+    const who = document.createElement("p");
+    who.textContent = whoBits.join(" · ");
+    box.appendChild(who);
+
+    const log = document.createElement("div");
+    log.style.cssText = "max-height:220px;overflow-y:auto;margin-top:4px;";
+    const entries = b.history || [];
+    if (!entries.length) {
+      const none = document.createElement("div");
+      none.className = "bc-bot-card-meta";
+      none.textContent =
+        "Nothing recorded yet. Saves, managers joining, and restores will show up here.";
+      log.appendChild(none);
+    }
+    for (const e of entries) {
+      const row = document.createElement("div");
+      row.className = "bc-bot-card-meta";
+      row.style.padding = "3px 0";
+      row.textContent =
+        (e.by || "someone") +
+        " " +
+        (e.action || "did something") +
+        (e.rules ? " (" + e.rules + " rules)" : "") +
+        " · " +
+        agoText(e.at);
+      log.appendChild(row);
+    }
+    box.appendChild(log);
+
+    const versions = b.versions || [];
+    if (versions.length) {
+      const vh = document.createElement("p");
+      vh.style.marginTop = "12px";
+      vh.textContent = isOwn
+        ? "Earlier versions - restore one if an edit went wrong:"
+        : "Earlier versions (only the owner can restore):";
+      box.appendChild(vh);
+      for (const v of versions) {
+        const row = document.createElement("div");
+        row.style.cssText =
+          "display:flex;align-items:center;gap:8px;padding:4px 0;";
+        const label = document.createElement("span");
+        label.className = "bc-bot-card-meta";
+        label.style.flex = "1";
+        label.textContent =
+          (v.name || b.name) +
+          " · " +
+          v.rules +
+          (v.rules === 1 ? " rule" : " rules") +
+          " · by " +
+          (v.by || "someone") +
+          " · " +
+          agoText(v.at);
+        row.appendChild(label);
+        if (isOwn) {
+          const btn = document.createElement("button");
+          btn.className = "bc-btn";
+          btn.textContent = "Restore";
+          btn.addEventListener("click", () => {
+            if (
+              confirm(
+                "Put the bot back the way it was " +
+                  agoText(v.at) +
+                  "? The current version is kept in this list.",
+              )
+            )
+              socket.emit("bots restore", { id: botId, at: v.at });
+          });
+          row.appendChild(btn);
+        }
+        box.appendChild(row);
+      }
+    }
+
+    const btns = document.createElement("div");
+    btns.className = "bc-modal-btns";
+    const done = document.createElement("button");
+    done.className = "bc-btn primary";
+    done.textContent = "Done";
+    done.addEventListener("click", closeModal);
+    btns.appendChild(done);
+    box.appendChild(btns);
+  }
+
+  function refreshHistoryModal() {
+    const open = document.getElementById("bcHistoryBox");
+    if (!open) return;
+    const botId = open.dataset.botId;
+    const exists =
+      (status?.bots || []).some((x) => x.id === botId) ||
+      (status?.shared || []).some((x) => x.id === botId);
+    if (exists) openHistoryModal(botId);
+    else closeModal();
+  }
+
+  socket.on("bots restored", (d) => {
+    toastr.success("Restored. The bot is back the way it was.");
+    if (edit?.id === d.id) pendingReloadId = d.id;
+  });
+
+  let pendingReloadId = null;
 
   socket.on("bots redeemed", (d) => {
     closeModal();
@@ -3697,6 +3866,7 @@
 
   const NEWS_VERSION = 9;
   const NEWS = [
+    'Share a bot with friends: the new share button in the editor makes a code. Anyone who enters it under "Add a shared bot" becomes a manager - they can edit the bot, send it to rooms, and use its admin-only commands in rooms, exactly like you. Only you can delete the bot, remove managers, or hand ownership over. The clock button shows the bot\'s history (who made it, who saved what), the last 5 versions are kept with one-click restore for the owner, and nobody can accidentally overwrite anyone else\'s save.',
     "Custom command prefixes: the little box next to your bot's name sets the symbol people type before commands. Keep ! or pick ? . ~ >> or any 1-2 symbols. {commands} lists them with the right prefix, and {prefix} says what it is.",
     'Bots now say hello: when a bot lands in a room it introduces itself and lists its public commands, so people know it exists. Want your own greeting? Add a rule with the new "the bot arrives in the room" trigger and it replaces the built-in hello completely. Want silence? Make an arrive rule with only a wait block. Preview it with the "Bot arrives" button in the Test room.',
     "Memories can now be picked by name at runtime: {memory:note_{word1}} reads whatever the first word names, and a memory block can WRITE to note_{word1} too. So !remember pizza extra cheese saves it, and !recall pizza reads it back. Add |your own text for when nothing is stored: {memory:note_{word1}|I have no note about that}. {words2} grabs everything from the 2nd word on, and writing an empty value forgets a memory.",
@@ -3711,6 +3881,21 @@
   ];
 
   const CHANGELOG = [
+    {
+      title: "Sharing your bot",
+      icon: "fa-user-group",
+      items: [
+        "The share button in the editor (next to Delete) opens the Managers dialog: make a share code, copy it, revoke it whenever you like.",
+        'Your friend presses "Add a shared bot" on the home screen and enters the code. The bot appears in their list marked "shared by you", and they become a manager (up to 5 per bot).',
+        'Managers can edit the bot\'s rules, send it to a room, stop it, and use its "admins only" commands in rooms - the bot recognises them by their device, never by their name.',
+        "Only the owner can delete the bot, hand out or revoke the code, remove a manager, or transfer ownership (Make owner - you stay on as a manager).",
+        "One bot in play per stable: while a shared bot is out, neither the owner nor its managers can send another copy.",
+        "Edits made while the bot is out in a room apply the next time it is deployed, same as your own edits.",
+        "Every shared bot keeps a history: who made it, every save with who saved it, managers joining or being removed, transfers and restores. The clock button in the editor shows it to the whole group.",
+        "The last 5 versions are kept automatically. If an edit wrecks the bot, the owner opens History and restores any earlier version with one click - the wrecked version stays in the list too, so nothing is ever lost.",
+        "Nobody can silently overwrite anyone: saving over a version somebody else saved after you opened the bot is stopped with a clear message - reopen the bot from your list to catch up, then make your change.",
+      ],
+    },
     {
       title: "Command prefixes",
       icon: "fa-terminal",
@@ -3751,7 +3936,7 @@
       icon: "fa-user-shield",
       items: [
         'Every rule has a "who can trigger it" dropdown: anyone (the default, exactly as before) or only me (admin).',
-        "Admin-only rules ignore everyone but the person who deployed the bot, matched by session, never by name.",
+        "Admin-only rules ignore everyone but the person who deployed the bot and the bot's managers, matched by session and device, never by name.",
         "{ownercommands} lists your admin commands; {commands} now lists only the public ones. {owner} is your name.",
         'A ready-made "Admin commands" bot: !say, !clear, !gohome, !admin, all owner-only.',
         "In the Test room you count as the owner, so admin rules fire when you test them; Testy cannot trigger them.",

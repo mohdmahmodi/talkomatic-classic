@@ -161,6 +161,48 @@ function activeBotOfActor(actorKey) {
   return null;
 }
 
+// ── Attribution: who did what, and the versions that protect against it ─────
+// Every meaningful action lands in bot.history (a capped log the whole group
+// can read), and every overwrite first snapshots the state it replaces into
+// bot.versions, so the owner can restore if an edit wrecked the bot.
+
+const CARRY = [
+  "managers",
+  "inviteCode",
+  "sharedBy",
+  "lastStop",
+  "createdBy",
+  "history",
+  "versions",
+];
+const MAX_HISTORY = 25;
+const MAX_VERSIONS = 5;
+
+function actorName(socket) {
+  return sanitizeName(
+    String(socket.handshake?.session?.username || "someone"),
+  ).slice(0, 30);
+}
+
+function logHistory(bot, entry) {
+  if (!bot.history) bot.history = [];
+  bot.history.unshift({ at: Date.now(), ...entry });
+  if (bot.history.length > MAX_HISTORY) bot.history.length = MAX_HISTORY;
+}
+
+function snapshotVersion(bot) {
+  if (!bot.versions) bot.versions = [];
+  bot.versions.unshift({
+    at: bot.updatedAt || Date.now(),
+    by: (bot.editedBy && bot.editedBy.name) || bot.createdBy || "someone",
+    name: bot.name,
+    location: bot.location,
+    prefix: bot.prefix || "!",
+    rules: bot.rules,
+  });
+  if (bot.versions.length > MAX_VERSIONS) bot.versions.length = MAX_VERSIONS;
+}
+
 // ── Rule validation ─────────────────────────────────────────────────────────
 
 const TRIGGERS = ["command", "says", "mention", "join", "leave", "timer", "arrive"];
@@ -699,10 +741,21 @@ function commandIndex(lowerLine, word, prefix) {
   return -1;
 }
 
-// Owner-only rules fire only for the person who deployed the bot. Matched by
-// session userId, never by name, so nobody can trigger them by renaming.
+// Admin-only rules fire for the person who deployed the bot and for the
+// bot's managers. The deployer is matched by session userId, managers by the
+// device behind the speaker's live socket - never by name, so nobody can
+// trigger them by renaming.
 function allowedBy(rt, rule, userId) {
-  return rule.who !== "owner" || (!!userId && userId === rt.ownerId);
+  if (rule.who !== "owner") return true;
+  if (!userId) return false;
+  if (userId === rt.ownerId) return true;
+  const managers = rt.bot.managers;
+  if (!managers || !managers.length || !io()) return false;
+  for (const [, s] of io().sockets.sockets) {
+    if (!s.connected || s.handshake?.session?.userId !== userId) continue;
+    if (s.deviceId && managers.some((m) => m.did === s.deviceId)) return true;
+  }
+  return false;
 }
 
 // Runs when the bot lands in a room. "arrive" rules take over completely;
@@ -1198,6 +1251,15 @@ function ownerStatus(ownerKey) {
       lastStop: b.lastStop || null,
       managers: managerView(b),
       inviteCode: b.inviteCode?.code || null,
+      createdBy: b.createdBy || null,
+      editedBy: b.editedBy || null,
+      history: b.history || [],
+      versions: (b.versions || []).map((x) => ({
+        at: x.at,
+        by: x.by,
+        name: x.name,
+        rules: (x.rules || []).length,
+      })),
     })),
     shared: sharedBotsFor(ownerKey).map((b) => ({
       id: b.id,
@@ -1209,6 +1271,19 @@ function ownerStatus(ownerKey) {
       vars: b.vars || {},
       lastStop: b.lastStop || null,
       sharedBy: b.sharedBy || "the owner",
+      createdBy: b.createdBy || null,
+      editedBy: b.editedBy || null,
+      history: b.history || [],
+      managers: (b.managers || []).map((m) => ({
+        name: m.name || "someone",
+        addedAt: m.addedAt || 0,
+      })),
+      versions: (b.versions || []).map((x) => ({
+        at: x.at,
+        by: x.by,
+        name: x.name,
+        rules: (x.rules || []).length,
+      })),
     })),
     deployed: rt
       ? {
@@ -1266,20 +1341,46 @@ function register(socket, safe) {
         return fail(socket, `You can keep ${LIMITS.MAX_SAVED} bots. Delete one first.`);
       const v = validateConfig(data?.bot, existing?.id);
       if (!v.ok) return fail(socket, v.error);
+      const who = actorName(socket);
       if (existing) {
+        // Refuse to silently overwrite an edit somebody else saved while
+        // this copy was open. The client re-opens the bot to catch up.
+        const base = Number(data?.baseUpdatedAt);
+        if (
+          Number.isFinite(base) &&
+          existing.updatedAt &&
+          existing.updatedAt > base
+        )
+          return fail(
+            socket,
+            "Someone saved this bot after you opened it. Go back to your bot list and open it again to see their version.",
+            "stale_save",
+          );
         v.bot.createdAt = existing.createdAt;
         v.bot.vars = existing.vars || {};
         v.bot.uvars = existing.uvars || {};
-        if (existing.managers) v.bot.managers = existing.managers;
-        if (existing.inviteCode) v.bot.inviteCode = existing.inviteCode;
-        if (existing.sharedBy) v.bot.sharedBy = existing.sharedBy;
-        if (existing.lastStop) v.bot.lastStop = existing.lastStop;
+        snapshotVersion(existing);
+        for (const k of CARRY) if (existing[k] != null) v.bot[k] = existing[k];
+        v.bot.editedBy = {
+          name: who,
+          role: found && found.role === "admin" ? "manager" : "owner",
+          at: Date.now(),
+        };
+        logHistory(v.bot, {
+          by: who,
+          role: v.bot.editedBy.role,
+          action: "edited the bot",
+          rules: v.bot.rules.length,
+        });
         rec.bots[rec.bots.indexOf(existing)] = v.bot;
       } else {
+        v.bot.createdBy = who;
+        v.bot.editedBy = { name: who, role: "owner", at: Date.now() };
+        logHistory(v.bot, { by: who, role: "owner", action: "made the bot" });
         rec.bots.push(v.bot);
       }
       saveSoon();
-      socket.emit("bots saved", { id: v.bot.id });
+      socket.emit("bots saved", { id: v.bot.id, updatedAt: v.bot.updatedAt });
       socket.emit("bots status", ownerStatus(ownerKey));
     }),
   );
@@ -1456,9 +1557,12 @@ function register(socket, safe) {
         code: "BOT-" + crypto.randomBytes(4).toString("hex").toUpperCase(),
         at: Date.now(),
       };
-      bot.sharedBy = sanitizeName(
-        String(socket.handshake.session.username || "the owner"),
-      ).slice(0, 30);
+      bot.sharedBy = actorName(socket);
+      logHistory(bot, {
+        by: bot.sharedBy,
+        role: "owner",
+        action: "made a share code",
+      });
       saveSoon();
       socket.emit("bots status", ownerStatus(ownerKey));
     }),
@@ -1473,6 +1577,11 @@ function register(socket, safe) {
       const bot = rec?.bots.find((b) => b.id === data?.id);
       if (!bot) return;
       bot.inviteCode = null;
+      logHistory(bot, {
+        by: actorName(socket),
+        role: "owner",
+        action: "revoked the share code",
+      });
       saveSoon();
       socket.emit("bots status", ownerStatus(ownerKey));
     }),
@@ -1499,12 +1608,16 @@ function register(socket, safe) {
           if ((bot.managers || []).length >= LIMITS.MAX_MANAGERS)
             return fail(socket, "This bot already has its limit of managers.");
           if (!bot.managers) bot.managers = [];
+          const joiner = actorName(socket);
           bot.managers.push({
             did: actorKey,
-            name: sanitizeName(
-              String(socket.handshake.session.username || "someone"),
-            ).slice(0, 30),
+            name: joiner,
             addedAt: Date.now(),
+          });
+          logHistory(bot, {
+            by: joiner,
+            role: "manager",
+            action: "joined as a manager",
           });
           saveSoon();
           socket.emit("bots redeemed", {
@@ -1528,11 +1641,25 @@ function register(socket, safe) {
       const found = findBotFor(ownerKey, data?.id);
       if (!found || !data?.ref) return;
       const { bot } = found;
-      const canRemove =
-        found.role === "owner" || mgrRef(ownerKey) === data.ref;
+      const self = mgrRef(ownerKey) === data.ref;
+      const canRemove = found.role === "owner" || self;
       if (!canRemove) return;
+      const removed = (bot.managers || []).find(
+        (m) => mgrRef(m.did) === data.ref,
+      );
+      if (!removed) return;
       bot.managers = (bot.managers || []).filter(
         (m) => mgrRef(m.did) !== data.ref,
+      );
+      logHistory(
+        bot,
+        self && found.role !== "owner"
+          ? { by: removed.name, role: "manager", action: "left" }
+          : {
+              by: actorName(socket),
+              role: "owner",
+              action: "removed " + (removed.name || "a manager"),
+            },
       );
       saveSoon();
       socket.emit("bots status", ownerStatus(ownerKey));
@@ -1559,17 +1686,57 @@ function register(socket, safe) {
         return fail(socket, "They already keep the maximum number of bots.");
       rec.bots = rec.bots.filter((b) => b !== bot);
       targetRec.bots.push(bot);
+      const oldOwner = actorName(socket);
       bot.managers = (bot.managers || []).filter((m) => m.did !== target.did);
       bot.managers.push({
         did: ownerKey,
-        name: sanitizeName(
-          String(socket.handshake.session.username || "someone"),
-        ).slice(0, 30),
+        name: oldOwner,
         addedAt: Date.now(),
       });
       bot.sharedBy = target.name || "the owner";
+      logHistory(bot, {
+        by: oldOwner,
+        role: "owner",
+        action: "handed the bot to " + (target.name || "a manager"),
+      });
       saveSoon();
       socket.emit("bots transferred", { id: bot.id, to: target.name });
+      socket.emit("bots status", ownerStatus(ownerKey));
+    }),
+  );
+
+  // ── Restore: the owner rolls the bot back to a kept version ──────────────
+  socket.on(
+    "bots restore",
+    safe(async (data) => {
+      if (!requireSignin(socket)) return;
+      const ownerKey = ownerKeyOf(socket);
+      const rec = ownerRecord(ownerKey, false);
+      const bot = rec?.bots.find((b) => b.id === data?.id);
+      if (!bot) {
+        if (findBotFor(ownerKey, data?.id))
+          fail(socket, "Only the owner can restore an earlier version.");
+        return;
+      }
+      const ver = (bot.versions || []).find((x) => x.at === Number(data?.at));
+      if (!ver || !Array.isArray(ver.rules) || !ver.rules.length)
+        return fail(socket, "That version is no longer kept.");
+      const who = actorName(socket);
+      snapshotVersion(bot);
+      bot.name = ver.name;
+      bot.location = ver.location;
+      bot.prefix = ver.prefix || "!";
+      bot.rules = ver.rules;
+      bot.updatedAt = Date.now();
+      bot.editedBy = { name: who, role: "owner", at: Date.now() };
+      logHistory(bot, {
+        by: who,
+        role: "owner",
+        action: "restored the version by " + (ver.by || "someone"),
+        versionAt: ver.at,
+      });
+      saveSoon();
+      socket.emit("bots restored", { id: bot.id, updatedAt: bot.updatedAt });
       socket.emit("bots status", ownerStatus(ownerKey));
     }),
   );
