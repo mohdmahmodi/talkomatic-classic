@@ -1256,6 +1256,53 @@
     });
   }
 
+  // ── Community-rule picker for report and block prompts ────────────────────
+  let communityRules = null;
+
+  function fetchCommunityRules() {
+    return new Promise((resolve) => {
+      if (communityRules) return resolve(communityRules);
+      const s = window.socket;
+      if (!s || !s.connected) return resolve(null);
+      const timer = setTimeout(done, 1500);
+      function done(d) {
+        clearTimeout(timer);
+        s.off("rules data", done);
+        if (d && Array.isArray(d.community) && d.community.length)
+          communityRules = d.community;
+        resolve(communityRules);
+      }
+      s.on("rules data", done);
+      s.emit("rules get");
+    });
+  }
+
+  async function communityRuleField() {
+    const list = await fetchCommunityRules();
+    if (!list || !list.length) return null;
+    const options = [{ value: "", label: "No specific rule" }];
+    list.forEach((r, i) => {
+      if (!r || !r.title) return;
+      options.push({
+        value: "Rule " + (i + 1) + " - " + r.title,
+        label: i + 1 + ". " + r.title,
+      });
+    });
+    return {
+      name: "rule",
+      label: "Broke a rule? (optional)",
+      type: "select",
+      value: "",
+      options,
+    };
+  }
+
+  function ruleReason(rule, text) {
+    const t = String(text || "").trim();
+    if (!rule) return t;
+    return t ? rule + ". " + t : rule + ".";
+  }
+
   window.StaffUI = {
     escape,
     el,
@@ -1269,5 +1316,7 @@
     actionToast,
     copy,
     help,
+    communityRuleField,
+    ruleReason,
   };
 })();

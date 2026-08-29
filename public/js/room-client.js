@@ -1934,48 +1934,27 @@ function triggerDevConfetti() {
   }, 5000);
 }
 
-function createDevColorPicker() {
-  const navRight = document.querySelector(".navbar-right");
-  if (!navRight || document.getElementById("devColorPicker")) return;
+// Applies a picked staff color locally right away and emits it throttled, so
+// dragging the native picker updates the room live without flooding.
+let staffColorTimer = null;
+let staffColorSentAt = 0;
 
-  const wrapper = document.createElement("div");
-  wrapper.id = "devColorPicker";
-  wrapper.style.cssText =
-    "display:flex;align-items:center;gap:6px;margin-right:8px;";
-
-  const label = document.createElement("span");
-  label.textContent = "Color:";
-  label.style.cssText = "color:#ff9800;font-size:12px;";
-
-  const input = document.createElement("input");
-  input.type = "color";
-  input.value = localStorage.getItem("talkomatic_devColor") || "#ff9800";
-  input.title = "Change your text color";
-  input.style.cssText =
-    "width:28px;height:28px;border:1px solid #555;border-radius:4px;cursor:pointer;background:none;padding:0;";
-
-  input.addEventListener("input", (e) => {
-    const color = e.target.value;
-    localStorage.setItem("talkomatic_devColor", color);
-    socket.emit("dev set color", { color });
-    applyDevColor(color);
-  });
-
-  wrapper.appendChild(label);
-  wrapper.appendChild(input);
-
-  const leaveBtn = navRight.querySelector(".leave-room");
-  if (leaveBtn) {
-    navRight.insertBefore(wrapper, leaveBtn);
-  } else {
-    navRight.appendChild(wrapper);
+function pushStaffColor(color, final) {
+  if (!/^#[0-9a-fA-F]{6}$/.test(color)) return;
+  localStorage.setItem("talkomatic_devColor", color);
+  refreshCurrentUserAppearance();
+  const send = () => {
+    staffColorSentAt = Date.now();
+    socket.emit("dev set color", {
+      color: localStorage.getItem("talkomatic_devColor"),
+    });
+  };
+  if (staffColorTimer) {
+    clearTimeout(staffColorTimer);
+    staffColorTimer = null;
   }
-
-  const savedColor = localStorage.getItem("talkomatic_devColor");
-  if (savedColor) {
-    socket.emit("dev set color", { color: savedColor });
-    applyDevColor(savedColor);
-  }
+  if (final || Date.now() - staffColorSentAt > 300) send();
+  else staffColorTimer = setTimeout(send, 320);
 }
 
 function getCurrentUserRow() {
@@ -2024,6 +2003,9 @@ function applyDevAppearanceToRow(row, user) {
     ci.style.removeProperty("color");
     if (modRowClass) row.classList.add(modRowClass);
     if (modTextClass) ci.classList.add(modTextClass);
+    if (modTextClass && user.devColor) {
+      ci.style.setProperty("color", user.devColor, "important");
+    }
   }
 
   if (showCrown) {
@@ -2077,7 +2059,7 @@ function refreshCurrentUserAppearance() {
     modLevel: currentUserModLevel,
     isHidden: currentUserIsHidden,
     devColor:
-      currentUserIsDev && !currentUserIsHidden
+      (currentUserIsDev || currentUserIsMod) && !currentUserIsHidden
         ? localStorage.getItem("talkomatic_devColor") || null
         : null,
   };
@@ -2391,6 +2373,34 @@ function createUserRow(user, container) {
       ? targetVisibleRole === null
       : false;
   if (isStaff()) {
+    if (user.id === currentUserId) {
+      const colorBtn = document.createElement("button");
+      colorBtn.className = "staff-action-button color-action-button";
+      colorBtn.innerHTML = '<i class="fas fa-palette"></i>';
+      colorBtn.title = "Change your text color";
+
+      const colorInput = document.createElement("input");
+      colorInput.type = "color";
+      colorInput.setAttribute("aria-label", "Pick your text color");
+      colorInput.style.cssText =
+        "position:absolute;width:0;height:0;opacity:0;border:0;padding:0;";
+      colorInput.addEventListener("click", (e) => e.stopPropagation());
+      colorInput.addEventListener("input", () =>
+        pushStaffColor(colorInput.value, false),
+      );
+      colorInput.addEventListener("change", () =>
+        pushStaffColor(colorInput.value, true),
+      );
+      colorBtn.appendChild(colorInput);
+
+      colorBtn.addEventListener("click", () => {
+        colorInput.value =
+          localStorage.getItem("talkomatic_devColor") || "#ff9800";
+        colorInput.click();
+      });
+      tools.appendChild(colorBtn);
+    }
+
     const noteBtn = document.createElement("button");
     noteBtn.className = "staff-action-button note-action-button";
     noteBtn.innerHTML = '<i class="fas fa-sticky-note"></i>';
@@ -2453,7 +2463,7 @@ function createUserRow(user, container) {
     );
   }
 
-  if (user.devColor && user.isDev && !user.isHidden) {
+  if (user.devColor && (user.isDev || user.isMod) && !user.isHidden) {
     div.style.setProperty("color", user.devColor, "important");
   }
 
@@ -2462,7 +2472,7 @@ function createUserRow(user, container) {
     "width:100%;height:100%;background:black;color:orange;overflow-x:hidden;overflow-y:auto;padding:6px 8px;box-sizing:border-box;outline:none;white-space:pre-wrap;word-break:break-word;position:absolute;top:0;left:0;z-index:2";
   div.spellcheck = false;
 
-  if (user.devColor && user.isDev && !user.isHidden) {
+  if (user.devColor && (user.isDev || user.isMod) && !user.isHidden) {
     div.style.color = user.devColor;
   }
 
@@ -3099,8 +3109,9 @@ socket.on("room joined", (data) => {
   updateInviteLink();
   createEmotesDropdown();
 
-  if (currentUserIsDev) {
-    if (!currentUserIsHidden) triggerDevConfetti();
+  if (currentUserIsDev && !currentUserIsHidden) triggerDevConfetti();
+
+  if (currentUserIsDev || currentUserIsMod) {
     const savedColor = localStorage.getItem("talkomatic_devColor");
     if (savedColor) {
       socket.emit("dev set color", { color: savedColor });
@@ -3684,33 +3695,36 @@ async function openReportPrompt(user) {
       });
     return;
   }
+  const fields = [
+    {
+      name: "category",
+      label: "What is wrong?",
+      type: "select",
+      value: "spam",
+      options: cats,
+    },
+  ];
+  const ruleField = await StaffUI.communityRuleField();
+  if (ruleField) fields.push(ruleField);
+  fields.push({
+    name: "reason",
+    label: "Details (optional)",
+    type: "textarea",
+    maxLength: 300,
+    placeholder: "Anything that helps staff understand.",
+  });
   const r = await StaffUI.prompt({
     title: "Report " + name,
     icon: '<i class="fas fa-flag"></i>',
     subtitle: "Sent privately to the moderators",
-    fields: [
-      {
-        name: "category",
-        label: "What is wrong?",
-        type: "select",
-        value: "spam",
-        options: cats,
-      },
-      {
-        name: "reason",
-        label: "Details (optional)",
-        type: "textarea",
-        maxLength: 300,
-        placeholder: "Anything that helps staff understand.",
-      },
-    ],
+    fields,
     confirmText: "Send report",
   });
   if (r)
     socket.emit("user report", {
       targetUserId: user.id,
       category: r.category,
-      reason: r.reason,
+      reason: StaffUI.ruleReason(r.rule, r.reason),
     });
 }
 
@@ -4075,26 +4089,30 @@ function openIpBlockPicker(user) {
           label: d.label,
           danger: true,
           onClick: async () => {
+            const fields = [];
+            const ruleField = await StaffUI.communityRuleField();
+            if (ruleField) fields.push(ruleField);
+            fields.push(
+              {
+                name: "reason",
+                label: "Message to show the blocked user (optional)",
+                type: "textarea",
+                placeholder: "e.g. Repeated harassment after warnings.",
+                maxLength: 500,
+              },
+              {
+                name: "banRange",
+                type: "checkbox",
+                label: "Also block their surrounding range",
+                value: false,
+                help: "Covers the whole network they sit on (IPv6 /64, or IPv4 /24, which is up to 256 addresses) instead of the single address. Use it for someone who keeps returning on a neighbouring address, not as a matter of course.",
+              },
+            );
             const res = await StaffUI.prompt({
               title: "Block IP",
               icon: '<i class="fas fa-ban"></i>',
               message: `Block this user's IP for ${d.label}? They'll be disconnected immediately.`,
-              fields: [
-                {
-                  name: "reason",
-                  label: "Message to show the blocked user (optional)",
-                  type: "textarea",
-                  placeholder: "e.g. Repeated harassment after warnings.",
-                  maxLength: 500,
-                },
-                {
-                  name: "banRange",
-                  type: "checkbox",
-                  label: "Also block their surrounding range",
-                  value: false,
-                  help: "Covers the whole network they sit on (IPv6 /64, or IPv4 /24, which is up to 256 addresses) instead of the single address. Use it for someone who keeps returning on a neighbouring address, not as a matter of course.",
-                },
-              ],
+              fields,
               danger: true,
               confirmText: "Block IP",
             });
@@ -4102,7 +4120,7 @@ function openIpBlockPicker(user) {
               socket.emit("staff ip block", {
                 targetUserId: user.id,
                 duration: d.value,
-                reason: res.reason || "",
+                reason: StaffUI.ruleReason(res.rule, res.reason),
                 banRange: !!res.banRange,
               });
           },
@@ -4237,20 +4255,10 @@ function openStaffPanel() {
       id: "staffFakeAfkItem",
       icon: '<i class="fas fa-user-clock"></i>',
       label: fakeAfkActive ? "Fake AFK: ON" : "Fake AFK: OFF",
-      desc: "Locks your typing; a minute later the room sees you as away",
+      desc: "Locks your typing; a few minutes later the room sees you as away",
       onClick: () => toggleFakeAfk(),
     },
-  ];
-  if (currentUserIsDev) {
-    appearanceItems.push({
-      id: "staffVanishItem",
-      icon: '<i class="fas fa-ghost"></i>',
-      label: currentUserIsVanished ? "Vanish: ON" : "Vanish: OFF",
-      desc: "Invisible to non-devs; takes no room slot",
-      onClick: () =>
-        socket.emit("dev set vanish", { isVanished: !currentUserIsVanished }),
-    });
-    appearanceItems.push({
+    {
       icon: '<i class="fas fa-palette"></i>',
       label: "Custom name color...",
       desc: "Set your chat text color",
@@ -4268,12 +4276,18 @@ function openStaffPanel() {
           ],
           confirmText: "Apply",
         });
-        if (color) {
-          localStorage.setItem("talkomatic_devColor", color);
-          socket.emit("dev set color", { color });
-          applyDevColor(color);
-        }
+        if (color) pushStaffColor(color, true);
       },
+    },
+  ];
+  if (currentUserIsDev) {
+    appearanceItems.push({
+      id: "staffVanishItem",
+      icon: '<i class="fas fa-ghost"></i>',
+      label: currentUserIsVanished ? "Vanish: ON" : "Vanish: OFF",
+      desc: "Invisible to non-devs; takes no room slot",
+      onClick: () =>
+        socket.emit("dev set vanish", { isVanished: !currentUserIsVanished }),
     });
     appearanceItems.push({
       id: "staffIpItem",

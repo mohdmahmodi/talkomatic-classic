@@ -1737,6 +1737,7 @@ function formatUserForSocket(user, recipientSocket) {
   } else if (user.isMod) {
     formatted.isMod = true;
     formatted.modLevel = user.modLevel || 2;
+    if (user.devColor && !user.isHidden) formatted.devColor = user.devColor;
     if (user.isHidden) formatted.isHidden = true;
   }
 
@@ -4799,9 +4800,11 @@ function registerSocketHandlers(opts) {
     socket.on(
       "dev set color",
       safe(async (data) => {
-        if (!socket.isDev) return;
+        if (!socket.isDev && !socket.isMod) return;
         if (!data?.color || typeof data.color !== "string") return;
         if (!/^#[0-9a-fA-F]{6}$/.test(data.color)) return;
+        if (Date.now() - (socket._colorTick || 0) < 100) return;
+        socket._colorTick = Date.now();
 
         const userId = socket.handshake.session?.userId;
         if (!userId || !socket.roomId) return;
@@ -7896,7 +7899,7 @@ function registerSocketHandlers(opts) {
             : "other";
         const reason = sanitizeMessage(
           typeof data?.reason === "string" ? data.reason : "",
-        ).slice(0, 300);
+        ).slice(0, 440);
         const roomId = socket.roomId;
         const room = roomId ? state.rooms.get(roomId) : null;
         let targetName = null;

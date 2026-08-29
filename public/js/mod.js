@@ -2610,7 +2610,7 @@
     return Math.floor(h / 24) + "d ago";
   }
 
-  function banReported(r, duration) {
+  async function banReported(r, duration) {
     const go = (reason, banRange) =>
       socket.emit("staff ip block", {
         targetUserId: r.targetUserId,
@@ -2619,6 +2619,25 @@
         banRange: !!banRange,
       });
     if (!window.StaffUI) return go("", false);
+    const fields = [];
+    const ruleField = await StaffUI.communityRuleField();
+    if (ruleField) fields.push(ruleField);
+    fields.push(
+      {
+        name: "value",
+        label: "Reason (optional, saved to the ban list)",
+        type: "textarea",
+        placeholder: "e.g. Repeated harassment after warnings.",
+        maxLength: 500,
+      },
+      {
+        name: "banRange",
+        type: "checkbox",
+        label: "Also block the surrounding range",
+        value: false,
+        help: "Covers the whole network they sit on (IPv6 /64, or IPv4 /24, which is up to 256 addresses). Use it for someone returning on neighbouring addresses.",
+      },
+    );
     StaffUI.prompt({
       title: "IP block " + (r.name || "user"),
       icon: '<i class="fas fa-ban"></i>',
@@ -2628,26 +2647,11 @@
         (r.online
           ? ". They are disconnected immediately."
           : ". They are offline; the block uses their last known address."),
-      fields: [
-        {
-          name: "value",
-          label: "Reason (optional, saved to the ban list)",
-          type: "textarea",
-          placeholder: "e.g. Repeated harassment after warnings.",
-          maxLength: 500,
-        },
-        {
-          name: "banRange",
-          type: "checkbox",
-          label: "Also block the surrounding range",
-          value: false,
-          help: "Covers the whole network they sit on (IPv6 /64, or IPv4 /24, which is up to 256 addresses). Use it for someone returning on neighbouring addresses.",
-        },
-      ],
+      fields,
       danger: true,
       confirmText: "Block " + durationLabel(duration),
     }).then((res) => {
-      if (res != null) go(res.value, res.banRange);
+      if (res != null) go(StaffUI.ruleReason(res.rule, res.value), res.banRange);
     });
   }
   function dismissReport(r) {

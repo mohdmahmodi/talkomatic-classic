@@ -21,8 +21,14 @@ const DEFAULT_COMMUNITY = [
   {
     title: "Talkomatic is open to everyone",
     body:
-      "No account, no invite, no age gate. People here come from everywhere and will not share your opinions, humour, or language. You do not have to like everyone in a room, but you do have to let them be in it.",
+      "No account, no invite. People here come from everywhere and will not share your opinions, humour, or language. You do not have to like everyone in a room, but you do have to let them be in it.",
     why: "An open platform only stays open if people are not driven out of it.",
+  },
+  {
+    title: "You must be 13 or older to use Talkomatic",
+    body:
+      "Talkomatic is for people aged 13 and up. If you are between 13 and 17, use it only with the permission of a parent or legal guardian. Nobody here will ask your age and you should not offer it, but if you tell us you are under 13, you will be removed and your access blocked. You are welcome back once you meet the requirement. Parents or guardians who believe a child under 13 is using Talkomatic can contact us through Discord and we will remove their access.",
+    why: "The law does not permit a site like this to serve children under 13, and an anonymous room full of strangers is no place for them anyway.",
   },
   {
     title: "Do not harass people",
@@ -39,7 +45,7 @@ const DEFAULT_COMMUNITY = [
   {
     title: "Never post personal information",
     body:
-      "Do not post anyone's real name, address, workplace, school, phone number, IP address, or photographs, and do not press others to reveal them. This covers guessing publicly at who someone is. It applies to information you found elsewhere, and it applies in every room.",
+      "Do not post anyone's real name, address, workplace, school, phone number, IP address, or photographs, and do not press others to reveal them. This covers guessing publicly at who someone is. It applies to information you found elsewhere, and it applies in every room. It covers your own details too: do not post them, and be suspicious of anyone who asks for them, because staff never will.",
     why: "Talkomatic is anonymous on purpose. Stripping someone's anonymity is the one thing said here that can follow them home, and it cannot be undone.",
   },
   {
@@ -57,7 +63,7 @@ const DEFAULT_COMMUNITY = [
   {
     title: "Keep sexual content out of public rooms",
     body:
-      "Public rooms are shared with people who did not choose to see it, and you cannot know who is reading. Keep explicit text and links out of them.",
+      "Public rooms are shared with people who did not choose to see it, and you cannot know who is reading. Keep explicit text and links out of them. Directing sexual content at a minor is never allowed anywhere on the site, public or private.",
     why: "Anyone can walk into a public room without warning, including people who should not see that.",
   },
   {
@@ -69,7 +75,7 @@ const DEFAULT_COMMUNITY = [
   {
     title: "Nothing illegal",
     body:
-      "No sexual content involving minors, no credible threats of violence, no malware or phishing links, no content that is a crime to share. There is no warning step for this.",
+      "No sexual content involving minors and no sexual messages sent to them, no credible threats of violence, no malware or phishing links, no content that is a crime to share. There is no warning step for this.",
     why: "This is handled outside of moderation, not inside it.",
   },
   {
@@ -81,7 +87,7 @@ const DEFAULT_COMMUNITY = [
   {
     title: "Private and semi-private rooms belong to the people in them",
     body:
-      "What happens in a room you made private is between the people you let in, and moderators do not patrol them. Two things still hold everywhere: nothing illegal, and no posting of personal information. Anyone inside a private room can still report what happens in it.",
+      "What happens in a room you made private is between the people you let in, and moderators do not patrol them. Three things still hold everywhere: nothing illegal, no posting of personal information, and the age requirement. Anyone inside a private room can still report what happens in it.",
     why: "A private room a moderator can wander into is not private, so the only way it works is that reports come from inside.",
   },
   {
@@ -119,6 +125,13 @@ const DEFAULT_MOD = [
     body:
       "Warn before you kick. Kick before you block. Reach for a longer block only when a shorter one has already failed. A kick is a full stop in a conversation, not a punishment.",
     why: "Most trouble stops at the first sign that somebody is watching, and an over-reaction turns a small problem into a grudge.",
+  },
+  {
+    level: "all",
+    title: "Underage users are removed, not warned",
+    body:
+      "When somebody clearly states they are under 13, act on it: remove them with the standard underage notice, and a full moderator places the block and hands it up to be made permanent, with underage as the recorded reason. Only a clear statement counts. A guess from how somebody types is not a disclosure, and another user calling somebody a child is not either. Never ask anybody their age, never ask for proof, and never collect anything beyond the normal log: no names, no schools, no photos, ever. If they come back, it is ordinary ban evasion. The block can be appealed once they meet the age requirement.",
+    why: "The law sets this one, not us. And the one way staff can make it worse is by questioning a child for personal details, so we never do.",
   },
   {
     level: "all",
@@ -166,21 +179,21 @@ const DEFAULT_MOD = [
     level: "jr",
     title: "Junior moderators: escalate rather than guess",
     body:
-      "When something needs more than a warning or a kick, leave it and call a full moderator or a developer. Do not improvise a substitute, and do not lean on somebody else to run the action for you without telling them what it is.",
+      "When something needs more than a warning or a kick, leave it and call a full moderator or a developer. Do not improvise a substitute, and do not lean on somebody else to run the action for you without telling them what it is. For an underage disclosure, kick with the standard notice and hand the block up.",
     why: "A handover with the facts attached is worth more than a fast decision made by the person with the fewest tools.",
   },
   {
     level: "full",
     title: "Full moderators: what you hold",
     body:
-      "Everything a junior has, plus IP blocks of 1 hour, 24 hours, or 7 days, closing a room, spectating, discarding reports, resolving appeals, and reviewing moderator applications. Lifting a ban, granting or revoking keys, permanent blocks, and the site-wide tools stay with developers.",
+      "Everything a junior has, plus IP blocks of 1 hour, 24 hours, or 7 days, closing a room, spectating public rooms, discarding reports, resolving appeals, and reviewing moderator applications. Lifting a ban, granting or revoking keys, permanent blocks, and the site-wide tools stay with developers.",
     why: "Anything that cannot be undone by the person who did it sits one level above them on purpose.",
   },
   {
     level: "full",
     title: "Full moderators: blocks are temporary by default",
     body:
-      "Pick the shortest block that will actually work, and let it expire rather than reaching for the next tier out of habit. If a case genuinely needs to be permanent, that is a developer's call and you should hand it over with your reasoning.",
+      "Pick the shortest block that will actually work, and let it expire rather than reaching for the next tier out of habit. If a case genuinely needs to be permanent, that is a developer's call and you should hand it over with your reasoning. Underage removals are the standing exception: those are always handed up to be made permanent.",
     why: "A temporary block that works costs nothing to get wrong. A permanent one removes somebody from an anonymous platform they can simply rejoin, so it mostly punishes the people who play fair.",
   },
   {
