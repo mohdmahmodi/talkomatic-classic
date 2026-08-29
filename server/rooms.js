@@ -2617,7 +2617,7 @@ function joinRoom(socket, roomId, userId) {
           true,
         ),
       );
-    if (!location) location = "On The Web";
+    if (!location) location = "";
 
     const clientIp = socket.clientIp || socket.handshake.address;
     if (CONFIG.FEATURES.ENABLE_BOT_PROTECTION) {
@@ -3340,9 +3340,7 @@ function registerSocketHandlers(opts) {
         }
 
         let username = enforceUsernameLimit(sanitizeName(data.username));
-        let location = enforceLocationLimit(
-          sanitizeName(data.location || "On The Web"),
-        );
+        let location = enforceLocationLimit(sanitizeName(data.location || ""));
 
         if (!username) {
           return socket.emit(
@@ -3353,7 +3351,6 @@ function registerSocketHandlers(opts) {
             ),
           );
         }
-        if (!location) location = "On The Web";
 
         if (CONFIG.FEATURES.ENABLE_WORD_FILTER) {
           if (wordFilter.checkText(username).hasOffensiveWord)
@@ -4384,7 +4381,7 @@ function registerSocketHandlers(opts) {
           userId = socket.handshake.sessionID;
           socket.handshake.session.userId = userId;
         }
-        location = location || "On The Web";
+        location = location || "";
 
         if (!socket.isDev && !socket.isMod) {
           const cur = getOwnCurrentRoom(userId);

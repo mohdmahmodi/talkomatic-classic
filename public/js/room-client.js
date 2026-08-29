@@ -1961,6 +1961,12 @@ function getCurrentUserRow() {
   return document.querySelector(`.chat-row[data-user-id="${currentUserId}"]`);
 }
 
+function userLabel(user) {
+  return user.location
+    ? `${user.username} / ${user.location}`
+    : `${user.username}`;
+}
+
 function applyDevAppearanceToRow(row, user) {
   if (!row || !user) return;
 
@@ -2315,7 +2321,7 @@ function createUserRow(user, container) {
 
   const nameEl = document.createElement("span");
   nameEl.className = "ui-name";
-  nameEl.textContent = `${user.username} / ${user.location}`;
+  nameEl.textContent = userLabel(user);
   info.appendChild(nameEl);
 
   const muteBtn = document.createElement("button");
@@ -3359,9 +3365,7 @@ function storedAvatar() {
 function joinRoom(roomId, accessCode = null) {
   const uname = currentUsername || localStorage.getItem("talkomaticUsername");
   const uloc =
-    currentLocation ||
-    localStorage.getItem("talkomaticLocation") ||
-    "On The Web";
+    currentLocation || localStorage.getItem("talkomaticLocation") || "";
 
   if (!uname || isGuestUsername(uname)) {
     if (uname) localStorage.removeItem("talkomaticUsername");
@@ -3403,9 +3407,7 @@ socket.io.on("reconnect", () => {
 
   const uname = currentUsername || localStorage.getItem("talkomaticUsername");
   const uloc =
-    currentLocation ||
-    localStorage.getItem("talkomaticLocation") ||
-    "On The Web";
+    currentLocation || localStorage.getItem("talkomaticLocation") || "";
 
   if (!uname || isGuestUsername(uname)) {
     if (uname) localStorage.removeItem("talkomaticUsername");
@@ -4784,7 +4786,7 @@ socket.on("user renamed", (data) => {
   if (!row) return;
   const info = row.querySelector(".user-info");
   if (!info) return;
-  const label = `${data.username} / ${data.location}`;
+  const label = userLabel(data);
   const nameEl = info.querySelector(".ui-name");
   if (nameEl) {
     nameEl.textContent = label;

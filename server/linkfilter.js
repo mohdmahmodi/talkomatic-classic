@@ -43,7 +43,7 @@ function scan(value) {
     }
   }
   map.push(value.length);
-  return { text, map };
+  return { text, map, src: value };
 }
 
 function tighten(scanned) {
@@ -78,7 +78,7 @@ function tighten(scanned) {
     }
   }
   map.push(scanned.map[scanned.map.length - 1]);
-  return { text, map };
+  return { text, map, src: scanned.src };
 }
 
 function closeUp(scanned) {
@@ -90,7 +90,7 @@ function closeUp(scanned) {
     map.push(scanned.map[i]);
   }
   map.push(scanned.map[scanned.map.length - 1]);
-  return { text, map };
+  return { text, map, src: scanned.src };
 }
 
 const TLD = new Set(
@@ -169,7 +169,7 @@ const LINK = new RegExp(
     "((?=[a-z0-9-]*[a-z])[a-z0-9][a-z0-9-]{1,23})" +
     "(:\\d{1,5})?" +
     "([\\/?#][^\\s<>\"']*)?)",
-  "gi",
+  "dgi",
 );
 
 const TRAILING = /[.,!?;:)\]}'"]+$/;
@@ -190,7 +190,19 @@ function looksLikeLink(value) {
   );
 }
 
-function rangesIn({ text, map }, out, weak) {
+// A "port" whose characters sat apart in the original text, or one followed
+// by another colon, is prose ("time: 5:32", "score: 5/10"), not a port.
+function phonyPort(m, scanned) {
+  if (!m[5]) return false;
+  if (scanned.text[m.index + m[0].length] === ":") return true;
+  const idx = m.indices && m.indices[5];
+  if (!idx || typeof scanned.src !== "string") return false;
+  const span = scanned.src.slice(scanned.map[idx[0]], scanned.map[idx[1]]);
+  return /\s/.test(span);
+}
+
+function rangesIn(scanned, out, weak) {
+  const { text, map } = scanned;
   LINK.lastIndex = 0;
   let m;
   while ((m = LINK.exec(text)) !== null) {
@@ -199,6 +211,7 @@ function rangesIn({ text, map }, out, weak) {
       continue;
     }
     if (!m[1]) {
+      if (phonyPort(m, scanned)) continue;
       const labels = m[3] || "";
       const tld = m[4] || "";
       const tail = m[6] || "";
@@ -239,7 +252,7 @@ function swapRanges(scanned, out) {
   if (!SWAP_SHAPE.test(scanned.text)) return;
   for (const ch of SWAPPABLE) {
     if (!scanned.text.includes(ch)) continue;
-    rangesIn({ text: scanned.text.split(ch).join("."), map: scanned.map }, out);
+    rangesIn({ ...scanned, text: scanned.text.split(ch).join(".") }, out);
   }
 }
 
@@ -254,7 +267,7 @@ function stripJunk(scanned) {
     map.push(scanned.map[i]);
   }
   map.push(scanned.map[scanned.map.length - 1]);
-  return { text, map };
+  return { text, map, src: scanned.src };
 }
 
 const WEAK_ANY = /[-_‐-―⁃־－＿]/g;
@@ -283,7 +296,7 @@ function weakRanges(scanned, out) {
   WEAK_ANY.lastIndex = 0;
   if (!WEAK_ANY.test(scanned.text)) return;
   rangesIn(
-    { text: scanned.text.replace(WEAK_ANY, "."), map: scanned.map },
+    { ...scanned, text: scanned.text.replace(WEAK_ANY, ".") },
     out,
     true,
   );
@@ -317,7 +330,7 @@ function unspell(scanned) {
     map.push(scanned.map[i]);
   }
   map.push(scanned.map[scanned.map.length - 1]);
-  return { text, map };
+  return { text, map, src: scanned.src };
 }
 
 const TOLD = [
@@ -341,7 +354,7 @@ function namedChars(scanned) {
 function toldRanges(scanned, chars, out) {
   for (const ch of chars) {
     if (!scanned.text.includes(ch)) continue;
-    rangesIn({ text: scanned.text.split(ch).join("."), map: scanned.map }, out);
+    rangesIn({ ...scanned, text: scanned.text.split(ch).join(".") }, out);
   }
 }
 

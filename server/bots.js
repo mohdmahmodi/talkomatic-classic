@@ -47,6 +47,7 @@ const LIMITS = {
   TYPE_CHARS_PER_TICK: 4,
   OWNER_GRACE_MS: 60000,
   MAX_CONFIG_BYTES: 200000,
+  MAX_MANAGERS: 5,
 };
 
 const TICK_MS = 120;
@@ -106,6 +107,58 @@ function ownerRecord(ownerKey, create) {
     store.owners[ownerKey] = rec;
   }
   return rec || null;
+}
+
+// ── Managers (bots shared with other users) ─────────────────────────────────
+// A manager can edit, deploy and stop the bot. Only the owner can delete it,
+// hand out or revoke the invite code, demote managers, or transfer it.
+// Manager device ids never leave the server; the client sees opaque refs.
+
+function mgrRef(did) {
+  return crypto
+    .createHash("sha256")
+    .update(String(did))
+    .digest("hex")
+    .slice(0, 12);
+}
+
+function isManager(bot, actorKey) {
+  return (bot.managers || []).some((m) => m.did === actorKey);
+}
+
+function managerView(bot) {
+  return (bot.managers || []).map((m) => ({
+    ref: mgrRef(m.did),
+    name: m.name || "someone",
+    addedAt: m.addedAt || 0,
+  }));
+}
+
+function findBotFor(actorKey, botId) {
+  if (!actorKey || !botId) return null;
+  const own = ownerRecord(actorKey, false);
+  const mine = own?.bots.find((b) => b.id === botId);
+  if (mine) return { bot: mine, rec: own, ownerKey: actorKey, role: "owner" };
+  for (const [key, rec] of Object.entries(store.owners)) {
+    const bot = rec.bots.find((b) => b.id === botId && isManager(b, actorKey));
+    if (bot) return { bot, rec, ownerKey: key, role: "admin" };
+  }
+  return null;
+}
+
+function sharedBotsFor(actorKey) {
+  const out = [];
+  for (const rec of Object.values(store.owners))
+    for (const b of rec.bots) if (isManager(b, actorKey)) out.push(b);
+  return out;
+}
+
+function activeBotOfActor(actorKey) {
+  for (const rt of active.values()) {
+    if (rt.ownerKey === actorKey) return rt;
+    if (isManager(rt.bot, actorKey)) return rt;
+  }
+  return null;
 }
 
 // ── Rule validation ─────────────────────────────────────────────────────────
@@ -1003,7 +1056,7 @@ function isActiveBot(userId) {
 
 function ownerStatus(ownerKey) {
   const rec = ownerRecord(ownerKey, false);
-  const rt = activeBotOfOwner(ownerKey);
+  const rt = activeBotOfActor(ownerKey);
   return {
     enabled: store.enabled,
     limits: {
@@ -1014,6 +1067,7 @@ function ownerStatus(ownerKey) {
       maxConditions: LIMITS.MAX_CONDITIONS_PER_RULE,
       sayLength: LIMITS.MAX_SAY_LENGTH,
       timerMinMinutes: LIMITS.TIMER_MIN_MINUTES,
+      maxManagers: LIMITS.MAX_MANAGERS,
     },
     bots: (rec?.bots || []).map((b) => ({
       id: b.id,
@@ -1023,6 +1077,18 @@ function ownerStatus(ownerKey) {
       updatedAt: b.updatedAt,
       vars: b.vars || {},
       lastStop: b.lastStop || null,
+      managers: managerView(b),
+      inviteCode: b.inviteCode?.code || null,
+    })),
+    shared: sharedBotsFor(ownerKey).map((b) => ({
+      id: b.id,
+      name: b.name,
+      location: b.location || "Bot",
+      rules: b.rules,
+      updatedAt: b.updatedAt,
+      vars: b.vars || {},
+      lastStop: b.lastStop || null,
+      sharedBy: b.sharedBy || "the owner",
     })),
     deployed: rt
       ? {
@@ -1073,10 +1139,9 @@ function register(socket, safe) {
       if (!requireSignin(socket)) return;
       const ownerKey = ownerKeyOf(socket);
       if (!ownerKey) return;
-      const rec = ownerRecord(ownerKey, true);
-      const existing = data?.id
-        ? rec.bots.find((b) => b.id === data.id)
-        : null;
+      const found = data?.id ? findBotFor(ownerKey, data.id) : null;
+      const rec = found ? found.rec : ownerRecord(ownerKey, true);
+      const existing = found ? found.bot : null;
       if (!existing && rec.bots.length >= LIMITS.MAX_SAVED)
         return fail(socket, `You can keep ${LIMITS.MAX_SAVED} bots. Delete one first.`);
       const v = validateConfig(data?.bot, existing?.id);
@@ -1085,6 +1150,10 @@ function register(socket, safe) {
         v.bot.createdAt = existing.createdAt;
         v.bot.vars = existing.vars || {};
         v.bot.uvars = existing.uvars || {};
+        if (existing.managers) v.bot.managers = existing.managers;
+        if (existing.inviteCode) v.bot.inviteCode = existing.inviteCode;
+        if (existing.sharedBy) v.bot.sharedBy = existing.sharedBy;
+        if (existing.lastStop) v.bot.lastStop = existing.lastStop;
         rec.bots[rec.bots.indexOf(existing)] = v.bot;
       } else {
         rec.bots.push(v.bot);
@@ -1101,9 +1170,13 @@ function register(socket, safe) {
       if (!requireSignin(socket)) return;
       const ownerKey = ownerKeyOf(socket);
       const rec = ownerRecord(ownerKey, false);
-      if (!rec || !data?.id) return;
-      const bot = rec.bots.find((b) => b.id === data.id);
-      if (!bot) return;
+      if (!data?.id) return;
+      const bot = rec?.bots.find((b) => b.id === data.id);
+      if (!bot) {
+        if (findBotFor(ownerKey, data.id))
+          fail(socket, "Only the owner can delete this bot.");
+        return;
+      }
       const rt = activeBotOfOwner(ownerKey);
       if (rt && rt.bot.id === bot.id) retire(rt, "deleted");
       rec.bots = rec.bots.filter((b) => b.id !== bot.id);
@@ -1117,9 +1190,10 @@ function register(socket, safe) {
     safe(async (data) => {
       if (!requireSignin(socket)) return;
       const ownerKey = ownerKeyOf(socket);
-      const rec = ownerRecord(ownerKey, false);
-      const bot = rec?.bots.find((b) => b.id === data?.id);
+      const found = findBotFor(ownerKey, data?.id);
+      const bot = found?.bot;
       if (!bot) return fail(socket, "Save the bot first.", "save_first");
+      const homeKey = found.ownerKey;
 
       if (!store.enabled)
         return fail(socket, "Bots are turned off by staff right now.", "bots_off");
@@ -1127,7 +1201,7 @@ function register(socket, safe) {
         return fail(socket, "Talkomatic is in maintenance mode. Try again shortly.", "maintenance");
       if (active.size >= LIMITS.MAX_ACTIVE_TOTAL)
         return fail(socket, "Too many bots are running right now. Try again in a while.", "busy");
-      const already = activeBotOfOwner(ownerKey);
+      const already = activeBotOfActor(ownerKey) || activeBotOfOwner(homeKey);
       if (already)
         return fail(
           socket,
@@ -1212,7 +1286,7 @@ function register(socket, safe) {
       if (data?.newRoom) {
         pendingNewRoom.set(socket.handshake.session.userId, {
           botId: bot.id,
-          ownerKey,
+          ownerKey: homeKey,
           roomId: room.id,
           at: Date.now(),
         });
@@ -1226,7 +1300,7 @@ function register(socket, safe) {
         return;
       }
 
-      const rt = deploy(socket, bot, room, ownerKey);
+      const rt = deploy(socket, bot, room, homeKey);
       socket.emit("bots deployed", {
         botId: bot.id,
         roomId: room.id,
@@ -1242,8 +1316,140 @@ function register(socket, safe) {
       if (!requireSignin(socket)) return;
       const ownerKey = ownerKeyOf(socket);
       pendingNewRoom.delete(socket.handshake.session.userId);
-      const rt = activeBotOfOwner(ownerKey);
+      const rt = activeBotOfActor(ownerKey);
       if (rt) retire(rt, "stopped by you");
+      socket.emit("bots status", ownerStatus(ownerKey));
+    }),
+  );
+
+  // ── Managers: invite codes, promotion, demotion, transfer ────────────────
+
+  socket.on(
+    "bots invite create",
+    safe(async (data) => {
+      if (!requireSignin(socket)) return;
+      const ownerKey = ownerKeyOf(socket);
+      const rec = ownerRecord(ownerKey, false);
+      const bot = rec?.bots.find((b) => b.id === data?.id);
+      if (!bot) return;
+      bot.inviteCode = {
+        code: "BOT-" + crypto.randomBytes(4).toString("hex").toUpperCase(),
+        at: Date.now(),
+      };
+      bot.sharedBy = sanitizeName(
+        String(socket.handshake.session.username || "the owner"),
+      ).slice(0, 30);
+      saveSoon();
+      socket.emit("bots status", ownerStatus(ownerKey));
+    }),
+  );
+
+  socket.on(
+    "bots invite revoke",
+    safe(async (data) => {
+      if (!requireSignin(socket)) return;
+      const ownerKey = ownerKeyOf(socket);
+      const rec = ownerRecord(ownerKey, false);
+      const bot = rec?.bots.find((b) => b.id === data?.id);
+      if (!bot) return;
+      bot.inviteCode = null;
+      saveSoon();
+      socket.emit("bots status", ownerStatus(ownerKey));
+    }),
+  );
+
+  socket.on(
+    "bots invite redeem",
+    safe(async (data) => {
+      if (!requireSignin(socket)) return;
+      const actorKey = ownerKeyOf(socket);
+      if (!actorKey) return;
+      if (Date.now() - (socket._botCodeTick || 0) < 2000)
+        return fail(socket, "Give it a second between attempts.");
+      socket._botCodeTick = Date.now();
+      const code = String(data?.code || "").trim().toUpperCase();
+      if (!code) return fail(socket, "Enter a bot code.");
+      for (const [key, rec] of Object.entries(store.owners)) {
+        for (const bot of rec.bots) {
+          if (bot.inviteCode?.code !== code) continue;
+          if (key === actorKey)
+            return fail(socket, "That is your own bot.");
+          if (isManager(bot, actorKey))
+            return fail(socket, "You already manage this bot.");
+          if ((bot.managers || []).length >= LIMITS.MAX_MANAGERS)
+            return fail(socket, "This bot already has its limit of managers.");
+          if (!bot.managers) bot.managers = [];
+          bot.managers.push({
+            did: actorKey,
+            name: sanitizeName(
+              String(socket.handshake.session.username || "someone"),
+            ).slice(0, 30),
+            addedAt: Date.now(),
+          });
+          saveSoon();
+          socket.emit("bots redeemed", {
+            id: bot.id,
+            name: bot.name,
+            sharedBy: bot.sharedBy || null,
+          });
+          socket.emit("bots status", ownerStatus(actorKey));
+          return;
+        }
+      }
+      fail(socket, "That code does not match any bot.");
+    }),
+  );
+
+  socket.on(
+    "bots manager remove",
+    safe(async (data) => {
+      if (!requireSignin(socket)) return;
+      const ownerKey = ownerKeyOf(socket);
+      const found = findBotFor(ownerKey, data?.id);
+      if (!found || !data?.ref) return;
+      const { bot } = found;
+      const canRemove =
+        found.role === "owner" || mgrRef(ownerKey) === data.ref;
+      if (!canRemove) return;
+      bot.managers = (bot.managers || []).filter(
+        (m) => mgrRef(m.did) !== data.ref,
+      );
+      saveSoon();
+      socket.emit("bots status", ownerStatus(ownerKey));
+    }),
+  );
+
+  socket.on(
+    "bots transfer",
+    safe(async (data) => {
+      if (!requireSignin(socket)) return;
+      const ownerKey = ownerKeyOf(socket);
+      const rec = ownerRecord(ownerKey, false);
+      const bot = rec?.bots.find((b) => b.id === data?.id);
+      if (!bot) return;
+      const target = (bot.managers || []).find(
+        (m) => mgrRef(m.did) === data?.ref,
+      );
+      if (!target) return fail(socket, "Pick a manager to hand the bot to.");
+      for (const rt of active.values())
+        if (rt.bot.id === bot.id && rt.ownerKey === ownerKey)
+          return fail(socket, "Stop the bot before transferring it.");
+      const targetRec = ownerRecord(target.did, true);
+      if (targetRec.bots.length >= LIMITS.MAX_SAVED)
+        return fail(socket, "They already keep the maximum number of bots.");
+      rec.bots = rec.bots.filter((b) => b !== bot);
+      targetRec.bots.push(bot);
+      bot.managers = (bot.managers || []).filter((m) => m.did !== target.did);
+      bot.managers.push({
+        did: ownerKey,
+        name: sanitizeName(
+          String(socket.handshake.session.username || "someone"),
+        ).slice(0, 30),
+        addedAt: Date.now(),
+      });
+      bot.sharedBy = target.name || "the owner";
+      saveSoon();
+      socket.emit("bots transferred", { id: bot.id, to: target.name });
       socket.emit("bots status", ownerStatus(ownerKey));
     }),
   );

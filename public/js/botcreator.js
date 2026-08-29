@@ -903,6 +903,7 @@
     status = st;
     renderHome();
     renderEditorChrome();
+    refreshManagersModal();
     renderNewsTab();
     maybeShowNews();
   });
@@ -1047,12 +1048,14 @@
     const host = $("botList");
     host.innerHTML = "";
     const bots = status?.bots || [];
-    if (!bots.length) {
+    const shared = status?.shared || [];
+    if (!bots.length && !shared.length) {
       const note = document.createElement("div");
       note.className = "bc-empty-note";
       note.innerHTML =
         "Nothing here yet! Press <b>Start from an idea</b> up there, or open a <b>ready-made bot</b> below to see how one works.";
       host.appendChild(note);
+      appendRedeemButton(host);
       return;
     }
     for (const b of bots) {
@@ -1101,6 +1104,87 @@
       );
       host.appendChild(card);
     }
+    for (const b of shared) {
+      const card = document.createElement("button");
+      card.type = "button";
+      card.className = "bc-bot-card";
+      const name = document.createElement("div");
+      name.className = "bc-bot-card-name";
+      if (deployedInfo()?.botId === b.id) {
+        const dot = document.createElement("span");
+        dot.className = "live-dot";
+        name.appendChild(dot);
+      }
+      name.appendChild(document.createTextNode(b.name));
+      const meta = document.createElement("div");
+      meta.className = "bc-bot-card-meta";
+      meta.textContent =
+        b.rules.length +
+        (b.rules.length === 1 ? " rule" : " rules") +
+        " · shared by " +
+        b.sharedBy;
+      card.appendChild(name);
+      card.appendChild(meta);
+      card.addEventListener("click", () =>
+        loadBot({
+          id: b.id,
+          name: b.name,
+          location: b.location || "Bot",
+          rules: b.rules,
+          shared: true,
+          sharedBy: b.sharedBy,
+        }),
+      );
+      host.appendChild(card);
+    }
+    appendRedeemButton(host);
+  }
+
+  function appendRedeemButton(host) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "bc-btn";
+    btn.style.marginTop = "8px";
+    btn.innerHTML = '<i class="fas fa-user-group"></i> Add a shared bot';
+    btn.title = "Enter a code another user gave you to co-manage their bot";
+    btn.addEventListener("click", openRedeemModal);
+    host.appendChild(btn);
+  }
+
+  function openRedeemModal() {
+    const box = openModal(false);
+    const h = document.createElement("h3");
+    h.innerHTML = '<i class="fas fa-user-group"></i> Add a shared bot';
+    const p = document.createElement("p");
+    p.textContent =
+      "If another user gave you their bot's share code, enter it here. You " +
+      "become a manager: you can edit the bot and send it to rooms, but only " +
+      "the owner can delete it.";
+    const input = document.createElement("input");
+    input.className = "bc-input";
+    input.placeholder = "BOT-XXXXXXXX";
+    input.maxLength = 20;
+    const btns = document.createElement("div");
+    btns.className = "bc-modal-btns";
+    const cancel = document.createElement("button");
+    cancel.className = "bc-btn";
+    cancel.textContent = "Cancel";
+    cancel.addEventListener("click", closeModal);
+    const add = document.createElement("button");
+    add.className = "bc-btn primary";
+    add.textContent = "Add bot";
+    add.addEventListener("click", () => {
+      const code = input.value.trim();
+      if (!code) return;
+      socket.emit("bots invite redeem", { code });
+    });
+    btns.appendChild(cancel);
+    btns.appendChild(add);
+    box.appendChild(h);
+    box.appendChild(p);
+    box.appendChild(input);
+    box.appendChild(btns);
+    input.focus();
   }
 
   function diffChip(level) {
@@ -1298,7 +1382,8 @@
 
   function renderEditorChrome() {
     if (!edit) return;
-    $("deleteBtn").style.display = edit.id ? "" : "none";
+    $("deleteBtn").style.display = edit.id && !edit.shared ? "" : "none";
+    $("managersBtn").style.display = edit.id && !edit.shared ? "" : "none";
     const d = deployedInfo();
     const label = $("deployOpenLabel");
     if (d && d.botId === edit.id) label.textContent = "Live · manage";
@@ -1449,6 +1534,146 @@
     localStorage.removeItem("bc_draft");
     edit = null;
     showView("home");
+  });
+
+  // ── Managers: share a bot with other users ────────────────────────────────
+
+  $("managersBtn").addEventListener("click", () => {
+    if (edit?.id && !edit.shared) openManagersModal(edit.id);
+  });
+
+  function openManagersModal(botId) {
+    const b = (status?.bots || []).find((x) => x.id === botId);
+    if (!b) return;
+    const box = openModal(false);
+    box.id = "bcManagersBox";
+    box.dataset.botId = botId;
+
+    const h = document.createElement("h3");
+    h.innerHTML = '<i class="fas fa-user-group"></i> ';
+    h.appendChild(document.createTextNode("Managers of " + b.name));
+    box.appendChild(h);
+
+    const p = document.createElement("p");
+    p.textContent =
+      "Managers can edit this bot and send it to rooms. Only you can " +
+      "delete it, remove managers, or hand it over.";
+    box.appendChild(p);
+
+    const codeRow = document.createElement("div");
+    codeRow.className = "bc-modal-btns";
+    codeRow.style.justifyContent = "flex-start";
+    if (b.inviteCode) {
+      const code = document.createElement("code");
+      code.textContent = b.inviteCode;
+      code.style.cssText =
+        "padding:6px 10px;background:rgba(255,255,255,.08);border-radius:4px;letter-spacing:1px;";
+      codeRow.appendChild(code);
+      const copy = document.createElement("button");
+      copy.className = "bc-btn";
+      copy.textContent = "Copy";
+      copy.addEventListener("click", () => {
+        navigator.clipboard
+          .writeText(b.inviteCode)
+          .then(() => toastr.success("Code copied. Send it to your friend."))
+          .catch(() => {});
+      });
+      codeRow.appendChild(copy);
+      const revoke = document.createElement("button");
+      revoke.className = "bc-btn danger";
+      revoke.textContent = "Revoke code";
+      revoke.addEventListener("click", () =>
+        socket.emit("bots invite revoke", { id: botId }),
+      );
+      codeRow.appendChild(revoke);
+    } else {
+      const gen = document.createElement("button");
+      gen.className = "bc-btn primary";
+      gen.innerHTML = '<i class="fas fa-key"></i> Make a share code';
+      gen.addEventListener("click", () =>
+        socket.emit("bots invite create", { id: botId }),
+      );
+      codeRow.appendChild(gen);
+      const hint = document.createElement("span");
+      hint.className = "bc-bot-card-meta";
+      hint.textContent = "Anyone with the code becomes a manager.";
+      codeRow.appendChild(hint);
+    }
+    box.appendChild(codeRow);
+
+    const list = document.createElement("div");
+    list.style.marginTop = "12px";
+    const managers = b.managers || [];
+    if (!managers.length) {
+      const none = document.createElement("div");
+      none.className = "bc-bot-card-meta";
+      none.textContent = "Nobody manages this bot with you yet.";
+      list.appendChild(none);
+    }
+    for (const m of managers) {
+      const row = document.createElement("div");
+      row.style.cssText =
+        "display:flex;align-items:center;gap:8px;padding:6px 0;";
+      const who = document.createElement("span");
+      who.textContent = m.name;
+      who.style.flex = "1";
+      row.appendChild(who);
+      const transfer = document.createElement("button");
+      transfer.className = "bc-btn";
+      transfer.textContent = "Make owner";
+      transfer.addEventListener("click", () => {
+        if (
+          confirm(
+            `Hand "${b.name}" to ${m.name} for good? You stay on as a manager.`,
+          )
+        )
+          socket.emit("bots transfer", { id: botId, ref: m.ref });
+      });
+      row.appendChild(transfer);
+      const remove = document.createElement("button");
+      remove.className = "bc-btn danger";
+      remove.textContent = "Remove";
+      remove.addEventListener("click", () =>
+        socket.emit("bots manager remove", { id: botId, ref: m.ref }),
+      );
+      row.appendChild(remove);
+      list.appendChild(row);
+    }
+    box.appendChild(list);
+
+    const btns = document.createElement("div");
+    btns.className = "bc-modal-btns";
+    const done = document.createElement("button");
+    done.className = "bc-btn primary";
+    done.textContent = "Done";
+    done.addEventListener("click", closeModal);
+    btns.appendChild(done);
+    box.appendChild(btns);
+  }
+
+  function refreshManagersModal() {
+    const open = document.getElementById("bcManagersBox");
+    if (!open) return;
+    const botId = open.dataset.botId;
+    if ((status?.bots || []).some((b) => b.id === botId))
+      openManagersModal(botId);
+    else closeModal();
+  }
+
+  socket.on("bots redeemed", (d) => {
+    closeModal();
+    toastr.success(
+      `"${d.name}" was shared with you` +
+        (d.sharedBy ? " by " + d.sharedBy : "") +
+        ". It is in your bot list now.",
+    );
+  });
+
+  socket.on("bots transferred", (d) => {
+    closeModal();
+    toastr.success("The bot now belongs to " + (d.to || "them") + ".");
+    if (edit?.id === d.id) edit.shared = true;
+    renderEditorChrome();
   });
 
   // ── Import / export: carry a bot between devices as a file ────────────────

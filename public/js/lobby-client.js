@@ -1422,8 +1422,7 @@ roomTypeRadios.forEach((radio) => {
 logForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   const newUsername = usernameInput.value.trim().slice(0, MAX_USERNAME_LENGTH);
-  const newLocation =
-    locationInput.value.trim().slice(0, MAX_LOCATION_LENGTH) || "On The Web";
+  const newLocation = locationInput.value.trim().slice(0, MAX_LOCATION_LENGTH);
 
   if (!newUsername) {
     window.showErrorModal("Please enter a username.");
@@ -1681,7 +1680,7 @@ function updatePfpPreview() {
       if (after.hash !== before.hash) {
         updatePfpPreview();
         if (currentUsername)
-          emitJoinLobby(currentUsername, currentLocation || "On The Web");
+          emitJoinLobby(currentUsername, currentLocation || "");
       }
     } catch (e) {
       localStorage.removeItem("talkomaticPfpEnabled");
@@ -1690,7 +1689,7 @@ function updatePfpPreview() {
       if (box) box.checked = false;
       sync();
       if (currentUsername)
-        emitJoinLobby(currentUsername, currentLocation || "On The Web");
+        emitJoinLobby(currentUsername, currentLocation || "");
     }
   }, 4000);
 })();
@@ -1990,10 +1989,12 @@ function createRoomElement(room) {
     }
 
     userDiv.appendChild(userNameSpan);
-    const locSpan = document.createElement("span");
-    locSpan.className = "user-loc";
-    locSpan.textContent = ` / ${user.location}`;
-    userDiv.appendChild(locSpan);
+    if (user.location) {
+      const locSpan = document.createElement("span");
+      locSpan.className = "user-loc";
+      locSpan.textContent = ` / ${user.location}`;
+      userDiv.appendChild(locSpan);
+    }
 
     usersDetailDiv.appendChild(userDiv);
   });
@@ -2214,7 +2215,7 @@ function initLobby() {
 
     if (savedUsername && !isGuestUsername(savedUsername)) {
       currentUsername = savedUsername;
-      currentLocation = savedLocation || "On The Web";
+      currentLocation = savedLocation || "";
       isSignedIn = true;
 
       usernameInput.value = currentUsername;
@@ -2223,7 +2224,7 @@ function initLobby() {
       setSignedInButtonState();
       setCreateRoomVisible(true);
 
-      emitJoinLobby(savedUsername, savedLocation || "On The Web");
+      emitJoinLobby(savedUsername, savedLocation || "");
       showRoomList();
     } else {
       if (savedUsername) localStorage.removeItem("talkomaticUsername");
