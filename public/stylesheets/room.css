@@ -413,9 +413,7 @@ html {
   padding: 6px 8px;
   box-sizing: border-box;
   text-align: center;
-  background: rgba(0, 0, 0, 0.6);
-  -webkit-backdrop-filter: blur(3px);
-  backdrop-filter: blur(3px);
+  background: rgba(0, 0, 0, 0.78);
   color: var(--tk-accent, orange);
   font-family: talkoText, Arial, sans-serif;
   font-size: 16px;

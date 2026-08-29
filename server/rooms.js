@@ -2242,6 +2242,10 @@ function clearAFKTimers(userId) {
     clearTimeout(state.afkTimers.get(userId));
     state.afkTimers.delete(userId);
   }
+  if (state.afkSpectateTimers.has(userId)) {
+    clearTimeout(state.afkSpectateTimers.get(userId));
+    state.afkSpectateTimers.delete(userId);
+  }
 }
 
 function setupAFKTimers(socket, userId) {
@@ -2279,6 +2283,37 @@ async function handleAFKTimeout(socket, userId) {
   });
   await leaveRoom(socket, userId);
   clearAFKTimers(userId);
+}
+
+const AFK_SPECTATE_TIME = 15 * 60 * 1000;
+
+async function handleAfkSpectate(socket, userId) {
+  state.afkSpectateTimers.delete(userId);
+  if (!socket || !socket.connected || !socket.roomId || socket.spectating)
+    return;
+  if (socket.isDev || socket.isMod || socket.isBot) return;
+  if (socket.boardOpen) return;
+  const roomId = socket.roomId;
+  if (gamesFloor.isPlaying(roomId, userId)) return;
+  const room = state.rooms.get(roomId);
+  if (!room || !room.users.find((u) => u.id === userId)) return;
+
+  await leaveRoom(socket, userId);
+  socket.tabHidden = undefined;
+
+  const after = state.rooms.get(roomId);
+  if (!after || after.type !== "public") {
+    socket.emit("afk timeout", {
+      message: "Removed from room after being away too long.",
+      redirectTo: "/",
+    });
+    return;
+  }
+  socket.leave("lobby");
+  socket.join(roomId);
+  socket.spectating = roomId;
+  socket.roomId = roomId;
+  socket.emit("afk spectate", spectatePayload(socket, after));
 }
 
 // ── Chat Processing ─────────────────────────────────────────────────────────
@@ -4432,6 +4467,8 @@ function registerSocketHandlers(opts) {
         if (room.votes[userId] === data.targetUserId) delete room.votes[userId];
         else room.votes[userId] = data.targetUserId;
         emitRoomVoteUpdates(roomId);
+        // Staff collect votes but are never kicked by them.
+        if (getUserStaffRole(data.targetUserId)) return;
         if (votesAgainst(room, data.targetUserId) > voteThreshold(room)) {
           const target = findSocketByUserId(data.targetUserId, roomId);
           if (target) {
@@ -4490,6 +4527,35 @@ function registerSocketHandlers(opts) {
         }
         user.isAfk = isAfk;
         emitRoomAfkUpdate(socket, userId, isAfk);
+      }),
+    );
+
+    // While the tab is hidden the typing-inactivity timers pause and a
+    // longer clock runs; when it expires the user is moved to spectating.
+    socket.on(
+      "tab state",
+      safe(async (data) => {
+        if (!socket.roomId || socket.spectating || socket.isBot) return;
+        if (socket.isDev || socket.isMod) return;
+        const userId = socket.handshake.session?.userId;
+        if (!userId) return;
+        const room = state.rooms.get(socket.roomId);
+        if (!room || !room.users.find((u) => u.id === userId)) return;
+        const hidden = !!data?.hidden;
+        if (hidden === !!socket.tabHidden) return;
+        socket.tabHidden = hidden;
+        clearAFKTimers(userId);
+        if (hidden) {
+          state.afkSpectateTimers.set(
+            userId,
+            setTimeout(
+              () => handleAfkSpectate(socket, userId),
+              AFK_SPECTATE_TIME,
+            ),
+          );
+        } else {
+          setupAFKTimers(socket, userId);
+        }
       }),
     );
 
@@ -5968,6 +6034,36 @@ function registerSocketHandlers(opts) {
           sendDevRoomContext(roomId);
           if (!socket.isDev) logStaff(socket, "spectate", null, room);
         }
+      }),
+    );
+
+    // A spectator asks to take a real slot in the room they are watching.
+    socket.on(
+      "spectate join",
+      safe(async () => {
+        if (!socket.spectating) return;
+        const roomId = socket.spectating;
+        const userId = socket.handshake.session?.userId;
+        const fail = (reason) =>
+          socket.emit("spectate join result", { ok: false, reason });
+        const room = state.rooms.get(roomId);
+        if (!room) return fail("gone");
+        if (!userId || isGuestName(socket.handshake.session?.username))
+          return fail("name");
+        if (room.bannedUserIds?.has(userId)) return fail("banned");
+        if (state.maintenance) return fail("maintenance");
+        if (room.locked) return fail("locked");
+        const others = (room.users || []).filter(
+          (u) => u.id !== userId && !(u.isDev && u.isVanished),
+        ).length;
+        if (others >= roomCapacity(room)) return fail("full");
+        const cur = getOwnCurrentRoom(userId);
+        if (cur && cur !== roomId) return fail("elsewhere");
+
+        socket.spectating = null;
+        socket.roomId = null;
+        socket.leave(roomId);
+        joinRoom(socket, roomId, userId);
       }),
     );
 

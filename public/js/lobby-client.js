@@ -390,6 +390,7 @@ const socket = io({
   auth: {
     devKey: localStorage.getItem("talkomatic_devKey") || undefined,
     modKey: localStorage.getItem("talkomatic_modKey") || undefined,
+    staffHidden: localStorage.getItem("talkomatic_devHidden") || undefined,
     deviceId:
       (window.TalkomaticIdentity && window.TalkomaticIdentity.deviceId) ||
       undefined,

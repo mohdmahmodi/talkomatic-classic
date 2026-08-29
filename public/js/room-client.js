@@ -10,6 +10,7 @@ const socket = io({
   auth: {
     devKey: localStorage.getItem("talkomatic_devKey") || undefined,
     modKey: localStorage.getItem("talkomatic_modKey") || undefined,
+    staffHidden: localStorage.getItem("talkomatic_devHidden") || undefined,
     deviceId:
       (window.TalkomaticIdentity && window.TalkomaticIdentity.deviceId) ||
       undefined,
@@ -2884,10 +2885,10 @@ function msToTime(duration) {
 
 socket.on("chat update", displayChatMessage);
 
-// ── Tab-away AFK: after a minute on another tab/window, everyone else sees
-//    the overlay on this user's textbox instead of their frozen text ────────
+// ── Tab-away AFK: after a few minutes on another tab/window, everyone else
+//    sees the overlay on this user's textbox instead of their frozen text ───
 
-const AFK_TAB_HIDDEN_DELAY = 60000;
+const AFK_TAB_HIDDEN_DELAY = 180000;
 let afkHiddenTimer = null;
 let selfTabAfk = false;
 
@@ -2895,6 +2896,11 @@ function sendAfkState(isAfk) {
   if (isSpectating || !currentRoomId) return;
   selfTabAfk = isAfk;
   socket.emit("afk state", { isAfk });
+}
+
+function sendTabState(hidden) {
+  if (isSpectating || !currentRoomId) return;
+  socket.emit("tab state", { hidden });
 }
 
 function armAfkTimer() {
@@ -2905,6 +2911,7 @@ function armAfkTimer() {
 }
 
 document.addEventListener("visibilitychange", () => {
+  sendTabState(document.hidden);
   if (fakeAfkActive) return;
   if (document.hidden) {
     armAfkTimer();
@@ -2922,8 +2929,8 @@ socket.on("afk update", (data) => {
   setRowAfk(data.userId, !!data.isAfk);
 });
 
-// ── Fake AFK (staff): typing locks right away, and a minute later the room
-//    sees the same overlay as a real tab-away. Indistinguishable to users. ──
+// ── Fake AFK (staff): typing locks right away, and a few minutes later the
+//    room sees the same overlay as a real tab-away. Indistinguishable. ──────
 
 let fakeAfkActive = false;
 let fakeAfkBroadcast = false;
@@ -2949,7 +2956,7 @@ function renderSelfFakeOverlay(row) {
   sub.className = "afk-overlay-sub";
   sub.textContent = fakeAfkBroadcast
     ? "Fake AFK - the room sees you as away"
-    : "Fake AFK - the room sees it in about a minute";
+    : "Fake AFK - the room sees it in a few minutes";
   overlay.appendChild(main);
   overlay.appendChild(sub);
 }
@@ -2984,7 +2991,7 @@ function toggleFakeAfk() {
     }, AFK_TAB_HIDDEN_DELAY);
     if (window.toastr)
       toastr.info(
-        "Typing is locked. In about a minute the room sees you as away.",
+        "Typing is locked. In a few minutes the room sees you as away.",
       );
   } else {
     if (fakeAfkTimer) {
@@ -3063,6 +3070,14 @@ socket.on("room joined", (data) => {
   currentUserIsHidden = !!data.isHidden;
   currentUserIsVanished = !!data.isVanished;
 
+  if (isSpectating) {
+    isSpectating = false;
+    const banner = document.getElementById("spectateBanner");
+    if (banner) banner.remove();
+    const invite = document.querySelector(".invite-section");
+    if (invite) invite.style.display = "";
+  }
+
   selfTabAfk = false;
   if (fakeAfkActive) {
     // Rejoined (reconnect/handoff) while faking: the server-side flag was
@@ -3071,6 +3086,7 @@ socket.on("room joined", (data) => {
   } else {
     armAfkTimer();
   }
+  if (document.hidden) sendTabState(true);
   afkUsers.clear();
   (data.users || []).forEach((u) => {
     if (u.isAfk && u.id !== currentUserId) afkUsers.add(u.id);
@@ -4568,7 +4584,7 @@ function applyRoomFlags(data) {
 }
 
 // ── Spectate (read-only) ─────────────────────────────────────────────────────
-function renderSpectate(data) {
+function renderSpectate(data, noteText) {
   isSpectating = true;
   currentRoomId = data.roomId;
   if (data.userId) currentUserId = data.userId;
@@ -4621,9 +4637,11 @@ function renderSpectate(data) {
 
   const note = document.createElement("span");
   note.className = "sb-note";
-  note.textContent = isStaff()
-    ? "Invisible, read-only."
-    : "Read-only. You are watching this room.";
+  note.textContent =
+    noteText ||
+    (isStaff()
+      ? "Invisible, read-only."
+      : "Read-only. You are watching this room.");
   banner.appendChild(note);
 
   const acts = document.createElement("div");
@@ -4647,6 +4665,14 @@ function renderSpectate(data) {
     });
     acts.appendChild(desk);
   }
+  if (!isStaff()) {
+    const join = document.createElement("button");
+    join.type = "button";
+    join.className = "sb-btn";
+    join.innerHTML = '<i class="fas fa-right-to-bracket"></i> Join room';
+    join.addEventListener("click", () => socket.emit("spectate join"));
+    acts.appendChild(join);
+  }
   const leave = document.createElement("button");
   leave.type = "button";
   leave.className = "sb-btn sb-leave";
@@ -4655,6 +4681,47 @@ function renderSpectate(data) {
   acts.appendChild(leave);
   banner.appendChild(acts);
 }
+
+const SPECTATE_JOIN_MESSAGES = {
+  full: "The room is full right now.",
+  banned: "You cannot rejoin this room.",
+  locked: "This room is locked. No new joins are allowed right now.",
+  maintenance: "Talkomatic is in maintenance mode. Please try again shortly.",
+  name: "Choose a username in the lobby before joining a room.",
+  elsewhere: "You are already in another room. Leave it first.",
+  gone: "This room no longer exists.",
+};
+
+socket.on("spectate join result", (data) => {
+  const reason = data?.reason;
+  const message =
+    SPECTATE_JOIN_MESSAGES[reason] || "You cannot join this room right now.";
+  if (reason === "gone") {
+    showInfoModal(message, () => {
+      window.location.href = "/index.html";
+    });
+    return;
+  }
+  showModal(reason === "full" ? "Room is full" : "Cannot join", message, {
+    confirmText: "Keep spectating",
+    cancelText: "Back to lobby",
+    callback: (confirmed) => {
+      if (!confirmed) window.location.href = "/index.html";
+    },
+  });
+});
+
+socket.on("afk spectate", (data) => {
+  selfTabAfk = false;
+  if (afkHiddenTimer) {
+    clearTimeout(afkHiddenTimer);
+    afkHiddenTimer = null;
+  }
+  renderSpectate(
+    data,
+    "You were moved to spectating after 15 minutes away. Join back anytime.",
+  );
+});
 
 socket.on("spectate joined", (data) => renderSpectate(data));
 socket.on("spectate ended", () => {

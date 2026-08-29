@@ -453,6 +453,14 @@ io.use((socket, next) => {
     if (stale !== undefined && !ipban.isActiveBlock(stale))
       state.blockedIPs.delete(clientIp);
 
+    // The client sends its stored flair preference in the handshake so a
+    // hidden badge never flashes while the session catches up.
+    const authHidden = socket.handshake.auth?.staffHidden;
+    const hiddenPref =
+      authHidden === "1" || authHidden === "0"
+        ? authHidden === "1"
+        : !!socket.handshake?.session?.isDevHidden;
+
     // Dev mode: validate devKey by hash against the configured dev keys
     // (.env DEV_KEY_HASH supports multiple labeled keys). Owner-only.
     const devKey = socket.handshake.auth.devKey;
@@ -462,7 +470,7 @@ io.use((socket, next) => {
       socket.isMainDev = !!devMatch.main;
       socket.staffLabel = devMatch.label;
       socket.devKeyHash = devMatch.hash;
-      socket.isHidden = !!socket.handshake?.session?.isDevHidden;
+      socket.isHidden = hiddenPref;
       if (socket.isMainDev) {
         socket.isHidden = true;
         socket.isVanished = true;
@@ -490,7 +498,7 @@ io.use((socket, next) => {
         socket.modLevel = mk.level || 2;
         socket.staffLabel = mk.label;
         // Mods can hide their badge with the same persisted toggle as devs.
-        socket.isHidden = !!socket.handshake?.session?.isDevHidden;
+        socket.isHidden = hiddenPref;
         socket.keyNewIp = roles.recordKeyUse(
           mk.hash,
           mk.label,

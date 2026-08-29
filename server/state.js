@@ -147,6 +147,7 @@ const state = {
 
   afkTimers: new Map(),
   afkWarningTimers: new Map(),
+  afkSpectateTimers: new Map(),
 
   chatCircuitState: {
     failures: 0,
