@@ -172,7 +172,7 @@ const DEFAULT_MOD = [
     level: "jr",
     title: "Junior moderators: what you hold",
     body:
-      "You can warn and kick, and you can read everything: reports, appeals, applications, the ban list, the staff roster, and any moderator's record. You cannot IP block, close a room, spectate, discard a report, or decide an appeal or an application. Those need a full moderator.",
+      "You can warn, kick, and bar a user from the room you kicked them out of, and you can read everything: reports, appeals, applications, the ban list, the staff roster, and any moderator's record. You cannot IP block, close a room, spectate, discard a report, or decide an appeal or an application. Those need a full moderator.",
     why: "You start with the tools that are reversible and none of the ones that are not, which is how you learn the job without anybody paying for a mistake.",
   },
   {

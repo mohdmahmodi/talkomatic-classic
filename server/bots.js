@@ -292,10 +292,15 @@ function validateConfig(input, existingId) {
         act.seconds = Math.round(s * 10) / 10;
       } else if (a.type === "set" || a.type === "add" || a.type === "random") {
         const name0 = String(a.var || "").trim();
-        if (!VAR_NAME.test(name0))
+        const stripped = name0.replace(/\{[^{}]*\}/g, "x");
+        const valid = name0.includes("{")
+          ? name0.length <= 60 && /^[a-z0-9_x]+$/i.test(stripped)
+          : VAR_NAME.test(name0);
+        if (!valid)
           return {
             ok: false,
-            error: "Variable names are 1-20 letters, digits or _.",
+            error:
+              "Memory names are 1-20 letters, digits or _, and may include a placeholder like {word1}.",
           };
         act.var = name0.toLowerCase();
         act.per = a.per === "user" ? "user" : "bot";
@@ -403,91 +408,127 @@ function makeFakeSocket(botUserId, name, roomId, location) {
 }
 
 // ── Template expansion ──────────────────────────────────────────────────────
+// Tokens may nest one level, so a memory can be picked by name at runtime:
+// {memory:note_{word1}} looks up whatever the first word names.
 
-function expand(rt, template, ctx) {
-  return String(template).replace(/\{([a-z0-9:_|.\- ]+)\}/gi, (whole, body) => {
-    const key = body.trim();
-    const low = key.toLowerCase();
-    if (low === "user" || low === "name") return ctx.username || "someone";
-    if (low === "line" || low === "text") return ctx.line || "";
-    if (low === "arg" || low === "words" || low === "everything")
-      return ctx.args ? ctx.args.join(" ") : "";
-    if (/^arg[1-9]$/.test(low))
-      return (ctx.args && ctx.args[Number(low.slice(3)) - 1]) || "";
-    if (/^word[1-9]$/.test(low))
-      return (ctx.args && ctx.args[Number(low.slice(4)) - 1]) || "";
-    if (low.startsWith("memory:")) {
-      const n = low.slice(7);
-      return rt.bot.vars[n] != null ? String(rt.bot.vars[n]) : "0";
-    }
-    if (low.startsWith("mymemory:")) {
-      const n = low.slice(9);
-      const row = ctx.userId ? rt.bot.uvars[ctx.userId] : null;
-      return row && row[n] != null ? String(row[n]) : "0";
-    }
-    if (low === "bot") return rt.name;
-    if (low === "owner") return rt.ownerName || "the owner";
-    if (low === "newline") return "\n";
-    if (low === "commands") {
-      const seen = [];
-      for (const r of rt.bot.rules)
-        if (
-          r.on.type === "command" &&
-          r.who !== "owner" &&
-          seen.indexOf("!" + r.on.word) === -1
-        )
-          seen.push("!" + r.on.word);
-      return seen.join("\n");
-    }
-    if (low === "ownercommands" || low === "admincommands") {
-      const seen = [];
-      for (const r of rt.bot.rules)
-        if (
-          r.on.type === "command" &&
-          r.who === "owner" &&
-          seen.indexOf("!" + r.on.word) === -1
-        )
-          seen.push("!" + r.on.word);
-      return seen.join("\n");
-    }
-    if (low === "runtime")
-      return fmtRuntime(Date.now() - (rt.deployedAt || Date.now()));
-    if (low === "room") return rt.roomName || "";
-    if (low === "humans") {
-      const room = state.rooms.get(rt.roomId);
-      return String(room ? humanCount(room) : 0);
-    }
-    if (low === "time")
-      return new Date().toLocaleTimeString("en-US", {
-        hour: "numeric",
-        minute: "2-digit",
-        timeZone: "UTC",
-      }) + " UTC";
-    if (low.startsWith("var:")) {
-      const n = low.slice(4);
-      return rt.bot.vars[n] != null ? String(rt.bot.vars[n]) : "0";
-    }
-    if (low.startsWith("uvar:")) {
-      const n = low.slice(5);
-      const row = ctx.userId ? rt.bot.uvars[ctx.userId] : null;
-      return row && row[n] != null ? String(row[n]) : "0";
-    }
-    if (low.startsWith("rand:")) {
-      const m = low.slice(5).match(/^(-?\d+)\s*-\s*(-?\d+)$/);
-      if (m) {
-        const a = Number(m[1]), b = Number(m[2]);
-        const lo = Math.min(a, b), hi = Math.max(a, b);
-        return String(lo + Math.floor(Math.random() * (hi - lo + 1)));
-      }
-      return whole;
-    }
-    if (low.startsWith("pick:")) {
-      const opts = key.slice(5).split("|").map((s) => s.trim()).filter(Boolean);
-      if (opts.length) return opts[Math.floor(Math.random() * opts.length)];
-      return whole;
-    }
-    return whole;
+const TOKEN_RE = /\{((?:[^{}]|\{[^{}]*\})*)\}/g;
+
+function varName(raw) {
+  return String(raw)
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9_]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 20);
+}
+
+// Reads a memory with an optional |fallback for when nothing is stored:
+// {memory:note_pizza|I have no note about that}
+function readVar(rt, ctx, per, body) {
+  const bar = body.indexOf("|");
+  const rawName = bar === -1 ? body : body.slice(0, bar);
+  const fallback = bar === -1 ? null : body.slice(bar + 1);
+  const n = varName(rawName);
+  let v;
+  if (per === "user") {
+    const row = ctx.userId ? rt.bot.uvars[ctx.userId] : null;
+    v = row ? row[n] : undefined;
+  } else {
+    v = rt.bot.vars[n];
+  }
+  if (v != null && String(v) !== "") return String(v);
+  if (fallback != null) return fallback;
+  return v != null ? String(v) : "0";
+}
+
+function expand(rt, template, ctx, depth) {
+  const d = depth || 0;
+  if (d > 2) return String(template);
+  return String(template).replace(TOKEN_RE, (whole, body) => {
+    const inner = body.includes("{") ? expand(rt, body, ctx, d + 1) : body;
+    const out = resolveToken(rt, inner, ctx);
+    if (out != null) return out;
+    return inner === body ? whole : "{" + inner + "}";
   });
+}
+
+function resolveToken(rt, body, ctx) {
+  const key = body.trim();
+  const low = key.toLowerCase();
+  if (low === "user" || low === "name") return ctx.username || "someone";
+  if (low === "line" || low === "text") return ctx.line || "";
+  if (low === "arg" || low === "words" || low === "everything")
+    return ctx.args ? ctx.args.join(" ") : "";
+  if (/^arg[1-9]$/.test(low))
+    return (ctx.args && ctx.args[Number(low.slice(3)) - 1]) || "";
+  if (/^word[1-9]$/.test(low))
+    return (ctx.args && ctx.args[Number(low.slice(4)) - 1]) || "";
+  if (/^words[2-8]$/.test(low)) {
+    const from = Number(low.slice(5)) - 1;
+    if (ctx.after != null) {
+      const parts = String(ctx.after).split(/\s+/).filter(Boolean);
+      return parts.slice(from).join(" ");
+    }
+    return ctx.args ? ctx.args.slice(from).join(" ") : "";
+  }
+  if (low.startsWith("memory:")) return readVar(rt, ctx, "bot", key.slice(7));
+  if (low.startsWith("mymemory:"))
+    return readVar(rt, ctx, "user", key.slice(9));
+  if (low.startsWith("var:")) return readVar(rt, ctx, "bot", key.slice(4));
+  if (low.startsWith("uvar:")) return readVar(rt, ctx, "user", key.slice(5));
+  if (low === "bot") return rt.name;
+  if (low === "owner") return rt.ownerName || "the owner";
+  if (low === "newline") return "\n";
+  if (low === "commands") {
+    const seen = [];
+    for (const r of rt.bot.rules)
+      if (
+        r.on.type === "command" &&
+        r.who !== "owner" &&
+        seen.indexOf("!" + r.on.word) === -1
+      )
+        seen.push("!" + r.on.word);
+    return seen.join("\n");
+  }
+  if (low === "ownercommands" || low === "admincommands") {
+    const seen = [];
+    for (const r of rt.bot.rules)
+      if (
+        r.on.type === "command" &&
+        r.who === "owner" &&
+        seen.indexOf("!" + r.on.word) === -1
+      )
+        seen.push("!" + r.on.word);
+    return seen.join("\n");
+  }
+  if (low === "runtime")
+    return fmtRuntime(Date.now() - (rt.deployedAt || Date.now()));
+  if (low === "room") return rt.roomName || "";
+  if (low === "humans") {
+    const room = state.rooms.get(rt.roomId);
+    return String(room ? humanCount(room) : 0);
+  }
+  if (low === "time")
+    return new Date().toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      timeZone: "UTC",
+    }) + " UTC";
+  if (low.startsWith("rand:")) {
+    const m = low.slice(5).match(/^(-?\d+)\s*-\s*(-?\d+)$/);
+    if (m) {
+      const a = Number(m[1]), b = Number(m[2]);
+      const lo = Math.min(a, b), hi = Math.max(a, b);
+      return String(lo + Math.floor(Math.random() * (hi - lo + 1)));
+    }
+    return null;
+  }
+  if (low.startsWith("pick:")) {
+    const opts = key.slice(5).split("|").map((s) => s.trim()).filter(Boolean);
+    if (opts.length) return opts[Math.floor(Math.random() * opts.length)];
+    return null;
+  }
+  return null;
 }
 
 function fmtRuntime(ms) {
@@ -521,7 +562,16 @@ function evalConds(rt, conds, ctx) {
 
 // ── Variables ───────────────────────────────────────────────────────────────
 
+// A memory name may itself contain placeholders (note_{word1}); it resolves
+// against the message that fired the rule. Empty after resolution = no-op.
+function actVarName(rt, act, ctx) {
+  const raw = String(act.var || "");
+  return varName(raw.includes("{") ? expand(rt, raw, ctx) : raw);
+}
+
 function setVar(rt, act, ctx, value) {
+  const name = actVarName(rt, act, ctx);
+  if (!name) return;
   const v = String(value).slice(0, LIMITS.VAR_VALUE_LENGTH);
   if (act.per === "user") {
     if (!ctx.userId) return;
@@ -532,22 +582,39 @@ function setVar(rt, act, ctx, value) {
       u[ctx.userId] = {};
     }
     const row = u[ctx.userId];
-    if (Object.keys(row).length >= 64 && row[act.var] == null) return;
-    row[act.var] = v;
-  } else {
-    if (Object.keys(rt.bot.vars).length >= LIMITS.MAX_VARS && rt.bot.vars[act.var] == null)
+    // Writing an empty value forgets the memory and frees its slot.
+    if (v === "") {
+      if (row[name] != null) {
+        delete row[name];
+        rt.varsDirty = true;
+      }
       return;
-    rt.bot.vars[act.var] = v;
+    }
+    if (Object.keys(row).length >= 64 && row[name] == null) return;
+    row[name] = v;
+  } else {
+    if (v === "") {
+      if (rt.bot.vars[name] != null) {
+        delete rt.bot.vars[name];
+        rt.varsDirty = true;
+      }
+      return;
+    }
+    if (Object.keys(rt.bot.vars).length >= LIMITS.MAX_VARS && rt.bot.vars[name] == null)
+      return;
+    rt.bot.vars[name] = v;
   }
   rt.varsDirty = true;
 }
 
 function getVar(rt, act, ctx) {
+  const name = actVarName(rt, act, ctx);
+  if (!name) return undefined;
   if (act.per === "user") {
     const row = ctx.userId ? rt.bot.uvars[ctx.userId] : null;
-    return row ? row[act.var] : undefined;
+    return row ? row[name] : undefined;
   }
-  return rt.bot.vars[act.var];
+  return rt.bot.vars[name];
 }
 
 function applyMath(cur, op, amt) {
@@ -634,6 +701,7 @@ function onUtterance(rt, userId, username, line, fullText) {
       const at = commandIndex(lower, on.word);
       if (at === -1) continue;
       const after = line.slice(at + 1 + on.word.length).trim();
+      ctx.after = after;
       ctx.args = after ? after.split(/\s+/).slice(0, 8) : [];
     } else if (on.type === "says") {
       if (!lower.includes(on.text.toLowerCase())) continue;

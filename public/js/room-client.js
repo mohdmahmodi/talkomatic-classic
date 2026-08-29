@@ -3857,26 +3857,24 @@ function openUserStaffMenu(user) {
     },
   });
 
-  if (isFullMod) {
-    items.push({
-      icon: '<i class="fas fa-user-slash"></i>',
-      label: "Kick and room ban",
-      danger: true,
-      desc: "Remove and ban from this room",
-      onClick: async () => {
-        if (
-          await StaffUI.confirm({
-            title: "Kick + ban",
-            message: `Kick and room-ban ${name}?`,
-            danger: true,
-            confirmText: "Kick + ban",
-          })
-        ) {
-          socket.emit("staff kick", { targetUserId: user.id, ban: true });
-        }
-      },
-    });
-  }
+  items.push({
+    icon: '<i class="fas fa-user-slash"></i>',
+    label: "Kick and room ban",
+    danger: true,
+    desc: "Remove and ban from this room",
+    onClick: async () => {
+      if (
+        await StaffUI.confirm({
+          title: "Kick + ban",
+          message: `Kick and room-ban ${name}?`,
+          danger: true,
+          confirmText: "Kick + ban",
+        })
+      ) {
+        socket.emit("staff kick", { targetUserId: user.id, ban: true });
+      }
+    },
+  });
 
   if (isFullMod) {
     items.push({

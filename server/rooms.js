@@ -4916,8 +4916,7 @@ function registerSocketHandlers(opts) {
             ),
           );
         const targetUser = room.users.find((u) => u.id === targetUserId);
-        const canBan =
-          socket.isDev || (socket.isMod && (socket.modLevel || 2) >= 2);
+        const canBan = socket.isDev || socket.isMod;
         const ban = canBan && data.ban !== false;
         if (ban) {
           if (!room.bannedUserIds) room.bannedUserIds = new Set();

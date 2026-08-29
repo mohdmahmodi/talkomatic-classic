@@ -3599,7 +3599,7 @@
     else if (!d.users || !d.users.length)
       list.appendChild(el("div", "dk-empty", "Nobody in the room."));
     else {
-      const canBan = me && (me.role === "dev" || (me.level || 2) >= 2);
+      const canBan = me && (me.role === "dev" || me.role === "mod");
       for (const u of d.users) {
         const row = el("div", "dk-occ");
         const head = el("div", "dk-occ-h");
@@ -4498,7 +4498,7 @@
     {
       name: "ban",
       usage: "/ban <name or id>",
-      what: "Kick with a room ban (full mods)",
+      what: "Kick with a room ban",
     },
     { name: "wipe", usage: "/wipe <name or id>", what: "Clear their textbox" },
     {
@@ -4748,7 +4748,7 @@
     },
     {
       words: ["kick", "remove", "boot", "eject", "throw"],
-      say: "/kick removes them from their room. /ban does the same and stops them coming back to that room, if you are a full mod.",
+      say: "/kick removes them from their room. /ban does the same and stops them coming back to that room.",
       cmds: ["kick", "ban"],
     },
     {

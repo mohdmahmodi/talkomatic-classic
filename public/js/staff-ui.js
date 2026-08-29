@@ -1065,7 +1065,7 @@
         ],
         [
           "Kick + room ban",
-          "mod",
+          "jr",
           "Removes the user and bans them from that room so they can't rejoin.",
         ],
         [

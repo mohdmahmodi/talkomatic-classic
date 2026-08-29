@@ -211,6 +211,60 @@
       },
     },
     {
+      key: "notebook",
+      icon: "fa-book-open",
+      level: "medium",
+      name: "Notebook",
+      blurb:
+        "!remember pizza extra cheese, !recall pizza, !forget pizza. Memories picked by name.",
+      bot: {
+        name: "NoteBot",
+        rules: [
+          {
+            on: { type: "command", word: "remember" },
+            if: [{ a: "{word2}", op: "not", b: "" }],
+            do: [
+              {
+                type: "set",
+                var: "note_{word1}",
+                per: "bot",
+                value: "{words2}",
+              },
+              { type: "say", text: '📝 Noted. Ask me with "!recall {word1}".' },
+            ],
+          },
+          {
+            on: { type: "command", word: "remember" },
+            if: [{ a: "{word2}", op: "is", b: "" }],
+            do: [
+              {
+                type: "say",
+                text: "Tell me the name and the note: !remember pizza extra cheese",
+              },
+            ],
+          },
+          {
+            on: { type: "command", word: "recall" },
+            if: [{ a: "{word1}", op: "not", b: "" }],
+            do: [
+              {
+                type: "say",
+                text: "📖 {word1}: {memory:note_{word1}|I have no note called {word1}.}",
+              },
+            ],
+          },
+          {
+            on: { type: "command", word: "forget" },
+            if: [{ a: "{word1}", op: "not", b: "" }],
+            do: [
+              { type: "set", var: "note_{word1}", per: "bot", value: "" },
+              { type: "say", text: "🗑️ Forgot {word1}." },
+            ],
+          },
+        ],
+      },
+    },
+    {
       key: "quiz",
       icon: "fa-trophy",
       level: "medium",
@@ -581,8 +635,17 @@
     { tok: "{word1}", desc: "1st word after the command" },
     { tok: "{word2}", desc: "2nd word after the command (up to {word8})" },
     { tok: "{words}", desc: "all the words after the command" },
+    { tok: "{words2}", desc: "everything from the 2nd word on (up to {words8})" },
     { tok: "{memory:coins}", desc: "the room's shared memory (any name)" },
     { tok: "{mymemory:coins}", desc: "that person's own memory (any name)" },
+    {
+      tok: "{memory:note_{word1}}",
+      desc: "a memory picked by name at runtime, from what they typed",
+    },
+    {
+      tok: "{memory:coins|nothing yet}",
+      desc: "a memory with your own text when nothing is stored",
+    },
     { tok: "{rand:1-6}", desc: "random number, new every time" },
     { tok: "{pick:red|green|blue}", desc: "random choice, new every time" },
     { tok: "{newline}", desc: "start a new line mid-message" },
@@ -1472,11 +1535,21 @@
       for (const a of r.do) {
         if ((a.type === "say" || a.type === "append") && !String(a.text || "").trim())
           return { ok: false, ri, msg: n + ": a say block is empty. Write the message, or remove the block." };
-        if (
-          (a.type === "set" || a.type === "add" || a.type === "random") &&
-          !/^[a-z0-9_]{1,20}$/i.test(String(a.var || "").trim())
-        )
-          return { ok: false, ri, msg: n + ": memory names are 1-20 letters, digits or _." };
+        if (a.type === "set" || a.type === "add" || a.type === "random") {
+          const nm = String(a.var || "").trim();
+          const stripped = nm.replace(/\{[^{}]*\}/g, "x");
+          const ok = nm.includes("{")
+            ? nm.length <= 60 && /^[a-z0-9_x]+$/i.test(stripped)
+            : /^[a-z0-9_]{1,20}$/i.test(nm);
+          if (!ok)
+            return {
+              ok: false,
+              ri,
+              msg:
+                n +
+                ": memory names are 1-20 letters, digits or _, and may include a placeholder like note_{word1}.",
+            };
+        }
         if (a.type === "random" && !String(a.from || "").trim())
           return { ok: false, ri, msg: n + ": the random block needs choices (a, b, c) or a range like 1-100." };
       }
@@ -3578,8 +3651,9 @@
 
   // ── What's new ────────────────────────────────────────────────────────────
 
-  const NEWS_VERSION = 7;
+  const NEWS_VERSION = 8;
   const NEWS = [
+    "Memories can now be picked by name at runtime: {memory:note_{word1}} reads whatever the first word names, and a memory block can WRITE to note_{word1} too. So !remember pizza extra cheese saves it, and !recall pizza reads it back. Add |your own text for when nothing is stored: {memory:note_{word1}|I have no note about that}. {words2} grabs everything from the 2nd word on, and writing an empty value forgets a memory.",
     'Admin commands: every rule now has a "who can trigger it" choice. Pick "only me (admin)" and that rule ignores everyone but you, matched by your session, not your name. New magic words {owner} and {ownercommands}, and an "Admin commands" ready-made bot to start from.',
     "The For coders page is now the real manual: every socket event documented, tokens that renew themselves, working Node and Python bots to copy, and answers for the classic \"my bot vanished\" mysteries.",
     "Automod no longer stars out what bots say for everyone: it is each viewer's own choice now, exactly like for people. Turn your filter off, see the real text.",
@@ -3591,6 +3665,18 @@
   ];
 
   const CHANGELOG = [
+    {
+      title: "Memories by name",
+      icon: "fa-book-open",
+      items: [
+        "A memory block's name can include placeholders: set note_{word1} = {words2} stores whatever they typed under a name of their choosing.",
+        "{memory:note_{word1}} reads it back: the name inside resolves first, then the memory is looked up. Works for {mymemory:...} too.",
+        "Add |your own fallback for when nothing is stored: {memory:note_{word1}|I have no note about that}.",
+        "{words2} up to {words8}: everything from that word on, so !remember pizza extra cheese splits into the name and the note.",
+        "Writing an empty value forgets the memory and frees its slot, so a !forget command is one set block.",
+        "Names settle to letters, digits and _ (spaces become _), 20 letters max. Everything works in the Test room.",
+      ],
+    },
     {
       title: "Admin commands",
       icon: "fa-user-shield",
