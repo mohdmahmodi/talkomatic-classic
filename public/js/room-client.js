@@ -1994,21 +1994,24 @@ function applyDevAppearanceToRow(row, user) {
   const showCrown = !!user.isDev && (!user.isHidden || devSeesConcealed);
 
   const loudMod = !!user.isMod && !user.isDev && !user.isHidden;
-  const modRowClass =
-    loudMod && (user.modLevel || 1) >= 2
-      ? "mod-user"
-      : loudMod
-        ? "jrmod-user"
-        : null;
-  const modTextClass =
-    loudMod && (user.modLevel || 1) >= 2
-      ? "mod-glow-text"
-      : loudMod
-        ? "jrmod-glow-text"
-        : null;
+  const modLvl = user.modLevel || 1;
+  const modRowClass = !loudMod
+    ? null
+    : modLvl >= 3
+      ? "leadmod-user"
+      : modLvl >= 2
+        ? "mod-user"
+        : "jrmod-user";
+  const modTextClass = !loudMod
+    ? null
+    : modLvl >= 3
+      ? "leadmod-glow-text"
+      : modLvl >= 2
+        ? "mod-glow-text"
+        : "jrmod-glow-text";
 
-  row.classList.remove("mod-user", "jrmod-user");
-  ci.classList.remove("mod-glow-text", "jrmod-glow-text");
+  row.classList.remove("mod-user", "jrmod-user", "leadmod-user");
+  ci.classList.remove("mod-glow-text", "jrmod-glow-text", "leadmod-glow-text");
 
   if (loudDev) {
     row.classList.add("dev-user");
@@ -5104,7 +5107,7 @@ window.addEventListener("hashchange", () => {
     .dev-meta:active{opacity:.6;}
     .mod-badge{display:inline-block;background:#5aa9ff;color:#001229;font-size:9px;font-weight:bold;padding:1px 5px;border-radius:8px;margin:0 5px 0 0;letter-spacing:.5px;vertical-align:middle;flex:0 0 auto;}
     .mod-badge.mod-badge-jr{background:#c08bff;color:#16002b;}
-    .mod-badge.mod-badge-lead{background:#4ade80;color:#00220f;}
+    .mod-badge.mod-badge-lead{background:#22c55e;color:#00220f;}
     .bot-badge{display:inline-block;background:var(--bot-flair,#9aa3ae);color:#16191d;font-size:9px;font-weight:bold;padding:1px 5px;border-radius:8px;margin:0 5px 0 0;letter-spacing:.5px;vertical-align:middle;flex:0 0 auto;}
     .bot-user .chat-input{border-left:2px solid rgba(154,163,174,.4);}
     body.tk-hide-bots .bot-user{display:none !important;}

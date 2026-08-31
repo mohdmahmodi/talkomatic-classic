@@ -92,13 +92,13 @@
   .tk-iico.t-dev{background:rgba(255,84,104,.15);color:#ff5468;}
   .tk-iico.t-mod{background:rgba(90,169,255,.15);color:#5aa9ff;}
   .tk-iico.t-jr{background:rgba(192,139,255,.16);color:#c08bff;}
-  .tk-iico.t-lead{background:rgba(74,222,128,.15);color:#4ade80;}
+  .tk-iico.t-lead{background:rgba(34,197,94,.15);color:#22c55e;}
   /* Rank chips match the room flair and the dashboard: dev red, mod leader
      green, full mod blue, junior mod purple. */
   .tk-chip{display:inline-block;font-size:10px;font-weight:bold;padding:2px 7px;border-radius:4px;
     letter-spacing:.4px;vertical-align:middle;}
   .tk-chip.dev{background:#ff5468;color:#1a0005;}
-  .tk-chip.lead{background:#4ade80;color:#00220f;}
+  .tk-chip.lead{background:#22c55e;color:#00220f;}
   .tk-chip.mod{background:#5aa9ff;color:#001229;}
   .tk-chip.jr{background:#c08bff;color:#16002b;}
   /* toasts */

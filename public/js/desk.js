@@ -5387,7 +5387,7 @@
 .dk-mname.l1{color: #cfa6ff;}
 .dk-chip{font-size:9px;font-weight:bold;letter-spacing:.5px;padding:1px 5px;border-radius:3px;border:1px solid;}
 .dk-chip.dev{color: #ff5468;border-color: #ff5468;}
-.dk-chip.l3{color: #4ade80;border-color: #4ade80;}
+.dk-chip.l3{color: #22c55e;border-color: #22c55e;}
 .dk-chip.l2{color: #5aa9ff;border-color: #5aa9ff;}
 .dk-chip.l1{color: #c08bff;border-color: #c08bff;}
 .dk-chip.ghost{color: #8d8d8d;border-color: #8d8d8d;}
@@ -5859,7 +5859,7 @@
 .dk-group{display:flex;align-items:center;gap:6px;padding:9px 5px 3px;}
 .dk-group-n{font-size:10px;font-weight:bold;letter-spacing:.7px;text-transform:uppercase;color: #8d8d8d;}
 .dk-group.dev .dk-group-n{color: #ff5468;}
-.dk-group.l3 .dk-group-n{color: #4ade80;}
+.dk-group.l3 .dk-group-n{color: #22c55e;}
 .dk-group.l2 .dk-group-n{color: #5aa9ff;}
 .dk-group.l1 .dk-group-n{color: #c08bff;}
 .dk-group-c{font-size:10px;color: #6f6f6f;font-variant-numeric:tabular-nums;}
