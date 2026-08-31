@@ -1112,22 +1112,22 @@ html {
       padding-box,
     conic-gradient(
         from var(--tk-border-angle),
-        #00ff41,
-        #b3ffcc 25%,
-        #00ff41 50%,
-        #00a32a 75%,
-        #00ff41
+        #77dd77,
+        #d3f5d3 25%,
+        #77dd77 50%,
+        #3f9e51 75%,
+        #77dd77
       )
       border-box;
   box-shadow:
-    0 0 8px rgba(0, 255, 65, 0.5),
-    0 0 20px rgba(0, 255, 65, 0.25),
-    inset 0 0 8px rgba(0, 255, 65, 0.1);
+    0 0 8px rgba(119, 221, 119, 0.45),
+    0 0 20px rgba(119, 221, 119, 0.22),
+    inset 0 0 8px rgba(119, 221, 119, 0.1);
   animation: tk-border-spin 3s linear infinite;
 }
 
 .chat-row.leadmod-user .user-info {
-  background: linear-gradient(to bottom, #128a3e, #07401d);
+  background: linear-gradient(to bottom, #2b5e3c, #142e1e);
 }
 
 /* Glow on the typed text, matching the dev treatment */
@@ -1148,8 +1148,8 @@ html {
 .leadmod-glow-text {
   text-shadow:
     0 0 10px currentColor,
-    0 -2px 6px rgba(0, 255, 65, 0.4),
-    0 -5px 12px rgba(0, 255, 65, 0.22);
+    0 -2px 6px rgba(119, 221, 119, 0.4),
+    0 -5px 12px rgba(119, 221, 119, 0.22);
 }
 
 /* ── Crown Icon ────────────────────────────────────────────────────────────── */
