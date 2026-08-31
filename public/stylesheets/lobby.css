@@ -319,6 +319,13 @@ html {
   text-decoration: underline;
 }
 
+/* No double-tap-zoom wait on touch screens: taps fire immediately. */
+button,
+a,
+.enter-button {
+  touch-action: manipulation;
+}
+
 /* The lobby form has always toggled this class on sign in and sign out, but the
    rule behind it was missing, so the create-room box showed to everyone. It
    matters now that a name is required: no name, no room form. */

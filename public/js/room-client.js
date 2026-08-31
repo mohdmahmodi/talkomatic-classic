@@ -3621,6 +3621,11 @@ window.addEventListener("load", () => {
 });
 
 document.querySelector(".leave-room").addEventListener("click", () => {
+  // The click is instant; the wait is the lobby page loading. Show it.
+  const btn = document.querySelector(".leave-room");
+  btn.classList.add("leaving");
+  const ic = btn.querySelector("i");
+  if (ic) ic.className = "fas fa-spinner fa-spin";
   if (isSpectating) socket.emit("staff unspectate");
   else socket.emit("leave room");
   window.location.href = "/index.html";

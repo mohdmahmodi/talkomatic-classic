@@ -1575,6 +1575,12 @@ goChatButton.addEventListener("click", () => {
       }
     }
 
+    // The id comes back from the server, so creation has to wait one round
+    // trip - but the button says so instead of sitting there dead.
+    goChatButton.disabled = true;
+    goChatButton.textContent = "Creating...";
+    if (goChatRestoreTimer) clearTimeout(goChatRestoreTimer);
+    goChatRestoreTimer = setTimeout(restoreGoChat, 6000);
     socket.emit("create room", {
       name: roomName,
       type: roomType,
@@ -1586,6 +1592,20 @@ goChatButton.addEventListener("click", () => {
     window.showErrorModal("Please fill in all room details.");
   }
 });
+
+let goChatRestoreTimer = null;
+const goChatLabel = goChatButton.textContent;
+function restoreGoChat() {
+  if (goChatRestoreTimer) {
+    clearTimeout(goChatRestoreTimer);
+    goChatRestoreTimer = null;
+  }
+  if (goChatButton.disabled) {
+    goChatButton.disabled = false;
+    goChatButton.textContent = goChatLabel;
+  }
+}
+socket.on("error", restoreGoChat);
 
 dynamicRoomList.addEventListener("click", (e) => {
   if (e.target.classList.contains("enter-button") && !e.target.disabled) {
@@ -1604,6 +1624,8 @@ dynamicRoomList.addEventListener("click", (e) => {
     if (roomType === "semi-private") {
       promptAccessCode(roomId);
     } else {
+      e.target.textContent = "Joining...";
+      e.target.disabled = true;
       joinRoom(roomId);
     }
   }
@@ -1636,15 +1658,16 @@ function promptAccessCode(roomId) {
 }
 
 function joinRoom(roomId, accessCode = null) {
-  if (!socket.connected) {
-    window.showErrorModal(
-      "Not connected to server. Please wait for connection or refresh the page.",
-      "SERVER_ERROR",
-    );
-    return;
-  }
-
-  socket.emit("join room", { roomId, accessCode });
+  // Straight to the room page, the same path an invite link takes. The room
+  // page does the real join and already handles every failure (full, gone,
+  // wrong code) with a modal and a way back. The old flow joined on THIS
+  // socket first and only navigated on the server's reply, which cost a full
+  // round trip while the button sat there looking dead.
+  const code = accessCode
+    ? "&accessCode=" + encodeURIComponent(accessCode)
+    : "";
+  window.location.href =
+    "/room.html?roomId=" + encodeURIComponent(roomId) + code;
 }
 
 socket.on("access code required", () => {

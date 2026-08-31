@@ -23,6 +23,10 @@ class TalkomaticPopupManager {
   }
 
   checkAndShowPopup() {
+    // Turned off for everyone for now: between the first-visit read-through
+    // (rules, then staff) and the dev announcement, this was one popup too
+    // many. Delete the next line to bring the What's New card back.
+    return;
     if (this.shouldShowPopup()) {
       this.createAndShowPopup();
     }

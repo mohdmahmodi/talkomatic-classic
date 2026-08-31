@@ -4,12 +4,16 @@
   if (typeof socket === "undefined") return;
 
   var overlay,
+    modalEl,
     listEl,
+    closeBtnEl,
+    footerEl = null,
     built = false,
     loaded = false;
   var tab = "community";
   var data = { community: [], mod: [] };
   var tabBtns = {};
+  var gateCb = null;
 
   function el(tag, cls, text) {
     var e = document.createElement(tag);
@@ -46,6 +50,12 @@
       ".tkr-lvl-full{background:rgba(0,188,212,.16);color:#4dd0e1;}",
       ".tkr-lvl-leader{background:rgba(119,221,119,.16);color:#77dd77;}",
       ".tkr-empty{color:var(--tk-muted);text-align:center;padding:40px 0;font-size:14px;}",
+      ".tkr-gate{flex-shrink:0;display:flex;align-items:center;gap:14px;flex-wrap:wrap;",
+      "padding:13px 24px;border-top:1px solid var(--tk-border);background:var(--tk-tile);}",
+      ".tkr-gate-msg{flex:1;min-width:200px;color:var(--tk-text);font-size:13px;line-height:1.55;}",
+      ".tkr-gate-btn{background:var(--tk-accent);color:#1a1a1a;border:none;border-radius:5px;",
+      "padding:10px 20px;font-size:14px;font-weight:bold;font-family:inherit;cursor:pointer;}",
+      ".tkr-gate-btn:disabled{background:var(--tk-tile-hover);color:var(--tk-muted);cursor:default;}",
       "@media (max-width:640px){.tkr-body,.tkr-why{margin-left:0;}}",
     ].join("");
     document.head.appendChild(s);
@@ -59,6 +69,7 @@
     overlay = el("div", "sb-overlay");
     overlay.id = "tkRulesOverlay";
     var modal = el("div", "sb-modal");
+    modalEl = modal;
 
     var head = el("div", "sb-head");
     var titleWrap = el("div", "sb-title-wrap");
@@ -77,6 +88,7 @@
     closeBtn.setAttribute("aria-label", "Close");
     closeBtn.addEventListener("click", close);
     headBtns.appendChild(closeBtn);
+    closeBtnEl = closeBtn;
 
     head.appendChild(titleWrap);
     head.appendChild(headBtns);
@@ -174,8 +186,58 @@
     listEl.appendChild(wrap);
   }
 
-  function open() {
+  // First-visit gate: the modal cannot be dismissed until the button at the
+  // bottom is pressed, and the button unlocks after a short pause so the
+  // rules get read rather than clicked away.
+  function setGateFooter() {
+    if (footerEl) {
+      footerEl.remove();
+      footerEl = null;
+    }
+    if (!gateCb) return;
+    footerEl = el("div", "tkr-gate");
+    footerEl.appendChild(
+      el(
+        "div",
+        "tkr-gate-msg",
+        "Welcome to Talkomatic. Before you start chatting, please take a minute to read the rules. They apply to everyone here.",
+      ),
+    );
+    var btn = el("button", "tkr-gate-btn");
+    btn.type = "button";
+    btn.disabled = true;
+    var left = 5;
+    var paint = function () {
+      btn.textContent =
+        left > 0 ? "I have read the rules (" + left + ")" : "I have read the rules";
+    };
+    paint();
+    var t = setInterval(function () {
+      left--;
+      paint();
+      if (left <= 0) {
+        clearInterval(t);
+        btn.disabled = false;
+      }
+    }, 1000);
+    btn.addEventListener("click", function () {
+      if (btn.disabled) return;
+      var cb = gateCb;
+      gateCb = null;
+      setGateFooter();
+      if (closeBtnEl) closeBtnEl.style.display = "";
+      close();
+      if (cb) cb();
+    });
+    footerEl.appendChild(btn);
+    modalEl.appendChild(footerEl);
+  }
+
+  function open(opts) {
     build();
+    gateCb = opts && opts.gate ? opts.onDone || function () {} : null;
+    if (closeBtnEl) closeBtnEl.style.display = gateCb ? "none" : "";
+    setGateFooter();
     overlay.classList.add("show");
     document.addEventListener("keydown", esc);
     render();
@@ -187,7 +249,7 @@
   }
 
   function close() {
-    if (!overlay) return;
+    if (!overlay || gateCb) return;
     overlay.classList.remove("show");
     document.removeEventListener("keydown", esc);
   }

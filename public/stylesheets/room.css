@@ -176,6 +176,18 @@ html {
   color: #000;
 }
 
+.leave-room.leaving {
+  opacity: 0.65;
+  pointer-events: none;
+}
+
+/* No double-tap-zoom wait on touch screens: taps fire immediately. */
+button,
+.leave-room,
+.enter-button {
+  touch-action: manipulation;
+}
+
 /* Mute Toggle Button Styles */
 .mute-toggle {
   background: none;
