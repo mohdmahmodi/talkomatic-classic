@@ -182,6 +182,10 @@ const TRAILING = /[.,!?;:)\]}'"]+$/;
 
 const DEFAULT_LABEL = "[link removed]";
 
+// The cheap gate for the space-for-dot tier: a word followed by one of its
+// no-evidence TLDs ("skribbl io"). The full pass still decides.
+const SPACED_HINT = /[a-z0-9]\s+(?:com|org|io|co)(?![a-z0-9])/i;
+
 function looksLikeLink(value) {
   return (
     typeof value === "string" &&
@@ -192,6 +196,7 @@ function looksLikeLink(value) {
       /d\s*[o0]\s*t|period/i.test(value) ||
       SWAP_SHAPE.test(value) ||
       pairedWeak(value) ||
+      SPACED_HINT.test(value) ||
       /[。．｡․]/.test(value))
   );
 }
@@ -285,6 +290,95 @@ function stripJunk(scanned) {
   }
   map.push(scanned.map[scanned.map.length - 1]);
   return { text, map, src: scanned.src };
+}
+
+// People swap the dot for a plain space: "skribbl io", "talkomatic co",
+// "discord gg/CODE". Rewriting every space as a dot would flag half of
+// ordinary chat ("the store", "watch tv", "safety net" are all real TLD
+// shapes), so this is the strictest tier: without a path or port attached,
+// only a handful of TLDs that barely exist as English words count, the word
+// before the TLD must not be an everyday one, and only the host itself is
+// flagged rather than the sentence around it. Accepted misses, in line with
+// the other second-class swap tiers: a bare "discord gg" with no invite code
+// attached, and word-like TLDs ("safety net", "that was fun gg").
+const SPACED_STOP = new Set(
+  (
+    "a an the and or of to in on at as is are was were be been being by for " +
+    "with from not no yes ok okay yeah nah it its this that these those " +
+    "there their they them then than you your yours we our ours us me my " +
+    "mine he she his her hers him had has have having do does did done im " +
+    "ive id ill youre theyre weve dont wont cant isnt arent wasnt didnt " +
+    "go goes going gone get gets got getting let lets like liked just " +
+    "really very so but if because when what who whom how why where which " +
+    "while will would can could should shall may might must one two three " +
+    "too also more most much many some any every all each both few out up " +
+    "down off over under again once here now new old good bad big small " +
+    "long short high low right wrong left next last first second only own " +
+    "same other another such well even never always often sometimes maybe " +
+    "please thanks thank sorry hello hi hey bye see saw seen say says said " +
+    "come came comes back still yet after before about against between " +
+    "during without within into onto want wants wanted need needs needed " +
+    "know knows knew think thinks thought make makes made take takes took " +
+    "play plays played game games fun nice cool great wanna gonna gotta " +
+    "kinda sorta dot www com net org"
+  ).split(/\s+/),
+);
+
+// Whitespace runs between letters or digits become a single dot; everything
+// else is left alone so the rest of the text still reads as prose.
+function spaceDots(scanned) {
+  const t = scanned.text;
+  let text = "";
+  const map = [];
+  let i = 0;
+  while (i < t.length) {
+    if (SPACE.test(t[i])) {
+      let j = i;
+      while (j < t.length && SPACE.test(t[j])) j++;
+      const prev = text[text.length - 1] || "";
+      const next = t[j] || "";
+      text += /[a-z0-9]/.test(prev) && /[a-z0-9]/.test(next) ? "." : " ";
+      map.push(scanned.map[i]);
+      i = j;
+      continue;
+    }
+    text += t[i];
+    map.push(scanned.map[i]);
+    i++;
+  }
+  map.push(scanned.map[scanned.map.length - 1]);
+  return { text, map, src: scanned.src };
+}
+
+// The general LINK regex reads a dotted-up sentence as one giant host, which
+// buries the real one ("come.play.skribbl.io.with.us" ends in "us"). These
+// two shapes find the host inside the sentence instead: name.tld standing on
+// its own, and name.tld with a path or port hanging off it.
+const SPACED_NAKED = /([a-z0-9][a-z0-9-]{2,62})\.(com|org|io|co)(?![a-z0-9-])/g;
+const SPACED_TAILED =
+  /([a-z0-9][a-z0-9-]{2,62})\.([a-z0-9]{2,24})(?::\d{1,5})?\/[^\s<>"']*/g;
+
+function spacedRanges(scanned, out) {
+  const sp = spaceDots(scanned);
+  if (sp.text === scanned.text) return;
+  const { text, map } = sp;
+  const scanShape = (re, checkTld) => {
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      if (checkTld && !TLD.has(m[2])) continue;
+      // The word before the TLD is the name being shared; an everyday word
+      // there means this is a sentence, not a host.
+      if (m[1].length < 3 || SPACED_STOP.has(m[1])) continue;
+      // Never start mid-word; a dot before is fine ("www skribbl io").
+      const before = text[m.index - 1];
+      if (before && /[a-z0-9-]/.test(before)) continue;
+      const trimmed = m[0].replace(TRAILING, "");
+      out.push([map[m.index], map[m.index + trimmed.length]]);
+    }
+  };
+  scanShape(SPACED_NAKED, false);
+  scanShape(SPACED_TAILED, true);
 }
 
 const WEAK_ANY = /[-_‐-―⁃־－＿]/g;
@@ -523,14 +617,20 @@ function tailSmuggles(tail) {
 // the parser cannot split, or anything extra inside the range, keeps it
 // blocked - blocked is the safe direction.
 function allowedRange(value, start, end) {
-  const text = scan(value.slice(start, end))
-    .text.replace(DOT_ALL, ".")
-    .replace(/\s+/g, "")
-    .replace(TRAILING, "");
-  const parts = splitUrlish(text);
-  if (!parts) return false;
-  if (!HOST_OK.test(parts.host) || !hostAllowed(parts.host)) return false;
-  return !parts.tail || !tailSmuggles(parts.tail);
+  const dotted = scan(value.slice(start, end)).text.replace(DOT_ALL, ".");
+  // Two readings of leftover spaces: stripped out ("y o u t u b e . c o m")
+  // and standing in for dots ("youtube com"). Allowed if either parses to an
+  // allowed host.
+  const variants = [dotted.replace(/\s+/g, "")];
+  if (/\s/.test(dotted.trim())) variants.push(dotted.trim().replace(/\s+/g, "."));
+  for (const v of variants) {
+    const text = v.replace(TRAILING, "");
+    const parts = splitUrlish(text);
+    if (!parts) continue;
+    if (!HOST_OK.test(parts.host) || !hostAllowed(parts.host)) continue;
+    if (!parts.tail || !tailSmuggles(parts.tail)) return true;
+  }
+  return false;
 }
 
 loadAllowed();
@@ -554,6 +654,7 @@ function findRanges(value, ignoreAllowed) {
   if (JUNK.test(loose.text)) rangesIn(stripJunk(loose), extra, false, true);
   if (SPACE.test(loose.text)) {
     rangesIn(tighten(loose), found);
+    spacedRanges(loose, extra);
     const closed = closeUp(loose);
     rangesIn(closed, extra, false, true);
     markerRange(closed, extra);
