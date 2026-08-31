@@ -1988,7 +1988,11 @@ function applyDevAppearanceToRow(row, user) {
   const ci = row.querySelector(".chat-input");
   if (!info || !ci) return;
 
-  const devSeesConcealed = currentUserIsDev && user.id !== currentUserId;
+  // Admins and mod leaders both see through concealed flair; the server only
+  // ever sends a leader the hidden state of MODS, so dev privacy holds.
+  const devSeesConcealed =
+    (currentUserIsDev || currentUserModLevel >= 3) &&
+    user.id !== currentUserId;
   const crown = info.querySelector(".dev-crown");
   const loudDev = !!user.isDev && !user.isHidden;
   const showCrown = !!user.isDev && (!user.isHidden || devSeesConcealed);
@@ -2317,7 +2321,11 @@ function createUserRow(user, container) {
   row.dataset.userId = user.id;
   row.dataset.username = user.username || "";
 
-  const devSeesConcealed = currentUserIsDev && user.id !== currentUserId;
+  // Admins and mod leaders both see through concealed flair; the server only
+  // ever sends a leader the hidden state of MODS, so dev privacy holds.
+  const devSeesConcealed =
+    (currentUserIsDev || currentUserModLevel >= 3) &&
+    user.id !== currentUserId;
 
   if (user.isDev && !user.isHidden) {
     row.classList.add("dev-user");
@@ -5107,7 +5115,7 @@ window.addEventListener("hashchange", () => {
     .dev-meta:active{opacity:.6;}
     .mod-badge{display:inline-block;background:#5aa9ff;color:#001229;font-size:9px;font-weight:bold;padding:1px 5px;border-radius:8px;margin:0 5px 0 0;letter-spacing:.5px;vertical-align:middle;flex:0 0 auto;}
     .mod-badge.mod-badge-jr{background:#c08bff;color:#16002b;}
-    .mod-badge.mod-badge-lead{background:#22c55e;color:#00220f;}
+    .mod-badge.mod-badge-lead{background:#00ff41;color:#00220f;}
     .bot-badge{display:inline-block;background:var(--bot-flair,#9aa3ae);color:#16191d;font-size:9px;font-weight:bold;padding:1px 5px;border-radius:8px;margin:0 5px 0 0;letter-spacing:.5px;vertical-align:middle;flex:0 0 auto;}
     .bot-user .chat-input{border-left:2px solid rgba(154,163,174,.4);}
     body.tk-hide-bots .bot-user{display:none !important;}

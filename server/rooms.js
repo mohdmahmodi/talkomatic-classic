@@ -1885,7 +1885,18 @@ function formatUserForSocket(user, recipientSocket) {
   }
   if (user.avatar) formatted.avatar = user.avatar;
   const recipientIsDev = canSeeConcealed(recipientSocket, user);
-  if ((user.isHidden || isOpsUser(user)) && !recipientIsDev) {
+  // Leaders see which MOD has their flair off, the way admins do. Hidden and
+  // vanished devs stay a dev-only matter.
+  const leaderSeesHiddenMod =
+    !user.isDev &&
+    !!user.isMod &&
+    !!recipientSocket?.isMod &&
+    (recipientSocket.modLevel || 1) >= 3;
+  if (
+    (user.isHidden || isOpsUser(user)) &&
+    !recipientIsDev &&
+    !leaderSeesHiddenMod
+  ) {
     return formatted;
   }
 
