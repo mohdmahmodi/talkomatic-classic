@@ -106,6 +106,8 @@ html.tk-fx-glass .chat-row {
   border: 1px solid color-mix(in srgb, var(--tk-text) 18%, transparent) !important;
 }
 
+/* The profile picture card is light, so glass tints it from the input color
+   rather than the dark tile color the rule above uses. */
 html.tk-fx-glass .pfp-card {
   background: color-mix(in srgb, var(--tk-input-bg) 70%, transparent) !important;
 }

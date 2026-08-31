@@ -1,7 +1,8 @@
-// feature-announce.js - One-time "New Feature" modal for word filter toggle
-// Dismissed via cookie for 60 days.
+// feature-announce.js - One-time card for the personal toggles (word filter,
+// hide bots). Dismissed via cookie for 60 days. The name is versioned so a
+// reworded card shows once more to people who dismissed an older one.
 (function () {
-  var COOKIE_NAME = "tk_announce_seen";
+  var COOKIE_NAME = "tk_announce_seen2";
   var COOKIE_DAYS = 60;
 
   function getCookie(name) {

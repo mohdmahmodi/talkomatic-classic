@@ -46,7 +46,7 @@ function evictOldest() {
   }
 }
 
-function record({ hash, label, role, action, target, room, ip }) {
+function record({ hash, label, role, level, action, target, room, ip }) {
   if (!hash) return;
   const now = Date.now();
   let arr = log.get(hash) || [];
@@ -104,7 +104,8 @@ function record({ hash, label, role, action, target, room, ip }) {
     text: `Possible mod abuse by ${who}: ${reasons.join("; ")}. Recent actions: ${recentList}.`,
     room: room || null,
     ip: ip || null,
-    minLevel: 2,
+    minLevel: 3,
+    devOnly: (level || 1) >= 3,
     card: {
       target: who,
       targetRole: role || "mod",

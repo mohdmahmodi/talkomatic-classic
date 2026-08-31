@@ -148,6 +148,9 @@ html {
 }
 
 .leave-room {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   font-size: 14px;
   cursor: pointer;
   background-color: var(--tk-card);
@@ -157,6 +160,20 @@ html {
   border-radius: 5px;
   font-family: var(--tk-font-main, talkoSS, Arial, sans-serif);
   white-space: nowrap;
+}
+
+.leave-room i {
+  color: var(--tk-accent);
+  font-size: 14px;
+}
+
+.leave-room:hover {
+  background-color: var(--tk-accent);
+  color: #000;
+}
+
+.leave-room:hover i {
+  color: #000;
 }
 
 /* Mute Toggle Button Styles */
@@ -363,6 +380,51 @@ html {
 
 .user-info.tools-open .ui-tools-toggle i {
   transform: rotate(180deg);
+}
+
+/* Phones: opened inline, the tray steals the bar's width and shoves its own
+   chevron off the edge, so it cannot be closed again. Instead it floats in a
+   panel under the bar with touch-size buttons; the bar itself never moves. */
+@media screen and (max-width: 576px) {
+  .user-info {
+    position: relative;
+  }
+  /* The bar clips overflow to ellipsize long names; while the tray is out
+     that clipping would swallow the floating panel too. */
+  .user-info.tools-open {
+    overflow: visible;
+  }
+  .user-info .ui-tools-toggle {
+    font-size: 14px;
+    padding: 5px 6px 5px 9px;
+  }
+  .user-info.tools-open .ui-tools {
+    position: absolute;
+    top: calc(100% + 3px);
+    right: 2px;
+    z-index: 60;
+    max-width: none;
+    overflow: visible;
+    gap: 4px;
+    padding: 6px 8px;
+    background: #101010;
+    border: 1px solid #616161;
+    border-radius: 6px;
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.55);
+    transition: none;
+  }
+  .user-info.tools-open .ui-tools .staff-action-button,
+  .user-info.tools-open .ui-tools .report-button {
+    font-size: 16px;
+    padding: 4px 8px;
+    margin: 0;
+    opacity: 0.9;
+  }
+  .user-info.tools-open .ui-tools .mute-button {
+    font-size: 14px;
+    padding: 3px 8px;
+    margin: 0;
+  }
 }
 
 /* Muted rows keep a visible hint while the tray is closed */
@@ -607,11 +669,22 @@ html {
     min-height: 100%;
   }
 
+  /* The right side holds up to seven controls on a phone: smaller paddings,
+     and the leave button drops its label to just the exit icon. */
+  .top-navbar {
+    padding: 8px 10px;
+  }
   .brand {
-    font-size: 18px;
+    font-size: 17px;
+  }
+  .mute-toggle {
+    padding: 6px;
   }
   .leave-room {
-    padding: 6px;
+    padding: 8px 9px;
+  }
+  .leave-room span {
+    display: none;
   }
   .room-name {
     font-size: 14px;
@@ -978,8 +1051,9 @@ html {
 
 /* ── Moderator flair ───────────────────────────────────────────────────────
    Same treatment as the dev row, keyed to rank so you can tell staff apart at
-   a glance: developers red (above), full mods (L2) blue, junior mods (L1)
-   purple. Set server-side from the mod key, so it cannot be faked. */
+   a glance: developers red (above), mod leaders (L3) green, full mods (L2)
+   blue, junior mods (L1) purple. Set server-side from the mod key, so it
+   cannot be faked. */
 
 .chat-row.mod-user {
   border: 2px solid transparent;
@@ -1031,6 +1105,31 @@ html {
   background: linear-gradient(to bottom, #40265e, #221333);
 }
 
+.chat-row.leadmod-user {
+  border: 2px solid transparent;
+  background:
+    linear-gradient(var(--tk-chat-bg, #000), var(--tk-chat-bg, #000))
+      padding-box,
+    conic-gradient(
+        from var(--tk-border-angle),
+        #4ade80,
+        #d9ffe8 25%,
+        #4ade80 50%,
+        #1c5e38 75%,
+        #4ade80
+      )
+      border-box;
+  box-shadow:
+    0 0 8px rgba(74, 222, 128, 0.55),
+    0 0 20px rgba(74, 222, 128, 0.28),
+    inset 0 0 8px rgba(74, 222, 128, 0.1);
+  animation: tk-border-spin 3s linear infinite;
+}
+
+.chat-row.leadmod-user .user-info {
+  background: linear-gradient(to bottom, #1c5e38, #0e2b1c);
+}
+
 /* Glow on the typed text, matching the dev treatment */
 .mod-glow-text {
   text-shadow:
@@ -1044,6 +1143,13 @@ html {
     0 0 10px currentColor,
     0 -2px 6px rgba(192, 139, 255, 0.4),
     0 -5px 12px rgba(192, 139, 255, 0.22);
+}
+
+.leadmod-glow-text {
+  text-shadow:
+    0 0 10px currentColor,
+    0 -2px 6px rgba(74, 222, 128, 0.4),
+    0 -5px 12px rgba(74, 222, 128, 0.22);
 }
 
 /* ── Crown Icon ────────────────────────────────────────────────────────────── */
@@ -2095,7 +2201,8 @@ html {
   text-align: right;
 }
 
-/* Mobile */
+/* Mobile: the bar only fits three things - Emoticons, the name, and the id.
+   The type and the uptime are the two least useful and go first. */
 @media screen and (max-width: 576px) {
   .room-type-group {
     gap: 6px;
@@ -2104,9 +2211,9 @@ html {
     padding: 4px 8px;
     font-size: 12px;
   }
-  .room-type {
-    font-size: 11px;
-    white-space: nowrap;
+  .room-type,
+  .second-navbar .room-uptime {
+    display: none;
   }
   .second-navbar .room-id {
     font-size: 11px;

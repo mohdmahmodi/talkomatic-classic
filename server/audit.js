@@ -54,13 +54,8 @@ function redactEntry(entry, view) {
       copy.type === "comment"
         ? roles.systemLabel(copy.label, copy.role)
         : roles.teamLabel(copy.label, copy.role, view);
-  if (copy.byRole === "mod" || copy.byRole === "dev") {
-    if (view && view.names) copy.by = roles.systemLabel(copy.by, copy.byRole);
-    else {
-      delete copy.by;
-      delete copy.byRole;
-    }
-  }
+  if (copy.byRole === "mod" || copy.byRole === "dev")
+    copy.by = roles.systemLabel(copy.by, copy.byRole);
   return copy;
 }
 
@@ -90,7 +85,7 @@ function broadcast(entry) {
     }
     if (privileged) continue;
     if (!s.isMod) continue;
-    if (entry.minLevel && (s.modLevel || 2) < entry.minLevel) continue;
+    if (entry.minLevel && (s.modLevel || 1) < entry.minLevel) continue;
     if (!forMod) forMod = redactEntry(entry, MOD_VIEW);
     s.emit("audit entry", forMod);
   }
@@ -236,14 +231,15 @@ function recordKeyAlert({ role, label, ip, kind, detail }) {
 function recordNotification({
   kind, label, role, text, target, room, by, minLevel,
   ip, targetIp, targetUserId, byUserId, reports, byRole, targetRole,
-  card, opsOnly,
+  card, opsOnly, devOnly,
 }) {
-  const lvl = minLevel === 1 ? 1 : 2;
+  const lvl = minLevel >= 3 ? 3 : minLevel === 1 ? 1 : 2;
   const entry = push({
     ts: Date.now(),
     type: "notification",
     minLevel: lvl,
     ...(opsOnly ? { opsOnly: true } : {}),
+    ...(devOnly ? { devOnly: true } : {}),
     kind: kind || "notice",
     role: role || null,
     label: label || null,
@@ -259,18 +255,19 @@ function recordNotification({
     targetIp: targetIp || null,
     reports: reports || null,
   });
-  notifyStaffToast(text || "New staff notification", lvl, !!opsOnly);
+  notifyStaffToast(text || "New staff notification", lvl, !!opsOnly, !!devOnly);
   try {
     require("./staffchat").systemQueues(kind || "notice", text || "", {
       minLevel: lvl,
       card: card || null,
       opsOnly: !!opsOnly,
+      devOnly: !!devOnly,
     });
   } catch (_) {}
   return entry;
 }
 
-function notifyStaffToast(text, minLevel, opsOnly) {
+function notifyStaffToast(text, minLevel, opsOnly, devOnly) {
   if (!io()) return;
   const masked = maskIps(text);
   for (const [, s] of io().sockets.sockets) {
@@ -283,7 +280,8 @@ function notifyStaffToast(text, minLevel, opsOnly) {
       s.emit("staff notice", { text: masked });
       continue;
     }
-    if (s.isMod && (s.modLevel || 2) >= (minLevel || 2))
+    if (devOnly) continue;
+    if (s.isMod && (s.modLevel || 1) >= (minLevel || 2))
       s.emit("staff notice", { text: masked });
   }
 }

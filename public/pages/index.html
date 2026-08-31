@@ -557,6 +557,18 @@
   <body>
     <!-- Button to toggle the left panel (menu) visibility -->
     <button class="toggle-button" id="toggleButton">Menu</button>
+    <!-- Floating tools pinned to the top right of the room list -->
+    <div class="corner-tools">
+      <a
+        href="#"
+        id="themeEditorLink"
+        class="corner-tool"
+        title="Customize the look"
+        aria-label="Customize the look"
+      >
+        <i class="fas fa-palette"></i>
+      </a>
+    </div>
     <!-- Container that holds both the left (menu) and right (content) panels -->
     <div class="container">
       <!-- Left panel containing the menu options and forms -->
@@ -569,82 +581,65 @@
         <div class="panel-header">
           <span class="talkomatic">Talkomatic™</span>
           <span class="lobby">Lobby</span>
-          <div>
-            <a class="panel-header-about" href="about.html">About Talkomatic</a>
-            <a class="panel-header-about" href="#" id="rulesLink"
-              >Talkomatic Rules</a
-            >
-          </div>
+          <nav class="panel-header-links">
+            <a href="about.html">About</a>
+            <span aria-hidden="true">|</span>
+            <a href="#" id="rulesLink">Rules</a>
+          </nav>
         </div>
         <div class="external-links">
           <a
             href="https://discord.gg/N7tJznESrE"
-            class="icon-only"
             title="Discord"
             aria-label="Discord"
             rel="noopener noreferrer"
           >
-            <i class="fab fa-discord"></i>
+            <i class="fab fa-discord"></i><span>Discord</span>
           </a>
           <a
             href="themes.html"
             id="themesButton"
-            class="icon-only"
             title="Themes"
             aria-label="Themes"
             rel="noopener noreferrer"
           >
-            <i class="fas fa-paintbrush"></i>
-          </a>
-          <a
-            href="#"
-            id="themeEditorLink"
-            class="icon-only"
-            title="Customize"
-            aria-label="Customize"
-            rel="noopener noreferrer"
-          >
-            <i class="fas fa-palette"></i>
+            <i class="fas fa-paintbrush"></i><span>Themes</span>
           </a>
           <a
             href="#"
             id="updateNotesButton"
-            class="icon-only"
             title="Update Notes"
             aria-label="Update Notes"
             rel="noopener noreferrer"
           >
-            <i class="fas fa-bullhorn"></i>
+            <i class="fas fa-bullhorn"></i><span>Updates</span>
           </a>
           <a
             href="#"
             id="siteStatsLink"
-            class="icon-only"
             title="Site Stats"
             aria-label="Site Stats"
             rel="noopener noreferrer"
           >
-            <i class="fas fa-chart-column"></i>
+            <i class="fas fa-chart-column"></i><span>Stats</span>
           </a>
           <a
             href="#"
             id="staffLoginLink"
-            class="icon-only"
             title="Staff Access"
             aria-label="Staff Access"
             rel="noopener noreferrer"
           >
-            <i class="fas fa-key"></i>
+            <i class="fas fa-key"></i><span>Staff</span>
           </a>
           <a
             href="botcreator.html"
             id="botCreatorLink"
-            class="icon-only"
             title="Bot Creator"
             aria-label="Bot Creator"
             rel="noopener noreferrer"
           >
-            <i class="fas fa-robot"></i>
+            <i class="fas fa-robot"></i><span>Bot Creator</span>
           </a>
           <a href="#" id="modApplyLink" class="wide" rel="noopener noreferrer">
             <i class="fas fa-user-pen"></i> Apply to be a mod
@@ -665,95 +660,89 @@
               required
               maxlength="15"
             />
-            <!-- Optional text input for the user's location -->
+            <!-- Location: blank falls back to the classic "On The Web" -->
             <input
               type="text"
-              placeholder="Location (optional)"
+              placeholder="Location - On The Web"
               maxlength="20"
             />
-            <!-- Optional preset picture -->
-            <div class="pfp-card preset-card" id="presetCard">
+            <!-- Optional profile picture: one of ours, or a Discord avatar -->
+            <div class="pfp-card" id="pfpCard">
               <div class="pfp-card-head">
-                <span class="pfp-ico preset-ico"
-                  ><i class="fas fa-user-astronaut"></i
-                ></span>
-                <span class="pfp-card-text">
-                  <span class="pfp-card-title">Profile picture</span>
-                  <span class="pfp-card-sub"
-                    >Optional. Pick one of ours to show next to your name.</span
-                  >
-                </span>
-                <img
-                  id="presetPreview"
-                  class="pfp-preview preset-preview"
-                  alt=""
-                  style="display: none"
-                />
-                <label class="pfp-switch" title="Use a preset picture">
-                  <input type="checkbox" id="presetEnable" />
-                  <span class="pfp-slider"></span>
-                </label>
-              </div>
-              <div class="pfp-card-body" id="presetBody" style="display: none">
-                <div
-                  class="preset-grid"
-                  id="presetGrid"
-                  role="radiogroup"
-                  aria-label="Choose a profile picture"
-                ></div>
-              </div>
-            </div>
-            <!-- Optional Discord avatar -->
-            <div class="pfp-card">
-              <div class="pfp-card-head">
-                <span class="pfp-ico"><i class="fab fa-discord"></i></span>
-                <span class="pfp-card-text">
-                  <span class="pfp-card-title">Discord avatar</span>
-                  <span class="pfp-card-sub"
-                    >Optional. Show your Discord picture next to your
-                    name.</span
-                  >
-                </span>
+                <span class="pfp-ico"><i class="fas fa-user"></i></span>
+                <span class="pfp-card-title">Profile picture</span>
                 <img
                   id="pfpPreview"
                   class="pfp-preview"
                   alt=""
                   style="display: none"
                 />
-                <label class="pfp-switch" title="Use Discord avatar">
-                  <input type="checkbox" id="pfpEnable" />
+                <label class="pfp-switch" title="Show a picture next to your name">
+                  <input type="checkbox" id="pfpMasterEnable" />
                   <span class="pfp-slider"></span>
                 </label>
               </div>
-              <div class="pfp-card-body" id="pfpBody" style="display: none">
-                <input
-                  type="text"
-                  id="pfpDiscordId"
-                  placeholder="Your Discord user ID"
-                  maxlength="20"
-                  inputmode="numeric"
-                  autocomplete="off"
-                />
-                <button type="button" class="pfp-help-btn" id="pfpHelpBtn">
-                  <i class="fas fa-circle-question"></i> How do I find my ID?
-                </button>
-                <div class="pfp-help" id="pfpHelp" style="display: none">
-                  <ol>
-                    <li>
-                      Open Discord and go to <b>Settings &gt; Advanced</b>, then
-                      turn on <b>Developer Mode</b>.
-                    </li>
-                    <li>
-                      Right click your own name or picture anywhere in Discord
-                      and pick <b>Copy User ID</b>.
-                    </li>
-                    <li>Paste the number here and press <b>Change</b>.</li>
-                  </ol>
-                  <p>
-                    Your Discord picture will show next to your name in the
-                    lobby and in rooms. It refreshes when you sign in again.
-                    Turn the switch off to remove it.
-                  </p>
+              <div class="pfp-card-body" id="pfpCardBody" style="display: none">
+                <div class="pfp-seg" role="tablist" aria-label="Picture source">
+                  <button
+                    type="button"
+                    class="pfp-seg-btn"
+                    id="pfpSourcePreset"
+                    data-source="preset"
+                    role="tab"
+                    aria-selected="true"
+                  >
+                    Our pictures
+                  </button>
+                  <button
+                    type="button"
+                    class="pfp-seg-btn"
+                    id="pfpSourceDiscord"
+                    data-source="discord"
+                    role="tab"
+                    aria-selected="false"
+                  >
+                    Discord
+                  </button>
+                </div>
+                <div id="presetPane">
+                  <div
+                    class="preset-grid"
+                    id="presetGrid"
+                    role="radiogroup"
+                    aria-label="Choose a profile picture"
+                  ></div>
+                </div>
+                <div id="discordPane" style="display: none">
+                  <input
+                    type="text"
+                    id="pfpDiscordId"
+                    placeholder="Your Discord user ID"
+                    maxlength="20"
+                    inputmode="numeric"
+                    autocomplete="off"
+                  />
+                  <button type="button" class="pfp-help-btn" id="pfpHelpBtn">
+                    <i class="fas fa-circle-question"></i> How do I find my ID?
+                  </button>
+                  <div class="pfp-help" id="pfpHelp" style="display: none">
+                    <ol>
+                      <li>
+                        Open Discord and go to <b>Settings &gt; Advanced</b>,
+                        then turn on <b>Developer Mode</b>.
+                      </li>
+                      <li>
+                        Right click your own name or picture anywhere in
+                        Discord and pick <b>Copy User ID</b>.
+                      </li>
+                      <li>Paste the number here and press <b>Change</b>.</li>
+                    </ol>
+                    <p>
+                      Your Discord picture will show next to your name in the
+                      lobby and in rooms. It refreshes when you sign in again.
+                      Turn the switch off to remove it.
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>

@@ -198,8 +198,11 @@
         }
       }
       .app-directory-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
         color: var(--tk-accent);
-        font-size: 16px;
+        font-size: 15px;
         font-weight: bold;
         margin-bottom: 1rem;
         padding-bottom: 0.5rem;
@@ -236,23 +239,24 @@
         background-color: var(--tk-card);
         transform: none;
       }
+      /* Each app's icon sits on a dark tile and carries its own colour; the
+         old orange gradient swallowed the glyph. */
       .app-icon {
-        width: 32px;
-        height: 32px;
-        border-radius: 6px;
-        margin-right: 12px;
-        object-fit: cover;
-      }
-      .app-icon.placeholder {
-        background: linear-gradient(135deg, var(--tk-accent), #ff8c42);
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 16px;
-        color: #000000;
+        width: 36px;
+        height: 36px;
+        flex-shrink: 0;
+        border-radius: 6px;
+        margin-right: 12px;
+        background-color: var(--tk-tile, #1b1b1b);
+        border: 1px solid #333;
+        font-size: 15px;
       }
       .app-info {
         flex: 1;
+        min-width: 0;
       }
       .app-name {
         font-size: 14px;
@@ -265,21 +269,36 @@
         color: #cccccc;
         line-height: 1.3;
       }
+      .app-enter {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+        margin-left: 10px;
+        padding: 6px 11px;
+        border-radius: 4px;
+        background: var(--tk-accent);
+        color: #000;
+        font-size: 11px;
+        font-weight: bold;
+        transition: background 0.15s ease;
+      }
+      .app-item:hover .app-enter {
+        background: #ffa726;
+      }
       .app-status {
+        flex-shrink: 0;
         font-size: 10px;
-        padding: 2px 6px;
-        border-radius: 8px;
+        padding: 4px 8px;
+        border-radius: 4px;
         font-weight: bold;
         text-transform: uppercase;
-        margin-left: 8px;
-      }
-      .status-available {
-        background: var(--tk-accent);
-        color: #000000;
+        margin-left: 10px;
       }
       .status-coming-soon {
-        background: var(--tk-border);
-        color: #ffffff;
+        background: var(--tk-tile, #1b1b1b);
+        border: 1px solid var(--tk-border);
+        color: #9a9a9a;
       }
       @media (max-width: 768px) {
         .app-directory-dropdown {
@@ -297,33 +316,60 @@
           display: none;
         }
       }
-      #filterToggle {
-        font-size: 16px;
-        opacity: 1;
-        transition: opacity 0.2s ease;
+      /* Navbar toggles: each icon keeps one colour so the row reads at a
+         glance. The filter shield is green when it protects you and red with
+         a slash when it is off, same slash the bots toggle draws. */
+      #muteToggle i {
+        font-size: 17px;
+        width: 20px;
+        color: #ffca28;
       }
-      #filterToggle.filter-off {
-        opacity: 0.4;
+      #muteToggle.sound-off i {
+        color: #8d8d8d;
+      }
+      #filterToggle {
+        position: relative;
+      }
+      #filterToggle i {
+        font-size: 17px;
+        color: #4ade80;
+        transition: color 0.2s ease;
+      }
+      #filterToggle.filter-off i {
+        color: #e5484d;
+      }
+      #filterToggle.filter-off::after {
+        content: "";
+        position: absolute;
+        left: 7px;
+        right: 7px;
+        top: 50%;
+        height: 2px;
+        background: #e5484d;
+        transform: rotate(-38deg);
+        border-radius: 2px;
+        pointer-events: none;
       }
       #layoutToggle {
         font-size: 18px;
-        color: #fff;
+        color: #5aa9ff;
       }
 
-      /* Feature announcement modal */
+      /* Feature announcement modal: the house card - flat dark overlay, black
+         card with a cream header strip, square corners, orange fills. */
       .feature-announce-overlay {
         display: none;
         position: fixed;
         inset: 0;
         z-index: 99999;
-        background: rgba(0, 0, 0, 0.75);
-        backdrop-filter: blur(4px);
+        background: rgba(0, 0, 0, 0.85);
         align-items: center;
         justify-content: center;
+        padding: 16px;
       }
       .feature-announce-overlay.show {
         display: flex;
-        animation: fadeIn 0.25s ease-out;
+        animation: fadeIn 0.2s ease-out;
       }
       @keyframes fadeIn {
         from {
@@ -334,94 +380,113 @@
         }
       }
       .feature-announce-box {
-        background: linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%);
-        border: 2px solid var(--tk-accent);
-        border-radius: 14px;
-        padding: 28px 32px;
-        max-width: 420px;
-        width: 90%;
-        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
-        text-align: center;
-        animation: slideUp 0.3s ease-out;
+        background: #000;
+        border: 1px solid var(--tk-border, #616161);
+        max-width: 440px;
+        width: 100%;
+        text-align: left;
+        overflow: hidden;
       }
-      @keyframes slideUp {
-        from {
-          transform: translateY(30px);
-          opacity: 0;
-        }
-        to {
-          transform: translateY(0);
-          opacity: 1;
-        }
+      .feature-announce-head {
+        display: flex;
+        align-items: center;
+        gap: 11px;
+        background: var(--tk-cream, #fdf5e6);
+        color: #000;
+        padding: 13px 16px;
       }
       .feature-announce-icon {
-        font-size: 48px;
-        margin-bottom: 12px;
-      }
-      .feature-announce-tag {
-        display: inline-block;
-        background: var(--tk-accent);
-        color: #000;
-        font-size: 11px;
-        font-weight: bold;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        padding: 3px 10px;
-        border-radius: 20px;
-        margin-bottom: 14px;
+        font-size: 17px;
+        color: #4ade80;
       }
       .feature-announce-title {
-        color: #fff;
-        font-size: 20px;
+        flex: 1;
+        margin: 0;
+        color: #000;
+        font-size: 16px;
         font-weight: bold;
-        margin: 0 0 10px;
+        letter-spacing: 0.2px;
+      }
+      .feature-announce-tag {
+        background: var(--tk-accent);
+        color: #000;
+        font-size: 10px;
+        font-weight: bold;
+        text-transform: uppercase;
+        letter-spacing: 0.8px;
+        padding: 2px 7px;
       }
       .feature-announce-body {
-        color: #ccc;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        padding: 16px;
+      }
+      .feature-announce-lead {
+        margin: 0;
+        color: #dcdcdc;
         font-size: 14px;
         line-height: 1.6;
-        margin: 0 0 8px;
       }
-      .feature-announce-hint {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        background: color-mix(in srgb, var(--tk-accent) 10%, transparent);
-        border: 1px solid rgba(255, 152, 0, 0.3);
-        border-radius: 8px;
-        padding: 8px 14px;
-        margin: 12px 0 20px;
-        color: var(--tk-accent);
-        font-size: 13px;
-        font-weight: 500;
+      .feature-announce-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 11px;
+        background: #1b1b1b;
+        border: 1px solid #333;
+        padding: 11px 13px;
       }
-      .feature-announce-hint-icon {
-        font-size: 20px;
+      .feature-announce-row > i {
+        width: 20px;
+        margin-top: 2px;
+        font-size: 16px;
+        text-align: center;
+      }
+      .feature-announce-row.f-filter {
+        border-left: 3px solid #4ade80;
+      }
+      .feature-announce-row.f-filter > i {
+        color: #4ade80;
+      }
+      .feature-announce-row.f-bots {
+        border-left: 3px solid #26c6da;
+      }
+      .feature-announce-row.f-bots > i {
+        color: #26c6da;
+      }
+      .feature-announce-row b {
+        display: block;
+        margin-bottom: 2px;
+        color: #fff;
+        font-size: 13.5px;
+      }
+      .feature-announce-row p {
+        margin: 0;
+        color: #c3c3c3;
+        font-size: 12.5px;
+        line-height: 1.55;
       }
       .feature-announce-note {
-        color: #888;
+        margin: 0;
+        color: #8d8d8d;
         font-size: 12px;
-        margin: 0 0 18px;
+        line-height: 1.55;
       }
       .feature-announce-btn {
+        align-self: flex-end;
         background: var(--tk-accent);
         color: #000;
         border: none;
-        padding: 10px 32px;
-        border-radius: 8px;
-        font-size: 14px;
+        border-radius: 0;
+        padding: 9px 22px;
+        font-size: 13px;
         font-weight: bold;
+        font-family: inherit;
         cursor: pointer;
-        transition:
-          background 0.2s ease,
-          transform 0.1s ease;
+        transition: background 0.15s ease;
       }
       .feature-announce-btn:hover {
-        background: #ffb74d;
-        transform: translateY(-1px);
-      }
-      .feature-announce-btn:active {
-        transform: translateY(0);
+        background: #ffa726;
       }
 
       .user-info button.staff-action-button i.fas {
@@ -446,7 +511,7 @@
         </div>
         <div class="navbar-section navbar-right">
           <button id="muteToggle" class="mute-toggle" aria-label="Toggle Sound">
-            <img src="images/icons/sound-on.svg" alt="Sound On" id="muteIcon" />
+            <i class="fas fa-volume-high" id="muteIcon"></i>
           </button>
           <button
             id="filterToggle"
@@ -454,7 +519,7 @@
             aria-label="Toggle Word Filter"
             title="Word Filter: ON (click to disable)"
           >
-            🛡️
+            <i class="fas fa-shield-halved"></i>
           </button>
           <button
             id="layoutToggle"
@@ -481,7 +546,9 @@
             <img src="images/icons/apps.png" alt="Apps" id="appDirectoryIcon" />
             <span>Apps</span>
           </button>
-          <div class="leave-room">Leave Room</div>
+          <div class="leave-room" role="button" tabindex="0" title="Leave Room">
+            <i class="fas fa-right-from-bracket"></i><span>Leave Room</span>
+          </div>
         </div>
       </nav>
       <div class="second-navbar">
@@ -543,28 +610,47 @@
       </div>
     </div>
 
-    <!-- Feature announcement: word filter toggle -->
+    <!-- Feature announcement: the word filter and bots are personal toggles -->
     <div id="featureAnnounce" class="feature-announce-overlay">
       <div class="feature-announce-box">
-        <div class="feature-announce-icon">🛡️</div>
-        <div class="feature-announce-tag">New Feature</div>
-        <h2 class="feature-announce-title">Automod is now optional</h2>
-        <p class="feature-announce-body">
-          You can now enable or disable the word filter for yourself. When
-          enabled, offensive words are replaced with asterisks in chat. When
-          disabled, you see all messages unfiltered.
-        </p>
-        <div class="feature-announce-hint">
-          <span class="feature-announce-hint-icon">🛡️</span>
-          Click the shield icon in the top right to toggle it
+        <div class="feature-announce-head">
+          <i class="fas fa-shield-halved feature-announce-icon"></i>
+          <h2 class="feature-announce-title">Automod and bots are optional</h2>
+          <span class="feature-announce-tag">New</span>
         </div>
-        <p class="feature-announce-note">
-          This only changes what <strong>you</strong> see. It does not affect
-          other users.
-        </p>
-        <button class="feature-announce-btn" id="featureAnnounceClose">
-          Got it
-        </button>
+        <div class="feature-announce-body">
+          <p class="feature-announce-lead">
+            Two of the icons in the top bar are yours to switch. Click one to
+            turn it on or off whenever you like.
+          </p>
+          <div class="feature-announce-row f-filter">
+            <i class="fas fa-shield-halved"></i>
+            <div>
+              <b>Word filter</b>
+              <p>
+                Stars out offensive words for you. A green shield means it is
+                on; red with a slash means it is off.
+              </p>
+            </div>
+          </div>
+          <div class="feature-announce-row f-bots">
+            <i class="fas fa-robot"></i>
+            <div>
+              <b>Hide bots</b>
+              <p>
+                Takes bot users out of your view. Click the robot again to
+                bring them back.
+              </p>
+            </div>
+          </div>
+          <p class="feature-announce-note">
+            Both only change what <strong>you</strong> see. Other people in
+            the room are not affected.
+          </p>
+          <button class="feature-announce-btn" id="featureAnnounceClose">
+            Got it
+          </button>
+        </div>
       </div>
     </div>
 
@@ -585,7 +671,7 @@
     <script src="js/games-client.js?v=4.20.0"></script>
 
     <!-- Feature announcement logic -->
-    <script src="js/feature-announce.js?v=1.0.4"></script>
+    <script src="js/feature-announce.js?v=1.0.5"></script>
     <!-- Developer notices. Loaded after room-client.js, which publishes the
          socket this reuses, so a notice posted now reaches people mid-chat. -->
     <script src="js/announce.js?v=1.1.0"></script>

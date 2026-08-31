@@ -13,8 +13,10 @@ const STORE_PATH = path.join(DATA_DIR, "announcements.json");
 const MAX_KEPT = 200;
 const MAX_TITLE = 120;
 const MAX_BODY = 4000;
-const MAX_REACTIONS_PER_POST = 24;
-const MAX_EMOJI_LEN = 16;
+
+// The only reactions a notice accepts. Fixed on purpose: the old free-for-all
+// buried the message under a pile of novelty emoji.
+const REACTION_EMOJIS = ["👍", "😄", "❤️", "🎉"];
 
 const KINDS = ["update", "notice", "alert"];
 
@@ -136,35 +138,16 @@ function current() {
   return null;
 }
 
-const EMOJI_ONLY_RE =
-  /^[\p{Extended_Pictographic}\p{Emoji_Component}‍️⃣]+$/u;
-const HAS_SYMBOL_RE = /[\p{Extended_Pictographic}⃣]/u;
-
-function validEmoji(e) {
-  const s = String(e || "");
-  if (!s || s.length > MAX_EMOJI_LEN) return false;
-  try {
-    return EMOJI_ONLY_RE.test(s) && HAS_SYMBOL_RE.test(s);
-  } catch (_) {
-    return !/[\x00-\x7f]/.test(s);
-  }
-}
-
 function react({ id, deviceId, emoji }) {
   const a = get(id);
   if (!a || !deviceId) return null;
-  if (!validEmoji(emoji)) return null;
-  const key = String(emoji);
+  const key = String(emoji || "");
+  if (!REACTION_EMOJIS.includes(key)) return null;
   const holders = a.reactions[key];
   if (holders && holders[deviceId]) {
     delete holders[deviceId];
     if (!Object.keys(holders).length) delete a.reactions[key];
   } else {
-    if (
-      !holders &&
-      Object.keys(a.reactions).length >= MAX_REACTIONS_PER_POST
-    )
-      return null;
     if (!a.reactions[key]) a.reactions[key] = {};
     a.reactions[key][deviceId] = Date.now();
   }
@@ -220,7 +203,7 @@ module.exports = {
   current,
   publicOne,
   listFor,
-  validEmoji,
   flushSync,
   KINDS,
+  REACTION_EMOJIS,
 };

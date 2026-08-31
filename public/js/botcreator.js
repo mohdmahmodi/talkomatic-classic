@@ -959,7 +959,8 @@
     me = s;
     $("userChip").style.display = "";
     $("userChipName").textContent = s.username + " / " + (s.location || "");
-    if (s.isDev || s.isMod) $("staffNav").style.display = "";
+    if (s.isDev || (s.isMod && (s.modLevel || 1) >= 2))
+      $("staffNav").style.display = "";
     socket.emit("bots status");
     if (document.querySelector("#gateView.active")) showView("home");
   });

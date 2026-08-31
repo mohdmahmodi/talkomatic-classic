@@ -29,8 +29,11 @@ function hashKey(key) {
     .digest("hex");
 }
 
+// Mod levels: 1 = junior, 2 = full, 3 = leader. Anything unknown lands on 1.
 function normalizeLevel(v) {
-  return Math.floor(Number(v)) === 1 ? 1 : 2;
+  const n = Math.floor(Number(v));
+  if (n >= 3) return 3;
+  return n === 2 ? 2 : 1;
 }
 
 function loadModKeys() {
@@ -179,11 +182,14 @@ function systemLabel(label, role) {
   return isMainDevActor(label, role) ? SYSTEM_LABEL : label;
 }
 
+// view semantics: a non-null view means a STAFF viewer (from viewFor) and gets
+// real staff labels; a null view is a public-facing caller and keeps the mask.
+// The main dev renders as SYSTEM_LABEL for everyone below main dev either way.
 function teamLabel(label, role, view) {
   if (!label) return label;
   if (view && view.ip) return label;
   if (isMainDevActor(label, role)) return SYSTEM_LABEL;
-  if (view && view.names) return label;
+  if (view) return label;
   return isDevActor(label, role) ? label : TEAM_LABEL;
 }
 
@@ -202,7 +208,7 @@ function teamReviewer(value, view) {
   const label = idx === -1 ? s : s.slice(idx + 1);
   if (view && view.ip) return value;
   if (isMainDevActor(label, role)) return SYSTEM_LABEL;
-  if (view && view.names) return value;
+  if (view) return value;
   if (isDevActor(label, role)) return value;
   return (idx === -1 ? "" : s.slice(0, idx + 1)) + TEAM_LABEL;
 }
@@ -219,14 +225,13 @@ function stripStaffNames(text, view) {
   const ops = devKeys
     .filter((d) => d.main)
     .map((d) => ({ name: d.label, dev: true }));
-  const names =
-    view && view.names
-      ? ops
-      : [
-          ...ops,
-          ...modKeys.map((k) => ({ name: k.label, dev: false })),
-          ...formerMods.map((f) => ({ name: f.label, dev: false })),
-        ];
+  const names = view
+    ? ops
+    : [
+        ...ops,
+        ...modKeys.map((k) => ({ name: k.label, dev: false })),
+        ...formerMods.map((f) => ({ name: f.label, dev: false })),
+      ];
   for (const { name, dev } of names) {
     if (!name || name.length < 2 || !out.includes(name)) continue;
     out = out.split(name).join(dev ? SYSTEM_LABEL : TEAM_LABEL);
@@ -238,6 +243,22 @@ function getModKeyByPlain(key) {
   if (!key) return null;
   const h = hashKey(key);
   return modKeys.find((k) => k.hash === h) || null;
+}
+
+function getModKeyByHash(hash) {
+  if (!hash) return null;
+  return modKeys.find((k) => k.hash === hash) || null;
+}
+
+// Current level for a label: the active key wins, then the most recent former
+// key with that label. Null when the label is unknown.
+function modLevelForLabel(label) {
+  if (!label) return null;
+  const active = modKeys.find((k) => k.label === label);
+  if (active) return normalizeLevel(active.level);
+  for (let i = formerMods.length - 1; i >= 0; i--)
+    if (formerMods[i].label === label) return normalizeLevel(formerMods[i].level);
+  return null;
 }
 
 function validateKey(key) {
@@ -446,6 +467,26 @@ function recordKeyUse(hash, label, role, ip) {
   return { newIp };
 }
 
+// Stamp "last" for a key+ip without counting a new use. Called when a staff
+// socket disconnects, so last-seen covers the whole session, not just connect.
+function touchKeyUse(hash, ip) {
+  if (!hash || !ip) return;
+  const rec = keyActivity[hash];
+  if (!rec || !rec.ips || !rec.ips[ip]) return;
+  rec.ips[ip].last = Date.now();
+  saveKeyActivitySoon();
+}
+
+// A revoked key presented at connect: find its former-mods entry so the
+// person can be told why they were removed.
+function getFormerModByPlain(key) {
+  if (!key) return null;
+  const h = hashKey(key);
+  for (let i = formerMods.length - 1; i >= 0; i--)
+    if (formerMods[i].hash === h) return formerMods[i];
+  return null;
+}
+
 function getKeyActivity() {
   return Object.entries(keyActivity).map(([hash, r]) => ({
     hash,
@@ -482,6 +523,8 @@ module.exports = {
   teamReviewer,
   stripStaffNames,
   getModKeyByPlain,
+  getModKeyByHash,
+  modLevelForLabel,
   validateKey,
   grantModKey,
   revokeModKey,
@@ -491,5 +534,7 @@ module.exports = {
   formerLabels,
   modLog,
   recordKeyUse,
+  touchKeyUse,
+  getFormerModByPlain,
   getKeyActivity,
 };

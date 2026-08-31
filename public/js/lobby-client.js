@@ -382,8 +382,9 @@ function updateConnectionStatus() {
 const socket = io({
   transports: ["websocket"],
   upgrade: false,
-  reconnectionAttempts: 5,
+  reconnectionAttempts: Infinity,
   reconnectionDelay: 1000,
+  reconnectionDelayMax: 5000,
   timeout: 20000,
   autoConnect: true,
   withCredentials: true,
@@ -413,7 +414,7 @@ const roomListContainer = document.querySelector(".roomList");
 const dynamicRoomList = document.getElementById("dynamicRoomList");
 const usernameInput = logForm.querySelector('input[placeholder="Your Name"]');
 const locationInput = logForm.querySelector(
-  'input[placeholder="Location (optional)"]',
+  'input[placeholder="Location - On The Web"]',
 );
 const roomNameInput = createRoomForm.querySelector(
   'input[placeholder="Room Name"]',
@@ -429,8 +430,6 @@ let currentUsername = "";
 let currentLocation = "";
 let currentUserId = null;
 let isSignedIn = false;
-let connectionRetryCount = 0;
-const MAX_RETRIES = 3;
 const MAX_USERNAME_LENGTH = 15;
 const MAX_LOCATION_LENGTH = 20;
 const MAX_ROOM_NAME_LENGTH = 25;
@@ -600,7 +599,6 @@ function emitJoinLobby(username, location) {
 
 socket.on("connect", () => {
   console.log("Socket connected successfully");
-  connectionRetryCount = 0;
   updateConnectionStatus();
 });
 
@@ -613,6 +611,9 @@ socket.on("disconnect", (reason) => {
   }
 });
 
+// Reconnection itself is socket.io's job (endless, backed-off attempts set
+// up top); the shared connection overlay tells the user when an outage
+// outlives its grace period.
 socket.on("connect_error", (error) => {
   if (error?.data?.banned) {
     try {
@@ -622,29 +623,8 @@ socket.on("connect_error", (error) => {
     showBanScreen(error.data);
     return;
   }
-
   console.error("Connection error:", error);
   updateConnectionStatus();
-
-  if (connectionRetryCount < MAX_RETRIES) {
-    connectionRetryCount++;
-    console.log(
-      `Retrying connection (${connectionRetryCount}/${MAX_RETRIES})...`,
-    );
-
-    if (socket.disconnected) {
-      setTimeout(() => {
-        console.log("Attempting reconnection with clean session...");
-        socket.io.opts.query = { clean: "true" };
-        socket.connect();
-      }, 1000 * connectionRetryCount);
-    }
-  } else {
-    window.showErrorModal(
-      "Unable to connect to the server. Please refresh the page and try again.",
-      "SERVER_ERROR",
-    );
-  }
 });
 
 socket.on("reconnect", (attemptNumber) => {
@@ -667,23 +647,6 @@ function showTabSupersededOverlay() {
     socket.io.opts.reconnection = false;
     socket.disconnect();
   } catch (_) {}
-  if (!document.getElementById("supersededStyles")) {
-    const st = document.createElement("style");
-    st.id = "supersededStyles";
-    st.textContent = `
-      #supersededOverlay{position:fixed;inset:0;z-index:1000002;background:#0a0a0a;
-        display:flex;align-items:center;justify-content:center;padding:20px;font-family:Arial,sans-serif;}
-      #supersededOverlay .ss-card{max-width:460px;width:100%;background:#181818;border:1px solid #616161;
-        border-radius:10px;padding:36px 30px;text-align:center;box-shadow:0 12px 40px rgba(0,0,0,.6);}
-      #supersededOverlay .ss-icon{font-size:52px;color:#ff9800;margin-bottom:16px;}
-      #supersededOverlay h1{color:#ff9800;font-size:24px;margin:0 0 10px;}
-      #supersededOverlay p{color:#dddddd;font-size:15px;line-height:1.6;margin:0 0 22px;}
-      #supersededOverlay button{background:#ff9800;color:#000;border:none;border-radius:6px;
-        padding:12px 26px;font-size:15px;font-weight:bold;cursor:pointer;font-family:inherit;}
-      #supersededOverlay button:hover{background:#ffb74d;}
-    `;
-    document.head.appendChild(st);
-  }
   const ov = document.createElement("div");
   ov.id = "supersededOverlay";
   ov.innerHTML =
@@ -705,147 +668,6 @@ function showBanScreen(info) {
   if (banScreenShown) return;
   banScreenShown = true;
   const DISCORD = "https://discord.gg/N7tJznESrE";
-
-  if (!document.getElementById("banScreenStyles")) {
-    const style = document.createElement("style");
-    style.id = "banScreenStyles";
-    style.textContent = `
-      /* Talkomatic's own language: flat #202020 behind, black cards, thin
-         #333 lines, a cream section strip with a coloured icon, orange fills.
-         Square corners throughout, same as the dashboard. */
-      #banScreen{position:fixed;inset:0;z-index:1000001;background:#202020;
-        display:flex;align-items:flex-start;justify-content:center;padding:20px 16px;
-        overflow:auto;font-family:talkoSS,Arial,sans-serif;}
-      #banScreen .ban-card{max-width:620px;width:100%;background:#000;
-        border:1px solid #616161;border-radius:0;text-align:left;
-        overflow:hidden;margin:auto;}
-      #banScreen .ban-hd{background:#fdf5e6;color:#000;padding:13px 16px;
-        display:flex;align-items:center;gap:11px;}
-      #banScreen .ban-icon{font-size:17px;color:#c62828;}
-      #banScreen h1{color:#000;font-size:16px;margin:0;font-weight:bold;letter-spacing:.2px;flex:1;}
-      #banScreen .ban-hd-sub{font-size:12px;color:#5f5346;font-weight:bold;}
-      #banScreen .ban-body{padding:16px;display:flex;flex-direction:column;gap:14px;}
-      #banScreen .ban-sub{color:#dcdcdc;font-size:14px;line-height:1.6;margin:0;}
-      #banScreen .ban-meta{display:flex;flex-wrap:wrap;gap:7px;margin:0;}
-      #banScreen .ban-chip{display:inline-flex;align-items:center;gap:7px;background:#1b1b1b;
-        border:1px solid #333;border-radius:0;padding:6px 10px;font-size:12.5px;color:#c3c3c3;}
-      #banScreen .ban-chip i{color:#ff9800;font-size:11px;}
-      #banScreen .ban-chip b{color:#fff;font-weight:bold;}
-      /* Section strip, the same one the dashboard uses to open a block. */
-      #banScreen .ban-strip{background:#1b1b1b;border:1px solid #333;
-        border-left:3px solid #ff9800;border-radius:0;padding:11px 13px;margin:0;
-        text-align:left;}
-      #banScreen .ban-strip .lbl{color:#ff9800;font-size:10.5px;text-transform:uppercase;
-        letter-spacing:.8px;font-weight:bold;margin-bottom:5px;display:flex;align-items:center;gap:7px;}
-      #banScreen .ban-strip .txt{color:#e6e6e6;font-size:14px;line-height:1.55;
-        white-space:pre-wrap;word-break:break-word;}
-      #banScreen .ban-timer{background:#1b1b1b;border:1px solid #333;border-radius:0;
-        padding:13px;margin:0;display:flex;align-items:center;justify-content:space-between;gap:12px;}
-      #banScreen .ban-timer-label{color:#8d8d8d;font-size:10.5px;text-transform:uppercase;
-        letter-spacing:.8px;}
-      #banScreen .ban-timer-value{color:#fff;font-size:26px;font-weight:bold;
-        font-variant-numeric:tabular-nums;font-family:'Courier New',monospace;}
-      #banScreen .ban-perm{display:inline-flex;align-items:center;gap:8px;background:#1b1b1b;
-        border:1px solid #333;border-left:3px solid #ff5468;color:#ff5468;
-        font-weight:bold;font-size:13px;padding:11px 13px;border-radius:0;
-        text-transform:uppercase;letter-spacing:.8px;margin:0;}
-      /* The appeal panel is its own card, the way the dashboard and the
-         suggestion board stack sections. */
-      #banScreen .ban-appeal{background:#0d0d0d;border:1px solid #333;padding:0;text-align:left;}
-      #banScreen .ban-appeal-h{background:#1b1b1b;border-bottom:1px solid #333;
-        color:#fff;font-size:13px;font-weight:bold;margin:0;padding:10px 13px;
-        display:flex;align-items:center;gap:8px;letter-spacing:.2px;}
-      #banScreen .ban-appeal-h i{color:#ff9800;font-size:12px;}
-      #banScreen .ban-appeal-p{color:#9a9a9a;font-size:12.5px;line-height:1.6;
-        margin:0;padding:11px 13px 0;}
-      #banScreen textarea#banAppealText{width:calc(100% - 26px);min-height:74px;resize:vertical;
-        background:#000;color:#fff;border:1px solid #616161;border-radius:0;padding:10px 11px;
-        font-family:talkoSS,Arial,sans-serif;font-size:13.5px;line-height:1.5;
-        box-sizing:border-box;margin:11px 13px 0;display:block;}
-      #banScreen textarea#banAppealText:focus{outline:none;border-color:#ff9800;}
-      #banScreen .ban-appeal-row{display:flex;align-items:center;gap:11px;
-        padding:10px 13px 13px;flex-wrap:wrap;}
-      #banScreen button#banAppealSend{display:inline-flex;align-items:center;gap:8px;
-        background:#ff9800;color:#000;border:none;border-radius:0;padding:9px 16px;
-        font-size:13px;font-weight:bold;cursor:pointer;font-family:inherit;}
-      #banScreen button#banAppealSend:hover{background:#ffad33;}
-      #banScreen button#banAppealSend:disabled{opacity:.6;cursor:default;}
-      #banScreen .ban-appeal-msg{font-size:12.5px;line-height:1.5;}
-      #banScreen .ban-appeal-msg.ok{color:#57d9a3;}
-      #banScreen .ban-appeal-msg.err{color:#ff5468;}
-      #banScreen .ban-appeal-done{background:#1b1b1b;border:none;
-        border-left:3px solid #57d9a3;border-radius:0;padding:13px;color:#d7f3e7;font-size:13.5px;
-        line-height:1.55;text-align:left;display:flex;gap:10px;align-items:flex-start;margin:11px 13px 13px;}
-      #banScreen .ban-appeal-done i{color:#57d9a3;margin-top:2px;}
-      /* ── The appeal conversation ──
-         Bubbles: staff on the left with their face and rank, you on the right.
-         Nobody should have to work out who they are talking to. */
-      #banScreen .ac-log{background:#000;border-top:1px solid #333;border-bottom:1px solid #333;
-        padding:12px 13px;max-height:340px;overflow-y:auto;display:flex;flex-direction:column;
-        scrollbar-width:thin;scrollbar-color:#3d3d3d transparent;}
-      #banScreen .ac-log::-webkit-scrollbar{width:7px;}
-      #banScreen .ac-log::-webkit-scrollbar-thumb{background:#3d3d3d;border-radius:4px;}
-      #banScreen .ac-m{display:flex;flex-direction:column;gap:4px;max-width:88%;margin-top:12px;}
-      #banScreen .ac-m:first-child{margin-top:0;}
-      #banScreen .ac-m.user{align-self:flex-end;align-items:flex-end;}
-      #banScreen .ac-m.staff{align-self:flex-start;}
-      #banScreen .ac-who{font-size:11px;color:#8d8d8d;font-weight:bold;
-        display:flex;align-items:center;gap:7px;}
-      /* Who you are talking to: face, name, rank. */
-      #banScreen .ac-av{position:relative;flex:none;width:26px;height:26px;border-radius:50%;
-        overflow:hidden;background:#2b5e9e;color:#fff;font-size:11px;font-weight:bold;
-        display:flex;align-items:center;justify-content:center;}
-      #banScreen .ac-av.dev{background:#a3323f;}
-      #banScreen .ac-av-i{position:absolute;inset:0;display:flex;align-items:center;
-        justify-content:center;}
-      /* Taken out once the picture is really there: a transparent avatar does
-         not cover the letter, so the initial showed through its gaps. */
-      #banScreen .ac-av.has-pic .ac-av-i{display:none;}
-      #banScreen .ac-av img{position:absolute;inset:0;width:100%;height:100%;
-        object-fit:cover;display:block;}
-      #banScreen .ac-name{color:#fff;font-size:12.5px;}
-      #banScreen .ac-rank{font-size:9.5px;font-weight:bold;letter-spacing:.5px;
-        text-transform:uppercase;color:#5aa9ff;border:1px solid #5aa9ff;padding:1px 5px;}
-      #banScreen .ac-rank.dev{color:#ff5468;border-color:#ff5468;}
-      #banScreen .ac-b{background:#262626;padding:9px 12px;border-radius:12px 12px 12px 3px;
-        font-size:13.5px;line-height:1.55;color:#ededed;white-space:pre-wrap;
-        word-break:break-word;text-align:left;max-width:100%;}
-      #banScreen .ac-m.user .ac-b{background:#7a4d05;color:#fff;border-radius:12px 12px 3px 12px;}
-      #banScreen .ac-q{font-size:11.5px;color:rgba(255,255,255,.6);
-        border-left:2px solid rgba(255,255,255,.3);
-        padding-left:7px;margin-bottom:5px;display:block;overflow:hidden;
-        text-overflow:ellipsis;white-space:nowrap;max-width:100%;}
-      #banScreen .ac-t{font-size:10.5px;color:#6f6f6f;}
-      #banScreen .ac-sys{align-self:center;max-width:100%;text-align:center;font-size:12px;
-        color:#9a9a9a;background:#1b1b1b;border:1px solid #333;padding:6px 11px;
-        line-height:1.5;margin-top:12px;}
-      #banScreen .ac-reply{display:flex;align-items:center;gap:8px;background:#1b1b1b;
-        border-left:3px solid #ff9800;padding:7px 10px;margin:11px 13px 0;
-        font-size:12.5px;color:#c3c3c3;text-align:left;}
-      #banScreen .ac-reply span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;
-        white-space:nowrap;}
-      #banScreen .ac-reply button{background:none;border:none;color:#8d8d8d;cursor:pointer;
-        font-size:14px;padding:0 4px;font-family:inherit;}
-      #banScreen .ac-rbtn{background:none;border:none;color:#6f6f6f;cursor:pointer;
-        font-size:11px;font-family:inherit;padding:0;text-decoration:underline;}
-      #banScreen .ac-rbtn:hover{color:#ff9800;}
-      #banScreen .ac-closed{background:#1b1b1b;border-left:3px solid #616161;padding:11px 13px;
-        margin:11px 13px 13px;font-size:12.5px;color:#9a9a9a;line-height:1.55;text-align:left;}
-      #banScreen .ban-foot{padding-top:2px;display:flex;flex-direction:column;
-        align-items:flex-start;gap:10px;}
-      #banScreen .ban-discord{display:inline-flex;align-items:center;gap:9px;background:#5865f2;
-        color:#fff;text-decoration:none;font-size:13px;font-weight:bold;padding:9px 16px;
-        border-radius:0;transition:background .2s;}
-      #banScreen .ban-discord:hover{background:#4752c4;}
-      #banScreen .ban-note{color:#8d8d8d;font-size:12px;margin:0;line-height:1.55;}
-      @media (max-width:520px){
-        #banScreen{padding:0;}
-        #banScreen .ban-card{border:none;min-height:100%;}
-        #banScreen .ac-m{max-width:96%;}
-      }
-    `;
-    document.head.appendChild(style);
-  }
 
   const permanent = !!info.permanent;
   const timerHtml = permanent
@@ -1068,7 +890,7 @@ function showBanScreen(info) {
         const isDev = m.role === "dev";
         rank.className = "ac-rank" + (isDev ? " dev" : "");
         rank.textContent = isDev
-          ? "Developer"
+          ? "Admin"
           : m.level === 1
             ? "Moderator"
             : "Moderator";
@@ -1423,7 +1245,10 @@ roomTypeRadios.forEach((radio) => {
 logForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   const newUsername = usernameInput.value.trim().slice(0, MAX_USERNAME_LENGTH);
-  const newLocation = locationInput.value.trim().slice(0, MAX_LOCATION_LENGTH);
+  const newLocation = (locationInput.value.trim() || "On The Web").slice(
+    0,
+    MAX_LOCATION_LENGTH,
+  );
 
   if (!newUsername) {
     window.showErrorModal("Please enter a username.");
@@ -1438,6 +1263,12 @@ logForm.addEventListener("submit", async (e) => {
     );
     return;
   }
+  if (newLocation.length < 3) {
+    window.showErrorModal(
+      "Locations need at least 3 characters. Leave it blank for On The Web.",
+    );
+    return;
+  }
   if (isGuestUsername(newUsername)) {
     window.showErrorModal(
       "Guest names are not allowed. Please choose a username.",
@@ -1449,12 +1280,12 @@ logForm.addEventListener("submit", async (e) => {
     localStorage.setItem("talkomaticUsername", newUsername);
     localStorage.setItem("talkomaticLocation", newLocation);
 
-    const pfpEnable = document.getElementById("pfpEnable");
+    const master = document.getElementById("pfpMasterEnable");
     const pfpIdInput = document.getElementById("pfpDiscordId");
-    const presetEnable = document.getElementById("presetEnable");
-    if (presetEnable && presetEnable.checked && storedPreset()) {
-      localStorage.removeItem("talkomaticPfpEnabled");
-    } else if (pfpEnable && pfpEnable.checked) {
+    const source = document.querySelector(".pfp-seg-btn.active");
+    const wantsDiscord =
+      master && master.checked && source && source.dataset.source === "discord";
+    if (wantsDiscord) {
       const rawId = (pfpIdInput ? pfpIdInput.value : "").trim();
       if (!PFP_ID_RE.test(rawId)) {
         lobbyNotify(
@@ -1502,8 +1333,13 @@ logForm.addEventListener("submit", async (e) => {
 
 function updatePfpPreview() {
   const img = document.getElementById("pfpPreview");
-  if (img) {
-    let url = null;
+  if (!img) return;
+  // Same precedence as storedAvatar: a chosen preset wins over Discord.
+  let url = null;
+  const preset = storedPreset();
+  if (preset) {
+    url = presetUrl(preset);
+  } else {
     try {
       if (localStorage.getItem("talkomaticPfpEnabled") === "1") {
         const c = JSON.parse(localStorage.getItem("talkomaticPfp") || "null");
@@ -1514,37 +1350,48 @@ function updatePfpPreview() {
           );
       }
     } catch (e) {}
-    if (url) {
-      img.src = url;
-      img.style.display = "inline-block";
-    } else {
-      img.removeAttribute("src");
-      img.style.display = "none";
-    }
   }
-
-  const pre = document.getElementById("presetPreview");
-  if (pre) {
-    const n = storedPreset();
-    if (n) {
-      pre.src = presetUrl(n);
-      pre.style.display = "inline-block";
-    } else {
-      pre.removeAttribute("src");
-      pre.style.display = "none";
-    }
+  if (url) {
+    img.src = url;
+    img.style.display = "inline-block";
+  } else {
+    img.removeAttribute("src");
+    img.style.display = "none";
   }
 }
 
-(function initPresetControls() {
-  const box = document.getElementById("presetEnable");
-  const body = document.getElementById("presetBody");
+(function initPfpControls() {
+  const master = document.getElementById("pfpMasterEnable");
+  const body = document.getElementById("pfpCardBody");
+  const segButtons = Array.from(document.querySelectorAll(".pfp-seg-btn"));
+  const presetPane = document.getElementById("presetPane");
+  const discordPane = document.getElementById("discordPane");
   const grid = document.getElementById("presetGrid");
-  const card = document.getElementById("presetCard");
-  if (!box || !grid) return;
+  const input = document.getElementById("pfpDiscordId");
+  const helpBtn = document.getElementById("pfpHelpBtn");
+  const help = document.getElementById("pfpHelp");
+  if (!master || !grid || !input) return;
 
   let available = null;
   let building = false;
+
+  const activeSource = () => {
+    const btn = segButtons.find((b) => b.classList.contains("active"));
+    return btn ? btn.dataset.source : "preset";
+  };
+
+  const setSource = (source) => {
+    for (const b of segButtons) {
+      const on = b.dataset.source === source;
+      b.classList.toggle("active", on);
+      b.setAttribute("aria-selected", on ? "true" : "false");
+    }
+    if (presetPane)
+      presetPane.style.display = source === "preset" ? "" : "none";
+    if (discordPane)
+      discordPane.style.display = source === "discord" ? "" : "none";
+    if (source !== "discord" && help) help.style.display = "none";
+  };
 
   const paint = () => {
     const chosen = storedPreset();
@@ -1557,18 +1404,12 @@ function updatePfpPreview() {
       btn.tabIndex = on || (!chosen && first) ? 0 : -1;
       first = false;
     }
-    if (card) card.classList.toggle("pfp-on", box.checked);
-    if (body) body.style.display = box.checked ? "block" : "none";
+    if (body) body.style.display = master.checked ? "block" : "none";
     updatePfpPreview();
   };
 
   const choose = (n) => {
     localStorage.setItem("talkomaticPresetPfp", String(n));
-    const discordBox = document.getElementById("pfpEnable");
-    if (discordBox && discordBox.checked) {
-      discordBox.checked = false;
-      discordBox.dispatchEvent(new Event("change"));
-    }
     localStorage.removeItem("talkomaticPfpEnabled");
     paint();
   };
@@ -1617,74 +1458,73 @@ function updatePfpPreview() {
     paint();
   };
 
-  box.addEventListener("change", async () => {
-    if (box.checked) {
-      await build();
-      const keep = storedPreset();
-      const pick =
-        keep && (!available || available.indexOf(keep) !== -1)
-          ? keep
-          : available && available.length
-            ? available[0]
-            : 0;
-      if (pick) choose(pick);
-      else box.checked = false;
+  const ensurePresetChosen = async () => {
+    await build();
+    const keep = storedPreset();
+    const pick =
+      keep && (!available || available.indexOf(keep) !== -1)
+        ? keep
+        : available && available.length
+          ? available[0]
+          : 0;
+    if (pick) choose(pick);
+    else paint();
+  };
+
+  for (const btn of segButtons) {
+    btn.addEventListener("click", async () => {
+      if (btn.classList.contains("active")) return;
+      setSource(btn.dataset.source);
+      if (btn.dataset.source === "preset") {
+        localStorage.removeItem("talkomaticPfpEnabled");
+        await ensurePresetChosen();
+      } else {
+        localStorage.removeItem("talkomaticPresetPfp");
+        paint();
+      }
+    });
+  }
+
+  master.addEventListener("change", async () => {
+    if (master.checked) {
+      if (activeSource() === "preset") await ensurePresetChosen();
     } else {
       localStorage.removeItem("talkomaticPresetPfp");
+      localStorage.removeItem("talkomaticPfpEnabled");
     }
     paint();
   });
 
-  try {
-    if (storedPreset()) {
-      box.checked = true;
-      build();
-    }
-  } catch (e) {}
-  paint();
-})();
-
-(function initPfpControls() {
-  const box = document.getElementById("pfpEnable");
-  const input = document.getElementById("pfpDiscordId");
-  const body = document.getElementById("pfpBody");
-  const helpBtn = document.getElementById("pfpHelpBtn");
-  const help = document.getElementById("pfpHelp");
-  if (!box || !input) return;
-  const card = box.closest(".pfp-card");
-  const sync = () => {
-    if (body) body.style.display = box.checked ? "block" : "none";
-    if (!box.checked && help) help.style.display = "none";
-    if (card) card.classList.toggle("pfp-on", box.checked);
-  };
-  box.addEventListener("change", () => {
-    if (box.checked) {
-      const presetBox = document.getElementById("presetEnable");
-      if (presetBox && presetBox.checked) {
-        presetBox.checked = false;
-        presetBox.dispatchEvent(new Event("change"));
-      }
-      localStorage.removeItem("talkomaticPresetPfp");
-      updatePfpPreview();
-    }
-    sync();
-  });
   if (helpBtn && help)
     helpBtn.addEventListener("click", () => {
       help.style.display = help.style.display === "none" ? "block" : "none";
     });
+
   try {
-    if (localStorage.getItem("talkomaticPfpEnabled") === "1") box.checked = true;
     const c = JSON.parse(localStorage.getItem("talkomaticPfp") || "null");
     if (c && PFP_ID_RE.test(c.discordId)) input.value = c.discordId;
   } catch (e) {}
-  sync();
-  updatePfpPreview();
+
+  let savedDiscord = false;
+  try {
+    savedDiscord = localStorage.getItem("talkomaticPfpEnabled") === "1";
+  } catch (e) {}
+  if (storedPreset()) {
+    master.checked = true;
+    setSource("preset");
+    build();
+  } else if (savedDiscord) {
+    master.checked = true;
+    setSource("discord");
+  } else {
+    setSource("preset");
+  }
+  paint();
 
   setTimeout(async () => {
     if (localStorage.getItem("talkomaticPfpEnabled") !== "1") return;
     const before = storedAvatar();
-    if (!before) return;
+    if (!before || !before.discordId) return;
     try {
       const after = await resolveAvatar(before.discordId);
       if (after.hash !== before.hash) {
@@ -1695,9 +1535,8 @@ function updatePfpPreview() {
     } catch (e) {
       localStorage.removeItem("talkomaticPfpEnabled");
       localStorage.removeItem("talkomaticPfp");
-      updatePfpPreview();
-      if (box) box.checked = false;
-      sync();
+      master.checked = false;
+      paint();
       if (currentUsername)
         emitJoinLobby(currentUsername, currentLocation || "");
     }
@@ -1967,13 +1806,21 @@ function createRoomElement(room) {
     }
 
     if (user.isMod && !user.isDev && !user.isHidden) {
-      const jr = (user.modLevel || 2) === 1;
+      const lvl = user.modLevel || 1;
       const mb = document.createElement("span");
-      mb.className = jr
-        ? "mod-lobby-badge mod-lobby-badge-jr"
-        : "mod-lobby-badge";
-      mb.textContent = jr ? "JR MOD" : "MOD";
-      mb.title = jr ? "Junior Moderator (L1)" : "Moderator (L2)";
+      mb.className =
+        lvl >= 3
+          ? "mod-lobby-badge mod-lobby-badge-lead"
+          : lvl === 1
+            ? "mod-lobby-badge mod-lobby-badge-jr"
+            : "mod-lobby-badge";
+      mb.textContent = lvl >= 3 ? "LEADER" : lvl === 1 ? "JR MOD" : "MOD";
+      mb.title =
+        lvl >= 3
+          ? "Mod Leader (L3)"
+          : lvl === 1
+            ? "Junior Moderator (L1)"
+            : "Moderator (L2)";
       userDiv.appendChild(mb);
     }
 
@@ -2004,6 +1851,15 @@ function createRoomElement(room) {
       locSpan.className = "user-loc";
       locSpan.textContent = ` / ${user.location}`;
       userDiv.appendChild(locSpan);
+    }
+
+    if (user.isAfk) {
+      userDiv.classList.add("afk-lobby-user");
+      const afkSpan = document.createElement("span");
+      afkSpan.className = "user-afk";
+      afkSpan.textContent = " (AFK)";
+      afkSpan.title = "Away from keyboard";
+      userDiv.appendChild(afkSpan);
     }
 
     usersDetailDiv.appendChild(userDiv);
@@ -2284,7 +2140,7 @@ function ensureDevPanelButton() {
   btn.id = "devPanelButton";
   btn.type = "button";
   btn.innerHTML = currentUserIsDev
-    ? '<i class="fas fa-screwdriver-wrench"></i> Dev Panel'
+    ? '<i class="fas fa-screwdriver-wrench"></i> Admin Panel'
     : '<i class="fas fa-shield-halved"></i> Mod Panel';
   btn.title = currentUserIsDev ? "Dev tools" : "Mod tools";
   btn.addEventListener("click", () =>
@@ -2296,7 +2152,7 @@ function ensureDevPanelButton() {
 function openDevPanel() {
   if (!window.StaffUI) return;
   StaffUI.panel({
-    title: "Dev panel",
+    title: "Admin panel",
     icon: '<i class="fas fa-screwdriver-wrench"></i>',
     subtitle: "Global staff tools",
     wide: true,
@@ -2331,6 +2187,7 @@ function openDevPanel() {
                     options: [
                       { value: "1", label: "Junior mod (L1) - limited" },
                       { value: "2", label: "Full mod (L2) - all powers" },
+                      { value: "3", label: "Mod leader (L3) - runs the team" },
                     ],
                   },
                 ],
@@ -2494,8 +2351,19 @@ function openModLobbyPanel() {
     title: "Mod panel",
     icon: '<i class="fas fa-shield-halved"></i>',
     subtitle:
-      currentUserModLevel >= 2 ? "Full mod (L2)" : "Junior mod (L1)",
-    onHelp: () => StaffUI.help(currentUserModLevel >= 2 ? "mod" : "jr"),
+      currentUserModLevel >= 3
+        ? "Mod Leader (L3)"
+        : currentUserModLevel >= 2
+          ? "Full mod (L2)"
+          : "Junior mod (L1)",
+    onHelp: () =>
+      StaffUI.help(
+        currentUserModLevel >= 3
+          ? "leader"
+          : currentUserModLevel >= 2
+            ? "mod"
+            : "jr",
+      ),
     groups: [
       {
         title: "Records",
@@ -2549,8 +2417,8 @@ async function removeMyKey() {
     subtitle: "This browser only",
     message:
       "This browser will forget your " +
-      (devKey ? "developer" : "moderator") +
-      " key and you will go back to being an ordinary user here. The key itself is not revoked and still works everywhere else, so make sure you have a copy before you do this: getting back in means pasting it again with Enter staff key. If you think the key has leaked, tell a developer instead so it can be properly revoked.",
+      (devKey ? "admin" : "moderator") +
+      " key and you will go back to being an ordinary user here. The key itself is not revoked and still works everywhere else, so make sure you have a copy before you do this: getting back in means pasting it again with Enter staff key. If you think the key has leaked, tell an admin instead so it can be properly revoked.",
     confirmText: "Remove key",
   });
   if (!ok) return;
@@ -2589,8 +2457,8 @@ function openMyKey() {
     StaffUI.el("p", {
       text:
         "This is the " +
-        (devKey ? "developer" : "moderator") +
-        " key this browser is signed in with. Treat it like a password: it is the only proof of your role, so never paste it anywhere public or share it, not even with other staff. If it leaks, tell a developer and it will be revoked.",
+        (devKey ? "admin" : "moderator") +
+        " key this browser is signed in with. Treat it like a password: it is the only proof of your role, so never paste it anywhere public or share it, not even with other staff. If it leaks, tell an admin and it will be revoked.",
     }),
   );
 
@@ -2638,7 +2506,7 @@ socket.on("dev mod granted", (data) => {
   const wrap = StaffUI.el("div");
   wrap.appendChild(
     StaffUI.el("p", {
-      text: `New ${data.level === 1 ? "junior (L1)" : "full (L2)"} mod key for "${data.label}". This is shown ONCE, so copy it now and send it to them.`,
+      text: `New ${data.level >= 3 ? "leader (L3)" : data.level === 1 ? "junior (L1)" : "full (L2)"} mod key for "${data.label}". This is shown ONCE, so copy it now and send it to them.`,
     }),
   );
   const input = StaffUI.el("input", {
@@ -2692,43 +2560,45 @@ socket.on("dev mod granted", (data) => {
 
 function openModKeyActions(k) {
   if (!window.StaffUI) return;
-  const toLevel = k.level === 1 ? 2 : 1;
+  const lvl = k.level >= 3 ? 3 : k.level === 1 ? 1 : 2;
+  const LEVEL_NAMES = {
+    1: "junior mod (L1)",
+    2: "full mod (L2)",
+    3: "mod leader (L3)",
+  };
+  const steps = [];
+  if (lvl < 3) steps.push(lvl + 1);
+  if (lvl > 1) steps.push(lvl - 1);
   StaffUI.menu({
     title: k.label,
     icon: '<i class="fas fa-user-shield"></i>',
-    subtitle: `Level ${k.level === 1 ? 1 : 2} · key ${k.hash.slice(0, 12)}…`,
+    subtitle: `Level ${lvl} · key ${k.hash.slice(0, 12)}…`,
     groups: [
       {
         items: [
-          {
-            icon:
-              toLevel === 2
+          ...steps.map((toLevel) => {
+            const up = toLevel > lvl;
+            return {
+              icon: up
                 ? '<i class="fas fa-arrow-up"></i>'
                 : '<i class="fas fa-arrow-down"></i>',
-            label:
-              toLevel === 2
-                ? "Promote to full mod (L2)"
-                : "Demote to junior (L1)",
-            desc:
-              toLevel === 2
-                ? "Grant ban + IP block powers"
-                : "Limit to junior powers",
-            onClick: async () => {
-              const ok = await StaffUI.confirm({
-                title: toLevel === 2 ? "Promote to L2" : "Demote to L1",
-                message:
-                  toLevel === 2
-                    ? `Give "${k.label}" full (level 2) powers?`
-                    : `Limit "${k.label}" to junior (level 1) powers?`,
-                confirmText: toLevel === 2 ? "Promote" : "Demote",
-              });
-              if (ok)
-                socket.emit("dev set mod level", {
-                  hash: k.hash,
-                  level: toLevel,
+              label: (up ? "Promote to " : "Demote to ") + LEVEL_NAMES[toLevel],
+              desc: up ? "Move them up a level" : "Move them down a level",
+              onClick: async () => {
+                const ok = await StaffUI.confirm({
+                  title:
+                    (up ? "Promote to " : "Demote to ") + LEVEL_NAMES[toLevel],
+                  message: `Set "${k.label}" to ${LEVEL_NAMES[toLevel]}?`,
+                  confirmText: up ? "Promote" : "Demote",
                 });
-            },
-          },
+                if (ok)
+                  socket.emit("dev set mod level", {
+                    hash: k.hash,
+                    level: toLevel,
+                  });
+              },
+            };
+          }),
           {
             icon: '<i class="fas fa-user-xmark"></i>',
             label: "Revoke mod key",
@@ -2757,7 +2627,7 @@ socket.on("dev mod keys", (keys) => {
   const items = list.length
     ? list.map((k) => ({
         icon: '<i class="fas fa-user-shield"></i>',
-        label: `${k.label} - ${k.level === 1 ? "L1" : "L2"}`,
+        label: `${k.label} - ${k.level >= 3 ? "L3" : k.level === 1 ? "L1" : "L2"}`,
         desc: "key " + k.hash.slice(0, 12) + "…",
         keepOpen: true,
         onClick: () => openModKeyActions(k),
@@ -2932,12 +2802,71 @@ socket.on("staff action result", (data) => {
     );
 });
 
-socket.on("staff revoked", () => {
+function revokedNoticeBody(reason, removedAt) {
+  const wrap = document.createElement("div");
+  const p1 = document.createElement("p");
+  p1.textContent =
+    "The Talkomatic team has removed your moderator key" +
+    (removedAt ? " on " + new Date(removedAt).toLocaleDateString() : "") +
+    ".";
+  wrap.appendChild(p1);
+  if (reason) {
+    const q = document.createElement("p");
+    q.style.cssText =
+      "border-left:3px solid #ff5468;padding:8px 10px;background:rgba(255,84,104,.08);border-radius:0 6px 6px 0;";
+    q.textContent = "Reason: " + reason;
+    wrap.appendChild(q);
+  }
+  const p2 = document.createElement("p");
+  p2.style.cssText = "color:#8d8d8d;font-size:12px;";
+  p2.textContent =
+    "You are back to being an ordinary user. If you believe this was a mistake, raise it with staff.";
+  wrap.appendChild(p2);
+  return wrap;
+}
+
+socket.on("staff revoked", (d) => {
   localStorage.removeItem("talkomatic_modKey");
   currentUserIsMod = false;
   currentUserModLevel = 0;
-  lobbyNotify("Your mod key was revoked.", "warning", { timeout: 6000 });
-  setTimeout(() => window.location.reload(), 1500);
+  const reason = d && d.reason;
+  if (window.StaffUI && StaffUI.modal && reason) {
+    StaffUI.modal({
+      title: "You are no longer a moderator",
+      icon: '<i class="fas fa-user-xmark"></i>',
+      body: revokedNoticeBody(reason, Date.now()),
+      actions: [
+        {
+          label: "Understood",
+          kind: "primary",
+          onClick: () => window.location.reload(),
+        },
+      ],
+    });
+    setTimeout(() => window.location.reload(), 60000);
+  } else {
+    lobbyNotify("Your mod key was revoked.", "warning", { timeout: 6000 });
+    setTimeout(() => window.location.reload(), 1500);
+  }
+});
+
+socket.on("staff revoked notice", (d) => {
+  localStorage.removeItem("talkomatic_modKey");
+  if (window.StaffUI && StaffUI.modal) {
+    StaffUI.modal({
+      title: "You are no longer a moderator",
+      icon: '<i class="fas fa-user-xmark"></i>',
+      body: revokedNoticeBody(d && d.reason, d && d.removedAt),
+      actions: [{ label: "Understood", kind: "primary", onClick: () => {} }],
+    });
+  } else {
+    lobbyNotify(
+      "Your moderator key was removed" +
+        (d && d.reason ? ": " + d.reason : "."),
+      "warning",
+      { title: "You are no longer a moderator", timeout: 12000 },
+    );
+  }
 });
 
 // ── Staff key entry (no console needed) ──────────────────────────────────────
@@ -2996,9 +2925,11 @@ socket.on("you are now mod", (d) => {
     return;
   }
   lobbyNotify(
-    d.level === 2
-      ? "You've been promoted to Moderator (full)! Reloading…"
-      : "You've been made a Junior Moderator! Reloading…",
+    d.level >= 3
+      ? "You've been made a Mod Leader! Reloading…"
+      : d.level === 2
+        ? "You've been promoted to Moderator (full)! Reloading…"
+        : "You've been made a Junior Moderator! Reloading…",
     "success",
     { title: "You are now a mod", timeout: 4000 },
   );
@@ -3006,11 +2937,13 @@ socket.on("you are now mod", (d) => {
 });
 socket.on("staff level changed", (d) => {
   if (!d) return;
-  currentUserModLevel = d.level === 1 ? 1 : 2;
+  currentUserModLevel = d.level >= 3 ? 3 : d.level === 1 ? 1 : 2;
   lobbyNotify(
-    currentUserModLevel >= 2
-      ? "You are now a full (level 2) moderator."
-      : "Your moderator level is now junior (level 1).",
+    currentUserModLevel >= 3
+      ? "You are now a mod leader (level 3)."
+      : currentUserModLevel >= 2
+        ? "You are now a full (level 2) moderator."
+        : "Your moderator level is now junior (level 1).",
     "info",
     { timeout: 6000 },
   );
@@ -3157,13 +3090,17 @@ socket.on("mod application status", (d) => {
 function updateStaffLink() {
   const link = document.getElementById("staffLoginLink");
   if (link) {
-    const icon = currentUserIsDev || currentUserIsMod ? "fa-gauge-high" : "fa-key";
+    const isStaff = currentUserIsDev || currentUserIsMod;
+    const icon = isStaff ? "fa-gauge-high" : "fa-key";
     const label = currentUserIsDev
-      ? "Dev Dashboard"
+      ? "Admin Dashboard"
       : currentUserIsMod
         ? "Mod Dashboard"
         : "Staff Access";
-    link.innerHTML = '<i class="fas ' + icon + '"></i>';
+    link.innerHTML =
+      '<i class="fas ' + icon + '"></i><span>' +
+      (isStaff ? "Dashboard" : "Staff") +
+      "</span>";
     link.title = label;
     link.setAttribute("aria-label", label);
   }
@@ -3234,23 +3171,3 @@ socket.on("maintenance status", (data) => {
     bar.remove();
   }
 });
-
-(function injectLobbyStaffStyles() {
-  const css = `
-    .mod-lobby-badge{display:inline-block;background:#00bcd4;color:#003;font-size:8px;font-weight:bold;padding:1px 4px;border-radius:6px;margin:0 4px;letter-spacing:.5px;vertical-align:middle;}
-    .mod-lobby-badge.mod-lobby-badge-jr{background:#ab47bc;color:#fff;}
-    .bot-lobby-badge{display:inline-block;background:var(--bot-flair,#9aa3ae);color:#16191d;font-size:8px;font-weight:bold;padding:1px 4px;border-radius:6px;margin:0 4px 0 0;letter-spacing:.5px;vertical-align:middle;}
-    .official-badge{display:inline-block;background:#ffd700;color:#3a2c00;font-size:9px;font-weight:bold;padding:1px 6px;border-radius:8px;margin-right:6px;letter-spacing:.5px;}
-    .room.spotlight-room{border:1px solid #ffd700 !important;box-shadow:0 0 0 1px rgba(255,215,0,.25) inset;}
-    .lobby-dev-controls{display:flex;gap:6px;margin-top:6px;}
-    .lobby-dev-btn{flex:1;background:#000;color:#ff9800;border:1px solid #616161;border-radius:4px;padding:6px 7px;font-size:11px;cursor:pointer;font-weight:bold;font-family:inherit;transition:all .2s ease;}
-    .lobby-dev-btn:hover{border-color:#ff9800;background:#ff9800;color:#000;}
-    #devPanelButton{position:fixed;bottom:16px;right:16px;z-index:99990;background:#000;color:#ffffff;border:1px solid #ff9800;border-radius:4px;padding:10px 16px;font-size:13px;font-weight:bold;font-family:inherit;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.5);transition:all .2s ease;}
-    #devPanelButton:hover{background:#ff9800;color:#000;}
-    #lobbyTickerBar{position:fixed;top:0;left:0;right:0;z-index:99980;background:#ff9800;color:#1a1206;text-align:center;font-size:13px;font-weight:700;padding:7px 16px;letter-spacing:.3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-sizing:border-box;}
-    #lobbyMaintenanceBar{position:fixed;bottom:0;left:0;right:0;z-index:99980;background:#5c2d91;color:#fff;text-align:center;font-size:13px;font-weight:700;padding:7px 16px;box-sizing:border-box;}
-  `;
-  const style = document.createElement("style");
-  style.textContent = css;
-  document.head.appendChild(style);
-})();

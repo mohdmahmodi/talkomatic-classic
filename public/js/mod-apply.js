@@ -291,11 +291,11 @@
     var ol = el("ol");
     [
       "Moderating Talkomatic is volunteering. It is not a job, and there is no pay.",
-      "Junior moderators can warn and kick people, clear what someone has typed, reset a bad name, location or picture, and rename, lock or slow a room. Bans stay with full moderators and developers.",
+      "Junior moderators can warn and kick people, clear what someone has typed, reset a bad name, location or picture, and rename, lock or slow a room. Bans stay with full moderators and up.",
       "Use the tools on rule-breaking, not on people you dislike or argue with. If you are part of an argument, step back and let another moderator handle it.",
-      "Every moderator action is logged and the developers read the logs. Misusing the tools loses you the role, and serious cases get banned like anyone else.",
+      "Every moderator action is logged and the team leaders and admins read the logs. Misusing the tools loses you the role, and serious cases get banned like anyone else.",
       "Your moderator key is yours alone. Never share it or show it on stream. A key used by two people is revoked automatically.",
-      "Decisions by developers and full moderators are final. If you disagree with one, raise it with staff, not in a room.",
+      "Decisions by admins and moderators are final. If you disagree with one, raise it with staff, not in a room.",
       "The team can take the role back at any time, with or without a stated reason.",
     ].forEach(function (t) {
       ol.appendChild(el("li", null, t));
@@ -618,7 +618,7 @@
           ? "Your application was reviewed and declined this time. You can apply again below."
           : st.status === "revoked"
             ? "Your moderator access has been revoked. If you would like to help out again, you can apply again below."
-            : "Your application is in the queue. A developer or full moderator will review it soon. Thanks for your patience.";
+            : "Your application is in the queue. A mod leader will review it soon. Thanks for your patience.";
     body.appendChild(p);
     if (st.submittedAt) {
       var s = document.createElement("p");

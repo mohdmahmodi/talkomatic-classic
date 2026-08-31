@@ -5,7 +5,29 @@
   var restarting = false;
   var reconnectTimer = null;
   var buttonsTimer = null;
+  var retryTimer = null;
   var rejoinInPlace = false;
+  var everConnected = false;
+
+  // Most drops (wifi roam, phone tab unfreeze, laptop wake) heal on the first
+  // reconnect attempt, a second or two in. The overlay is for outages that
+  // outlive that, not a flash on every blip. Armed once per outage: resetting
+  // it on every failed attempt would keep pushing it out forever.
+  var GRACE_DROP = 5000;
+  var GRACE_FIRST = 2500;
+
+  function armOverlay(delay) {
+    if (reconnectTimer) return;
+    reconnectTimer = setTimeout(function () {
+      reconnectTimer = null;
+      showReconnecting();
+    }, delay);
+  }
+
+  function disarmOverlay() {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
 
   function styles() {
     if (document.getElementById("tkConnStyles")) return;
@@ -158,7 +180,7 @@
   }
 
   function recovered() {
-    clearTimeout(reconnectTimer);
+    disarmOverlay();
     clearTimeout(buttonsTimer);
     restarting = false;
     var o = document.getElementById("tkConnOverlay");
@@ -194,16 +216,27 @@
       });
       socket.on("disconnect", function (reason) {
         if (restarting || reason === "io client disconnect") return;
-        clearTimeout(reconnectTimer);
-        reconnectTimer = setTimeout(showReconnecting, 1200);
+        armOverlay(GRACE_DROP);
       });
       socket.on("connect_error", function (err) {
         if (restarting || (err && err.data && err.data.banned)) return;
-        clearTimeout(reconnectTimer);
-        reconnectTimer = setTimeout(showReconnecting, 1200);
+        armOverlay(everConnected ? GRACE_DROP : GRACE_FIRST);
+        // A middleware denial ("Too many connections") is final to socket.io:
+        // it stops trying on its own. Keep knocking until a slot frees up,
+        // unless something (ban, superseded tab) turned reconnection off.
+        if (!socket.active && !retryTimer) {
+          retryTimer = setTimeout(function () {
+            retryTimer = null;
+            if (socket.disconnected && socket.io.opts.reconnection !== false)
+              socket.connect();
+          }, 4000);
+        }
       });
       socket.on("connect", function () {
-        clearTimeout(reconnectTimer);
+        everConnected = true;
+        disarmOverlay();
+        clearTimeout(retryTimer);
+        retryTimer = null;
         if (rejoinInPlace) return;
         restarting = false;
         hide();

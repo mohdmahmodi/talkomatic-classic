@@ -327,10 +327,13 @@ socket.on("room mention", (data) => {
   }
 });
 function updateMuteIcon() {
-  muteIcon.src = soundEnabled
-    ? "images/icons/sound-on.svg"
-    : "images/icons/sound-off.svg";
-  muteIcon.alt = soundEnabled ? "Sound On" : "Sound Off";
+  muteIcon.className = soundEnabled
+    ? "fas fa-volume-high"
+    : "fas fa-volume-xmark";
+  muteToggleButton.classList.toggle("sound-off", !soundEnabled);
+  muteToggleButton.title = soundEnabled
+    ? "Sound: ON (click to mute)"
+    : "Sound: OFF (click to unmute)";
 }
 
 // ── 5. CONTENTEDITABLE UTILITIES ────────────────────────────────────────────
@@ -1450,8 +1453,8 @@ const APPS_DATA = {
   infiniteboard: {
     name: "Talkoboard",
     description: "Draw together in real-time",
-    icon: "\uD83C\uDFA8",
-    iconClass: "placeholder",
+    fa: "fa-paintbrush",
+    tint: "#ffb14d",
     status: "available",
     url: null,
     openInNewTab: false,
@@ -1460,8 +1463,8 @@ const APPS_DATA = {
   themeEditor: {
     name: "Theme Editor",
     description: "Recolor Talkomatic your way, no CSS needed",
-    icon: "🎨",
-    iconClass: "placeholder",
+    fa: "fa-palette",
+    tint: "#e91e63",
     status: "available",
     url: null,
     openInNewTab: false,
@@ -1470,12 +1473,22 @@ const APPS_DATA = {
   minigames: {
     name: "Mini Games",
     description: "Draw & Guess, Guess the Flag, Tic Tac Toe, Connect Four",
-    icon: "\uD83C\uDFAE",
-    iconClass: "placeholder",
+    fa: "fa-gamepad",
+    tint: "#5aa9ff",
     status: "available",
     url: null,
     openInNewTab: false,
     action: "games",
+  },
+  minecraftSmp: {
+    name: "Minecraft SMP",
+    description: "The official Talkomatic Minecraft server",
+    fa: "fa-cube",
+    tint: "#4ade80",
+    status: "coming-soon",
+    url: null,
+    openInNewTab: false,
+    action: null,
   },
 };
 let appDirectoryDropdown = null;
@@ -1487,23 +1500,16 @@ function createAppDirectoryDropdown() {
   appDirectoryDropdown.id = "appDirectoryDropdown";
   const header = document.createElement("div");
   header.className = "app-directory-header";
-  header.textContent = "\uD83D\uDE80 App Directory";
+  header.innerHTML = '<i class="fas fa-rocket"></i> App Directory';
   const grid = document.createElement("div");
   grid.className = "app-grid";
   Object.entries(APPS_DATA).forEach(([id, app]) => {
     const item = document.createElement("div");
     item.className = `app-item ${app.status === "coming-soon" ? "disabled" : ""}`;
     const icon = document.createElement("div");
-    icon.className = `app-icon ${app.iconClass}`;
-    if (app.iconClass === "placeholder") {
-      icon.textContent = app.icon;
-    } else {
-      const img = document.createElement("img");
-      img.src = app.icon;
-      img.alt = app.name;
-      img.style.cssText = "width:100%;height:100%;object-fit:cover";
-      icon.appendChild(img);
-    }
+    icon.className = "app-icon";
+    icon.innerHTML = `<i class="fas ${app.fa}"></i>`;
+    icon.style.color = app.tint;
     const info = document.createElement("div");
     info.className = "app-info";
     const nameEl = document.createElement("div");
@@ -1515,9 +1521,13 @@ function createAppDirectoryDropdown() {
     info.appendChild(nameEl);
     info.appendChild(desc);
     const status = document.createElement("div");
-    status.className = `app-status status-${app.status}`;
-    status.textContent =
-      app.status === "available" ? "Available" : "Coming Soon";
+    if (app.status === "available") {
+      status.className = "app-enter";
+      status.innerHTML = 'Enter <i class="fas fa-arrow-right"></i>';
+    } else {
+      status.className = "app-status status-coming-soon";
+      status.textContent = "Coming Soon";
+    }
     item.appendChild(icon);
     item.appendChild(info);
     item.appendChild(status);
@@ -1985,13 +1995,13 @@ function applyDevAppearanceToRow(row, user) {
 
   const loudMod = !!user.isMod && !user.isDev && !user.isHidden;
   const modRowClass =
-    loudMod && (user.modLevel || 2) >= 2
+    loudMod && (user.modLevel || 1) >= 2
       ? "mod-user"
       : loudMod
         ? "jrmod-user"
         : null;
   const modTextClass =
-    loudMod && (user.modLevel || 2) >= 2
+    loudMod && (user.modLevel || 1) >= 2
       ? "mod-glow-text"
       : loudMod
         ? "jrmod-glow-text"
@@ -2033,7 +2043,7 @@ function applyDevAppearanceToRow(row, user) {
   const modBadge = info.querySelector(".mod-badge");
   const showModFlair =
     !!user.isMod && !user.isDev && (!user.isHidden || devSeesConcealed);
-  const wantLevel = user.modLevel || 2;
+  const wantLevel = user.modLevel || 1;
   if (showModFlair) {
     if (!modBadge)
       info.insertBefore(createModBadge(wantLevel), info.firstChild);
@@ -2142,6 +2152,29 @@ function createDevHideToggle() {
 }
 
 let devShowIP = localStorage.getItem("talkomatic_devShowIP") !== "false";
+
+function copyDevMeta(span) {
+  const text = span.textContent;
+  const done = () => notify("Copied: " + text, "success", { timeout: 2000 });
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).then(done, () => fallbackCopy(text, done));
+  } else {
+    fallbackCopy(text, done);
+  }
+}
+
+function fallbackCopy(text, done) {
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.cssText = "position:fixed;left:-9999px;top:0;";
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    if (document.execCommand("copy")) done();
+  } catch (_) {}
+  ta.remove();
+}
+
 // Leaves an unchanged tag alone so a dev can select and copy it; replacing
 // the span on every room update kept clearing the selection.
 function renderDevContext() {
@@ -2165,6 +2198,8 @@ function renderDevContext() {
     const span = document.createElement("span");
     span.className = "dev-meta";
     span.textContent = want;
+    span.title = "Tap to copy";
+    span.addEventListener("click", () => copyDevMeta(span));
     info.insertBefore(span, info.querySelector(".ui-tools"));
   });
 }
@@ -2284,8 +2319,9 @@ function createUserRow(user, container) {
   if (user.isDev && !user.isHidden) {
     row.classList.add("dev-user");
   } else if (user.isMod && !user.isDev && !user.isHidden) {
+    const lvl = user.modLevel || 1;
     row.classList.add(
-      (user.modLevel || 2) >= 2 ? "mod-user" : "jrmod-user",
+      lvl >= 3 ? "leadmod-user" : lvl >= 2 ? "mod-user" : "jrmod-user",
     );
   }
 
@@ -2474,8 +2510,13 @@ function createUserRow(user, container) {
   if (user.isDev && !user.isHidden) {
     div.classList.add("dev-fire-text");
   } else if (user.isMod && !user.isDev && !user.isHidden) {
+    const lvl = user.modLevel || 1;
     div.classList.add(
-      (user.modLevel || 2) >= 2 ? "mod-glow-text" : "jrmod-glow-text",
+      lvl >= 3
+        ? "leadmod-glow-text"
+        : lvl >= 2
+          ? "mod-glow-text"
+          : "jrmod-glow-text",
     );
   }
 
@@ -2693,8 +2734,6 @@ function injectStyles() {
     .emote-item:hover { background-color:#555; }
     .emote-item img { width:30px; height:auto; }
     .emote-item span { font-size:10px; color:white; margin-top:5px; text-align:center; word-break:break-all; }
-    #filterToggle { font-size:16px; opacity:1; transition:opacity 0.2s ease; }
-    #filterToggle.filter-off { opacity:0.4; }
 
     /* Link safety */
 
@@ -3103,6 +3142,7 @@ socket.on("room joined", (data) => {
     const invite = document.querySelector(".invite-section");
     if (invite) invite.style.display = "";
   }
+  if (talkoboardInstance) talkoboardInstance.setWatching(false);
 
   selfTabAfk = false;
   if (fakeAfkActive) {
@@ -3648,15 +3688,26 @@ function notify(message, type, opts) {
 
 function staffRole() {
   if (currentUserIsDev) return "dev";
+  if (currentUserModLevel >= 3) return "leader";
   return currentUserModLevel >= 2 ? "mod" : "jr";
 }
 
 function createModBadge(level) {
-  const lvl = level === 1 ? 1 : 2;
+  const lvl = level >= 3 ? 3 : level === 1 ? 1 : 2;
   const badge = document.createElement("span");
-  badge.className = lvl === 1 ? "mod-badge mod-badge-jr" : "mod-badge";
-  badge.textContent = lvl === 1 ? "JR MOD" : "MOD";
-  badge.title = lvl === 1 ? "Junior Moderator (L1)" : "Moderator (L2)";
+  badge.className =
+    lvl === 3
+      ? "mod-badge mod-badge-lead"
+      : lvl === 1
+        ? "mod-badge mod-badge-jr"
+        : "mod-badge";
+  badge.textContent = lvl === 3 ? "LEADER" : lvl === 1 ? "JR MOD" : "MOD";
+  badge.title =
+    lvl === 3
+      ? "Mod Leader (L3)"
+      : lvl === 1
+        ? "Junior Moderator (L1)"
+        : "Moderator (L2)";
   badge.dataset.level = String(lvl);
   return badge;
 }
@@ -3953,6 +4004,16 @@ function openUserStaffMenu(user) {
                     level: 2,
                   }),
               },
+              {
+                icon: '<i class="fas fa-user-tie"></i>',
+                label: "Mod leader (L3)",
+                desc: "Runs the mod team",
+                onClick: () =>
+                  socket.emit("dev grant mod to user", {
+                    targetUserId: user.id,
+                    level: 3,
+                  }),
+              },
             ],
           },
         ],
@@ -3984,46 +4045,38 @@ function openUserStaffMenu(user) {
     });
     if (!user.isDev && !user.isMod) roles.push(makeModItem);
     if (user.isMod && !user.isDev) {
-      const lvl = user.modLevel || 2;
-      roles.push(
-        lvl < 2
-          ? {
-            icon: '<i class="fas fa-arrow-up"></i>',
-            label: "Promote to full mod (L2)",
-            desc: "Grant full mod powers",
-            onClick: async () => {
-              if (
-                await StaffUI.confirm({
-                  title: "Promote to L2",
-                  message: `Promote ${name} to a full (level 2) moderator?`,
-                  confirmText: "Promote",
-                })
-              )
-                socket.emit("dev set mod level for user", {
-                  targetUserId: user.id,
-                  level: 2,
-                });
-            },
-          }
-          : {
-            icon: '<i class="fas fa-arrow-down"></i>',
-            label: "Demote to junior (L1)",
-            desc: "Limit them to junior powers",
-            onClick: async () => {
-              if (
-                await StaffUI.confirm({
-                  title: "Demote to L1",
-                  message: `Demote ${name} to a junior (level 1) moderator?`,
-                  confirmText: "Demote",
-                })
-              )
-                socket.emit("dev set mod level for user", {
-                  targetUserId: user.id,
-                  level: 1,
-                });
-            },
+      const lvl = user.modLevel >= 3 ? 3 : user.modLevel === 1 ? 1 : 2;
+      const LEVEL_NAMES = {
+        1: "junior mod (L1)",
+        2: "full mod (L2)",
+        3: "mod leader (L3)",
+      };
+      const steps = [];
+      if (lvl < 3) steps.push(lvl + 1);
+      if (lvl > 1) steps.push(lvl - 1);
+      for (const toLevel of steps) {
+        const up = toLevel > lvl;
+        roles.push({
+          icon: up
+            ? '<i class="fas fa-arrow-up"></i>'
+            : '<i class="fas fa-arrow-down"></i>',
+          label: (up ? "Promote to " : "Demote to ") + LEVEL_NAMES[toLevel],
+          desc: up ? "Move them up a level" : "Move them down a level",
+          onClick: async () => {
+            if (
+              await StaffUI.confirm({
+                title: (up ? "Promote to " : "Demote to ") + LEVEL_NAMES[toLevel],
+                message: `Set ${name} to ${LEVEL_NAMES[toLevel]}?`,
+                confirmText: up ? "Promote" : "Demote",
+              })
+            )
+              socket.emit("dev set mod level for user", {
+                targetUserId: user.id,
+                level: toLevel,
+              });
           },
-      );
+        });
+      }
       roles.push({
         icon: '<i class="fas fa-user-xmark"></i>',
         label: "Remove mod (revoke key)",
@@ -4082,7 +4135,7 @@ function openIpBlockPicker(user) {
       value: "7d",
     },
   ];
-  if (currentUserIsDev)
+  if (currentUserIsDev || (currentUserIsMod && currentUserModLevel >= 2))
     durs.push({
       icon: '<i class="fas fa-infinity"></i>',
       label: "Permanent",
@@ -4149,8 +4202,8 @@ function createStaffPanelButton() {
   button.type = "button";
   button.className = "staff-nav-btn";
   button.innerHTML = currentUserIsDev
-    ? '<i class="fas fa-screwdriver-wrench"></i> Dev'
-    : '<i class="fas fa-shield-halved"></i> Staff';
+    ? '<i class="fas fa-screwdriver-wrench"></i><span>Dev</span>'
+    : '<i class="fas fa-shield-halved"></i><span>Staff</span>';
   button.title = "Staff tools";
   button.addEventListener("click", openStaffPanel);
   const leaveBtn = navRight.querySelector(".leave-room");
@@ -4440,10 +4493,12 @@ function openStaffPanel() {
   });
 
   const rankLabel = currentUserIsDev
-    ? "Developer"
-    : currentUserModLevel >= 2
-      ? "Full mod (L2)"
-      : "Junior mod (L1)";
+    ? "Admin"
+    : currentUserModLevel >= 3
+      ? "Mod Leader (L3)"
+      : currentUserModLevel >= 2
+        ? "Full mod (L2)"
+        : "Junior mod (L1)";
 
   StaffUI.panel({
     title: "Staff panel",
@@ -4610,6 +4665,7 @@ function applyRoomFlags(data) {
 // ── Spectate (read-only) ─────────────────────────────────────────────────────
 function renderSpectate(data, noteText) {
   isSpectating = true;
+  if (talkoboardInstance) talkoboardInstance.setWatching(true);
   currentRoomId = data.roomId;
   if (data.userId) currentUserId = data.userId;
   currentRoomName = data.roomName;
@@ -4870,12 +4926,71 @@ socket.on("staff action result", (data) => {
   if (window.StaffUI) StaffUI.actionToast(data);
   else notify((data.ok ? "Done: " : "Failed: ") + data.action, data.ok ? "success" : "error");
 });
-socket.on("staff revoked", () => {
+function revokedNoticeBody(reason, removedAt) {
+  const wrap = document.createElement("div");
+  const p1 = document.createElement("p");
+  p1.textContent =
+    "The Talkomatic team has removed your moderator key" +
+    (removedAt ? " on " + new Date(removedAt).toLocaleDateString() : "") +
+    ".";
+  wrap.appendChild(p1);
+  if (reason) {
+    const q = document.createElement("p");
+    q.style.cssText =
+      "border-left:3px solid #ff5468;padding:8px 10px;background:rgba(255,84,104,.08);border-radius:0 6px 6px 0;";
+    q.textContent = "Reason: " + reason;
+    wrap.appendChild(q);
+  }
+  const p2 = document.createElement("p");
+  p2.style.cssText = "color:#8d8d8d;font-size:12px;";
+  p2.textContent =
+    "You are back to being an ordinary user. If you believe this was a mistake, raise it with staff.";
+  wrap.appendChild(p2);
+  return wrap;
+}
+
+socket.on("staff revoked", (d) => {
   localStorage.removeItem("talkomatic_modKey");
   currentUserIsMod = false;
   currentUserModLevel = 0;
-  notify("Your mod key was revoked.", "warning", { timeout: 6000 });
-  setTimeout(() => window.location.reload(), 1500);
+  const reason = d && d.reason;
+  if (window.StaffUI && StaffUI.modal && reason) {
+    StaffUI.modal({
+      title: "You are no longer a moderator",
+      icon: '<i class="fas fa-user-xmark"></i>',
+      body: revokedNoticeBody(reason, Date.now()),
+      actions: [
+        {
+          label: "Understood",
+          kind: "primary",
+          onClick: () => window.location.reload(),
+        },
+      ],
+    });
+    setTimeout(() => window.location.reload(), 60000);
+  } else {
+    notify("Your mod key was revoked.", "warning", { timeout: 6000 });
+    setTimeout(() => window.location.reload(), 1500);
+  }
+});
+
+socket.on("staff revoked notice", (d) => {
+  localStorage.removeItem("talkomatic_modKey");
+  if (window.StaffUI && StaffUI.modal) {
+    StaffUI.modal({
+      title: "You are no longer a moderator",
+      icon: '<i class="fas fa-user-xmark"></i>',
+      body: revokedNoticeBody(d && d.reason, d && d.removedAt),
+      actions: [{ label: "Understood", kind: "primary", onClick: () => {} }],
+    });
+  } else {
+    notify(
+      "Your moderator key was removed" +
+        (d && d.reason ? ": " + d.reason : "."),
+      "warning",
+      { title: "You are no longer a moderator", timeout: 12000 },
+    );
+  }
 });
 
 // ── Staff key entry (no console needed) ──────────────────────────────────────
@@ -4920,7 +5035,7 @@ socket.on("staff key result", (d) => {
   else localStorage.setItem("talkomatic_modKey", pendingStaffKey);
   pendingStaffKey = null;
   notify(
-    `Key accepted. You are ${d.role}${d.label ? " (" + d.label + ")" : ""}. Reloading...`,
+    `Key accepted. You are ${d.role === "dev" ? "an admin" : "a mod"}${d.label ? " (" + d.label + ")" : ""}. Reloading...`,
     "success",
   );
   setTimeout(() => window.location.reload(), 1200);
@@ -4929,9 +5044,11 @@ socket.on("you are now mod", (d) => {
   if (!d || !d.key) return;
   localStorage.setItem("talkomatic_modKey", d.key);
   notify(
-    d.level === 2
-      ? "You've been promoted to Moderator (full)! Reloading..."
-      : "You've been made a Junior Moderator! Reloading...",
+    d.level >= 3
+      ? "You've been made a Mod Leader! Reloading..."
+      : d.level === 2
+        ? "You've been promoted to Moderator (full)! Reloading..."
+        : "You've been made a Junior Moderator! Reloading...",
     "success",
     { title: "You are now a mod", timeout: 4000 },
   );
@@ -4939,11 +5056,13 @@ socket.on("you are now mod", (d) => {
 });
 socket.on("staff level changed", (d) => {
   if (!d) return;
-  currentUserModLevel = d.level === 1 ? 1 : 2;
+  currentUserModLevel = d.level >= 3 ? 3 : d.level === 1 ? 1 : 2;
   notify(
-    currentUserModLevel >= 2
-      ? "You are now a full (level 2) moderator."
-      : "Your moderator level is now junior (level 1).",
+    currentUserModLevel >= 3
+      ? "You are now a mod leader (level 3)."
+      : currentUserModLevel >= 2
+        ? "You are now a full (level 2) moderator."
+        : "Your moderator level is now junior (level 1).",
     "info",
     { timeout: 6000 },
   );
@@ -4981,14 +5100,16 @@ window.addEventListener("hashchange", () => {
   const css = `
     .user-info{flex-wrap:nowrap;overflow:hidden;}
     .ui-name{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-    .dev-meta{flex:0 0 auto;max-width:42%;overflow:hidden;text-overflow:ellipsis;}
+    .dev-meta{flex:0 0 auto;max-width:42%;overflow:hidden;text-overflow:ellipsis;cursor:pointer;}
+    .dev-meta:active{opacity:.6;}
     .mod-badge{display:inline-block;background:#5aa9ff;color:#001229;font-size:9px;font-weight:bold;padding:1px 5px;border-radius:8px;margin:0 5px 0 0;letter-spacing:.5px;vertical-align:middle;flex:0 0 auto;}
     .mod-badge.mod-badge-jr{background:#c08bff;color:#16002b;}
+    .mod-badge.mod-badge-lead{background:#4ade80;color:#00220f;}
     .bot-badge{display:inline-block;background:var(--bot-flair,#9aa3ae);color:#16191d;font-size:9px;font-weight:bold;padding:1px 5px;border-radius:8px;margin:0 5px 0 0;letter-spacing:.5px;vertical-align:middle;flex:0 0 auto;}
     .bot-user .chat-input{border-left:2px solid rgba(154,163,174,.4);}
     body.tk-hide-bots .bot-user{display:none !important;}
-    .hide-bots-toggle{position:relative;color:#fff;}
-    .hide-bots-toggle i{color:#fff;font-size:16px;}
+    .hide-bots-toggle{position:relative;color:#26c6da;}
+    .hide-bots-toggle i{color:#26c6da;font-size:16px;}
     .hide-bots-toggle.off i{opacity:.55;}
     .hide-bots-toggle.off::after{content:"";position:absolute;left:5px;right:5px;top:50%;height:2px;background:currentColor;transform:rotate(-38deg);border-radius:2px;pointer-events:none;}
     .device-icon{color:#7f8794;font-size:11px;margin-right:6px;flex:0 0 auto;}
@@ -5020,8 +5141,15 @@ window.addEventListener("hashchange", () => {
     #spectateBanner .sb-leave:hover{background:#e5484d;border-color:#e5484d;color:#fff;}
     body:has(#spectateBanner) #devHud{bottom:52px;}
     @media (max-width:600px){
-      #spectateBanner{flex-wrap:wrap;gap:6px;}
-      #spectateBanner .sb-note{flex:1 1 100%;order:3;white-space:normal;}
+      /* One thin row: the tag says everything the note said. */
+      #spectateBanner{gap:8px;padding:5px 8px;}
+      #spectateBanner .sb-tag{flex:1 1 auto;font-size:12px;}
+      #spectateBanner .sb-note{display:none;}
+      #spectateBanner .sb-btn{padding:4px 8px;font-size:11px;gap:5px;}
+      .staff-nav-btn{padding:8px 9px;}
+      .staff-nav-btn span{display:none;}
+      /* The identifier eats half the bar on a phone; it stays selectable. */
+      .dev-meta{max-width:64px;}
     }
   `;
   const style = document.createElement("style");

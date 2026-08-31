@@ -79,6 +79,9 @@ function gracefulFlush() {
     require("./server/reports").flushSync();
   } catch (e) {}
   try {
+    require("./server/lastseen").flushSync();
+  } catch (e) {}
+  try {
     require("./server/appeals").flushSync();
   } catch (e) {}
   try {
@@ -495,7 +498,7 @@ io.use((socket, next) => {
       if (mk) {
         socket.isMod = true;
         socket.modKeyHash = mk.hash;
-        socket.modLevel = mk.level || 2;
+        socket.modLevel = mk.level || 1;
         socket.staffLabel = mk.label;
         // Mods can hide their badge with the same persisted toggle as devs.
         socket.isHidden = hiddenPref;
@@ -506,6 +509,16 @@ io.use((socket, next) => {
           clientIp,
         ).newIp;
         console.log(`[MOD] Mod mode activated (${mk.label}) for IP:${clientIp}`);
+      } else if (modKey) {
+        // A stored key that no longer works: if it was revoked, remember the
+        // entry so the person can be told why on this visit.
+        const former = roles.getFormerModByPlain(modKey);
+        if (former)
+          socket.formerModNotice = {
+            label: former.label,
+            reason: former.reason || null,
+            removedAt: former.removedAt || null,
+          };
       }
     }
 
@@ -536,6 +549,19 @@ io.use((socket, next) => {
         state.ipConnections.set(clientIp, count + 1);
         socket.clientIp = clientIp;
         socket.browserDetection = browser;
+
+        // Tied to the engine connection, not the "connection" event: a
+        // handshake that dies in a later middleware step never reaches the
+        // disconnect handler, and its slot would leak until the sweeper.
+        let slotReleased = false;
+        socket.releaseIpSlot = () => {
+          if (slotReleased) return;
+          slotReleased = true;
+          const c = state.ipConnections.get(clientIp) || 0;
+          if (c > 1) state.ipConnections.set(clientIp, c - 1);
+          else state.ipConnections.delete(clientIp);
+        };
+        socket.conn.on("close", socket.releaseIpSlot);
 
         socket.use((packet, nextMw) => {
           // Dev users bypass socket rate limits
@@ -1488,6 +1514,45 @@ app.post(`${API}/themes`, (req, res) => {
   } catch (e) {
     console.error("theme publish error:", e);
     sendErrorResponse(res, ERROR_CODES.SERVER_ERROR, "Could not publish.", 500);
+  }
+});
+
+// Takedown: full mods and up. The staff key rides a header because this page
+// has no socket; it is validated the same way the socket handshake does it.
+app.delete(`${API}/themes/:id`, (req, res) => {
+  try {
+    const key = String(req.headers["x-staff-key"] || "");
+    const v = key ? roles.validateKey(key) : { role: null };
+    const allowed =
+      v.role === "dev" || (v.role === "mod" && (v.level || 1) >= 2);
+    if (!allowed)
+      return sendErrorResponse(res, ERROR_CODES.FORBIDDEN, "Staff only.", 403);
+    const id = Math.floor(Number(req.params.id));
+    if (!Number.isFinite(id) || id <= 0)
+      return sendErrorResponse(
+        res,
+        ERROR_CODES.VALIDATION_ERROR,
+        "Bad theme id.",
+        400,
+      );
+    if (!communityThemes.remove(id))
+      return sendErrorResponse(
+        res,
+        ERROR_CODES.NOT_FOUND,
+        "Theme not found.",
+        404,
+      );
+    const audit = require("./server/audit");
+    audit.recordAction({
+      roleTag: v.role,
+      label: v.label,
+      action: "remove theme",
+      target: "theme #" + id,
+    });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error("theme takedown error:", e);
+    sendErrorResponse(res, ERROR_CODES.SERVER_ERROR, "Internal error", 500);
   }
 });
 

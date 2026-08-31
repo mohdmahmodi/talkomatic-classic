@@ -13,7 +13,7 @@ const MAX_RULES = 60;
 const MAX_TITLE = 120;
 const MAX_BODY = 900;
 
-const LEVELS = ["all", "jr", "full"];
+const LEVELS = ["all", "jr", "full", "leader"];
 
 // ── Defaults ────────────────────────────────────────────────────────────────
 
@@ -21,85 +21,85 @@ const DEFAULT_COMMUNITY = [
   {
     title: "Talkomatic is open to everyone",
     body:
-      "No account, no invite. People here come from everywhere and will not share your opinions, humour, or language. You do not have to like everyone in a room, but you do have to let them be in it.",
+      "No account, no invite, no sign-up. People arrive here from everywhere, and they will not share your opinions, your humour, or your language. You do not have to like everyone in a room, but you do have to let them be in it.",
     why: "An open platform only stays open if people are not driven out of it.",
   },
   {
     title: "You must be 13 or older to use Talkomatic",
     body:
-      "Talkomatic is for people aged 13 and up. If you are between 13 and 17, use it only with the permission of a parent or legal guardian. Nobody here will ask your age and you should not offer it, but if you tell us you are under 13, you will be removed and your access blocked. You are welcome back once you meet the requirement. Parents or guardians who believe a child under 13 is using Talkomatic can contact us through Discord and we will remove their access.",
-    why: "The law does not permit a site like this to serve children under 13, and an anonymous room full of strangers is no place for them anyway.",
+      "Talkomatic is for people aged 13 and up, and anyone under 18 should be here with the permission of a parent or legal guardian. Nobody on the site will ask your age, and you should not offer it. If you tell us you are under 13, you will be removed and your access blocked, and you are welcome back the day you meet the requirement. A parent or guardian who believes a child under 13 is using Talkomatic can reach us on Discord and we will remove the child's access.",
+    why: "The law does not allow a site like this to serve children under 13, and an anonymous room full of strangers is no place for a child anyway.",
   },
   {
     title: "Do not harass people",
     body:
-      "Do not follow someone from room to room, pile on with others, bring up things they asked you to drop, or keep going after they have disengaged. A single heated exchange is an argument. Repeating it, or organising it, is harassment.",
+      "Do not follow someone from room to room, pile on with others against them, drag up things they asked you to drop, or keep going after they have walked away. One heated exchange is an argument. Repeating it, or organising it, is harassment.",
     why: "The difference between an argument and harassment is whether the other person is able to walk away from it.",
   },
   {
     title: "Hate speech is not tolerated",
     body:
-      "Attacking people over race, ethnicity, nationality, religion, disability, gender, or sexuality is not allowed. This applies whether it is meant seriously, as a joke, as copypasta, or as a username.",
+      "Attacks on people over race, ethnicity, nationality, religion, disability, gender, or sexuality are not allowed. That holds whether it is meant seriously, dressed up as a joke, pasted as copypasta, or worn as a username.",
     why: "This is not about strong language. It is about telling a group of people they do not belong here, which is the one thing an open platform cannot allow.",
   },
   {
     title: "Never post personal information",
     body:
-      "Do not post anyone's real name, address, workplace, school, phone number, IP address, or photographs, and do not press others to reveal them. This covers guessing publicly at who someone is. It applies to information you found elsewhere, and it applies in every room. It covers your own details too: do not post them, and be suspicious of anyone who asks for them, because staff never will.",
+      "Do not post anyone's real name, address, workplace, school, phone number, IP address, or photograph, and do not press anyone to reveal them. Guessing publicly at who somebody is counts too. It applies to information you found somewhere else, and it applies in every room on the site. It covers your own details as well: keep them to yourself, and be suspicious of anyone who asks for them, because staff never will.",
     why: "Talkomatic is anonymous on purpose. Stripping someone's anonymity is the one thing said here that can follow them home, and it cannot be undone.",
   },
   {
     title: "Do not impersonate moderators or staff",
     body:
-      "Do not claim to be a moderator, developer, or admin. Do not pick a name or use wording designed to read as staff. Do not threaten people with warnings, kicks, or bans you cannot issue. Real staff carry a badge the site draws for them; you cannot type one.",
+      "Do not claim to be a moderator, a mod leader, or an admin. Do not pick a name or use wording built to read as staff, and do not threaten people with warnings, kicks, or bans you cannot issue. Real staff carry a badge the site draws for them; you cannot type one.",
     why: "If anybody can pretend to be staff, then a real warning from staff means nothing and people stop trusting it.",
   },
   {
     title: "Do not impersonate other users",
     body:
-      "Do not take a name in order to pass yourself off as someone else, put words in their mouth, or damage how people see them.",
+      "Do not take a name to pass yourself off as someone else, to put words in their mouth, or to damage how people see them.",
     why: "Names are the only identity anyone has here, so borrowing one takes away the only thing another person has.",
   },
   {
     title: "Keep sexual content out of public rooms",
     body:
-      "Public rooms are shared with people who did not choose to see it, and you cannot know who is reading. Keep explicit text and links out of them. Directing sexual content at a minor is never allowed anywhere on the site, public or private.",
-    why: "Anyone can walk into a public room without warning, including people who should not see that.",
+      "A public room is shared with people who did not choose to see it, and you cannot know who is reading. Keep explicit text and links out of it. Directing sexual content at a minor is never allowed anywhere on the site, public or private.",
+    why: "Anyone can walk into a public room without warning, including people who should never see that.",
   },
   {
     title: "Do not spam or flood",
     body:
       "Do not paste walls of text, repeat lines to push other people's writing off the screen, or run bots to fill a room.",
-    why: "Everyone types into the same screen at the same time, so flooding does not just annoy the room, it takes the room away from everybody in it.",
+    why: "Everyone types onto the same screen at the same time, so flooding does not just annoy the room, it takes the room away from everybody in it.",
   },
   {
     title: "Nothing illegal",
     body:
-      "No sexual content involving minors and no sexual messages sent to them, no credible threats of violence, no malware or phishing links, no content that is a crime to share. There is no warning step for this.",
+      "No sexual content involving minors and no sexual messages sent to them, no credible threats of violence, no malware or phishing links, and nothing that is a crime to share. There is no warning step for any of this.",
     why: "This is handled outside of moderation, not inside it.",
   },
   {
     title: "The word filter is your setting, not the rule",
     body:
-      "Talkomatic filters language automatically and you may switch that off for yourself. Turning it off does not mean anything goes, and leaving it on does not make abuse acceptable. Swearing on its own is not a punishable offence here.",
+      "Talkomatic filters language automatically, and you can switch that off for yourself. Turning it off does not mean anything goes, and leaving it on does not make abuse acceptable. Swearing on its own is not a punishable offence here.",
     why: "The filter decides what you are comfortable reading. These rules decide how you may treat people. They are separate questions.",
   },
   {
     title: "Private and semi-private rooms belong to the people in them",
     body:
-      "What happens in a room you made private is between the people you let in, and moderators do not patrol them. Three things still hold everywhere: nothing illegal, no posting of personal information, and the age requirement. Anyone inside a private room can still report what happens in it.",
+      "What happens in a room you made private is between the people you let in, and moderators do not patrol it. Three things still hold everywhere on the site: nothing illegal, no posting of personal information, and the age requirement. Anyone inside a private room can still report what happens there.",
     why: "A private room a moderator can wander into is not private, so the only way it works is that reports come from inside.",
   },
   {
     title: "Report instead of fighting back",
     body:
-      "Use the report button on the person's row rather than retaliating. Say what happened plainly. Reports go to staff with the room and the recent context attached.",
+      "Use the report button on the person's row instead of retaliating, and say what happened plainly. The report reaches staff with the room and the recent context attached.",
     why: "Retaliating leaves staff two people to sort out instead of one, and it usually costs you the benefit of the doubt.",
   },
   {
     title: "If you are banned, you can appeal",
     body:
-      "Ban appeals are read by a human. Explain what happened and what you would do differently. Repeating the same appeal, or opening new ones, does not speed it up.",
+      "Ban appeals are read by a human. Explain what happened and what you would do differently. Repeating the same appeal, or opening new ones, does not speed anything up.",
     why: "Moderators get things wrong sometimes, and an appeal is how that gets found and fixed.",
   },
 ];
@@ -130,7 +130,7 @@ const DEFAULT_MOD = [
     level: "all",
     title: "Underage users are removed, not warned",
     body:
-      "When somebody clearly states they are under 13, act on it: remove them with the standard underage notice, and a full moderator places the block and hands it up to be made permanent, with underage as the recorded reason. Only a clear statement counts. A guess from how somebody types is not a disclosure, and another user calling somebody a child is not either. Never ask anybody their age, never ask for proof, and never collect anything beyond the normal log: no names, no schools, no photos, ever. If they come back, it is ordinary ban evasion. The block can be appealed once they meet the age requirement.",
+      "When somebody clearly states they are under 13, act on it: remove them with the standard underage notice, and a full moderator places a permanent block with underage as the recorded reason. Only a clear statement counts. A guess from how somebody types is not a disclosure, and another user calling somebody a child is not one either. Never ask anybody their age, never ask for proof, and never collect anything beyond the normal log: no names, no schools, no photos, ever. If they come back, treat it as ordinary ban evasion. The block can be appealed the day they meet the age requirement.",
     why: "The law sets this one, not us. And the one way staff can make it worse is by questioning a child for personal details, so we never do.",
   },
   {
@@ -144,7 +144,7 @@ const DEFAULT_MOD = [
     level: "all",
     title: "Say why, every time",
     body:
-      "Fill in the reason on every warning, kick, and block. Write it for two readers: the person receiving it, and the developer who will read it months later without any memory of the day.",
+      "Fill in the reason on every warning, kick, and block. Write it for two readers: the person receiving it, and whoever reads your record months later with no memory of the day.",
     why: "An action with no reason cannot be defended when it is questioned, and it will be questioned.",
   },
   {
@@ -158,63 +158,77 @@ const DEFAULT_MOD = [
     level: "all",
     title: "Do not claim powers you do not have",
     body:
-      "Do not tell people you can ban them if you cannot, and do not present yourself as a developer. If something needs a level above yours, say so and pass it on.",
+      "Do not tell people you can ban them if you cannot, and do not present yourself as an admin. If something needs a level above yours, say so and pass it on.",
     why: "Overstating what you can do is the same trust problem as a user impersonating staff, and it is worse coming from real staff.",
   },
   {
     level: "all",
     title: "Everything you do is recorded",
     body:
-      "Every privileged action is written to the audit log with your label, the target, and your reason, and it stays in your record. This is normal and it applies to every moderator including developers.",
+      "Every privileged action is written to the audit log with your label, the target, and your reason, and it stays in your record. This is normal and it applies to every moderator including admins.",
     why: "The record is what makes it safe to hand these tools out at all. It protects you from an accusation just as much as it catches misuse.",
   },
   {
     level: "jr",
     title: "Junior moderators: what you hold",
     body:
-      "You can warn, kick, and bar a user from the room you kicked them out of, and you can read everything: reports, appeals, applications, the ban list, the staff roster, and any moderator's record. You cannot IP block, close a room, spectate, discard a report, or decide an appeal or an application. Those need a full moderator.",
+      "You can warn, kick, and bar a user from the room you kicked them out of, run the room itself (rename, lock, slow mode, clear the board), and work the report queue: every report reaches you, and a warning or a kick from you settles it. You cannot IP block, close a room, discard a report, or see the ban list, appeals, or applications. Those need a full moderator.",
     why: "You start with the tools that are reversible and none of the ones that are not, which is how you learn the job without anybody paying for a mistake.",
   },
   {
     level: "jr",
     title: "Junior moderators: escalate rather than guess",
     body:
-      "When something needs more than a warning or a kick, leave it and call a full moderator or a developer. Do not improvise a substitute, and do not lean on somebody else to run the action for you without telling them what it is. For an underage disclosure, kick with the standard notice and hand the block up.",
+      "When something needs more than a warning or a kick, leave it and call a full moderator or an admin. Do not improvise a substitute, and do not lean on somebody else to run the action for you without telling them what it is. For an underage disclosure, kick with the standard notice and call a full moderator to place the block.",
     why: "A handover with the facts attached is worth more than a fast decision made by the person with the fewest tools.",
   },
   {
     level: "full",
     title: "Full moderators: what you hold",
     body:
-      "Everything a junior has, plus IP blocks of 1 hour, 24 hours, or 7 days, closing a room, spectating public rooms, discarding reports, resolving appeals, and reviewing moderator applications. Lifting a ban, granting or revoking keys, permanent blocks, and the site-wide tools stay with developers.",
+      "Everything a junior has, plus IP blocks of 1 hour, 24 hours, 7 days, or permanent, closing a room, spectating public rooms, discarding reports, resolving appeals, killing bots, and taking down community themes. Lifting a permanent block, wide range bans, applications and promotions, and the site-wide tools sit above you.",
     why: "Anything that cannot be undone by the person who did it sits one level above them on purpose.",
   },
   {
     level: "full",
     title: "Full moderators: blocks are temporary by default",
     body:
-      "Pick the shortest block that will actually work, and let it expire rather than reaching for the next tier out of habit. If a case genuinely needs to be permanent, that is a developer's call and you should hand it over with your reasoning. Underage removals are the standing exception: those are always handed up to be made permanent.",
+      "Pick the shortest block that will actually work, and let it expire rather than reaching for the next tier out of habit. Permanent is yours to place, but only an admin can lift it, so treat it as writing something you personally cannot erase. Underage removals are the standing exception: those are always made permanent.",
     why: "A temporary block that works costs nothing to get wrong. A permanent one removes somebody from an anonymous platform they can simply rejoin, so it mostly punishes the people who play fair.",
   },
   {
     level: "full",
     title: "Full moderators: do not rule on your own ban",
     body:
-      "When an appeal comes in against a block you placed, pass it to another full moderator or a developer wherever there is one available. Read the record before you decide any appeal, not just the appeal text.",
+      "When an appeal comes in against a block you placed, pass it to another full moderator or an admin wherever there is one available. Read the record before you decide any appeal, not just the appeal text.",
     why: "Reviewing yourself is not a review, and the person appealing can tell.",
+  },
+  {
+    level: "leader",
+    title: "Mod leaders: what you hold",
+    body:
+      "Everything a full moderator has, plus the team itself: opening and closing applications, approving applicants as juniors, declining them, promoting between L1 and L2, removing junior and full mod keys with a written reason, bringing former mods back as juniors, and reading any junior or full mod's record and abuse flags. Leader keys, ban lifts, and the platform tools stay with admins.",
+    why: "Somebody has to own who is on the team and how they are doing, and it should be a person whose own record is on the line, not just whoever happens to hold an admin key.",
+  },
+  {
+    level: "leader",
+    title: "Mod leaders: promote from evidence, not friendship",
+    body:
+      "Approve applicants as juniors and promote from the record: the on-users number, how they handled reports, what their flags look like once read in context. Do not hand a key to a friend who has not applied, and do not promote to settle an argument. Every grant, promotion, and removal you make is logged with your name and shows in your own record.",
+    why: "The whole ladder only means something if the person running it treats it as evidence-based. One friendship promotion undoes months of the team taking it seriously.",
   },
   {
     level: "all",
     title: "Answer appeals, do not sit on them",
     body:
-      "An appeal that is never answered reads as contempt, and it is the complaint that reaches developers most often. Decide it, or say plainly that it is being passed up.",
+      "An appeal that is never answered reads as contempt, and it is the complaint that reaches admins most often. Decide it, or say plainly that it is being passed up.",
     why: "People accept a no far more often than they accept silence.",
   },
   {
     level: "all",
     title: "How mod abuse is watched",
     body:
-      "The system watches each key for patterns: a burst of actions in five minutes, a heavy hour, a run that is mostly kicks, the same person hit repeatedly, or a spray across many people at once. It never punishes anybody by itself. It raises one flag with your recent actions attached and a human reads it.",
+      "The system watches each key for patterns: a burst of actions in five minutes, a heavy hour, a run that is mostly kicks, the same person hit repeatedly, or a spray across many people at once. It never punishes anybody by itself. It raises one flag with your recent actions attached, and a mod leader or an admin reads it.",
     why: "Told in advance, it is a safety net. Discovered later, it feels like surveillance, so it is written down here.",
   },
   {

@@ -92,11 +92,13 @@
   .tk-iico.t-dev{background:rgba(255,84,104,.15);color:#ff5468;}
   .tk-iico.t-mod{background:rgba(90,169,255,.15);color:#5aa9ff;}
   .tk-iico.t-jr{background:rgba(192,139,255,.16);color:#c08bff;}
-  /* Rank chips match the room flair and the dashboard: dev red, full mod blue,
-     junior mod purple. */
+  .tk-iico.t-lead{background:rgba(74,222,128,.15);color:#4ade80;}
+  /* Rank chips match the room flair and the dashboard: dev red, mod leader
+     green, full mod blue, junior mod purple. */
   .tk-chip{display:inline-block;font-size:10px;font-weight:bold;padding:2px 7px;border-radius:4px;
     letter-spacing:.4px;vertical-align:middle;}
   .tk-chip.dev{background:#ff5468;color:#1a0005;}
+  .tk-chip.lead{background:#4ade80;color:#00220f;}
   .tk-chip.mod{background:#5aa9ff;color:#001229;}
   .tk-chip.jr{background:#c08bff;color:#16002b;}
   /* toasts */
@@ -1071,7 +1073,7 @@
         [
           "IP block",
           "mod",
-          "Blocks the user's address and disconnects them. Full mods pick 1h / 24h / 7d; devs can also pick permanent.",
+          "Blocks the user's address and disconnects them. 1h / 24h / 7d or permanent; only an admin can lift a permanent block.",
         ],
         [
           "Freeze / unfreeze",
@@ -1130,29 +1132,44 @@
       title: "Boards (Mod Dashboard)",
       items: [
         [
-          "Reports, appeals, applications",
+          "Reports",
+          "jr",
+          "The report queue. Anyone on staff can respond with a warning or a kick; discarding a report and blocking are full-mod actions.",
+        ],
+        [
+          "Appeals",
           "mod",
-          "The review queues. Full mods and devs triage what the community reports and who applies to help.",
+          "Ban appeals. Full mods run the conversation and dismiss; lifting a ban is admin-only.",
+        ],
+        [
+          "Applications",
+          "leader",
+          "Who applies to join the team. Mod leaders open and close intake, approve as junior (L1), or decline.",
         ],
         [
           "Ban list",
           "mod",
           "Every active block, grouped per person, with one-tap unban.",
         ],
+        [
+          "Mod records",
+          "leader",
+          "Any junior or full mod's full action history and abuse flags. Leader records are an admin matter.",
+        ],
       ],
     },
     {
-      title: "Lobby / global (Dev Panel button in the lobby)",
+      title: "Lobby / global (Admin Panel button in the lobby)",
       items: [
         [
-          "Grant mod key",
-          "dev",
-          "Mints a key at either level. Devs only.",
+          "Grant a junior (L1) key",
+          "leader",
+          "Mod leaders approve applicants and hand out junior keys; admins can mint any level.",
         ],
         [
-          "Manage / revoke mod keys",
-          "dev",
-          "Lists current mod keys; revoke instantly downgrades that mod live.",
+          "Promote, demote, revoke",
+          "leader",
+          "Leaders move people between L1 and L2 and can remove them, live. Leader keys themselves are an admin decision.",
         ],
         [
           "Lobby ticker",
@@ -1203,18 +1220,21 @@
     const RANKS = {
       jr: { n: 1, chip: "jr", label: "All staff", icon: "fa-shield-halved" },
       mod: { n: 2, chip: "mod", label: "Full mod", icon: "fa-shield-halved" },
-      dev: { n: 3, chip: "dev", label: "Dev only", icon: "fa-crown" },
+      leader: { n: 3, chip: "lead", label: "Mod leader", icon: "fa-user-shield" },
+      dev: { n: 4, chip: "dev", label: "Admin only", icon: "fa-crown" },
     };
     const mine = RANKS[role] ? RANKS[role].n : 1;
     const wrap = el("div");
     wrap.appendChild(
       el("p", {
         text:
-          mine >= 3
-            ? "You are a developer, so everything below is available to you."
-            : mine === 2
-              ? "You are a full mod (L2). Items marked Dev only are restricted to developers."
-              : "You are a junior mod (L1). Items marked Full mod or Dev only are not available to you yet; they are listed so you can see what the next level adds.",
+          mine >= 4
+            ? "You are an admin, so everything below is available to you."
+            : mine === 3
+              ? "You are a mod leader (L3). Items marked Admin only are restricted to admins."
+              : mine === 2
+                ? "You are a full mod (L2). Items marked Mod leader or Admin only are restricted to the levels above you."
+                : "You are a junior mod (L1). Items marked Full mod, Mod leader, or Admin only are not available to you yet; they are listed so you can see what the next level adds.",
       }),
     );
     HELP.forEach((sec) => {

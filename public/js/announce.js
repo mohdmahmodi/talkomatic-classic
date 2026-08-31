@@ -153,9 +153,10 @@
     alert: { label: "Important", icon: "fa-triangle-exclamation", cls: "an-alert" },
   };
 
-  var QUICK = ["👍", "🎉", "❤️", "🔥", "😮", "😢"];
+  // Must match REACTION_EMOJIS in server/announcements.js.
+  var REACTIONS = ["👍", "😄", "❤️", "🎉"];
 
-  var bodyEl, reactRow, titleEl, kindEl, metaEl, pickerInput;
+  var bodyEl, reactRow, titleEl, kindEl, metaEl;
   var gotItBtn, countFill, countHint, countTimer = null;
 
   var HOLD_SECONDS = 4;
@@ -189,25 +190,6 @@
     var reactWrap = el("div", "an-react-wrap");
     reactRow = el("div", "an-reacts");
     reactWrap.appendChild(reactRow);
-
-    var picker = el("div", "an-picker");
-    pickerInput = el("input", "an-picker-input");
-    pickerInput.type = "text";
-    pickerInput.maxLength = 16;
-    pickerInput.setAttribute("aria-label", "React with any emoji");
-    pickerInput.placeholder = "😀";
-    pickerInput.addEventListener("keydown", function (e) {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        sendReaction(pickerInput.value);
-      }
-    });
-    pickerInput.addEventListener("input", function () {
-      var v = pickerInput.value.trim();
-      if (v && !/[\w\s]/.test(v)) sendReaction(v);
-    });
-    picker.appendChild(pickerInput);
-    reactWrap.appendChild(picker);
 
     var closeWrap = el("div", "an-close-wrap");
     gotItBtn = el("button", "an-close-btn");
@@ -262,10 +244,17 @@
     });
   }
 
+  var lastReactAt = 0;
+
   function sendReaction(raw) {
     var v = String(raw || "").trim();
     if (!v || !current) return;
-    pickerInput.value = "";
+    if (REACTIONS.indexOf(v) === -1) return;
+    // The server drops reactions faster than 400ms apart without a word; if
+    // we rendered those optimistically the next broadcast would revert them.
+    var now = Date.now();
+    if (now - lastReactAt < 450) return;
+    lastReactAt = now;
     applyLocalReaction(v);
     renderReactions();
     socket.emit("announcement react", { id: current.id, emoji: v });
@@ -274,26 +263,23 @@
   function renderReactions() {
     if (!reactRow) return;
     reactRow.textContent = "";
-    var mine = {};
+    var byEmoji = {};
     ((current && current.reactions) || []).forEach(function (r) {
-      mine[r.e] = r;
-      var b = el("button", "an-react" + (r.me ? " mine" : ""));
-      b.innerHTML =
-        '<span class="an-react-e"></span><span class="an-react-n"></span>';
-      b.querySelector(".an-react-e").textContent = r.e;
-      b.querySelector(".an-react-n").textContent = String(r.n);
-      b.title = (r.me ? "You and " + (r.n - 1) + " others" : r.n + " reacted") ;
-      if (r.n === 1) b.title = r.me ? "You reacted" : "1 reacted";
-      b.addEventListener("click", function () {
-        sendReaction(r.e);
-      });
-      reactRow.appendChild(b);
+      byEmoji[r.e] = r;
     });
-    QUICK.forEach(function (e) {
-      if (mine[e]) return;
-      var b = el("button", "an-react an-quick");
-      b.textContent = e;
-      b.title = "React " + e;
+    REACTIONS.forEach(function (e) {
+      var r = byEmoji[e];
+      var n = r ? r.n : 0;
+      var b = el("button", "an-react" + (r && r.me ? " mine" : ""));
+      b.appendChild(el("span", "an-react-e", e));
+      if (n > 0) b.appendChild(el("span", "an-react-n", String(n)));
+      b.title = !n
+        ? "React " + e
+        : r.me
+          ? n === 1
+            ? "You reacted"
+            : "You and " + (n - 1) + " others"
+          : n + " reacted";
       b.addEventListener("click", function () {
         sendReaction(e);
       });

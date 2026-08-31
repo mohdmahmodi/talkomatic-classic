@@ -89,9 +89,17 @@
   }
 
   const rankOf = (a) =>
-    !a ? null : a.role === "dev" ? "dev" : (a.level || 2) >= 2 ? "l2" : "l1";
+    !a
+      ? null
+      : a.role === "dev"
+        ? "dev"
+        : (a.level || 1) >= 3
+          ? "l3"
+          : (a.level || 1) >= 2
+            ? "l2"
+            : "l1";
   const rankName = (r) =>
-    r === "dev" ? "DEV" : r === "l2" ? "MOD L2" : "MOD L1";
+    r === "dev" ? "ADMIN" : r === "l3" ? "LEADER" : r === "l2" ? "MOD L2" : "MOD L1";
 
   function initialOf(name) {
     const c = Array.from(String(name || "?").trim())[0];
@@ -227,6 +235,14 @@
       icon: "fa-users",
     },
     {
+      key: "l3",
+      write: "leaders",
+      name: "@leaders",
+      tokens: ["leaders", "mod leaders", "l3"],
+      desc: "Mod leaders",
+      icon: "fa-user-tie",
+    },
+    {
       key: "l2",
       write: "L2 mods",
       name: "@L2 mods",
@@ -244,10 +260,10 @@
     },
     {
       key: "dev",
-      write: "devs",
-      name: "@devs",
-      tokens: ["devs", "developers"],
-      desc: "Developers only",
+      write: "admins",
+      name: "@admins",
+      tokens: ["admins", "admin", "devs", "developers"],
+      desc: "Admins only",
       icon: "fa-code",
     },
   ];
@@ -256,12 +272,13 @@
     for (const t of g.tokens) GROUP_BY_TOKEN.set(t, g);
 
   const myRole = () => (me && me.role === "dev" ? "dev" : "mod");
-  const myLevel = () => (me && me.role === "dev" ? 0 : (me && me.level) || 2);
+  const myLevel = () => (me && me.role === "dev" ? 0 : (me && me.level) || 1);
   function inGroup(key, role, level) {
     if (key === "everyone") return true;
     if (key === "dev") return role === "dev";
-    if (key === "l2") return role !== "dev" && (level || 2) >= 2;
-    if (key === "l1") return role !== "dev" && (level || 2) === 1;
+    if (key === "l3") return role !== "dev" && (level || 1) >= 3;
+    if (key === "l2") return role !== "dev" && (level || 1) >= 2;
+    if (key === "l1") return role !== "dev" && (level || 1) === 1;
     return false;
   }
   function groupReach(key) {
@@ -1563,7 +1580,11 @@
             "Threads that go quiet for a day drop into the archive but stay readable.",
         },
         (t) => {
-          if (t.trim()) socket.emit("desk thread create", { title: t.trim() });
+          if (t.trim())
+            socket.emit("desk thread create", {
+              title: t.trim(),
+              origin: view.kind === "channel" ? view.key : "floor",
+            });
         },
       ),
     );
@@ -1603,7 +1624,7 @@
     team.type = "button";
     team.appendChild(icon("fa-user-group"));
     team.appendChild(el("span", "dk-chan-name", "The team"));
-    team.title = "Every moderator and developer, on or off";
+    team.title = "Every moderator and admin, on or off";
     team.addEventListener("click", openTeam);
     rail.appendChild(team);
 
@@ -1619,7 +1640,7 @@
       el(
         "div",
         "dk-rail-foot",
-        "Developers can read every channel and thread, including edits and deletions.",
+        "Admins can read every channel and thread, including edits and deletions.",
       ),
     );
   }
@@ -2035,7 +2056,8 @@
   };
 
   const isDev = () => !!me && me.role === "dev";
-  const isFullMod = () => !!me && (me.role === "dev" || (me.level || 2) >= 2);
+  const isFullMod = () => !!me && (me.role === "dev" || (me.level || 1) >= 2);
+  const isLeader = () => !!me && (me.role === "dev" || (me.level || 1) >= 3);
 
   function qField(label, value, cls) {
     const f = el("div", "dk-q-f" + (cls ? " " + cls : ""));
@@ -2087,11 +2109,21 @@
         chips.appendChild(
           qChip("reported user is staff", "warn", "fa-user-shield"),
         );
+      if (c.location)
+        chips.appendChild(qChip(c.location, "", "fa-location-dot"));
       if (c.roomName) chips.appendChild(qChip(c.roomName, "", "fa-door-open"));
       b.appendChild(chips);
       if (c.reason) b.appendChild(qField("Their note", c.reason));
       if (c.quote)
-        b.appendChild(qField("Their chat box read", c.quote, "quote"));
+        b.appendChild(
+          qField(
+            c.quoteWiped
+              ? "Their chat box read (wiped just before the report)"
+              : "Their chat box read",
+            c.quote,
+            "quote",
+          ),
+        );
       return b;
     }
 
@@ -2243,7 +2275,7 @@
       return bar;
     }
 
-    if (kind === "application" && c.itemId) {
+    if (kind === "application" && c.itemId && isLeader()) {
       add("Approve as L1", "fa-check", "primary", () =>
         ask(
           {
@@ -3321,7 +3353,13 @@
   }
 
   const rankKey = (s) =>
-    s.role === "dev" ? "dev" : (s.level || 2) >= 2 ? "l2" : "l1";
+    s.role === "dev"
+      ? "dev"
+      : (s.level || 1) >= 3
+        ? "l3"
+        : (s.level || 1) >= 2
+          ? "l2"
+          : "l1";
 
   function staffRow(s, offline) {
     const row = el("div", "dk-staff" + (offline ? " off" : ""));
@@ -3365,8 +3403,13 @@
     return [
       {
         key: "dev",
-        label: "Developers",
+        label: "Admins",
         rows: list.filter((s) => rankKey(s) === "dev"),
+      },
+      {
+        key: "l3",
+        label: "Mod leaders",
+        rows: list.filter((s) => rankKey(s) === "l3"),
       },
       {
         key: "l2",
@@ -3604,15 +3647,11 @@
         const row = el("div", "dk-occ");
         const head = el("div", "dk-occ-h");
         head.appendChild(el("span", "dk-occ-n", u.username || "?"));
-        if (u.isDev) head.appendChild(el("span", "dk-chip dev", "DEV"));
-        else if (u.isMod)
-          head.appendChild(
-            el(
-              "span",
-              "dk-chip " + ((u.modLevel || 2) >= 2 ? "l2" : "l1"),
-              rankName((u.modLevel || 2) >= 2 ? "l2" : "l1"),
-            ),
-          );
+        if (u.isDev) head.appendChild(el("span", "dk-chip dev", "ADMIN"));
+        else if (u.isMod) {
+          const ur = rankOf({ role: "mod", level: u.modLevel });
+          head.appendChild(el("span", "dk-chip " + ur, rankName(ur)));
+        }
         if (u.location) head.appendChild(el("span", "dk-occ-l", u.location));
         row.appendChild(head);
 
@@ -3682,12 +3721,24 @@
     return fallback;
   }
 
+  function canOpenRecord(role, level) {
+    if (!me) return false;
+    if (me.mainDev) return true;
+    if (role === "dev") return false;
+    if (me.role === "dev") return true;
+    if ((me.level || 1) < 3) return false;
+    return (level || 1) < 3;
+  }
+
   function openRecord(label, role, level) {
     if (!label) return;
     const known = levelFor(label, level);
+    const r = role === "dev" ? "dev" : "mod";
+    if (!canOpenRecord(r, known))
+      return toast("Their record sits above your level.");
     recordFor = {
       label,
-      role: role === "dev" ? "dev" : "mod",
+      role: r,
       level: known,
       loading: true,
     };
@@ -3836,7 +3887,7 @@
             openRecord(m.by, m.role === "dev" ? "dev" : "mod", m.level);
           });
           who.appendChild(nm);
-          const r = m.role === "dev" ? "dev" : (m.level || 2) >= 2 ? "l2" : "l1";
+          const r = rankOf({ role: m.role, level: m.level });
           who.appendChild(el("span", "dk-chip " + r, rankName(r)));
         } else {
           who.appendChild(el("span", "dk-ap-name plain", a.name || "Banned user"));
@@ -4130,7 +4181,7 @@
             name: "bar",
             type: "checkbox",
             label: "Do not let them appeal again",
-            help: "Final. They cannot file another appeal for this or any future ban, until a developer allows it again.",
+            help: "Final. They cannot file another appeal for this or any future ban, until an admin allows it again.",
           },
         ],
         danger: true,
@@ -4266,10 +4317,11 @@
         ],
         [
           "#queues",
-          "Reports, appeals, applications and suggestions as they arrive, each a card you can act on without leaving. Full mods and devs.",
+          "Reports, appeals, applications and suggestions as they arrive, each a card you can act on without leaving. Every card shows at the level that can handle it: reports for all staff, appeals for full mods, applications for mod leaders.",
         ],
-        ["#l2", "Bans, blocks and escalations. Full mods and devs."],
-        ["#devs", "Keys, promotions, abuse flags. Developers only."],
+        ["#l2", "Bans, blocks and escalations. Full mods and up."],
+        ["#leads", "Applications, promotions, the team. Mod leaders and devs."],
+        ["#admins", "Keys, promotions, abuse flags. Admins only."],
         ["#guide", "This page. Point anybody at it by writing its name."],
       ],
     },
@@ -4280,7 +4332,7 @@
       p: [
         'Type "@" and the team appears - everyone with a key, on or off. Pick one and their name goes in marked, and they are pinged.',
         "Somebody who is off is not a wasted ping: it waits as an unread mention and is the first thing they see when they sign back in. You are told at the time who was off.",
-        "Groups save typing eight names: @L2 mods, @L1 mods, @devs, and @everyone for developers. They are exclusive - @L2 mods does not reach developers, and the list tells you how many people each one actually reaches before you send it.",
+        "Groups save typing eight names: @leaders, @L2 mods, @L1 mods, @admins, and @everyone for admins. They are exclusive - @L2 mods does not reach admins, and the list tells you how many people each one actually reaches before you send it.",
         'Not the same as calling for backup: "@mod" typed in a ROOM raises a card in #help. "@" in here just names a person.',
       ],
     },
@@ -4311,7 +4363,7 @@
       p: [
         "A ban appeal is a chat, not a note. Open it from its card in #queues and ask what actually happened - they answer from their ban screen, and you both see the same thread.",
         "End chat stops them writing without deciding anything, for the one who answers every question with twenty messages. The appeal stays open and you still judge it.",
-        "Declining takes a message. Whatever you write is the last thing they read on their ban screen, so a refusal is never just a closed door. Lifting a ban is a developer call.",
+        "Declining takes a message. Whatever you write is the last thing they read on their ban screen, so a refusal is never just a closed door. Lifting a ban is an admin call.",
       ],
     },
     {
@@ -4351,7 +4403,7 @@
       tone: "red",
       h: "Things worth knowing",
       p: [
-        "Developers can read every channel and thread, including edits and deleted messages. That is deliberate, and it is said out loud here rather than hidden.",
+        "Admins can read every channel and thread, including edits and deleted messages. That is deliberate, and it is said out loud here rather than hidden.",
         "Hiding your flair hides you from users, never from the team. Your Desk name is always your staff name.",
         "Nothing you say here counts as moderation work. Your record only counts what you do to actual users.",
       ],
@@ -4723,7 +4775,10 @@
       }
       case "thread": {
         if (!rest) return toast("Usage: /thread <title>");
-        socket.emit("desk thread create", { title: rest.slice(0, 60) });
+        socket.emit("desk thread create", {
+          title: rest.slice(0, 60),
+          origin: view.kind === "channel" ? view.key : "floor",
+        });
         return;
       }
       case "find": {
@@ -5332,6 +5387,7 @@
 .dk-mname.l1{color: #cfa6ff;}
 .dk-chip{font-size:9px;font-weight:bold;letter-spacing:.5px;padding:1px 5px;border-radius:3px;border:1px solid;}
 .dk-chip.dev{color: #ff5468;border-color: #ff5468;}
+.dk-chip.l3{color: #4ade80;border-color: #4ade80;}
 .dk-chip.l2{color: #5aa9ff;border-color: #5aa9ff;}
 .dk-chip.l1{color: #c08bff;border-color: #c08bff;}
 .dk-chip.ghost{color: #8d8d8d;border-color: #8d8d8d;}
@@ -5803,6 +5859,7 @@
 .dk-group{display:flex;align-items:center;gap:6px;padding:9px 5px 3px;}
 .dk-group-n{font-size:10px;font-weight:bold;letter-spacing:.7px;text-transform:uppercase;color: #8d8d8d;}
 .dk-group.dev .dk-group-n{color: #ff5468;}
+.dk-group.l3 .dk-group-n{color: #4ade80;}
 .dk-group.l2 .dk-group-n{color: #5aa9ff;}
 .dk-group.l1 .dk-group-n{color: #c08bff;}
 .dk-group-c{font-size:10px;color: #6f6f6f;font-variant-numeric:tabular-nums;}

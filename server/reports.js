@@ -86,6 +86,7 @@ function distinctReporters(list) {
 function add({
   targetKey,
   targetName,
+  targetLocation,
   byDeviceId,
   byName,
   category,
@@ -94,6 +95,7 @@ function add({
   targetDeviceId,
   targetRole,
   targetText,
+  targetTextWiped,
 }) {
   if (!targetKey) return { total: 0, distinct: 0 };
   const now = Date.now();
@@ -104,6 +106,7 @@ function add({
   }
   arr.push({
     targetName: targetName || null,
+    targetLocation: targetLocation || null,
     byDeviceId: byDeviceId || null,
     byName: byName || null,
     category: category || "other",
@@ -113,6 +116,7 @@ function add({
     targetDeviceId: targetDeviceId || null,
     targetRole: targetRole || null,
     targetText: targetText || null,
+    targetTextWiped: !!targetTextWiped,
   });
   if (arr.length > MAX_PER_TARGET) arr.splice(0, arr.length - MAX_PER_TARGET);
   prune(now);

@@ -49,6 +49,7 @@
         --blue: #5aa9ff;
         --purple: #c08bff;
         --green: #57d9a3;
+        --lead: #4ade80;
         --cyan: #01ffff;
       }
       * {
@@ -190,6 +191,10 @@
         background: var(--orange);
         color: #1a1200;
       }
+      .chip.l3 {
+        background: var(--lead);
+        color: #00220f;
+      }
       .chip.l2 {
         background: var(--blue);
         color: #001229;
@@ -281,6 +286,26 @@
       }
       .nav-item[data-tab="guide"] i {
         color: #17a2b8;
+      }
+      .nav-item[data-tab="links"] i {
+        color: var(--green);
+      }
+      #linkAllowInput {
+        max-width: 320px;
+      }
+      .link-allow-row .mc-title i {
+        color: var(--green);
+        margin-right: 8px;
+      }
+      .link-allow-row .covers {
+        color: var(--dim);
+        font-size: 0.75rem;
+      }
+      #focusBar .focus-actions {
+        display: inline-flex;
+        gap: 6px;
+        margin-left: 10px;
+        vertical-align: middle;
       }
       .ni-badge {
         background: var(--tile);
@@ -556,6 +581,20 @@
       @media (max-width: 47.5rem) {
         .grid3 {
           grid-template-columns: minmax(0, 1fr);
+        }
+        /* The label beside the days squeezed them onto two rows on a phone;
+           stacked, all seven days share one full-width row. */
+        .daybar {
+          flex-direction: column;
+          align-items: stretch;
+          gap: 0.375rem;
+        }
+        .daypicker {
+          width: 100%;
+        }
+        .daypicker .daybtn {
+          min-width: 2.5rem;
+          padding: 0.375rem 0.125rem;
         }
       }
       .grid3 > .empty,
@@ -1894,6 +1933,9 @@
       .modcard.rank-dev {
         border-left-color: var(--red);
       }
+      .modcard.rank-l3 {
+        border-left-color: var(--lead);
+      }
       .modcard.rank-l2 {
         border-left-color: var(--blue);
       }
@@ -1917,6 +1959,9 @@
       }
       .rank-dev .mc-title .nm {
         color: var(--red);
+      }
+      .rank-l3 .mc-title .nm {
+        color: var(--lead);
       }
       .rank-l2 .mc-title .nm {
         color: var(--blue);
@@ -3386,8 +3431,28 @@
       .role-card.full .rh {
         color: var(--blue);
       }
+      .role-card.lead3 .rh {
+        color: var(--lead);
+      }
       .role-card.dev .rh {
         color: var(--red);
+      }
+      .rc-sub {
+        margin: 0.75rem 0 0.25rem;
+        font-size: 0.6875rem;
+        font-weight: bold;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+        color: var(--dim2);
+      }
+      .rc-sub.can {
+        color: var(--green);
+      }
+      .rc-sub.cant {
+        color: var(--red);
+      }
+      .rc-sub.sees {
+        color: var(--blue);
       }
       .role-card ul {
         margin: 0;
@@ -3772,7 +3837,7 @@
     <div id="denied" class="gate denied hidden">
       <div class="gate-icon"><i class="fas fa-lock"></i></div>
       <h2>Access denied</h2>
-      <p>This dashboard is for moderators and developers only.</p>
+      <p>This dashboard is for moderators and admins only.</p>
       <div class="gate-actions">
         <button id="enterKeyBtn" class="btn primary">
           <i class="fas fa-key"></i> Enter staff key
@@ -3812,11 +3877,11 @@
           <button class="nav-item active" data-tab="activity">
             <i class="fas fa-rectangle-list"></i> Activity
           </button>
-          <button class="nav-item" data-tab="reports" data-min2>
+          <button class="nav-item" data-tab="reports">
             <i class="fas fa-flag"></i> Reports
             <span class="ni-badge" id="reportsBadge">0</span>
           </button>
-          <button class="nav-item" data-tab="applications" data-min2>
+          <button class="nav-item" data-tab="applications" data-lead>
             <i class="fas fa-user-pen"></i> Applications
             <span class="ni-badge" id="appsBadge">0</span>
           </button>
@@ -3829,13 +3894,16 @@
             <i class="fas fa-ban"></i> Ban list
             <span class="ni-badge" id="bansBadge">0</span>
           </button>
-          <button class="nav-item" data-tab="mods" data-dev>
+          <button class="nav-item" data-tab="mods">
             <i class="fas fa-user-shield"></i> Moderators
             <span class="ni-badge" id="modsBadge">0</span>
           </button>
-          <button class="nav-item" data-tab="sessions" data-dev>
+          <button class="nav-item" data-tab="sessions" data-lead>
             <i class="fas fa-key"></i> Sessions
             <span class="ni-badge" id="sessionsBadge">0</span>
+          </button>
+          <button class="nav-item" data-tab="links" data-dev>
+            <i class="fas fa-link"></i> Allowed links
           </button>
           <button class="nav-item" data-tab="announce" data-dev>
             <i class="fas fa-bullhorn"></i> Announcements
@@ -3870,7 +3938,7 @@
               <button class="active" data-f="all">All</button>
               <button data-f="action">Actions</button>
               <button data-f="identity">Identity</button>
-              <button data-f="notification" data-min2>
+              <button data-f="notification">
                 Inbox<span
                   id="notifCount"
                   style="
@@ -3964,7 +4032,8 @@
               green check. Someone who is in the Talkomatic Discord server is
               much likelier to be accepted, because we can reach them, and once
               approved they get the site mod role there so they can talk to the
-              other moderators and the devs. Check the server before you decide.
+              other moderators and the admins. Check the server before you
+              decide.
             </span>
           </p>
           <div class="toolbar">
@@ -4007,7 +4076,7 @@
               ban they are contesting (who placed it and why) next to their
               message. Click their name to trace their activity. Lift the ban to
               unblock them and accept the appeal, or dismiss it to keep the ban.
-              Lifting a ban is dev-only.
+              Lifting a ban is admin-only.
             </span>
           </p>
           <div id="appealsList" class="grid2"></div>
@@ -4110,7 +4179,8 @@
           <div class="toolbar">
             <div class="seg" id="modsSeg">
               <button class="active" data-m="all">Everyone</button>
-              <button data-m="dev">Devs</button>
+              <button data-m="dev">Admins</button>
+              <button data-m="l3">Leaders</button>
               <button data-m="l2">Full mods</button>
               <button data-m="l1">Junior mods</button>
               <button data-m="active">Active</button>
@@ -4285,6 +4355,38 @@
         </section>
 
         <!-- Guide -->
+        <section id="tab-links" class="panel">
+          <div class="strip">
+            <i class="fas fa-link lead ic-orange"></i> Allowed links
+            <span class="sub">The only domains people may share in chat</span>
+          </div>
+          <p class="note-box">
+            <i class="fas fa-circle-info"></i>
+            <span>
+              Every link typed in chat is removed unless its domain is on this
+              list. A domain covers itself and its www form and nothing else:
+              <b>youtube.com</b> allows youtube.com and www.youtube.com, but
+              not music.youtube.com, not youtube.com.example.net, and not a
+              link whose path or query hides a second address. Names,
+              locations and room names never allow links, whatever is listed
+              here. Changes apply the moment they are made.
+            </span>
+          </p>
+          <div class="toolbar">
+            <input
+              id="linkAllowInput"
+              class="an-field"
+              type="text"
+              maxlength="253"
+              placeholder="Domain, e.g. youtube.com"
+            />
+            <button id="linkAllowAdd" class="btn sm primary">
+              <i class="fas fa-plus"></i> Allow domain
+            </button>
+          </div>
+          <div id="linkAllowList" class="cards"></div>
+        </section>
+
         <section id="tab-guide" class="panel">
           <div class="strip">
             <i class="fas fa-circle-question lead" style="color: #17a2b8"></i>
@@ -4316,13 +4418,14 @@
                 junior can do is reversible.
               </p>
               <ul>
-                <li>Warn and kick from a room</li>
+                <li>Warn and kick, with a ban from that one room</li>
                 <li>Wipe what someone has typed, for everyone</li>
                 <li>Reset a bad username or location</li>
                 <li>Turn someone's profile picture off</li>
                 <li>Rename, lock, or slow a room, and clear the Talkoboard</li>
+                <li>Work the report queue with warnings and kicks</li>
                 <li>Leave notes on users, and trace anyone in Activity</li>
-                <li>No bans, no IP blocks, cannot close a room</li>
+                <li>No IP blocks, cannot close a room</li>
               </ul>
             </div>
             <div class="role-card full">
@@ -4336,43 +4439,248 @@
               </p>
               <ul>
                 <li>Every junior power</li>
-                <li>Kick and room ban</li>
                 <li>
-                  IP and identifier blocks up to 7 days, including a whole range
+                  IP and identifier blocks from 1 hour to permanent; only an
+                  admin can lift a permanent one
                 </li>
-                <li>Close a room, spectate any room</li>
-                <li>Reports, appeals, applications, and the ban list</li>
-                <li>May grant a junior key; cannot promote anyone to L2</li>
+                <li>Close a room, spectate any public room</li>
+                <li>Discard reports, run appeals, and read the ban list</li>
+                <li>Kill bots and take down community themes</li>
+              </ul>
+            </div>
+            <div class="role-card lead3">
+              <div class="rh">
+                <i class="fas fa-user-tie"></i> Mod leader (L3)
+                <span class="chip l3">GREEN</span>
+              </div>
+              <p class="rp">
+                Runs the mod team. Everything a full mod has, plus the people.
+              </p>
+              <ul>
+                <li>Opens and closes applications, approves as junior</li>
+                <li>Promotes between L1 and L2, and revokes keys</li>
+                <li>Reads any junior or full mod's record and abuse flags</li>
+                <li>Key sessions, for spotting a shared or leaked key</li>
+                <li>Leader keys themselves are an admin decision</li>
               </ul>
             </div>
             <div class="role-card dev">
               <div class="rh">
-                <i class="fas fa-screwdriver-wrench"></i> Developer
+                <i class="fas fa-screwdriver-wrench"></i> Admin
                 <span class="chip dev">RED</span>
               </div>
               <p class="rp">
                 The people who run the site. Everything, on anyone except
-                another developer.
+                another admin.
               </p>
               <ul>
-                <li>Permanent blocks, and the only role that sees raw IPs</li>
-                <li>Grants, promotes, demotes, and revokes mod keys</li>
+                <li>Lifts permanent blocks, and blocks whole wide ranges</li>
+                <li>Grants any key, including mod leaders</li>
                 <li>Megaphone, ticker, party, spotlight, freeze</li>
                 <li>Feature flags, room size, maintenance, nuke</li>
-                <li>Key sessions, for spotting a shared or leaked key</li>
+                <li>Lifts bans through appeals</li>
               </ul>
             </div>
           </div>
           <p class="note-box">
             <i class="fas fa-circle-info"></i>
             <span>
-              The colors are the same everywhere. In a room a developer's row
-              glows red, a full mod's blue, and a junior mod's purple, and the
-              badge next to their name matches. Nobody can act on someone at
-              their own level or above, and the server checks this on every
-              single action, so a modified browser gains nothing.
+              The colors are the same everywhere. In a room an admin's row
+              glows red, a mod leader's green, a full mod's blue, and a junior
+              mod's purple, and the badge next to their name matches. Nobody
+              can act on someone at their own level or above, and the server
+              checks this on every single action, so a modified browser gains
+              nothing.
             </span>
           </p>
+
+          <div class="strip mini">
+            <i class="fas fa-list-check lead ic-orange"></i> Every rank in
+            detail
+            <span class="sub"
+              >What you can do, what you cannot, and who holds the thing you
+              cannot. The server enforces every line of this.</span
+            >
+          </div>
+          <div class="role-grid">
+            <div class="role-card jr">
+              <div class="rh">
+                <i class="fas fa-user-shield"></i> Junior mod (L1)
+                <span class="chip l1">PURPLE</span>
+              </div>
+              <div class="rc-sub can">You can</div>
+              <ul>
+                <li>Warn anyone who is not staff, online or queued for their next visit</li>
+                <li>Kick, with a ban from that one room (it dies with the room)</li>
+                <li>Wipe typed text, reset a name to Anonymous, reset a location, turn a profile picture off</li>
+                <li>Rename, lock, or slow-mode any room, and clear its Talkoboard</li>
+                <li>Leave staff notes on users and read everyone's notes</li>
+                <li>Work the report queue: every report reaches you, and your warning or kick settles it</li>
+                <li>Moderate the community board: set post status, remove any post or reply</li>
+                <li>Raise, claim, and resolve backup calls in the Desk's #help</li>
+                <li>Create rooms up to 15 people</li>
+              </ul>
+              <div class="rc-sub cant">You cannot</div>
+              <ul>
+                <li>IP or device block anyone (full mod)</li>
+                <li>Close a room, discard a report, or kill a bot (full mod)</li>
+                <li>Read or decide appeals, or see the ban list (full mod)</li>
+                <li>See or review applications (mod leader)</li>
+                <li>Act on, warn, or ban anybody on staff</li>
+              </ul>
+              <div class="rc-sub sees">You see</div>
+              <ul>
+                <li>The Activity feed, live report cards, and staff notes</li>
+                <li>The team roster with real staff names</li>
+                <li>Desk: #floor, #help, #activity, and the report cards in #queues</li>
+              </ul>
+            </div>
+            <div class="role-card full">
+              <div class="rh">
+                <i class="fas fa-shield-halved"></i> Full mod (L2)
+                <span class="chip l2">BLUE</span>
+              </div>
+              <div class="rc-sub can">You can (everything a junior can, plus)</div>
+              <ul>
+                <li>IP and device blocks: 1 hour, 24 hours, 7 days, or permanent</li>
+                <li>Block ranges up to /24 (IPv4) and /48 (IPv6), up to 200 entries at once</li>
+                <li>Block a reported user who has gone offline, via their last known address</li>
+                <li>Lift temporary blocks (their open appeals resolve with it)</li>
+                <li>Close a room, and spectate any public room</li>
+                <li>Run the whole report queue, including discarding reports</li>
+                <li>Handle appeals: reply, reopen, lock, dismiss, and bar repeat appeals</li>
+                <li>Resolve suggestions, kill any bot, take down community themes</li>
+                <li>Create rooms up to 25 people</li>
+              </ul>
+              <div class="rc-sub cant">You cannot</div>
+              <ul>
+                <li>Lift a permanent block, block wide ranges, or re-time a block (admin)</li>
+                <li>Lift a ban through an appeal, unbar, or delete an appeal (admin)</li>
+                <li>See or review applications, promote, or revoke keys (mod leader)</li>
+                <li>Read anybody's moderator record (mod leader)</li>
+              </ul>
+              <div class="rc-sub sees">You see</div>
+              <ul>
+                <li>The ban list and block list, live, with real staff names and no addresses</li>
+                <li>Live boards: reports, appeals, suggestions, ban history</li>
+                <li>Desk: everything a junior sees, plus #l2, #bans, and the full #queues</li>
+              </ul>
+            </div>
+            <div class="role-card lead3">
+              <div class="rh">
+                <i class="fas fa-user-tie"></i> Mod leader (L3)
+                <span class="chip l3">GREEN</span>
+              </div>
+              <div class="rc-sub can">You can (everything a full mod can, plus)</div>
+              <ul>
+                <li>Open and close moderator applications</li>
+                <li>Read applications in full and approve as junior (L1) or decline</li>
+                <li>Promote L1 to L2 and demote L2 to L1, live</li>
+                <li>Revoke a junior or full mod key, with a written reason they will see</li>
+                <li>Bring a former mod back, as a junior</li>
+                <li>Read any junior or full mod's record and review their abuse flags</li>
+                <li>Warn other mods (juniors and full mods)</li>
+                <li>Watch key sessions for shared or leaked keys</li>
+                <li>Create rooms up to 30 people</li>
+              </ul>
+              <div class="rc-sub cant">You cannot</div>
+              <ul>
+                <li>Grant a full (L2) key directly: the ladder is approve as junior, promote later</li>
+                <li>Touch a leader or admin key in any way (admin)</li>
+                <li>Read a leader's or an admin's record (admin)</li>
+                <li>Lift permanent blocks, or use any platform tool (admin)</li>
+              </ul>
+              <div class="rc-sub sees">You see</div>
+              <ul>
+                <li>Applications with answers and Discord, never addresses</li>
+                <li>Abuse flags on juniors and full mods, and key-sharing alerts</li>
+                <li>Desk: everything a full mod sees, plus #leads</li>
+              </ul>
+            </div>
+            <div class="role-card dev">
+              <div class="rh">
+                <i class="fas fa-screwdriver-wrench"></i> Admin
+                <span class="chip dev">RED</span>
+              </div>
+              <div class="rc-sub can">You can (everything a leader can, plus)</div>
+              <ul>
+                <li>Lift permanent blocks, block wide ranges, re-time any block</li>
+                <li>Lift bans through appeals, unbar appellants, delete appeals and reports</li>
+                <li>Grant any key at any level, including mod leaders</li>
+                <li>Announcements, rules, feature flags, maintenance mode, nuke</li>
+                <li>Megaphone, ticker, party, spotlight, room resize, server HUD</li>
+                <li>Freeze a user's typing, silence them, vanish, force-kick from any room</li>
+                <li>Create rooms up to 50 people</li>
+              </ul>
+              <div class="rc-sub cant">Even admins cannot</div>
+              <ul>
+                <li>See a raw IP address anywhere on the site</li>
+                <li>Act on another admin</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="strip mini">
+            <i class="fas fa-stairs lead ic-orange"></i> How the ladder works
+          </div>
+          <div class="guide-grid">
+            <div class="gcard">
+              <h3><i class="fas fa-door-open"></i> Joining</h3>
+              <p>
+                Mod leaders open and close applications. When intake is open,
+                active members apply from the lobby, a leader reads the
+                application, and approval mints a junior (L1) key on the spot.
+                Nobody starts above junior, and nobody is auto-accepted.
+              </p>
+            </div>
+            <div class="gcard">
+              <h3><i class="fas fa-arrow-trend-up"></i> Rising</h3>
+              <p>
+                Promotion runs on the record. The number that matters is work
+                done on people: warnings, kicks, and reports settled. A leader
+                promotes a junior to full mod when the record supports it, and
+                can demote the same way. Leaders themselves are picked by
+                admins, never self-appointed.
+              </p>
+            </div>
+            <div class="gcard">
+              <h3><i class="fas fa-eye"></i> Who watches whom</h3>
+              <p>
+                Juniors and full mods are watched by the abuse detector, and
+                their flags go to mod leaders and admins. Leaders are watched
+                the same way, and their flags go to admins only. Nobody
+                reviews their own tier, and every action by every rank is in
+                the log.
+              </p>
+            </div>
+            <div class="gcard">
+              <h3><i class="fas fa-user-xmark"></i> Leaving</h3>
+              <p>
+                Keys are removed with a written reason, and the person sees
+                that reason: at once if they are online, or the next time they
+                open the site. Former mods stay on the roster's history and
+                can be brought back as juniors.
+              </p>
+            </div>
+            <div class="gcard">
+              <h3><i class="fas fa-masks-theater"></i> Who sees which names</h3>
+              <p>
+                Inside staff surfaces everyone sees real staff names, so the
+                team can talk plainly. Users, banned users, and appellants
+                only ever see "the Talkomatic staff". Raw addresses are shown
+                to nobody.
+              </p>
+            </div>
+            <div class="gcard">
+              <h3><i class="fas fa-inbox"></i> Where the work happens</h3>
+              <p>
+                This dashboard holds the boards; the Desk rides along on every
+                page for live work. Cards in the Desk's #queues appear at the
+                rank that can settle them: reports for everyone, appeals for
+                full mods, applications and abuse flags for leaders.
+              </p>
+            </div>
+          </div>
 
           <div class="strip mini">
             <i class="fas fa-table-columns lead ic-orange"></i> The tabs
@@ -4393,45 +4701,51 @@
                 Users flagged by the community, grouped by person and most
                 reported first. The card header is the reported user; the list
                 below is who reported them and why. Act right from the card:
-                kick, or IP block for a set time. A reported user who goes
-                offline can still be blocked using their last known address.
-              </p>
-            </div>
-            <div class="gcard">
-              <h3><i class="fas fa-user-pen"></i> Applications</h3>
-              <p>
-                Active members applying for the junior role. Approve to mint and
-                deliver their key automatically, or decline. Each card shows
-                whether they have Discord linked; someone in the Talkomatic
-                server is easier to trust and gets the site mod role once
-                approved. Applications are never auto-accepted.
+                anyone on staff can warn or kick, and full mods can IP block or
+                discard. A reported user who goes offline can still be blocked
+                using their last known address.
               </p>
             </div>
             <div class="gcard">
               <h3>
-                <i class="fas fa-ban"></i> Ban list <span class="tag">DEV</span>
+                <i class="fas fa-user-pen"></i> Applications
+                <span class="tag">LEADER</span>
+              </h3>
+              <p>
+                Active members applying for the junior role. Mod leaders open
+                and close intake, approve to mint and deliver an L1 key
+                automatically, or decline. Each card shows whether they have
+                Discord linked; someone in the Talkomatic server is easier to
+                trust and gets the site mod role once approved. Applications
+                are never auto-accepted.
+              </p>
+            </div>
+            <div class="gcard">
+              <h3>
+                <i class="fas fa-ban"></i> Ban list <span class="tag">L2</span>
               </h3>
               <p>
                 Every active block with a live countdown, who placed it, and the
                 reason, grouped by person and searchable. One tap unbans. A
-                permanent block is tagged in red.
+                permanent block is tagged in red and only an admin can lift it.
               </p>
             </div>
             <div class="gcard">
               <h3>
                 <i class="fas fa-user-shield"></i> Moderators
-                <span class="tag">DEV</span>
               </h3>
               <p>
-                The full staff roster, colored by rank: developers red, full
-                mods blue, junior mods purple. Grant a new junior or full key
-                (shown once), promote or demote a level, or revoke instantly
-                with a live downgrade.
+                The full staff roster, colored by rank: admins red, mod leaders
+                green, full mods blue, junior mods purple. Anyone on staff can
+                read it. Leaders grant junior keys, promote or demote between
+                L1 and L2, and revoke instantly with a live downgrade; admins
+                also manage leader keys.
               </p>
             </div>
             <div class="gcard">
               <h3>
-                <i class="fas fa-key"></i> Sessions <span class="tag">DEV</span>
+                <i class="fas fa-key"></i> Sessions
+                <span class="tag">LEADER</span>
               </h3>
               <p>
                 Who is connected on each staff key right now, plus every network
@@ -4467,18 +4781,19 @@
             <div class="gcard">
               <h3><i class="fas fa-user-lock"></i> IP privacy</h3>
               <p>
-                Raw IP addresses are shown to developers only. Moderators can
-                still ban or IP block a user, because the server handles the
-                address for them, but never see it.
+                Raw IP addresses are never shown on this page. Staff can still
+                ban or IP block a user, because the server handles the address
+                for them, but nobody reads it off a screen.
               </p>
             </div>
             <div class="gcard">
               <h3><i class="fas fa-user-secret"></i> Staff colors</h3>
               <p>
                 Rank has one color everywhere, on this dashboard and in rooms:
-                developers red, full mods (L2) blue, junior mods (L1) purple.
-                In the Activity feed the person who acted is colored the same
-                way, so you can tell at a glance who took an action.
+                admins red, mod leaders (L3) green, full mods (L2) blue, junior
+                mods (L1) purple. In the Activity feed the person who acted is
+                colored the same way, so you can tell at a glance who took an
+                action.
               </p>
             </div>
             <div class="gcard">

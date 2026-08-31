@@ -210,35 +210,34 @@
   flex-wrap: wrap;
 }
 
+/* Four fixed reactions, nothing else. */
 .an-reacts {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   flex-wrap: wrap;
-  /* A popular notice collects dozens of reactions; they must never eat the
-     message area. Three rows, then the pile scrolls within itself. */
-  max-height: 102px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
 }
 
 .an-react {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  min-height: 30px;
-  padding: 3px 9px;
+  gap: 6px;
+  min-height: 32px;
+  padding: 4px 12px;
   border: 1px solid var(--tk-border, #616161);
   border-radius: 999px;
   background: var(--tk-tile, #1b1b1b);
   color: var(--tk-text, #fff);
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1;
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease;
 }
 
-.an-react:hover { background: var(--tk-tile-hover, #242424); }
+.an-react:hover {
+  background: var(--tk-tile-hover, #242424);
+  border-color: var(--tk-muted, #ccc);
+}
 
 .an-react.mine {
   border-color: var(--tk-accent, #ff9800);
@@ -248,27 +247,11 @@
 .an-react-n {
   font-size: 12px;
   font-weight: bold;
+  color: var(--tk-muted, #ccc);
 }
 
-.an-quick { opacity: 0.6; }
-.an-quick:hover { opacity: 1; }
-
-.an-picker-input {
-  width: 46px;
-  padding: 5px 6px;
-  border: 1px dashed var(--tk-border, #616161);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--tk-text, #fff);
-  font-size: 15px;
-  text-align: center;
-  font-family: inherit;
-}
-
-.an-picker-input:focus {
-  outline: none;
-  border-style: solid;
-  border-color: var(--tk-accent, #ff9800);
+.an-react.mine .an-react-n {
+  color: var(--tk-accent, #ff9800);
 }
 
 /* ── The way out, held shut for a few seconds ──────────────────────────────
@@ -341,8 +324,7 @@
 
 /* Phones: the card takes the whole screen so the message gets all of it.
    100dvh tracks the real visible height under Safari's collapsing URL bar;
-   plain 100vh overflows it, which is what made the outer layer scroll.
-   Reactions become ONE row that scrolls sideways under a thumb. */
+   plain 100vh overflows it, which is what made the outer layer scroll. */
 @media (max-width: 640px) {
   .an-overlay { padding: 0; }
   .an-card {
@@ -357,19 +339,5 @@
   .an-title { font-size: 20px; margin: 10px 0 4px; }
   .an-body { padding: 14px 16px 18px; font-size: 14.5px; }
   .an-foot { padding: 10px 12px 12px; gap: 8px; }
-  .an-react-wrap { flex-wrap: nowrap; }
-  .an-reacts {
-    flex: 1;
-    min-width: 0;
-    flex-wrap: nowrap;
-    max-height: none;
-    overflow-y: hidden;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    padding-bottom: 2px;
-    scrollbar-width: none;
-  }
-  .an-reacts::-webkit-scrollbar { display: none; }
-  .an-react { flex: 0 0 auto; }
   .an-close-wrap { width: 100%; margin-left: 0; }
 }

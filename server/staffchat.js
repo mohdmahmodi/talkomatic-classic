@@ -13,9 +13,10 @@ const FILE = path.join(DATA_DIR, "staff-chat.json");
 const CHANNELS = [
   { key: "floor", name: "floor", desc: "Day to day. The default." },
   { key: "help", name: "help", desc: "Live calls for backup from rooms." },
-  { key: "queues", name: "queues", desc: "Incoming reports, appeals, applications.", access: "l2" },
+  { key: "queues", name: "queues", desc: "Incoming reports, appeals, applications. Cards show at your level." },
   { key: "l2", name: "l2", desc: "Bans, blocks, escalations.", access: "l2" },
-  { key: "devs", name: "devs", desc: "Keys, promotions, mod abuse.", access: "dev" },
+  { key: "leads", name: "leads", desc: "Applications, promotions, the team.", access: "l3" },
+  { key: "devs", name: "admins", desc: "Keys, promotions, mod abuse.", access: "dev" },
   {
     key: "activity",
     name: "activity",
@@ -93,7 +94,7 @@ function who(socket) {
   return {
     label: socket.staffLabel || (socket.isDev ? "dev" : "mod"),
     role: socket.isDev ? "dev" : "mod",
-    level: socket.isDev ? 0 : socket.modLevel || 2,
+    level: socket.isDev ? 0 : socket.modLevel || 1,
     alias: socket.handshake?.session?.username || null,
     avatar:
       av && (av.id || av.discordId) && av.hash
@@ -110,11 +111,16 @@ const idKeyOf = (w) => w.role + ":" + w.label;
 
 function canRead(socket, key) {
   if (!isStaff(socket)) return false;
-  if (key.startsWith("t")) return true;
+  if (key.startsWith("t")) {
+    // A thread carries the access of the channel it was spawned from.
+    const t = desk.threads.find((x) => x.id === key);
+    return t ? canRead(socket, t.origin || "floor") : false;
+  }
   const ch = CHANNELS.find((c) => c.key === key);
   if (!ch) return false;
   if (ch.access === "dev") return !!socket.isDev;
-  if (ch.access === "l2") return socket.isDev || (socket.modLevel || 2) >= 2;
+  if (ch.access === "l3") return socket.isDev || (socket.modLevel || 1) >= 3;
+  if (ch.access === "l2") return socket.isDev || (socket.modLevel || 1) >= 2;
   return true;
 }
 
@@ -127,7 +133,7 @@ function canSeeMessage(socket, key, msg) {
   if (!canRead(socket, key)) return false;
   if (msg.opsOnly && !socket.isMainDev) return false;
   if (msg.devOnly && !socket.isDev) return false;
-  if (msg.minLevel && !socket.isDev && (socket.modLevel || 2) < msg.minLevel)
+  if (msg.minLevel && !socket.isDev && (socket.modLevel || 1) < msg.minLevel)
     return false;
   return true;
 }
@@ -253,14 +259,31 @@ function dropSettledCards() {
   return list.length - kept.length;
 }
 
+// Card floors by kind: reports go to every staff level, appeals and
+// suggestions to L2+, applications and abuse flags to leaders.
+const CARD_FLOORS = {
+  report: 1,
+  appeal: 2,
+  suggestion: 2,
+  application: 3,
+  abuse: 3,
+};
+
 function backfillCards() {
   let changed = dropSettledCards();
   for (const m of desk.channels.queues || []) {
-    if (!m || m.card || m.kind !== "system") continue;
-    const c = parseQueueCard(m);
-    if (!c) continue;
-    m.card = sanitizeCard(m.qkind, c);
-    changed++;
+    if (!m || m.kind !== "system") continue;
+    const floor = CARD_FLOORS[m.qkind];
+    if (floor && m.minLevel !== floor && !m.devOnly && !m.opsOnly) {
+      m.minLevel = floor;
+      changed++;
+    }
+    if (!m.card) {
+      const c = parseQueueCard(m);
+      if (!c) continue;
+      m.card = sanitizeCard(m.qkind, c);
+      changed++;
+    }
   }
   if (changed) scheduleSave();
   return changed;
@@ -279,6 +302,7 @@ function threadSummary(t, showIp) {
     lastTs: t.lastTs,
     archived: isArchived(t),
     link: t.link || null,
+    origin: t.origin || "floor",
     n: (t.messages || []).length,
   };
 }
@@ -300,7 +324,7 @@ function staffDirectory() {
     if (!by.has(k)) by.set(k, { label, role, level });
   };
   try {
-    for (const k of ctx.roles.listModKeys()) add(k.label, "mod", k.level || 2);
+    for (const k of ctx.roles.listModKeys()) add(k.label, "mod", k.level || 1);
     for (const d of ctx.roles.listDevKeys()) add(d.label, "dev", 0);
   } catch (_) {}
   if (io())
@@ -311,7 +335,7 @@ function staffDirectory() {
         s.staffLabel &&
         !isVeiled(s.staffLabel, s.isDev ? "dev" : "mod")
       )
-        add(s.staffLabel, s.isDev ? "dev" : "mod", s.isDev ? 0 : s.modLevel || 2);
+        add(s.staffLabel, s.isDev ? "dev" : "mod", s.isDev ? 0 : s.modLevel || 1);
   return [...by.values()];
 }
 
@@ -322,7 +346,8 @@ const staffLabels = () =>
 
 const MENTION_GROUPS = [
   { key: "everyone", tokens: ["everyone", "all"] },
-  { key: "dev", tokens: ["devs", "developers"] },
+  { key: "dev", tokens: ["admins", "admin", "devs", "developers"] },
+  { key: "l3", tokens: ["leaders", "mod leaders", "l3"] },
   { key: "l2", tokens: ["l2 mods", "full mods", "l2"] },
   { key: "l1", tokens: ["l1 mods", "jr mods", "junior mods", "juniors", "l1"] },
 ];
@@ -336,8 +361,9 @@ const GROUP_TOKENS = [...GROUP_BY_TOKEN.keys()].sort(
 function inGroup(key, role, level) {
   if (key === "everyone") return true;
   if (key === "dev") return role === "dev";
-  if (key === "l2") return role !== "dev" && (level || 2) >= 2;
-  if (key === "l1") return role !== "dev" && (level || 2) === 1;
+  if (key === "l3") return role !== "dev" && (level || 1) >= 3;
+  if (key === "l2") return role !== "dev" && (level || 1) >= 2;
+  if (key === "l1") return role !== "dev" && (level || 1) === 1;
   return false;
 }
 
@@ -387,7 +413,7 @@ function mentions(msg, socket) {
   const mine = socket.staffLabel.toLowerCase();
   if (Array.isArray(msg.mentionGroups))
     for (const g of msg.mentionGroups)
-      if (inGroup(g, socket.isDev ? "dev" : "mod", socket.modLevel || 2))
+      if (inGroup(g, socket.isDev ? "dev" : "mod", socket.modLevel || 1))
         return true;
   if (Array.isArray(msg.mentions))
     return msg.mentions.some((l) => String(l).toLowerCase() === mine);
@@ -426,11 +452,13 @@ function broadcast(key, msg, updated) {
 
 function broadcastThreadList() {
   if (!io()) return;
-  const masked = desk.threads.map((t) => threadSummary(t, false));
-  const full = desk.threads.map((t) => threadSummary(t, true));
-  for (const [, s] of io().sockets.sockets)
-    if (s.connected && isStaff(s))
-      s.emit("desk threads", { threads: s.isMainDev ? full : masked });
+  for (const [, s] of io().sockets.sockets) {
+    if (!s.connected || !isStaff(s)) continue;
+    const mine = desk.threads.filter((t) => canRead(s, t.id));
+    s.emit("desk threads", {
+      threads: mine.map((t) => threadSummary(t, s.isMainDev)),
+    });
+  }
 }
 
 // ── Messages ────────────────────────────────────────────────────────────────
@@ -503,6 +531,8 @@ function sanitizeCard(qkind, c) {
     category: cut(c.category, 60),
     reason: cut(c.reason, 300),
     quote: cut(c.quote, 300),
+    quoteWiped: c.quoteWiped ? true : null,
+    location: cut(c.location, 60),
     reports: Number(c.reports) || null,
     itemId: Number.isFinite(Number(c.itemId)) ? Number(c.itemId) : null,
     roomId: cut(c.roomId, 60),
@@ -658,6 +688,7 @@ function unreadFor(socket) {
     out[c.key] = { n, mentions: named };
   }
   for (const t of desk.threads) {
+    if (!canRead(socket, t.id)) continue;
     const since = read[t.id] || 0;
     let n = 0;
     for (let i = t.messages.length - 1; i >= 0; i--) {
@@ -687,9 +718,12 @@ function rosterFor(socket) {
       out.push({
         label: k.label,
         role: "mod",
-        level: k.level || 2,
+        level: k.level || 1,
         offline: true,
-        lastActive: lastBy.get(key) || null,
+        // Same clock as the dashboard roster: last connection stamp or last
+        // logged action, whichever is later.
+        lastActive:
+          Math.max(lastBy.get(key) || 0, k.lastSeen || 0) || null,
         grantedAt: k.grantedAt || null,
         locations: [],
       });
@@ -934,7 +968,7 @@ function virtualHistory(key, socket) {
         showIp: !!socket.isMainDev,
         showAll: !!socket.isMainDev,
         isDev: !!socket.isDev,
-        modLevel: socket.isDev ? 0 : socket.modLevel || 2,
+        modLevel: socket.isDev ? 0 : socket.modLevel || 1,
       });
       return rows.map(activityRow);
     }
@@ -971,7 +1005,7 @@ function pushActivity(entry) {
     if (!s.connected || !isStaff(s) || !canRead(s, "activity")) continue;
     if (!s.isMainDev && ops) continue;
     if (privileged && !s.isDev) continue;
-    if (entry.minLevel && !s.isDev && (s.modLevel || 2) < entry.minLevel)
+    if (entry.minLevel && !s.isDev && (s.modLevel || 1) < entry.minLevel)
       continue;
     const shown =
       s.isMainDev || !ctx || !ctx.audit
@@ -1037,7 +1071,9 @@ function register(socket, safe) {
           restricted: !!c.access,
           readonly: !!c.readonly,
         })),
-        threads: desk.threads.map((t) => threadSummary(t, socket.isMainDev)),
+        threads: desk.threads
+          .filter((t) => canRead(socket, t.id))
+          .map((t) => threadSummary(t, socket.isMainDev)),
         unread: unreadFor(socket),
         presence: buildPresence(socket),
       });
@@ -1383,9 +1419,14 @@ function register(socket, safe) {
       const title = String(data?.title || "").trim().slice(0, 60);
       if (!title) return;
       const w = who(socket);
+      const originReq = typeof data?.origin === "string" ? data.origin : "";
+      const originCh = CHANNELS.find((c) => c.key === originReq && !c.virtual);
+      const origin =
+        originCh && canRead(socket, originCh.key) ? originCh.key : "floor";
       const t = {
         id: "t" + ++desk.seq,
         title,
+        origin,
         createdBy: w.label,
         createdAt: Date.now(),
         lastTs: Date.now(),
@@ -1573,7 +1614,8 @@ function register(socket, safe) {
       for (const c of CHANNELS)
         if (!c.virtual && canRead(socket, c.key))
           scan(c.key, desk.channels[c.key] || []);
-      for (const t of desk.threads) scan(t.id, t.messages, t.title);
+      for (const t of desk.threads)
+        if (canRead(socket, t.id)) scan(t.id, t.messages, t.title);
       hits.sort((a, b) => b.ts - a.ts);
       socket.emit("desk search", { q, hits: hits.slice(0, 60) });
     }),

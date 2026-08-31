@@ -42,6 +42,7 @@ const modwatch = require("./modwatch");
 const keywatch = require("./keywatch");
 const applications = require("./applications");
 const reports = require("./reports");
+const lastseen = require("./lastseen");
 const appeals = require("./appeals");
 const suggestions = require("./suggestions");
 const rules = require("./rules");
@@ -92,6 +93,43 @@ function armLinkSweep(socket, userId) {
   linkSweepTimers.set(userId, t);
 }
 
+// What a user's chat box said just before they wiped it. Reports fall back to
+// this, so clearing the box between the bad line and the report button no
+// longer produces "their chat box was blank". Server-side on purpose: a
+// reporter can never forge the quote.
+const recentWipes = new Map();
+const WIPE_KEEP_MS = 5 * 60 * 1000;
+
+function noteBufferShrink(userId, oldText, newText) {
+  const oldTrim = (oldText || "").trim();
+  if (oldTrim.length < 3) return;
+  const shrank =
+    (newText || "").trim().length === 0 ||
+    (newText || "").length < oldText.length / 2;
+  if (!shrank) return;
+  const now = Date.now();
+  const arr = recentWipes.get(userId) || [];
+  const last = arr[arr.length - 1];
+  if (last && last.text === oldText) last.at = now;
+  else {
+    arr.push({ text: oldText.slice(0, 300), at: now });
+    if (arr.length > 3) arr.shift();
+  }
+  recentWipes.set(userId, arr);
+}
+
+function lastWipedText(userId) {
+  const arr = recentWipes.get(userId);
+  if (!arr) return null;
+  const cutoff = Date.now() - WIPE_KEEP_MS;
+  while (arr.length && arr[0].at < cutoff) arr.shift();
+  if (!arr.length) {
+    recentWipes.delete(userId);
+    return null;
+  }
+  return arr[arr.length - 1];
+}
+
 const BAN_REF_SECRET = crypto.randomBytes(32);
 function banRef(ip) {
   return crypto
@@ -131,15 +169,17 @@ const ROOM_CAPACITY_BY_ROLE = {
   user: NEW_ROOM_MAX_CAPACITY,
   jr: 15,
   mod: 25,
+  lead: 30,
   dev: 50,
 };
 
 function roomCapacityCeiling(socket) {
   if (socket?.isDev) return ROOM_CAPACITY_BY_ROLE.dev;
-  if (socket?.isMod)
-    return (socket.modLevel || 2) >= 2
-      ? ROOM_CAPACITY_BY_ROLE.mod
-      : ROOM_CAPACITY_BY_ROLE.jr;
+  if (socket?.isMod) {
+    const lvl = socket.modLevel || 1;
+    if (lvl >= 3) return ROOM_CAPACITY_BY_ROLE.lead;
+    return lvl >= 2 ? ROOM_CAPACITY_BY_ROLE.mod : ROOM_CAPACITY_BY_ROLE.jr;
+  }
   return ROOM_CAPACITY_BY_ROLE.user;
 }
 
@@ -787,7 +827,7 @@ function isUserStaffHidden(userId) {
 
 function getUserModLevel(userId) {
   for (const s of findSocketsByUserId(userId)) {
-    if (s.isMod) return s.modLevel || 2;
+    if (s.isMod) return s.modLevel || 1;
   }
   return 0;
 }
@@ -802,7 +842,7 @@ function canActOn(actorSocket, targetUserId) {
 function canManageNotesOn(actorSocket, targetUserId) {
   if (!actorSocket) return false;
   if (actorSocket.isDev) return true;
-  if (!actorSocket.isMod || (actorSocket.modLevel || 2) < 1) return false;
+  if (!actorSocket.isMod || (actorSocket.modLevel || 1) < 1) return false;
   const targetRole = getUserStaffRole(targetUserId);
   return targetRole === null || targetRole === "mod";
 }
@@ -827,7 +867,7 @@ function requireDev(socket) {
 
 function requireModLevel(socket, minLevel) {
   if (socket?.isDev) return true;
-  if (socket?.isMod && (socket.modLevel || 2) >= minLevel) return true;
+  if (socket?.isMod && (socket.modLevel || 1) >= minLevel) return true;
   socket.emit(
     "error",
     createErrorResponse(
@@ -877,7 +917,7 @@ function judgeStaffKey(hash, role, label) {
     role,
     label,
     text: detail,
-    minLevel: 2,
+    minLevel: 3,
     card: {
       target: label,
       targetRole: role,
@@ -923,11 +963,7 @@ async function revokeSharedKey(hash, label, headline) {
       }
       s.emit("staff revoked", { reason: headline });
     }
-    for (const [, s] of io().sockets.sockets)
-      if (s.isDev) {
-        s.emit("dev mod keys", roles.listModKeys(roles.viewFor(s)));
-        s.emit("dev former mods", roles.listFormerMods(roles.viewFor(s)));
-      }
+    broadcastModKeyLists();
     staffchat.rosterDirty();
   } catch (e) {
     console.error("auto-revoke of shared key failed:", e);
@@ -940,6 +976,100 @@ function settleQueueItem(qkind, itemId) {
       (m) => m.qkind === qkind && m.card && m.card.itemId === Number(itemId),
     );
   } catch (_) {}
+}
+
+// Roster hash visibility: devs see every hash, leaders see hashes only for
+// keys below leader level (what they can act on), everyone else sees none.
+function rosterHashFor(socket, entry) {
+  if (socket.isDev) return entry.hash;
+  const lvl = socket.modLevel || 1;
+  if (lvl >= 3 && (entry.level || 1) < 3) return entry.hash;
+  return null;
+}
+
+function sendModKeyLists(socket) {
+  const view = roles.viewFor(socket);
+  // One definition of "last seen" for every surface: now if the key is live,
+  // otherwise the later of its last connection stamp and its last logged
+  // action. Online and network counts ride along so clients never have to
+  // reconstruct them from other payloads.
+  const liveHashes = new Set();
+  if (io())
+    for (const [, s] of io().sockets.sockets)
+      if (s.connected && s.isMod && s.modKeyHash) liveHashes.add(s.modKeyHash);
+  let lastActive = new Map();
+  try {
+    lastActive = audit.lastActiveByLabel();
+  } catch (_) {}
+  const ipCounts = new Map();
+  try {
+    for (const h of roles.getKeyActivity())
+      ipCounts.set(h.hash, (h.ips || []).length);
+  } catch (_) {}
+  const now = Date.now();
+  socket.emit(
+    "dev mod keys",
+    roles.listModKeys(view).map((k) => {
+      const online = liveHashes.has(k.hash);
+      return {
+        ...k,
+        online,
+        networks: ipCounts.get(k.hash) || 0,
+        lastSeen: online
+          ? now
+          : Math.max(k.lastSeen || 0, lastActive.get("mod:" + k.label) || 0) ||
+            null,
+        hash: rosterHashFor(socket, k),
+      };
+    }),
+  );
+  socket.emit(
+    "dev former mods",
+    roles
+      .listFormerMods(view)
+      .map((f) => ({ ...f, hash: rosterHashFor(socket, f) })),
+  );
+}
+
+function broadcastModKeyLists() {
+  if (!io()) return;
+  for (const [, s] of io().sockets.sockets)
+    if (s.connected && (s.isDev || s.isMod)) sendModKeyLists(s);
+}
+
+// Record access: main dev sees everyone raw; devs see any mod's record;
+// leaders see records of mods below leader level. Dev records stay main-dev
+// only. Review rights track view rights exactly.
+function canViewModRecord(socket, label, role) {
+  if (socket.isMainDev) return true;
+  if (role === "dev") return false;
+  if (socket.isDev) return true;
+  if ((socket.modLevel || 1) < 3) return false;
+  const lvl = roles.modLevelForLabel(label);
+  return lvl != null && lvl < 3;
+}
+
+function emitModHistory(socket, label, role, opts) {
+  const h = audit.historyFor(label, role, opts);
+  if (socket.isMainDev)
+    return socket.emit("staff mod history", { ...h, canReview: true });
+  const view = { ip: false, names: !!socket.isDev };
+  socket.emit("staff mod history", {
+    ...h,
+    canReview: true,
+    flags: (h.flags || []).map((f) =>
+      f.reviewed
+        ? {
+            ...f,
+            reviewed: {
+              ...f.reviewed,
+              by: roles.systemLabel(f.reviewed.by, null),
+            },
+          }
+        : f,
+    ),
+    entries: (h.entries || []).map((e) => audit.redactEntry(e, view)),
+  });
 }
 
 function logStaff(socket, action, target, room, details) {
@@ -973,6 +1103,7 @@ function logStaff(socket, action, target, room, details) {
       hash: socket.modKeyHash,
       label,
       role: roleTag,
+      level: socket.modLevel || 1,
       action,
       target: targetStr,
       room: roomTag,
@@ -980,12 +1111,39 @@ function logStaff(socket, action, target, room, details) {
     });
 }
 
+function staffRoleOf(socket) {
+  if (socket?.isDev) return "dev";
+  if (socket?.isMod) {
+    const lvl = socket.modLevel || 1;
+    return lvl >= 3 ? "lead" : lvl >= 2 ? "mod" : "jr";
+  }
+  return null;
+}
+
+function noteLastSeen(socket) {
+  const userId = socket?.handshake?.session?.userId;
+  if (!userId || socket.isBot) return;
+  lastseen.record({
+    userId,
+    deviceId: socket.deviceId || null,
+    ip: socket.clientIp || null,
+    name: socket.handshake?.session?.username || null,
+    role: staffRoleOf(socket),
+  });
+}
+
+// Every connection leaves a last-seen record, so staff can act on somebody
+// who left without anyone having reported them first. When both sources
+// exist the last-seen record wins: it is written on every connection, a
+// report snapshot only when somebody pressed the button.
 function resolveOfflineTarget(targetUserId) {
   const lk = reports.lastKnown(targetUserId);
-  if (!lk) return null;
-  let ip = lk.ip;
-  if (!ip && lk.deviceId) {
-    const rec = identity.getRecord(lk.deviceId);
+  const seen = lastseen.get(targetUserId);
+  if (!lk && !seen) return null;
+  let ip = (seen && seen.ip) || (lk && lk.ip) || null;
+  const deviceId = (seen && seen.deviceId) || (lk && lk.deviceId) || null;
+  if (!ip && deviceId) {
+    const rec = identity.getRecord(deviceId);
     if (rec && rec.ips) {
       let best = null,
         bestN = -1;
@@ -999,9 +1157,9 @@ function resolveOfflineTarget(targetUserId) {
   }
   return {
     ip: ip || null,
-    name: lk.name || null,
-    role: lk.role || null,
-    deviceId: lk.deviceId || null,
+    name: (seen && seen.name) || (lk && lk.name) || null,
+    role: seen ? seen.role || null : (lk && lk.role) || null,
+    deviceId,
   };
 }
 
@@ -1032,11 +1190,19 @@ function buildReportsList(view) {
       targetIp = off?.ip || targetIp;
       targetDeviceId = off?.deviceId || targetDeviceId;
     }
+    const rows = reports.forTarget(s.targetKey);
+    let location = null;
+    for (let i = rows.length - 1; i >= 0; i--)
+      if (rows[i].targetLocation) {
+        location = rows[i].targetLocation;
+        break;
+      }
     return {
       targetUserId: s.targetKey,
       targetDeviceId,
       ip: showIp ? targetIp : undefined,
       name: name || "(unknown user)",
+      location,
       total: s.total,
       distinct: s.distinct,
       categories: s.categories,
@@ -1045,8 +1211,8 @@ function buildReportsList(view) {
       canBanOffline,
       first: s.first,
       last: s.last,
-      reasons: reports
-        .forTarget(s.targetKey)
+      reasons: rows
+        .slice()
         .reverse()
         .map((r) => ({
           category: r.category,
@@ -1056,6 +1222,7 @@ function buildReportsList(view) {
           targetText: showIp
             ? r.targetText || null
             : audit.maskIps(r.targetText || null),
+          targetTextWiped: !!r.targetTextWiped,
         })),
     };
   });
@@ -1148,7 +1315,7 @@ function buildAppealsList(view) {
 function broadcastAppealsList() {
   if (!io()) return;
   for (const [, s] of io().sockets.sockets)
-    if (s.isModLog && (s.isDev || (s.isMod && (s.modLevel || 2) >= 2)))
+    if (s.isModLog && (s.isDev || (s.isMod && (s.modLevel || 1) >= 2)))
       s.emit("staff appeals", buildAppealsList(roles.viewFor(s)));
 }
 
@@ -1170,7 +1337,7 @@ function buildSuggestionsList(view) {
 function broadcastSuggestionsList() {
   if (!io()) return;
   for (const [, s] of io().sockets.sockets)
-    if (s.isModLog && (s.isDev || (s.isMod && (s.modLevel || 2) >= 2)))
+    if (s.isModLog && (s.isDev || (s.isMod && (s.modLevel || 1) >= 2)))
       s.emit("staff suggestions", buildSuggestionsList(roles.viewFor(s)));
 }
 
@@ -1178,7 +1345,7 @@ function broadcastSuggestionsList() {
 function boardRole(socket) {
   if (socket.isMainDev) return "user";
   if (socket.isDev) return "dev";
-  if (socket.isMod) return (socket.modLevel || 2) >= 2 ? "mod" : "jr";
+  if (socket.isMod) return (socket.modLevel || 1) >= 2 ? "mod" : "jr";
   return "user";
 }
 
@@ -1278,7 +1445,7 @@ function announceAppealMessage(id) {
   if (!a || !io()) return;
   const text = `${a.name || "A banned user"} replied to their appeal.`;
   for (const [, s] of io().sockets.sockets)
-    if (s.isDev || (s.isMod && (s.modLevel || 2) >= 2))
+    if (s.isDev || (s.isMod && (s.modLevel || 1) >= 2))
       s.emit("staff notice", { text });
 }
 
@@ -1288,7 +1455,7 @@ function broadcastAppeal(id) {
   if (!a) return;
   for (const [, s] of io().sockets.sockets) {
     if (!s.connected || s.deskAppealId !== id) continue;
-    if (!(s.isDev || (s.isMod && (s.modLevel || 2) >= 2))) continue;
+    if (!(s.isDev || (s.isMod && (s.modLevel || 1) >= 2))) continue;
     s.emit(
       "staff appeal",
       buildAppealsList(roles.viewFor(s)).find((x) => x.id === id),
@@ -1357,7 +1524,7 @@ function sendAppsList(s) {
 function broadcastAppsList() {
   if (!io()) return;
   for (const [, s] of io().sockets.sockets)
-    if (s.isDev || (s.isMod && (s.modLevel || 2) >= 2)) sendAppsList(s);
+    if (s.isDev || (s.isMod && (s.modLevel || 1) >= 3)) sendAppsList(s);
 }
 
 function broadcastApplicationsState() {
@@ -1369,7 +1536,7 @@ function broadcastApplicationsState() {
 function broadcastReportsList() {
   if (!io()) return;
   for (const [, s] of io().sockets.sockets)
-    if (s.isModLog && (s.isDev || (s.isMod && (s.modLevel || 2) >= 2)))
+    if (s.isModLog && (s.isDev || s.isMod))
       s.emit("staff reports", buildReportsList(roles.viewFor(s)));
 }
 
@@ -1382,14 +1549,14 @@ function clearReportAfterAction(socket, targetUserId) {
 function broadcastBlockList() {
   if (!io()) return;
   for (const [, s] of io().sockets.sockets)
-    if (s.isModLog && (s.isDev || (s.isMod && (s.modLevel || 2) >= 2)))
+    if (s.isModLog && (s.isDev || (s.isMod && (s.modLevel || 1) >= 2)))
       s.emit("dev blocks", buildBlockList(roles.viewFor(s)));
 }
 
 function broadcastBanHistory() {
   if (!io()) return;
   for (const [, s] of io().sockets.sockets)
-    if (s.isModLog && (s.isDev || (s.isMod && (s.modLevel || 2) >= 2)))
+    if (s.isModLog && (s.isDev || (s.isMod && (s.modLevel || 1) >= 2)))
       s.emit("staff ban history", buildBanHistory(roles.viewFor(s)));
   try {
     staffchat.pushBans();
@@ -1736,7 +1903,7 @@ function formatUserForSocket(user, recipientSocket) {
     if (user.isHidden) formatted.isHidden = true;
   } else if (user.isMod) {
     formatted.isMod = true;
-    formatted.modLevel = user.modLevel || 2;
+    formatted.modLevel = user.modLevel || 1;
     if (user.devColor && !user.isHidden) formatted.devColor = user.devColor;
     if (user.isHidden) formatted.isHidden = true;
   }
@@ -1760,7 +1927,7 @@ function spectatePayload(socket, room) {
     userId: socket.handshake?.session?.userId || null,
     isDev: !!socket.isDev,
     isMod: !!socket.isMod,
-    modLevel: socket.isMod ? socket.modLevel || 2 : 0,
+    modLevel: socket.isMod ? socket.modLevel || 1 : 0,
     locked: !!room.locked,
     slowMode: !!room.slowMode,
     spotlight: !!room.spotlight,
@@ -2433,6 +2600,7 @@ async function processPendingChatUpdates(userId, socket) {
     }
 
     msg = sanitizeMessage(msg);
+    noteBufferShrink(userId, state.userMessageBuffers.get(userId) || "", msg);
     state.userMessageBuffers.set(userId, msg);
 
     if (linkfilter.containsLink(msg)) armLinkSweep(socket, userId);
@@ -2705,7 +2873,7 @@ function joinRoom(socket, roomId, userId) {
       isDev: !!socket.isDev,
       isMainDev: !!socket.isMainDev,
       isMod: !!socket.isMod,
-      modLevel: socket.isMod ? socket.modLevel || 2 : undefined,
+      modLevel: socket.isMod ? socket.modLevel || 1 : undefined,
       isHidden: !!socket.isHidden,
       isVanished: !!socket.isVanished,
       silenced: !!(socket.deviceId && identity.isSilenced(socket.deviceId)),
@@ -2777,7 +2945,7 @@ function emitJoinSuccess(socket, room, userId, username, location) {
     isDev: !!socket.isDev,
     isMainDev: !!socket.isMainDev,
     isMod: !!socket.isMod,
-    modLevel: socket.isMod ? socket.modLevel || 2 : undefined,
+    modLevel: socket.isMod ? socket.modLevel || 1 : undefined,
     isHidden: !!socket.isHidden,
     isVanished: !!socket.isVanished,
   };
@@ -2791,7 +2959,7 @@ function emitJoinSuccess(socket, room, userId, username, location) {
     location,
     isDev: !!socket.isDev,
     isMod: !!socket.isMod,
-    modLevel: socket.isMod ? socket.modLevel || 2 : 0,
+    modLevel: socket.isMod ? socket.modLevel || 1 : 0,
     isHidden: !!socket.isHidden,
     isVanished: !!socket.isVanished,
     roomName: room.name,
@@ -2883,7 +3051,12 @@ function registerSocketHandlers(opts) {
       let role = null;
       if (!concealed && u.isDev) role = "dev";
       else if (!concealed && u.isMod)
-        role = (u.modLevel || 2) >= 2 ? "mod" : "jr";
+        role =
+          (u.modLevel || 1) >= 3
+            ? "lead"
+            : (u.modLevel || 1) >= 2
+              ? "mod"
+              : "jr";
       return {
         userId,
         username: u.username,
@@ -2969,16 +3142,16 @@ function registerSocketHandlers(opts) {
   io().on("connection", (socket) => {
     const clientIp = socket.clientIp || socket.handshake.address;
 
-    let slotReleased = false;
-    const releaseSlot = () => {
-      if (slotReleased || !socket.clientIp) return;
-      slotReleased = true;
-      const c = state.ipConnections.get(socket.clientIp) || 0;
-      if (c > 1) state.ipConnections.set(socket.clientIp, c - 1);
-      else state.ipConnections.delete(socket.clientIp);
-    };
-    socket.on("disconnect", releaseSlot);
+    // The slot itself is released by the engine-close hook in server.js
+    // (socket.releaseIpSlot, idempotent); this is the belt to that brace.
     socket.on("disconnect", () => {
+      if (socket.releaseIpSlot) socket.releaseIpSlot();
+    });
+    socket.on("disconnect", () => {
+      // Stamp the key's last-seen so it reflects the end of the session,
+      // not just the moment they connected.
+      const keyHash = socket.isDev ? socket.devKeyHash : socket.modKeyHash;
+      if (keyHash) roles.touchKeyUse(keyHash, socket.clientIp);
       if (!socket.keyWatchHash) return;
       const hash = socket.keyWatchHash;
       keywatch.leave(hash, socket.id);
@@ -3002,6 +3175,8 @@ function registerSocketHandlers(opts) {
     socket.deviceType = deviceTypeFromUA(
       socket.handshake.headers["user-agent"],
     );
+
+    noteLastSeen(socket);
 
     try {
       if (socket.deviceId) {
@@ -3037,6 +3212,18 @@ function registerSocketHandlers(opts) {
             for (const w of queuedWarnings)
               socket.emit("staff warning", { message: w.message });
           }, 1500);
+      }
+
+      // They came back holding a revoked key: tell them why it was pulled.
+      if (socket.formerModNotice && !socket.isDev && !socket.isMod) {
+        const n = socket.formerModNotice;
+        setTimeout(() => {
+          socket.emit("staff revoked notice", {
+            label: n.label,
+            reason: n.reason,
+            removedAt: n.removedAt,
+          });
+        }, 1500);
       }
 
       if (socket.deviceId && !socket.isDev && !socket.isMod) {
@@ -3230,7 +3417,7 @@ function registerSocketHandlers(opts) {
             isBot: !!socket.isBot,
             isDev: !!socket.isDev,
             isMod: !!socket.isMod,
-            modLevel: socket.isMod ? socket.modLevel || 2 : 0,
+            modLevel: socket.isMod ? socket.modLevel || 1 : 0,
             isHidden: !!socket.isHidden,
           });
           socket.join("lobby");
@@ -3248,7 +3435,7 @@ function registerSocketHandlers(opts) {
             isBot: !!socket.isBot,
             isDev: !!socket.isDev,
             isMod: !!socket.isMod,
-            modLevel: socket.isMod ? socket.modLevel || 2 : 0,
+            modLevel: socket.isMod ? socket.modLevel || 1 : 0,
           });
         }
       }),
@@ -3341,6 +3528,17 @@ function registerSocketHandlers(opts) {
 
         let username = enforceUsernameLimit(sanitizeName(data.username));
         let location = enforceLocationLimit(sanitizeName(data.location || ""));
+        // Location is always filled in: blank means the classic default, and
+        // anything typed needs at least 3 characters, same as usernames.
+        if (!location.trim()) location = "On The Web";
+        if (location.trim().length < 3)
+          return socket.emit(
+            "error",
+            createErrorResponse(
+              ERROR_CODES.VALIDATION_ERROR,
+              "Locations need at least 3 characters. Leave it blank for On The Web.",
+            ),
+          );
 
         if (!username) {
           return socket.emit(
@@ -3392,8 +3590,8 @@ function registerSocketHandlers(opts) {
             ),
           );
         if (
-          linkfilter.containsLink(username) ||
-          linkfilter.containsLink(location)
+          linkfilter.containsLink(username, true) ||
+          linkfilter.containsLink(location, true)
         )
           return socket.emit(
             "error",
@@ -3481,6 +3679,7 @@ function registerSocketHandlers(opts) {
 
         if (socket.deviceId)
           identity.setName(socket.deviceId, username, location);
+        noteLastSeen(socket);
         if (reports.isTarget(userId)) broadcastReportsList();
 
         if (socket.isDev) {
@@ -3498,7 +3697,7 @@ function registerSocketHandlers(opts) {
           isBot: !!socket.isBot,
           isDev: !!socket.isDev,
           isMod: !!socket.isMod,
-          modLevel: socket.isMod ? socket.modLevel || 2 : 0,
+          modLevel: socket.isMod ? socket.modLevel || 1 : 0,
           isHidden: !!socket.isHidden,
           avatar,
         });
@@ -3731,7 +3930,7 @@ function registerSocketHandlers(opts) {
             "error",
             createErrorResponse(
               ERROR_CODES.FORBIDDEN,
-              "Only a developer can take another staff member off the board.",
+              "Only an admin can take another staff member off the board.",
             ),
           );
 
@@ -4286,7 +4485,7 @@ function registerSocketHandlers(opts) {
               "Room name cannot contain an IP address.",
             ),
           );
-        if (linkfilter.containsLink(roomName))
+        if (linkfilter.containsLink(roomName, true))
           return socket.emit(
             "error",
             createErrorResponse(
@@ -4393,7 +4592,7 @@ function registerSocketHandlers(opts) {
           userId = socket.handshake.sessionID;
           socket.handshake.session.userId = userId;
         }
-        location = location || "";
+        location = location || "On The Web";
 
         if (!socket.isDev && !socket.isMod) {
           const cur = getOwnCurrentRoom(userId);
@@ -4485,6 +4684,9 @@ function registerSocketHandlers(opts) {
             target.emit("kicked");
             if (!room.bannedUserIds) room.bannedUserIds = new Set();
             room.bannedUserIds.add(data.targetUserId);
+            // Their bot goes with them; the room ban on their user id also
+            // stops them deploying another one here (checked at deploy).
+            bots.evictOwner(data.targetUserId, roomId);
             await leaveRoom(target, data.targetUserId);
           } else if (
             bots.isActiveBot(data.targetUserId) ||
@@ -4537,6 +4739,7 @@ function registerSocketHandlers(opts) {
         }
         user.isAfk = isAfk;
         emitRoomAfkUpdate(socket, userId, isAfk);
+        updateLobby();
       }),
     );
 
@@ -4993,14 +5196,6 @@ function registerSocketHandlers(opts) {
         };
         let ms;
         if (duration === "permanent") {
-          if (!socket.isDev)
-            return socket.emit(
-              "error",
-              createErrorResponse(
-                ERROR_CODES.FORBIDDEN,
-                "Only devs can place permanent IP blocks.",
-              ),
-            );
           ms = Infinity;
         } else if (DURATIONS[duration] !== undefined) {
           ms = DURATIONS[duration];
@@ -5009,8 +5204,7 @@ function registerSocketHandlers(opts) {
             "error",
             createErrorResponse(
               ERROR_CODES.BAD_REQUEST,
-              "Invalid duration. Use 1h, 24h, 7d" +
-                (socket.isDev ? ", or permanent." : "."),
+              "Invalid duration. Use 1h, 24h, 7d, or permanent.",
             ),
           );
         }
@@ -5033,10 +5227,10 @@ function registerSocketHandlers(opts) {
               "error",
               createErrorResponse(
                 ERROR_CODES.NOT_FOUND,
-                "No IP on file for this user. They need to be reported at least once while online before an offline block is possible.",
+                "No address on file for this user. They have not been seen in the last 30 days, so there is nothing to block.",
               ),
             );
-          if (off.role === "dev" || (off.role === "mod" && !socket.isDev))
+          if (off.role === "dev" || (off.role && !socket.isDev))
             return socket.emit(
               "error",
               createErrorResponse(
@@ -5067,7 +5261,7 @@ function registerSocketHandlers(opts) {
             "error",
             createErrorResponse(
               ERROR_CODES.FORBIDDEN,
-              "This user is already covered by a permanent block. Only a developer can change that block.",
+              "This user is already covered by a permanent block. Only an admin can change that block.",
             ),
           );
 
@@ -5164,19 +5358,13 @@ function registerSocketHandlers(opts) {
         const DURATIONS = { "1h": 3600000, "24h": 86400000, "7d": 604800000 };
         let ms;
         if (duration === "permanent") {
-          if (!socket.isDev)
-            return fail(
-              ERROR_CODES.FORBIDDEN,
-              "Only devs can place permanent IP blocks.",
-            );
           ms = Infinity;
         } else if (DURATIONS[duration] !== undefined) {
           ms = DURATIONS[duration];
         } else {
           return fail(
             ERROR_CODES.BAD_REQUEST,
-            "Invalid duration. Use 1h, 24h, 7d" +
-              (socket.isDev ? ", or permanent." : "."),
+            "Invalid duration. Use 1h, 24h, 7d, or permanent.",
           );
         }
         const expiry =
@@ -5207,7 +5395,7 @@ function registerSocketHandlers(opts) {
             if (parsed.broad && !socket.isDev)
               return fail(
                 ERROR_CODES.FORBIDDEN,
-                `${entry} is wider than a /${parsed.v4 ? ipban.BROAD_IPV4_PREFIX : ipban.BROAD_IPV6_PREFIX}. Only devs can block a range that size.`,
+                `${entry} is wider than a /${parsed.v4 ? ipban.BROAD_IPV4_PREFIX : ipban.BROAD_IPV6_PREFIX}. Only admins can block a range that size.`,
               );
             key = parsed.key;
             range = ipban.isRangeKey(key);
@@ -5233,7 +5421,7 @@ function registerSocketHandlers(opts) {
           if (!socket.isDev && ipban.isPermanentBlock(covering))
             return fail(
               ERROR_CODES.FORBIDDEN,
-              `${entry} is already covered by a permanent block. Only a developer can change that block.`,
+              `${entry} is already covered by a permanent block. Only an admin can change that block.`,
             );
           const idRec = did ? identity.getRecord(did) : null;
           targets.push({
@@ -5815,7 +6003,7 @@ function registerSocketHandlers(opts) {
               "Room name cannot contain an IP address.",
             ),
           );
-        if (linkfilter.containsLink(roomName))
+        if (linkfilter.containsLink(roomName, true))
           return socket.emit(
             "error",
             createErrorResponse(
@@ -6027,6 +6215,16 @@ function registerSocketHandlers(opts) {
               "You can only spectate public rooms.",
             ),
           );
+        // Voted out means out: watching the room would defeat the kick.
+        const specUserId = socket.handshake.session?.userId;
+        if (!staff && specUserId && room.bannedUserIds?.has(specUserId))
+          return socket.emit(
+            "error",
+            createErrorResponse(
+              ERROR_CODES.FORBIDDEN,
+              "You were removed from this room, so you cannot watch it either.",
+            ),
+          );
         if (socket.roomId && !socket.spectating)
           return socket.emit(
             "error",
@@ -6169,7 +6367,7 @@ function registerSocketHandlers(opts) {
         let deviceId = null;
         for (const s of targets) if (s.deviceId) deviceId = s.deviceId;
         if (!deviceId) {
-          const lk = reports.lastKnown(targetUserId);
+          const lk = resolveOfflineTarget(targetUserId);
           deviceId = (lk && lk.deviceId) || null;
         }
         if (!deviceId)
@@ -6486,6 +6684,7 @@ function registerSocketHandlers(opts) {
       "dev list blocks",
       safe(async () => {
         if (!requireStaff(socket)) return;
+        if (!requireModLevel(socket, 2)) return;
         socket.emit("dev blocks", buildBlockList(roles.viewFor(socket)));
       }),
     );
@@ -6494,6 +6693,7 @@ function registerSocketHandlers(opts) {
       "staff get ban history",
       safe(async () => {
         if (!requireStaff(socket)) return;
+        if (!requireModLevel(socket, 2)) return;
         socket.emit("staff ban history", buildBanHistory(roles.viewFor(socket)));
       }),
     );
@@ -6502,6 +6702,7 @@ function registerSocketHandlers(opts) {
       "dev get sessions",
       safe(async () => {
         if (!requireStaff(socket)) return;
+        if (!requireModLevel(socket, 3)) return;
         const byKey = new Map();
         for (const [, s] of io().sockets.sockets) {
           if (!s.isDev && !s.isMod) continue;
@@ -6557,6 +6758,7 @@ function registerSocketHandlers(opts) {
     socket.on(
       "dev unblock ip",
       safe(async (data) => {
+        if (!requireStaff(socket)) return;
         if (!requireModLevel(socket, 2)) return;
         let ip = typeof data?.ip === "string" ? data.ip.trim() : "";
         if (!ip && typeof data?.ref === "string") ip = ipForBanRef(data.ref);
@@ -6571,7 +6773,7 @@ function registerSocketHandlers(opts) {
             "error",
             createErrorResponse(
               ERROR_CODES.FORBIDDEN,
-              "That block is permanent. Only a developer can lift it.",
+              "That block is permanent. Only an admin can lift it.",
             ),
           );
         const blockedName =
@@ -6709,13 +6911,21 @@ function registerSocketHandlers(opts) {
     socket.on(
       "dev grant mod",
       safe(async (data) => {
-        if (!requireDev(socket)) return;
+        if (!requireModLevel(socket, 3)) return;
         const label = typeof data?.label === "string" ? data.label : "mod";
-        const level = data?.level === 1 ? 1 : 2;
+        const wanted = Math.floor(Number(data?.level));
+        // Leaders mint junior keys only; devs pick any level.
+        const level = !socket.isDev
+          ? 1
+          : wanted >= 3
+            ? 3
+            : wanted === 2
+              ? 2
+              : 1;
         const granted = await roles.grantModKey(
           label,
           level,
-          socket.staffLabel || "dev",
+          socket.staffLabel || (socket.isDev ? "dev" : "mod"),
         );
         logStaff(
           socket,
@@ -6729,11 +6939,7 @@ function registerSocketHandlers(opts) {
           label: granted.label,
           level: granted.level,
         });
-        socket.emit("dev mod keys", roles.listModKeys(roles.viewFor(socket)));
-        socket.emit(
-          "dev former mods",
-          roles.listFormerMods(roles.viewFor(socket)),
-        );
+        broadcastModKeyLists();
         staffchat.rosterDirty();
       }),
     );
@@ -6741,13 +6947,24 @@ function registerSocketHandlers(opts) {
     socket.on(
       "dev revoke mod",
       safe(async (data) => {
-        if (!requireDev(socket)) return;
+        if (!requireModLevel(socket, 3)) return;
         const hash = typeof data?.hash === "string" ? data.hash : "";
         if (!hash)
           return socket.emit(
             "error",
             createErrorResponse(ERROR_CODES.BAD_REQUEST, "hash required."),
           );
+        if (!socket.isDev) {
+          const key = roles.getModKeyByHash(hash);
+          if (!key || (key.level || 1) >= 3)
+            return socket.emit(
+              "error",
+              createErrorResponse(
+                ERROR_CODES.FORBIDDEN,
+                "Only an admin can remove a mod leader.",
+              ),
+            );
+        }
         const reason = String(data?.reason || "")
           .trim()
           .slice(0, 300);
@@ -6761,7 +6978,7 @@ function registerSocketHandlers(opts) {
           );
         const ok = await roles.revokeModKey(hash, {
           reason,
-          by: socket.staffLabel || "dev",
+          by: socket.staffLabel || (socket.isDev ? "dev" : "mod"),
         });
         if (ok) {
           for (const [, s] of io().sockets.sockets) {
@@ -6780,16 +6997,12 @@ function registerSocketHandlers(opts) {
                   updateLobby();
                 }
               }
-              s.emit("staff revoked", {});
+              s.emit("staff revoked", { reason });
             }
           }
         }
         logStaff(socket, "revoke mod", hash.slice(0, 8), "-");
-        socket.emit("dev mod keys", roles.listModKeys(roles.viewFor(socket)));
-        socket.emit(
-          "dev former mods",
-          roles.listFormerMods(roles.viewFor(socket)),
-        );
+        broadcastModKeyLists();
         staffchat.rosterDirty();
         socket.emit("staff action result", {
           action: "revoke mod",
@@ -6803,41 +7016,34 @@ function registerSocketHandlers(opts) {
       "dev list mod keys",
       safe(async () => {
         if (!requireStaff(socket)) return;
-        const keys = roles.listModKeys(roles.viewFor(socket));
-        socket.emit(
-          "dev mod keys",
-          socket.isDev
-            ? keys
-            : keys.map((k) => ({
-                ...k,
-                hash: String(k.hash || "").slice(0, 8),
-              })),
-        );
-        const former = roles.listFormerMods(roles.viewFor(socket));
-        socket.emit(
-          "dev former mods",
-          socket.isDev
-            ? former
-            : former.map((f) => ({
-                ...f,
-                hash: String(f.hash || "").slice(0, 8),
-              })),
-        );
+        sendModKeyLists(socket);
       }),
     );
 
-    // ── Promote / demote a mod's level by key hash (dev only) ───────────
+    // ── Promote / demote a mod's level by key hash (leader+; L3 keys dev) ──
     socket.on(
       "dev set mod level",
       safe(async (data) => {
-        if (!requireDev(socket)) return;
+        if (!requireModLevel(socket, 3)) return;
         const hash = typeof data?.hash === "string" ? data.hash : "";
-        const level = data?.level === 1 ? 1 : 2;
+        const wanted = Math.floor(Number(data?.level));
+        const level = wanted >= 3 ? 3 : wanted === 2 ? 2 : 1;
         if (!hash)
           return socket.emit(
             "error",
             createErrorResponse(ERROR_CODES.BAD_REQUEST, "hash required."),
           );
+        if (!socket.isDev) {
+          const key = roles.getModKeyByHash(hash);
+          if (!key || (key.level || 1) >= 3 || level >= 3)
+            return socket.emit(
+              "error",
+              createErrorResponse(
+                ERROR_CODES.FORBIDDEN,
+                "Mod leader levels are an admin decision.",
+              ),
+            );
+        }
         const newLevel = await roles.setModLevel(hash, level);
         if (newLevel == null)
           return socket.emit(
@@ -6861,7 +7067,7 @@ function registerSocketHandlers(opts) {
           }
         }
         logStaff(socket, `set mod level L${newLevel}`, hash.slice(0, 8), "-");
-        socket.emit("dev mod keys", roles.listModKeys(roles.viewFor(socket)));
+        broadcastModKeyLists();
         staffchat.rosterDirty();
         socket.emit("staff action result", {
           action: "set mod level",
@@ -6872,13 +7078,14 @@ function registerSocketHandlers(opts) {
       }),
     );
 
-    // ── Promote / demote a connected user by userId (dev only) ──────────
+    // ── Promote / demote a connected user by userId (leader+; L3 dev) ───
     socket.on(
       "dev set mod level for user",
       safe(async (data) => {
-        if (!requireDev(socket)) return;
+        if (!requireModLevel(socket, 3)) return;
         const targetUserId = data?.targetUserId;
-        const level = data?.level === 1 ? 1 : 2;
+        const wanted = Math.floor(Number(data?.level));
+        const level = wanted >= 3 ? 3 : wanted === 2 ? 2 : 1;
         if (!targetUserId)
           return socket.emit(
             "error",
@@ -6899,6 +7106,27 @@ function registerSocketHandlers(opts) {
               "That user is not a moderator.",
             ),
           );
+        if (!socket.isDev) {
+          if (level >= 3)
+            return socket.emit(
+              "error",
+              createErrorResponse(
+                ERROR_CODES.FORBIDDEN,
+                "Mod leader levels are an admin decision.",
+              ),
+            );
+          for (const hash of hashes) {
+            const key = roles.getModKeyByHash(hash);
+            if (!key || (key.level || 1) >= 3)
+              return socket.emit(
+                "error",
+                createErrorResponse(
+                  ERROR_CODES.FORBIDDEN,
+                  "Mod leader levels are an admin decision.",
+                ),
+              );
+          }
+        }
         let applied = 0;
         for (const hash of hashes) {
           const newLevel = await roles.setModLevel(hash, level);
@@ -6930,7 +7158,7 @@ function registerSocketHandlers(opts) {
           targetUser || { id: targetUserId },
           room || "-",
         );
-        socket.emit("dev mod keys", roles.listModKeys(roles.viewFor(socket)));
+        broadcastModKeyLists();
         staffchat.rosterDirty();
         socket.emit("staff action result", {
           action: "set mod level",
@@ -6955,7 +7183,7 @@ function registerSocketHandlers(opts) {
             showIp: !!socket.isMainDev,
             showAll: !!socket.isMainDev,
             isDev: !!socket.isDev,
-            modLevel: socket.modLevel || 2,
+            modLevel: socket.modLevel || 1,
             since: weekStart,
           }),
           dayStart: days[days.length - 1],
@@ -6963,7 +7191,7 @@ function registerSocketHandlers(opts) {
           me: {
             role: socket.isDev ? "dev" : "mod",
             label: socket.staffLabel || null,
-            modLevel: socket.isDev ? 0 : socket.modLevel || 2,
+            modLevel: socket.isDev ? 0 : socket.modLevel || 1,
             mainDev: !!socket.isMainDev,
           },
           roster: {
@@ -6984,22 +7212,16 @@ function registerSocketHandlers(opts) {
       "staff get mod history",
       safe(async (data) => {
         if (!requireStaff(socket)) return;
-        if (!socket.isMainDev) return;
+        if (!requireModLevel(socket, 3)) return;
         const label = typeof data?.label === "string" ? data.label : "";
         const role = data?.role === "dev" ? "dev" : "mod";
-        const h = audit.historyFor(label, role, {
+        if (!canViewModRecord(socket, label, role)) return;
+        emitModHistory(socket, label, role, {
           offset: data?.offset,
           limit: data?.limit,
           group: typeof data?.group === "string" ? data.group : null,
           targetUid:
             typeof data?.targetUid === "string" ? data.targetUid : null,
-        });
-        socket.emit("staff mod history", {
-          ...h,
-          canReview: !!socket.isDev,
-          entries: socket.isMainDev
-            ? h.entries
-            : h.entries.map(audit.redactEntry),
         });
       }),
     );
@@ -7007,11 +7229,13 @@ function registerSocketHandlers(opts) {
     socket.on(
       "staff review flag",
       safe(async (data) => {
-        if (!socket.isMainDev) return;
+        if (!requireStaff(socket)) return;
+        if (!requireModLevel(socket, 3)) return;
         const label = typeof data?.label === "string" ? data.label : "";
         const key = typeof data?.key === "string" ? data.key : "";
         const role = data?.role === "dev" ? "dev" : "mod";
         if (!label || !key) return;
+        if (!canViewModRecord(socket, label, role)) return;
         if (data?.clear) {
           audit.clearFlagReview({ role, label, key });
           logStaff(socket, "unreview flag", null, null, key + " on " + label);
@@ -7020,7 +7244,7 @@ function registerSocketHandlers(opts) {
             role,
             label,
             key,
-            by: socket.staffLabel || "dev",
+            by: socket.staffLabel || (socket.isDev ? "dev" : "mod"),
             note: data?.note,
           });
           logStaff(
@@ -7031,14 +7255,13 @@ function registerSocketHandlers(opts) {
             key + " on " + label + (data?.note ? ": " + data.note : ""),
           );
         }
-        const h = audit.historyFor(label, role, {
+        emitModHistory(socket, label, role, {
           offset: data?.offset,
           limit: data?.limit,
           group: typeof data?.group === "string" ? data.group : null,
           targetUid:
             typeof data?.targetUid === "string" ? data.targetUid : null,
         });
-        socket.emit("staff mod history", { ...h, canReview: true });
       }),
     );
 
@@ -7128,6 +7351,7 @@ function registerSocketHandlers(opts) {
       "staff get appeals",
       safe(async () => {
         if (!requireStaff(socket)) return;
+        if (!requireModLevel(socket, 2)) return;
         socket.emit("staff appeals", buildAppealsList(roles.viewFor(socket)));
       }),
     );
@@ -7175,7 +7399,7 @@ function registerSocketHandlers(opts) {
           {
             label: socket.staffLabel || (socket.isDev ? "dev" : "mod"),
             role: socket.isDev ? "dev" : "mod",
-            level: socket.isDev ? 0 : socket.modLevel || 2,
+            level: socket.isDev ? 0 : socket.modLevel || 1,
             avatar: av?.preset
               ? { preset: av.preset }
               : av && (av.id || av.discordId) && av.hash
@@ -7476,6 +7700,48 @@ function registerSocketHandlers(opts) {
           "board badges",
           suggestions.unreadFor(socket.deviceId || null, since),
         );
+      }),
+    );
+
+    // ── Allowed link domains (admin-managed) ───────────────────────────────
+    socket.on(
+      "dev link whitelist",
+      safe(async () => {
+        if (!requireDev(socket)) return;
+        socket.emit("dev link whitelist", { hosts: linkfilter.listAllowed() });
+      }),
+    );
+
+    socket.on(
+      "dev link whitelist add",
+      safe(async (data) => {
+        if (!requireDev(socket)) return;
+        const r = linkfilter.addAllowed(data?.host);
+        if (!r.ok)
+          return socket.emit(
+            "error",
+            createErrorResponse(
+              ERROR_CODES.VALIDATION_ERROR,
+              "That does not look like a domain. Enter one like youtube.com.",
+            ),
+          );
+        logStaff(socket, "allow link domain", r.host, "-");
+        socket.emit("dev link whitelist", { hosts: linkfilter.listAllowed() });
+      }),
+    );
+
+    socket.on(
+      "dev link whitelist remove",
+      safe(async (data) => {
+        if (!requireDev(socket)) return;
+        if (linkfilter.removeAllowed(data?.host))
+          logStaff(
+            socket,
+            "disallow link domain",
+            String(data?.host || "").slice(0, 253),
+            "-",
+          );
+        socket.emit("dev link whitelist", { hosts: linkfilter.listAllowed() });
       }),
     );
 
@@ -7911,10 +8177,16 @@ function registerSocketHandlers(opts) {
         const roomId = socket.roomId;
         const room = roomId ? state.rooms.get(roomId) : null;
         let targetName = null;
+        let targetLocation = null;
         let targetSocket = null;
         if (targetUserId) {
           const tu = room?.users.find((u) => u.id === targetUserId);
           targetName = tu?.username || null;
+          targetLocation =
+            tu?.location ||
+            findSocketsByUserId(targetUserId)[0]?.handshake?.session
+              ?.location ||
+            null;
           targetSocket = findSocketsByUserId(targetUserId)[0] || null;
         }
         if (!targetUserId || !targetName)
@@ -7926,24 +8198,37 @@ function registerSocketHandlers(opts) {
             ),
           );
         socket._lastReport = now;
-        const targetText = sanitizeMessage(
+        // Current box first; if they wiped it before the report landed, use
+        // what it said just before the wipe.
+        let targetText = sanitizeMessage(
           state.userMessageBuffers.get(targetUserId) || "",
         ).slice(0, 300);
+        let targetTextWiped = false;
+        if (targetText.trim().length < 3) {
+          const wiped = lastWipedText(targetUserId);
+          if (wiped) {
+            targetText = sanitizeMessage(wiped.text).slice(0, 300);
+            targetTextWiped = true;
+          }
+        }
         const reporter = socket.handshake.session?.username || "A user";
         const catLabel = REPORT_CATEGORIES[category];
         const roleOf = (s) =>
           s?.isDev
             ? "dev"
             : s?.isMod
-              ? (s.modLevel || 2) >= 2
-                ? "mod"
-                : "jr"
+              ? (s.modLevel || 1) >= 3
+                ? "lead"
+                : (s.modLevel || 1) >= 2
+                  ? "mod"
+                  : "jr"
               : null;
         const targetRole = roleOf(targetSocket);
         const byRole = roleOf(socket);
         const tally = reports.add({
           targetKey: targetUserId,
           targetName,
+          targetLocation,
           byDeviceId: socket.deviceId,
           byName: reporter,
           category,
@@ -7952,13 +8237,18 @@ function registerSocketHandlers(opts) {
           targetDeviceId: targetSocket?.deviceId || null,
           targetRole,
           targetText,
+          targetTextWiped,
         });
         const targetIsStaff = !!targetRole;
         const text =
           `${reporter} reported ${targetName}${targetIsStaff ? " (staff)" : ""} for ${catLabel}` +
           (reason ? `: ${reason}` : "") +
           `. ${tally.distinct} ${tally.distinct === 1 ? "person has" : "people have"} reported ${targetName} recently.` +
-          (targetText ? ` Their chat box read: "${targetText}"` : "");
+          (targetText
+            ? targetTextWiped
+              ? ` Their chat box read (wiped just before the report): "${targetText}"`
+              : ` Their chat box read: "${targetText}"`
+            : "");
         audit.recordNotification({
           kind: "report",
           text,
@@ -7972,7 +8262,7 @@ function registerSocketHandlers(opts) {
           byRole,
           targetRole,
           reports: tally.distinct || null,
-          minLevel: 2,
+          minLevel: 1,
           card: {
             ids: [targetUserId, targetSocket?.deviceId].filter(Boolean),
             by: reporter,
@@ -7980,10 +8270,12 @@ function registerSocketHandlers(opts) {
             target: targetName,
             targetRole,
             targetUserId,
+            location: targetLocation,
             deviceId: targetSocket?.deviceId || null,
             category: catLabel,
             reason: reason || null,
             quote: targetText || null,
+            quoteWiped: targetTextWiped || undefined,
             reports: tally.distinct || null,
             roomId: room ? room.id : null,
             roomName: room ? room.name : null,
@@ -8088,7 +8380,7 @@ function registerSocketHandlers(opts) {
           kind: "application",
           text: `New mod application from ${socket.handshake.session?.username || "a user"}`,
           by: socket.handshake.session?.username || null,
-          minLevel: 2,
+          minLevel: 3,
           card: {
             ids: [socket.deviceId].filter(Boolean),
             by: socket.handshake.session?.username || "a user",
@@ -8108,6 +8400,7 @@ function registerSocketHandlers(opts) {
       "mod applications list",
       safe(async () => {
         if (!requireStaff(socket)) return;
+        if (!requireModLevel(socket, 3)) return;
         sendAppsList(socket);
       }),
     );
@@ -8115,7 +8408,7 @@ function registerSocketHandlers(opts) {
     socket.on(
       "dev set applications open",
       safe(async (data) => {
-        if (!requireDev(socket)) return;
+        if (!requireModLevel(socket, 3)) return;
         await applications.setOpen(!!(data && data.open));
         logStaff(
           socket,
@@ -8134,7 +8427,7 @@ function registerSocketHandlers(opts) {
     socket.on(
       "mod application review",
       safe(async (data) => {
-        if (!requireModLevel(socket, 2)) return;
+        if (!requireModLevel(socket, 3)) return;
         const id = Number(data?.id);
         const decision = data?.decision;
         const reason =
@@ -8222,7 +8515,7 @@ function registerSocketHandlers(opts) {
       }),
     );
 
-    // ── Warn a reported user, online or offline (any staff) ─────────────
+    // ── Warn a user, online or offline (any staff) ──────────────────────
     socket.on(
       "staff warn user",
       safe(async (data) => {
@@ -8230,13 +8523,24 @@ function registerSocketHandlers(opts) {
         const targetUserId =
           typeof data?.targetUserId === "string" ? data.targetUserId : "";
         if (!targetUserId) return;
-        const lk = reports.lastKnown(targetUserId);
+        const lk = resolveOfflineTarget(targetUserId);
         const role = getUserStaffRole(targetUserId) || (lk && lk.role) || null;
-        if (!socket.isDev && role)
-          return socket.emit("staff action result", {
-            ok: false,
-            action: "warn (cannot act on staff)",
-          });
+        if (!socket.isDev && role) {
+          // Leaders may warn mods below leader level; nobody else warns staff.
+          let targetLvl = null;
+          for (const s of findSocketsByUserId(targetUserId))
+            if (s.isMod && !s.isDev)
+              targetLvl = Math.max(targetLvl || 0, s.modLevel || 1);
+          if (targetLvl == null)
+            targetLvl = role === "jr" ? 1 : role === "mod" ? 2 : 99;
+          const leaderCanWarn =
+            (socket.modLevel || 1) >= 3 && role !== "dev" && targetLvl < 3;
+          if (!leaderCanWarn)
+            return socket.emit("staff action result", {
+              ok: false,
+              action: "warn (cannot act on staff)",
+            });
+        }
         let message = sanitizeMessage(
           typeof data?.message === "string" ? data.message : "",
         ).slice(0, 1000);
@@ -8251,10 +8555,18 @@ function registerSocketHandlers(opts) {
         }
         const deviceId =
           (online[0] && online[0].deviceId) || (lk && lk.deviceId) || null;
-        if (!delivered && deviceId)
-          warnings.queue(deviceId, message, socket.staffLabel || null);
+        const queued = !delivered && !!deviceId;
+        if (queued) warnings.queue(deviceId, message, socket.staffLabel || null);
         const targetName =
           (lk && lk.name) || online[0]?.handshake?.session?.username || "user";
+        if (!delivered && !queued)
+          return socket.emit("staff action result", {
+            ok: false,
+            action:
+              "warn (no way to reach " +
+              targetName +
+              ": offline with no known device)",
+          });
         logStaff(
           socket,
           "warn",
@@ -8310,7 +8622,8 @@ function registerSocketHandlers(opts) {
       "dev grant mod to user",
       safe(async (data) => {
         if (!requireDev(socket)) return;
-        const grantLevel = data?.level === 1 ? 1 : 2;
+        const wantedGrant = Math.floor(Number(data?.level));
+        const grantLevel = wantedGrant >= 3 ? 3 : wantedGrant === 1 ? 1 : 2;
         const targetUserId = data?.targetUserId;
         if (!targetUserId)
           return socket.emit(
@@ -8375,17 +8688,16 @@ function registerSocketHandlers(opts) {
           targetUserId,
           level: granted.level,
         });
-        if (socket.isDev)
-          socket.emit("dev mod keys", roles.listModKeys(roles.viewFor(socket)));
+        broadcastModKeyLists();
         staffchat.rosterDirty();
       }),
     );
 
-    // ── Demote: revoke a connected user's mod key by userId (dev) ────────
+    // ── Demote: revoke a connected user's mod key by userId (leader+) ────
     socket.on(
       "dev revoke mod from user",
       safe(async (data) => {
-        if (!requireDev(socket)) return;
+        if (!requireModLevel(socket, 3)) return;
         const targetUserId = data?.targetUserId;
         if (!targetUserId)
           return socket.emit(
@@ -8407,6 +8719,18 @@ function registerSocketHandlers(opts) {
               "That user is not a moderator.",
             ),
           );
+        if (!socket.isDev)
+          for (const hash of hashes) {
+            const key = roles.getModKeyByHash(hash);
+            if (!key || (key.level || 1) >= 3)
+              return socket.emit(
+                "error",
+                createErrorResponse(
+                  ERROR_CODES.FORBIDDEN,
+                  "Only an admin can remove a mod leader.",
+                ),
+              );
+          }
         const reason = String(data?.reason || "")
           .trim()
           .slice(0, 300);
@@ -8442,7 +8766,7 @@ function registerSocketHandlers(opts) {
                   updateLobby();
                 }
               }
-              s.emit("staff revoked", {});
+              s.emit("staff revoked", { reason });
             }
           }
         }
@@ -8452,11 +8776,7 @@ function registerSocketHandlers(opts) {
           targetUser || { id: targetUserId },
           room || "-",
         );
-        socket.emit("dev mod keys", roles.listModKeys(roles.viewFor(socket)));
-        socket.emit(
-          "dev former mods",
-          roles.listFormerMods(roles.viewFor(socket)),
-        );
+        broadcastModKeyLists();
         staffchat.rosterDirty();
         socket.emit("staff action result", {
           action: "remove mod",
@@ -8487,6 +8807,7 @@ function registerSocketHandlers(opts) {
             socket.deviceId,
             Date.now() - (socket._idAt || Date.now()),
           );
+        noteLastSeen(socket);
         if (userId && reports.isTarget(userId))
           setTimeout(() => broadcastReportsList(), 150);
         if (userId) {
@@ -8506,7 +8827,7 @@ function registerSocketHandlers(opts) {
           }
           state.users.delete(userId);
         }
-        releaseSlot();
+        if (socket.releaseIpSlot) socket.releaseIpSlot();
         if (socket.isDev || socket.isMod) staffchat.presenceDirty();
         console.log(
           `Disconnected: "${username}" from "${location}" (${reason}) IP:${socket.clientIp}${socket.isBot ? " [BOT]" : ""}${socket.isDev ? " [DEV]" : ""}`,

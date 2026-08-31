@@ -1,5 +1,11 @@
 // server/linkfilter.js
-// Links are not shareable on Talkomatic.
+// Links are not shareable on Talkomatic, except for the admin-managed list of
+// allowed domains at the bottom of this file.
+
+const path = require("path");
+const fs = require("fs");
+const fsp = require("fs").promises;
+const { DATA_DIR } = require("./datadir");
 
 const SKIP =
   /[\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u3164\ufeff\uffa0\u180b-\u180e\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufe00-\ufe0f]/;
@@ -201,7 +207,12 @@ function phonyPort(m, scanned) {
   return /\s/.test(span);
 }
 
-function rangesIn(scanned, out, weak) {
+// strict is set for passes that rewrite the text before matching (spaces
+// removed, punctuation swapped for dots). Those rewrites manufacture
+// host-shaped strings out of ordinary prose - "the comment. Do /untarget"
+// collapses to "comment.do/untarget" - so a made-up TLD there cannot be
+// rescued by port/path evidence the way it can in the original text.
+function rangesIn(scanned, out, weak, strict) {
   const { text, map } = scanned;
   LINK.lastIndex = 0;
   let m;
@@ -225,8 +236,9 @@ function rangesIn(scanned, out, weak) {
       } else {
         if (/\d/.test(tld)) {
           if (!isTld(tld)) continue;
-        } else if (!TLD.has(tld) && !tld.startsWith("xn--") && !evidence)
-          continue;
+        } else if (!TLD.has(tld) && !tld.startsWith("xn--")) {
+          if (strict || !evidence) continue;
+        }
         if (/^\d+$/.test(labels) && !evidence) continue;
       }
     } else if (weak) continue;
@@ -252,7 +264,12 @@ function swapRanges(scanned, out) {
   if (!SWAP_SHAPE.test(scanned.text)) return;
   for (const ch of SWAPPABLE) {
     if (!scanned.text.includes(ch)) continue;
-    rangesIn({ ...scanned, text: scanned.text.split(ch).join(".") }, out);
+    rangesIn(
+      { ...scanned, text: scanned.text.split(ch).join(".") },
+      out,
+      false,
+      true,
+    );
   }
 }
 
@@ -358,7 +375,167 @@ function toldRanges(scanned, chars, out) {
   }
 }
 
-function findRanges(value) {
+// ── Allowed domains ─────────────────────────────────────────────────────────
+// Admin-managed hosts that may be shared in chat. Matching is exact on
+// purpose: youtube.com covers youtube.com and www.youtube.com and nothing
+// else - not other subdomains, and never youtube.com as a label inside
+// somebody else's host. Identity fields (names, locations, room names) pass
+// ignoreAllowed and keep blocking everything.
+
+const ALLOW_PATH = path.join(DATA_DIR, "link-whitelist.json");
+const HOST_OK =
+  /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
+const DOT_ALL = new RegExp(DOT, "gi");
+
+let allowedHosts = ["youtube.com"];
+let allowSaveTimer = null;
+
+function loadAllowed() {
+  try {
+    const arr = JSON.parse(fs.readFileSync(ALLOW_PATH, "utf8"));
+    if (Array.isArray(arr))
+      allowedHosts = arr.filter(
+        (h) => typeof h === "string" && h.length <= 253 && HOST_OK.test(h),
+      );
+  } catch (err) {
+    if (err.code !== "ENOENT")
+      console.error("Error loading link-whitelist.json:", err);
+  }
+}
+
+function saveAllowedSoon() {
+  if (allowSaveTimer) return;
+  allowSaveTimer = setTimeout(async () => {
+    allowSaveTimer = null;
+    try {
+      const tmp = ALLOW_PATH + ".tmp";
+      await fsp.writeFile(tmp, JSON.stringify(allowedHosts, null, 2), "utf8");
+      await fsp.rename(tmp, ALLOW_PATH);
+    } catch (e) {
+      console.error("link-whitelist save failed:", e);
+    }
+  }, 500);
+}
+
+// "https://www.YouTube.com/watch?v=x" typed into the admin form becomes
+// "youtube.com".
+function normalizeEntry(input) {
+  let s = String(input || "").trim().toLowerCase();
+  s = s.replace(/^[a-z][a-z0-9+.-]*:\/\//, "");
+  const cut = s.search(/[\/?#]/);
+  if (cut !== -1) s = s.slice(0, cut);
+  const at = s.lastIndexOf("@");
+  if (at !== -1) s = s.slice(at + 1);
+  s = s.replace(/:\d+$/, "").replace(/\.+$/, "");
+  if (s.startsWith("www.")) s = s.slice(4);
+  if (!s || s.length > 253 || !HOST_OK.test(s)) return null;
+  return s;
+}
+
+function listAllowed() {
+  return allowedHosts.slice();
+}
+
+function addAllowed(input) {
+  const host = normalizeEntry(input);
+  if (!host) return { ok: false };
+  if (!allowedHosts.includes(host)) {
+    allowedHosts.push(host);
+    allowedHosts.sort();
+    saveAllowedSoon();
+  }
+  return { ok: true, host };
+}
+
+function removeAllowed(input) {
+  const host = normalizeEntry(input);
+  if (!host) return false;
+  const i = allowedHosts.indexOf(host);
+  if (i === -1) return false;
+  allowedHosts.splice(i, 1);
+  saveAllowedSoon();
+  return true;
+}
+
+function hostAllowed(host) {
+  return (
+    allowedHosts.includes(host) ||
+    (host.startsWith("www.") && allowedHosts.includes(host.slice(4)))
+  );
+}
+
+// Splits normalized link text (lowercase, real dots, no spaces) into host and
+// tail, the way a browser would read it: scheme off the front, userinfo cut
+// at the last @ so "youtube.com@evil.com" resolves to evil.com, then an
+// optional numeric port. Null means it does not parse as one clean URL.
+function splitUrlish(text) {
+  const sm = /^[a-z][a-z0-9+.*-]{1,14}:\/\//.exec(text);
+  let host = sm ? text.slice(sm[0].length) : text;
+  let tail = "";
+  const cut = host.search(/[/?#:]/);
+  if (cut !== -1) {
+    tail = host.slice(cut);
+    host = host.slice(0, cut);
+  }
+  const at = host.lastIndexOf("@");
+  if (at !== -1) host = host.slice(at + 1);
+  if (tail.startsWith(":")) {
+    const pm = /^:\d{1,5}/.exec(tail);
+    if (!pm) return null;
+    tail = tail.slice(pm[0].length);
+    if (tail && !/^[/?#]/.test(tail)) return null;
+  }
+  return { host: host.replace(/\.+$/, ""), tail };
+}
+
+// A second host hiding in an allowed link's path or query - a redirector
+// target, "?q=evil.com" - keeps the whole thing blocked.
+function tailSmuggles(tail) {
+  LINK.lastIndex = 0;
+  let m;
+  while ((m = LINK.exec(tail)) !== null) {
+    if (m[0] === "") {
+      LINK.lastIndex++;
+      continue;
+    }
+    let host;
+    if (m[1]) {
+      const parts = splitUrlish(m[1].replace(/\s+/g, ""));
+      if (!parts) return true;
+      host = parts.host;
+    } else {
+      const tld = m[4] || "";
+      if (
+        !TLD.has(tld) &&
+        !tld.startsWith("xn--") &&
+        !(/\d/.test(tld) && isTld(tld))
+      )
+        continue;
+      host = (m[3] + "." + tld).replace(DOT_ALL, ".").replace(/\s+/g, "");
+    }
+    if (!hostAllowed(host)) return true;
+  }
+  return false;
+}
+
+// A flagged range passes only when the WHOLE range reads as one link to an
+// allowed host: [scheme://][user@]host[:port][/tail]. A host glued to prose
+// the parser cannot split, or anything extra inside the range, keeps it
+// blocked - blocked is the safe direction.
+function allowedRange(value, start, end) {
+  const text = scan(value.slice(start, end))
+    .text.replace(DOT_ALL, ".")
+    .replace(/\s+/g, "")
+    .replace(TRAILING, "");
+  const parts = splitUrlish(text);
+  if (!parts) return false;
+  if (!HOST_OK.test(parts.host) || !hostAllowed(parts.host)) return false;
+  return !parts.tail || !tailSmuggles(parts.tail);
+}
+
+loadAllowed();
+
+function findRanges(value, ignoreAllowed) {
   const found = [];
   if (!looksLikeLink(value)) return found;
   const loose = scan(value);
@@ -374,15 +551,16 @@ function findRanges(value) {
     rangesIn(spelled, extra);
     markerRange(spelled, extra);
   }
-  if (JUNK.test(loose.text)) rangesIn(stripJunk(loose), extra);
+  if (JUNK.test(loose.text)) rangesIn(stripJunk(loose), extra, false, true);
   if (SPACE.test(loose.text)) {
     rangesIn(tighten(loose), found);
     const closed = closeUp(loose);
-    rangesIn(closed, extra);
+    rangesIn(closed, extra, false, true);
     markerRange(closed, extra);
     swapRanges(closed, extra);
     toldRanges(closed, chars, extra);
-    if (JUNK.test(closed.text)) rangesIn(stripJunk(closed), extra);
+    if (JUNK.test(closed.text))
+      rangesIn(stripJunk(closed), extra, false, true);
   }
   for (const r of extra)
     if (!found.some((f) => r[0] < f[1] && f[0] < r[1])) found.push(r);
@@ -393,11 +571,12 @@ function findRanges(value) {
     if (last && r[0] <= last[1]) last[1] = Math.max(last[1], r[1]);
     else merged.push([r[0], r[1]]);
   }
-  return merged;
+  if (ignoreAllowed || !allowedHosts.length) return merged;
+  return merged.filter((r) => !allowedRange(value, r[0], r[1]));
 }
 
-function redact(value, label) {
-  const ranges = findRanges(value);
+function redact(value, label, ignoreAllowed) {
+  const ranges = findRanges(value, ignoreAllowed);
   if (!ranges.length) return value;
   const tag = label || DEFAULT_LABEL;
   let out = "";
@@ -410,8 +589,16 @@ function redact(value, label) {
   return out + value.slice(last);
 }
 
-function containsLink(value) {
-  return findRanges(value).length > 0;
+function containsLink(value, ignoreAllowed) {
+  return findRanges(value, ignoreAllowed).length > 0;
 }
 
-module.exports = { redact, containsLink, looksLikeLink, DEFAULT_LABEL };
+module.exports = {
+  redact,
+  containsLink,
+  looksLikeLink,
+  listAllowed,
+  addAllowed,
+  removeAllowed,
+  DEFAULT_LABEL,
+};

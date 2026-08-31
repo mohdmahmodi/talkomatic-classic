@@ -20,7 +20,10 @@ const CONFIG = {
     MAX_ROOM_CAPACITY: 5,
     BASE_MAX_ROOMS: 15,
     ROOM_SCALING_INCREMENT: 5,
-    MAX_CONNECTIONS_PER_IP: 8,
+    // Live sockets, not people: schools and carrier NAT put many users behind
+    // one address, and a frozen phone tab holds its slot until the ping
+    // timeout reaps it. 8 locked whole networks out of the lobby.
+    MAX_CONNECTIONS_PER_IP: 30,
     SOCKET_MAX_REQUESTS_WINDOW: 1,
     SOCKET_MAX_REQUESTS_PER_WINDOW: 75,
     CHAT_UPDATE_RATE_LIMIT: 500,

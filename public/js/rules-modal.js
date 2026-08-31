@@ -44,6 +44,7 @@
       "text-transform:uppercase;padding:2px 7px;border-radius:9px;white-space:nowrap;}",
       ".tkr-lvl-jr{background:rgba(171,71,188,.18);color:#ce93d8;}",
       ".tkr-lvl-full{background:rgba(0,188,212,.16);color:#4dd0e1;}",
+      ".tkr-lvl-leader{background:rgba(74,222,128,.16);color:#4ade80;}",
       ".tkr-empty{color:var(--tk-muted);text-align:center;padding:40px 0;font-size:14px;}",
       "@media (max-width:640px){.tkr-body,.tkr-why{margin-left:0;}}",
     ].join("");
@@ -148,12 +149,19 @@
       var top = el("div", "tkr-rule-top");
       top.appendChild(el("span", "tkr-num", String(i + 1) + "."));
       top.appendChild(el("span", "tkr-title", r.title || ""));
-      if (tab === "mod" && (r.level === "jr" || r.level === "full")) {
+      if (
+        tab === "mod" &&
+        (r.level === "jr" || r.level === "full" || r.level === "leader")
+      ) {
         top.appendChild(
           el(
             "span",
-            "tkr-lvl " + (r.level === "jr" ? "tkr-lvl-jr" : "tkr-lvl-full"),
-            r.level === "jr" ? "Jr mod" : "Full mod",
+            "tkr-lvl tkr-lvl-" + r.level,
+            r.level === "jr"
+              ? "Jr mod"
+              : r.level === "full"
+                ? "Full mod"
+                : "Mod leader",
           ),
         );
       }

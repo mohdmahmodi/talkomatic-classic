@@ -505,6 +505,18 @@ class Talkoboard {
     toolbar.appendChild(historyGroup);
     if (this.inspectBtn) toolbar.appendChild(modGroup);
 
+    // Everything that draws disappears while watching; pan, zoom, save and
+    // the staff inspector stay.
+    this.watchHide = [
+      this.penBtn,
+      this.eraserBtn,
+      shapeGroup,
+      areaGroup,
+      colorGroup,
+      sizeWrap,
+      historyGroup,
+    ];
+
     // ── Header right: save + zoom + close ───────────────────────────
     const headerRight = document.createElement("div");
     headerRight.className = "tb-header-right";
@@ -603,6 +615,16 @@ class Talkoboard {
 
     this.updateUndoRedoButtons();
     this.bindCanvasEvents();
+    this.setWatching(this.watching);
+  }
+
+  // Flips between drawing and read-only watching in place - the same board
+  // instance survives being moved to spectating (AFK) and joining back.
+  setWatching(on) {
+    this.watching = !!on;
+    for (const el of this.watchHide || [])
+      if (el) el.style.display = this.watching ? "none" : "";
+    if (this.watching) this.setTool("pan");
   }
 
   // ── Color panel ──────────────────────────────────────────────────
@@ -1081,6 +1103,11 @@ class Talkoboard {
   // ═══════════════════════════════════════════════════════════════════════════
 
   setTool(name) {
+    // Watching is read-only: pan (plus the staff inspector) is all there is.
+    // The server drops a spectator's strokes anyway; without this the canvas
+    // still drew them locally, which read as "spectators can draw".
+    if (this.watching && name !== "pan" && !(name === "inspect" && this.isStaff))
+      name = "pan";
     this.tool = name;
     this.panMode = name === "pan";
     this.eraser = name === "eraser";

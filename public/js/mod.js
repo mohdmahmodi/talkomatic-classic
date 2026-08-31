@@ -163,7 +163,7 @@
       color: "#ff9800",
       icon: "fa-bell",
       label:
-        "Inbox: reports, applications, and possible mod-abuse flags (full mods + devs)",
+        "Inbox: reports, appeals, applications, and abuse flags, each at the level that handles it",
     },
     other: {
       color: "#6b7080",
@@ -263,7 +263,12 @@
     if (row) parent.appendChild(row);
   }
 
-  const ROLE_CHIP = { dev: ["dev", "DEV"], mod: ["l2", "MOD"], jr: ["l1", "JR MOD"] };
+  const ROLE_CHIP = {
+    dev: ["dev", "ADMIN"],
+    lead: ["l3", "LEADER"],
+    mod: ["l2", "MOD"],
+    jr: ["l1", "JR MOD"],
+  };
   function whoWithRole(name, role, uid) {
     const wrap = span("whorole");
     wrap.appendChild(uid ? uref(String(name), uid) : span(null, String(name)));
@@ -275,7 +280,8 @@
     return wrap;
   }
   function staffLine(role) {
-    if (role === "dev") return "yes - developer";
+    if (role === "dev") return "yes - admin";
+    if (role === "lead") return "yes - mod leader";
     if (role === "mod") return "yes - full moderator";
     if (role === "jr") return "yes - junior moderator";
     if (role) return "yes - " + role;
@@ -777,6 +783,30 @@
     b.textContent = String(s.actionsAgainst);
     sum.appendChild(b);
     focusBar.appendChild(sum);
+    // Act straight from the trace: works whether they are online or long
+    // gone, and without anybody having reported them first.
+    const act = span("focus-actions");
+    const traced = {
+      targetUserId: focusUid,
+      name: s.names.length ? s.names[0] : null,
+      online: false,
+    };
+    const mkFocusBtn = (label, fa, fn) => {
+      const btn = document.createElement("button");
+      btn.className = "btn sm";
+      btn.appendChild(icon(fa));
+      btn.appendChild(document.createTextNode(" " + label));
+      btn.addEventListener("click", fn);
+      return btn;
+    };
+    act.appendChild(
+      mkFocusBtn("Warn", "fa-triangle-exclamation", () => warnReported(traced)),
+    );
+    if (viewerIsFullMod())
+      act.appendChild(
+        mkFocusBtn("IP block", "fa-ban", () => openReportBanMenu(traced)),
+      );
+    focusBar.appendChild(act);
     const clear = document.createElement("button");
     clear.className = "btn sm";
     clear.appendChild(icon("fa-xmark"));
@@ -1044,7 +1074,7 @@
     if (viewerIsFullMod()) {
       if (b.permanent && !isDev) {
         const lock = span("ibtn locked");
-        lock.title = "Permanent: only a developer can lift this";
+        lock.title = "Permanent: only an admin can lift this";
         lock.appendChild(icon("fa-lock"));
         row.appendChild(lock);
       } else {
@@ -1235,8 +1265,8 @@
         note.appendChild(
           document.createTextNode(
             held === 1
-              ? " 1 permanent block, dev-only to lift"
-              : ` ${held} permanent blocks, dev-only to lift`,
+              ? " 1 permanent block, admin-only to lift"
+              : ` ${held} permanent blocks, admin-only to lift`,
           ),
         );
         foot.appendChild(note);
@@ -1446,10 +1476,13 @@
     return m.online || (m.lastSeen && Date.now() - m.lastSeen < 7 * 86400000);
   }
   const RANKS = {
-    dev: { chip: "chip dev", name: "DEV", color: "var(--red)" },
+    dev: { chip: "chip dev", name: "ADMIN", color: "var(--red)" },
+    l3: { chip: "chip l3", name: "LEADER", color: "var(--lead)" },
     l2: { chip: "chip l2", name: "MOD L2", color: "var(--blue)" },
     l1: { chip: "chip l1", name: "MOD L1", color: "var(--purple)" },
   };
+  const rankForLevel = (level) =>
+    (level || 1) >= 3 ? "l3" : (level || 1) >= 2 ? "l2" : "l1";
   function buildStaffRoster() {
     const online = new Set((sessionData.sessions || []).map((s) => s.hash));
     const activityByHash = new Map(
@@ -1471,14 +1504,15 @@
     for (const k of modKeys) {
       const act = activityByHash.get(k.hash);
       roster.push({
-        rank: k.level === 1 ? "l1" : "l2",
+        rank: rankForLevel(k.level),
         label: k.label || "mod",
         hash: k.hash,
         lastSeen: k.lastSeen || null,
-        networks: act ? (act.ips || []).length : 0,
+        networks:
+          k.networks != null ? k.networks : act ? (act.ips || []).length : 0,
         grantedBy: k.grantedBy || null,
         grantedAt: k.grantedAt || null,
-        online: online.has(k.hash),
+        online: k.online != null ? !!k.online : online.has(k.hash),
         key: k,
       });
     }
@@ -1553,7 +1587,11 @@
     card.appendChild(grid);
 
     const actions = divc("mc-actions");
-    if (viewerIsOps()) {
+    const canSeeRecord =
+      viewerIsOps() ||
+      (m.rank !== "dev" &&
+        (viewerIsDev() || (viewerIsLeader() && m.rank !== "l3")));
+    if (canSeeRecord) {
       const histBtn = document.createElement("button");
       histBtn.className = "btn sm";
       histBtn.appendChild(icon("fa-clock-rotate-left"));
@@ -1564,38 +1602,45 @@
       actions.appendChild(histBtn);
     }
 
-    if (m.key && viewerIsDev()) {
+    const canManageKey =
+      m.key && (viewerIsDev() || (viewerIsLeader() && (m.key.level || 1) < 3));
+    if (canManageKey) {
       const k = m.key;
-      const toLevel = k.level === 1 ? 2 : 1;
-      const levelBtn = document.createElement("button");
-      levelBtn.className = "btn sm";
-      levelBtn.appendChild(
-        icon(toLevel === 2 ? "fa-arrow-up" : "fa-arrow-down"),
-      );
-      levelBtn.appendChild(
-        document.createTextNode(
-          toLevel === 2 ? " Promote to L2" : " Demote to L1",
-        ),
-      );
-      levelBtn.addEventListener("click", async () => {
-        if (window.StaffUI) {
-          const ok = await StaffUI.confirm({
-            title: toLevel === 2 ? "Promote to L2" : "Demote to L1",
-            message:
-              toLevel === 2
-                ? 'Give "' +
-                  (k.label || "mod") +
-                  '" full (level 2) powers, including ban and IP block?'
-                : 'Limit "' +
-                  (k.label || "mod") +
-                  '" to junior (level 1) powers?',
-            confirmText: toLevel === 2 ? "Promote" : "Demote",
-          });
-          if (!ok) return;
-        }
-        socket.emit("dev set mod level", { hash: k.hash, level: toLevel });
-      });
-      actions.appendChild(levelBtn);
+      const lvl = k.level >= 3 ? 3 : k.level === 1 ? 1 : 2;
+      const LEVEL_NAMES = {
+        1: "Junior mod (L1)",
+        2: "Full mod (L2)",
+        3: "Mod leader (L3)",
+      };
+      const maxLevel = viewerIsDev() ? 3 : 2;
+      const steps = [];
+      if (lvl < maxLevel) steps.push(lvl + 1);
+      if (lvl > 1) steps.push(lvl - 1);
+      for (const toLevel of steps) {
+        const up = toLevel > lvl;
+        const levelBtn = document.createElement("button");
+        levelBtn.className = "btn sm";
+        levelBtn.appendChild(icon(up ? "fa-arrow-up" : "fa-arrow-down"));
+        levelBtn.appendChild(
+          document.createTextNode(
+            (up ? " Promote to " : " Demote to ") +
+              (toLevel === 3 ? "Leader" : "L" + toLevel),
+          ),
+        );
+        levelBtn.addEventListener("click", async () => {
+          if (window.StaffUI) {
+            const ok = await StaffUI.confirm({
+              title: (up ? "Promote to " : "Demote to ") + LEVEL_NAMES[toLevel],
+              message:
+                'Set "' + (k.label || "mod") + '" to ' + LEVEL_NAMES[toLevel] + "?",
+              confirmText: up ? "Promote" : "Demote",
+            });
+            if (!ok) return;
+          }
+          socket.emit("dev set mod level", { hash: k.hash, level: toLevel });
+        });
+        actions.appendChild(levelBtn);
+      }
 
       const revoke = document.createElement("button");
       revoke.className = "btn sm danger";
@@ -1647,7 +1692,8 @@
     recordCtx = {
       label: m.label,
       role: m.rank === "dev" ? "dev" : "mod",
-      modLevel: m.rank === "l1" ? 1 : m.rank === "l2" ? 2 : 0,
+      modLevel:
+        m.rank === "l1" ? 1 : m.rank === "l2" ? 2 : m.rank === "l3" ? 3 : 0,
       offset: o.offset || 0,
       group: o.group || null,
       targetUid: o.targetUid || null,
@@ -1979,7 +2025,7 @@
           on +
             " actions on actual users as a junior, of which " +
             (h.core || 0) +
-            " were kicks, warnings and buffer wipes. Full mods can place bans and IP blocks, close rooms, and work the review queues. Read the log below first - the number is a prompt to look, not a qualification. Promoting is a developer decision.",
+            " were kicks, warnings and buffer wipes. Full mods can place bans and IP blocks, close rooms, and work the review queues. Read the log below first - the number is a prompt to look, not a qualification. Promoting is a mod leader's decision.",
         ),
       );
       p.appendChild(txt);
@@ -2309,10 +2355,12 @@
 
   function mountRecord(h, wrap, isDev, ctx) {
     const rank = isDev
-      ? "Developer"
-      : ctx.modLevel === 1
-        ? "Junior moderator"
-        : "Moderator";
+      ? "Admin"
+      : ctx.modLevel >= 3
+        ? "Mod leader"
+        : ctx.modLevel === 1
+          ? "Junior moderator"
+          : "Moderator";
     const subtitle = isDev
       ? rank + "  ·  " + h.total + " actions logged"
       : rank +
@@ -2363,7 +2411,10 @@
     const title = divc("mc-title");
     title.appendChild(span("nm", f.label || "staff"));
     title.appendChild(
-      span("chip former", f.level === 1 ? "WAS MOD L1" : "WAS MOD L2"),
+      span(
+        "chip former",
+        f.level >= 3 ? "WAS LEADER" : f.level === 1 ? "WAS MOD L1" : "WAS MOD L2",
+      ),
     );
     top.appendChild(title);
     top.appendChild(span("former-tag", "No longer a moderator"));
@@ -2404,7 +2455,11 @@
     card.appendChild(grid);
 
     const actions = divc("mc-actions");
-    if (viewerIsOps()) {
+    const canSeeFormerRecord =
+      viewerIsOps() ||
+      viewerIsDev() ||
+      (viewerIsLeader() && (f.level || 1) < 3);
+    if (canSeeFormerRecord) {
       const histBtn = document.createElement("button");
       histBtn.className = "btn sm";
       histBtn.appendChild(icon("fa-clock-rotate-left"));
@@ -2412,12 +2467,12 @@
       histBtn.title =
         "Everything " + (f.label || "this person") + " did as staff";
       histBtn.addEventListener("click", () =>
-        openModHistory({ label: f.label, rank: f.level === 1 ? "l1" : "l2" }),
+        openModHistory({ label: f.label, rank: rankForLevel(f.level) }),
       );
       actions.appendChild(histBtn);
     }
 
-    if (viewerIsDev()) {
+    if (viewerIsLeader()) {
       const back = document.createElement("button");
       back.className = "btn sm";
       back.appendChild(icon("fa-rotate-left"));
@@ -2431,25 +2486,31 @@
           message:
             'A new key under the same label, so everything "' +
             (f.label || "this person") +
-            '" did before still shows up on their record.',
-          fields: [
-            {
-              name: "level",
-              label: "Level",
-              type: "select",
-              value: f.level === 1 ? "1" : "2",
-              options: [
-                { value: "1", label: "Junior mod (L1) - limited" },
-                { value: "2", label: "Full mod (L2) - all powers" },
-              ],
-            },
-          ],
+            '" did before still shows up on their record.' +
+            (viewerIsDev()
+              ? ""
+              : " They come back as a junior (L1); promote them once they are settled."),
+          fields: viewerIsDev()
+            ? [
+                {
+                  name: "level",
+                  label: "Level",
+                  type: "select",
+                  value: f.level >= 3 ? "3" : f.level === 1 ? "1" : "2",
+                  options: [
+                    { value: "1", label: "Junior mod (L1) - limited" },
+                    { value: "2", label: "Full mod (L2) - all powers" },
+                    { value: "3", label: "Mod leader (L3) - runs the team" },
+                  ],
+                },
+              ]
+            : [],
           confirmText: "Generate key",
         });
         if (r)
           socket.emit("dev grant mod", {
             label: f.label,
-            level: Number(r.level),
+            level: Number(r.level) || 1,
           });
       });
       actions.appendChild(back);
@@ -2489,12 +2550,12 @@
     }
 
     let list = roster;
-    if (modsFilter === "dev" || modsFilter === "l2" || modsFilter === "l1")
+    if (["dev", "l3", "l2", "l1"].includes(modsFilter))
       list = roster.filter((m) => m.rank === modsFilter);
     else if (modsFilter === "active") list = roster.filter(isActiveStaff);
     else if (modsFilter === "inactive")
       list = roster.filter((m) => !isActiveStaff(m));
-    const order = { dev: 0, l2: 1, l1: 2 };
+    const order = { dev: 0, l3: 1, l2: 2, l1: 3 };
     list = list
       .slice()
       .sort(
@@ -2553,6 +2614,7 @@
           options: [
             { value: "1", label: "Junior mod (L1) - limited" },
             { value: "2", label: "Full mod (L2) - all powers" },
+            { value: "3", label: "Mod leader (L3) - runs the team" },
           ],
         },
       ],
@@ -2670,7 +2732,7 @@
         icon: '<i class="fas fa-calendar-week"></i>',
       },
     ];
-    if (me && me.role === "dev")
+    if (viewerIsFullMod())
       durs.push({
         label: "Permanent",
         value: "permanent",
@@ -2701,7 +2763,7 @@
       { value: "24h", label: "24 hours" },
       { value: "7d", label: "7 days" },
     ];
-    if (me && me.role === "dev")
+    if (viewerIsFullMod())
       durations.push({ value: "permanent", label: "Permanent" });
     return durations;
   }
@@ -2869,6 +2931,12 @@
       idCol.appendChild(rNameNode);
       const meta = document.createElement("div");
       meta.className = "rc-meta";
+      if (r.location) {
+        const loc = span(null, "");
+        loc.appendChild(icon("fa-location-dot"));
+        loc.appendChild(document.createTextNode(" " + r.location));
+        meta.appendChild(loc);
+      }
       const cnt = span("rbadge " + (hot ? "count" : "warm"));
       cnt.appendChild(icon("fa-user-group"));
       cnt.appendChild(
@@ -2928,14 +2996,19 @@
         card.appendChild(cats);
       }
 
-      const typedSnap = (r.reasons || [])
-        .map((x) => x.targetText)
-        .find((t) => t && t.trim());
+      const snapEntry = (r.reasons || []).find(
+        (x) => x.targetText && x.targetText.trim(),
+      );
+      const typedSnap = snapEntry && snapEntry.targetText;
       const typedBox = divc("rc-typed");
       const typedLbl = divc("lbl");
       typedLbl.appendChild(icon("fa-keyboard"));
       typedLbl.appendChild(
-        document.createTextNode(" Their chat box when reported"),
+        document.createTextNode(
+          snapEntry && snapEntry.targetTextWiped
+            ? " Their chat box when reported (wiped just before the report)"
+            : " Their chat box when reported",
+        ),
       );
       typedBox.appendChild(typedLbl);
       const typedTxt = divc("txt" + (typedSnap ? "" : " none"));
@@ -3155,7 +3228,7 @@
         );
         av.textContent = initialOf(mine ? m.by || "S" : a.name || "?");
         av.title = mine
-          ? (m.by || "Staff") + (m.role === "dev" ? " (developer)" : " (moderator)")
+          ? (m.by || "Staff") + (m.role === "dev" ? " (admin)" : " (moderator)")
           : (a.name || "This user") + " - the banned user";
         gut.appendChild(av);
       }
@@ -3170,7 +3243,7 @@
         who.appendChild(
           span(
             "chip " + (mine ? (m.role === "dev" ? "dev" : "l2") : "banned"),
-            mine ? (m.role === "dev" ? "DEV" : "MOD") : "BANNED",
+            mine ? (m.role === "dev" ? "ADMIN" : "MOD") : "BANNED",
           ),
         );
         const t = span("apm-t", relTime(m.ts));
@@ -3260,7 +3333,7 @@
       return;
     }
     if (!viewerIsFullMod()) {
-      foot.appendChild(span("apm-closed", "Full mods and developers answer appeals."));
+      foot.appendChild(span("apm-closed", "Full mods and up answer appeals."));
       return;
     }
 
@@ -3372,7 +3445,7 @@
             name: "bar",
             type: "checkbox",
             label: "Do not let them appeal again",
-            help: "Final. They cannot file another appeal for this or any future ban, until a developer allows it again.",
+            help: "Final. They cannot file another appeal for this or any future ban, until an admin allows it again.",
           },
         ],
         danger: true,
@@ -3648,7 +3721,7 @@
                 name: "bar",
                 type: "checkbox",
                 label: "Do not let them appeal again",
-                help: "Final. They cannot file another appeal for this or any future ban, until a developer allows it again.",
+                help: "Final. They cannot file another appeal for this or any future ban, until an admin allows it again.",
               },
             ],
             danger: true,
@@ -3997,7 +4070,7 @@
     }
     foot.appendChild(info);
 
-    if (a.status === "pending" && viewerIsFullMod()) {
+    if (a.status === "pending" && viewerIsLeader()) {
       const actions = divc("ac-actions");
       const approve = document.createElement("button");
       approve.className = "btn sm primary";
@@ -4077,9 +4150,9 @@
   function renderApplicationsToggle() {
     const btn = $("appsToggle");
     if (!btn) return;
-    const isDev = me && me.role === "dev";
-    btn.style.display = isDev ? "" : "none";
-    if (!isDev) return;
+    const canToggle = viewerIsLeader();
+    btn.style.display = canToggle ? "" : "none";
+    if (!canToggle) return;
     btn.innerHTML = applicationsOpen
       ? '<i class="fas fa-lock"></i> Close applications'
       : '<i class="fas fa-lock-open"></i> Open applications';
@@ -4341,6 +4414,83 @@
     }
   }
 
+  // ── Allowed link domains ──────────────────────────────────────────────────
+  let allowedLinkHosts = [];
+
+  socket.on("dev link whitelist", (d) => {
+    allowedLinkHosts = Array.isArray(d && d.hosts) ? d.hosts : [];
+    renderLinkAllowList();
+  });
+
+  function linkAllowRow(host) {
+    const card = divc("modcard link-allow-row");
+    const top = divc("mc-top");
+    const title = divc("mc-title");
+    title.appendChild(icon("fa-link"));
+    title.appendChild(span("nm", host));
+    top.appendChild(title);
+    top.appendChild(
+      span("covers", "covers " + host + " and www." + host + ", no other subdomains"),
+    );
+    card.appendChild(top);
+    const actions = divc("mc-actions");
+    const rm = document.createElement("button");
+    rm.className = "btn sm danger";
+    rm.appendChild(icon("fa-trash"));
+    rm.appendChild(document.createTextNode(" Remove"));
+    rm.addEventListener("click", async () => {
+      if (window.StaffUI) {
+        const ok = await StaffUI.confirm({
+          title: "Stop allowing " + host,
+          message: 'Links to "' + host + '" will be removed from chat again.',
+          confirmText: "Remove",
+        });
+        if (!ok) return;
+      }
+      socket.emit("dev link whitelist remove", { host });
+    });
+    actions.appendChild(rm);
+    card.appendChild(actions);
+    return card;
+  }
+
+  function renderLinkAllowList() {
+    const list = $("linkAllowList");
+    if (!list) return;
+    list.innerHTML = "";
+    if (!allowedLinkHosts.length) {
+      list.appendChild(
+        emptyBox(
+          "fa-link-slash",
+          "No domains allowed. Every link is removed from chat.",
+        ),
+      );
+      return;
+    }
+    allowedLinkHosts.forEach((h) => list.appendChild(linkAllowRow(h)));
+  }
+
+  function submitLinkAllow() {
+    const input = $("linkAllowInput");
+    if (!input) return;
+    const v = input.value.trim();
+    if (!v) return;
+    socket.emit("dev link whitelist add", { host: v });
+    input.value = "";
+  }
+
+  const linkAllowAddBtn = $("linkAllowAdd");
+  if (linkAllowAddBtn)
+    linkAllowAddBtn.addEventListener("click", submitLinkAllow);
+  const linkAllowInputEl = $("linkAllowInput");
+  if (linkAllowInputEl)
+    linkAllowInputEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        submitLinkAllow();
+      }
+    });
+
   function switchTab(name) {
     tab = name;
     document
@@ -4363,6 +4513,7 @@
     }
     if (name === "sessions") socket.emit("dev get sessions");
     if (name === "announce") socket.emit("announcement list");
+    if (name === "links") socket.emit("dev link whitelist");
     if (name === "rules") socket.emit("rules get");
     if (name === "applications") socket.emit("mod applications list");
     if (name === "reports") socket.emit("staff get reports");
@@ -4379,7 +4530,9 @@
 
   const viewerIsDev = () => !!(me && me.role === "dev");
   const viewerIsFullMod = () =>
-    viewerIsDev() || !!(me && (me.modLevel || 2) >= 2);
+    viewerIsDev() || !!(me && (me.modLevel || 1) >= 2);
+  const viewerIsLeader = () =>
+    viewerIsDev() || !!(me && (me.modLevel || 1) >= 3);
   const viewerIsOps = () => !!(me && me.mainDev);
 
   let diagInstalled = false;
@@ -4424,20 +4577,21 @@
   }
 
   function applyRoleGating() {
-    document
-      .querySelectorAll(".nav-item[data-dev], .nav-item[data-min2]")
-      .forEach((n) => {
-        n.style.display = "";
-      });
-    document.querySelectorAll("#filterSeg [data-min2]").forEach((n) => {
+    document.querySelectorAll(".nav-item[data-dev]").forEach((n) => {
+      n.style.display = viewerIsDev() ? "" : "none";
+    });
+    document.querySelectorAll(".nav-item[data-lead]").forEach((n) => {
+      n.style.display = viewerIsLeader() ? "" : "none";
+    });
+    document.querySelectorAll(".nav-item[data-min2]").forEach((n) => {
       n.style.display = viewerIsFullMod() ? "" : "none";
     });
 
-    const devOnly = [
+    const gated = [
       ["grantMod", viewerIsDev()],
-      ["appsToggle", viewerIsDev()],
+      ["appsToggle", viewerIsLeader()],
     ];
-    devOnly.forEach(([id, ok]) => {
+    gated.forEach(([id, ok]) => {
       const el = $(id);
       if (el) el.style.display = ok ? "" : "none";
     });
@@ -4451,33 +4605,11 @@
       "You can warn and kick from here. Discarding a report and IP blocking are full-mod actions.",
     );
     readOnlyNote(
-      "tab-applications",
-      "Read-only for junior mods. Approving or declining an application is a full-mod action.",
-    );
-    readOnlyNote(
-      "tab-appeals",
-      "Read-only for junior mods. Dismissing an appeal is a full-mod action, and lifting a ban is dev-only.",
-    );
-    readOnlyNote(
-      "tab-bans",
-      "Read-only for junior mods. Placing and lifting blocks are full-mod actions, and a permanent block can only be lifted by a developer. Addresses are never shown on this page.",
-    );
-    readOnlyNote(
       "tab-mods",
-      "Anyone on staff can read the roster. Granting, promoting, and revoking keys are dev-only.",
-    );
-    readOnlyNote(
-      "tab-sessions",
-      "Addresses here belong to other staff and are never shown. You see how many networks each key is live on.",
+      "Anyone on staff can read the roster. Applications, promotions, and key removals belong to mod leaders; leader keys themselves are an admin decision.",
     );
 
     renderApplicationsToggle();
-    if (!viewerIsFullMod() && feedFilter === "notification") {
-      feedFilter = "all";
-      document
-        .querySelectorAll("#filterSeg button")
-        .forEach((b) => b.classList.toggle("active", b.dataset.f === "all"));
-    }
   }
 
   function loadBoards() {
@@ -4627,7 +4759,7 @@
     const p1 = document.createElement("p");
     p1.textContent =
       "New " +
-      (d.level === 1 ? "junior (L1)" : "full (L2)") +
+      (d.level >= 3 ? "leader (L3)" : d.level === 1 ? "junior (L1)" : "full (L2)") +
       ' mod key for "' +
       (d.label || "mod") +
       '". Copy it now: it is shown once and never stored.';
@@ -4923,6 +5055,7 @@
           ["all", "All moderators"],
           ["jr", "Junior only"],
           ["full", "Full mods only"],
+          ["leader", "Mod leaders only"],
         ].forEach(([v, label]) => {
           const o = document.createElement("option");
           o.value = v;

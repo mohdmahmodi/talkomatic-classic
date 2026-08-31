@@ -149,6 +149,28 @@
     });
     actions.appendChild(apply);
     actions.appendChild(details);
+
+    var staffKey =
+      localStorage.getItem("talkomatic_devKey") ||
+      localStorage.getItem("talkomatic_modKey");
+    if (staffKey) {
+      var rm = el("button", "btn", '<i class="fas fa-trash"></i> Remove');
+      rm.addEventListener("click", function () {
+        if (!confirm('Take down "' + (t.title || "this theme") + '" for everyone?')) return;
+        fetch("/api/v1/themes/" + encodeURIComponent(t.id), {
+          method: "DELETE",
+          credentials: "same-origin",
+          headers: { "x-staff-key": staffKey },
+        })
+          .then(function (r) {
+            if (r.ok) card.remove();
+            else if (r.status === 403) alert("Taking down themes needs a full mod key.");
+            else alert("Could not remove that theme.");
+          })
+          .catch(function () { alert("Could not remove that theme."); });
+      });
+      actions.appendChild(rm);
+    }
     body.appendChild(actions);
     card.appendChild(body);
 

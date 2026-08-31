@@ -231,7 +231,7 @@ function validateConfig(input, existingId) {
     return { ok: false, error: "That name is reserved." };
   if (ipredact.containsIp(name))
     return { ok: false, error: "Names cannot contain an IP address." };
-  if (linkfilter.containsLink(name))
+  if (linkfilter.containsLink(name, true))
     return { ok: false, error: "Names cannot contain a link." };
   const nameCheck = nameguard.check(name, { reserved: CONFIG.RESERVED_NAMES });
   if (!nameCheck.ok)
@@ -248,7 +248,7 @@ function validateConfig(input, existingId) {
     return { ok: false, error: "That location is not allowed." };
   if (location && ipredact.containsIp(location))
     return { ok: false, error: "Locations cannot contain an IP address." };
-  if (location && linkfilter.containsLink(location))
+  if (location && linkfilter.containsLink(location, true))
     return { ok: false, error: "Locations cannot contain a link." };
   if (location && !nameguard.check(location).ok)
     return {
@@ -818,6 +818,7 @@ function polishSay(rt, act, ctx) {
   let text = expand(rt, act.text, ctx);
   text = sanitizeMessage(text).slice(0, LIMITS.MAX_SAY_LENGTH);
   if (ipredact.looksLikeIp(text)) text = ipredact.redact(text);
+  if (linkfilter.looksLikeLink(text)) text = linkfilter.redact(text);
   return text;
 }
 
@@ -1223,6 +1224,13 @@ function isActiveBot(userId) {
   return active.has(userId);
 }
 
+// A votekicked owner does not get to leave their bot behind.
+function evictOwner(ownerId, roomId) {
+  for (const rt of [...active.values()])
+    if (rt.ownerId === ownerId && rt.roomId === roomId)
+      retire(rt, "its owner was voted out of the room");
+}
+
 // ── Socket surface ──────────────────────────────────────────────────────────
 
 function ownerStatus(ownerKey) {
@@ -1442,6 +1450,12 @@ function register(socket, safe) {
           return fail(socket, "That room is locked.", "room_locked");
         if (room.bannedUserIds?.has?.(bot.id))
           return fail(socket, "This bot was removed from that room.", "room_banned");
+        if (room.bannedUserIds?.has?.(socket.handshake.session.userId))
+          return fail(
+            socket,
+            "You were removed from that room, so you cannot send a bot there.",
+            "room_banned_you",
+          );
         if (humanCount(room) === 0)
           return fail(
             socket,
@@ -1825,7 +1839,8 @@ function register(socket, safe) {
   socket.on(
     "staff bots list",
     safe(async () => {
-      if (!socket.isDev && !socket.isMod) return;
+      if (!socket.isDev && !(socket.isMod && (socket.modLevel || 1) >= 2))
+        return;
       const hosted = [...active.values()].map((rt) => ({
         tier: 1,
         botUserId: rt.userId,
@@ -1862,7 +1877,8 @@ function register(socket, safe) {
   socket.on(
     "staff bots kill",
     safe(async (data) => {
-      if (!socket.isDev && !socket.isMod) return;
+      if (!socket.isDev && !(socket.isMod && (socket.modLevel || 1) >= 2))
+        return;
       const id = data?.botUserId;
       if (!id) return;
       const rt = active.get(id);
@@ -2048,6 +2064,7 @@ module.exports = {
   onLeave,
   onOwnerJoined,
   noteEvicted,
+  evictOwner,
   isActiveBot,
   botCountInRoom,
   maxBotsForRoom,

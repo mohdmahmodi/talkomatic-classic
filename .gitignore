@@ -12,6 +12,9 @@ talkomatic-v4.pdf
 update.md
 STAFF-V5-PLAN.md
 
+# Internal working docs (session handoffs, restructure contracts) - never commit
+docs/
+
 # Staff key store and audit logs (never commit)
 mod-keys.json
 modlog.txt
@@ -46,6 +49,11 @@ announcements.json
 announcements.json.tmp
 community-themes.json
 ban-history.json
+link-whitelist.json
+link-whitelist.json.tmp
+last-seen.json
+last-seen.json.tmp
+former-mods.json
 service.json
 service.json.tmp
 controls.html

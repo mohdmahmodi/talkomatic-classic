@@ -148,6 +148,10 @@
 
   --focus-creator-link-outline-color: #c7c7c7;
 
+  /* The lighter orange used for hover lifts and warm accents. Kept separate
+     from --tk-accent-hover, which darkens instead. */
+  --accent-bright: #ffa726;
+
   /* Discord's current blurple. #7289da is their pre-2021 one and reads dull. */
   --discord-icon-color: #3a63fa;
   --community-icon-color: #ff6b35;
@@ -224,6 +228,10 @@ html {
   flex-direction: column; /* Stack child elements vertically */
   margin-top: 23px; /* Space from the top */
   height: calc(100vh - 23px); /* Adjust height considering the top margin */
+  /* dvh excludes the browser chrome on iOS, where 100vh reaches under the
+     toolbar and hides the bottom of the panel. */
+  height: calc(100dvh - 23px);
+  padding-bottom: calc(24px + env(safe-area-inset-bottom));
   overflow-y: auto; /* Enable vertical scrolling */
   overflow-x: hidden; /* Disable horizontal scrolling */
   scrollbar-width: none; /* Hide scrollbar in Firefox */
@@ -285,26 +293,30 @@ html {
 }
 
 /* A quiet second line under the wordmark, for people who land here with no
-   idea what Talkomatic is. Deliberately not one of the icon buttons: those
+   idea what Talkomatic is. Deliberately not one of the tile buttons: those
    are errands, this is the explanation of the place. */
-.panel-header-about {
-  display: block;
+.panel-header-links {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
   margin-top: 12px;
+  font-size: 15px;
+}
+
+.panel-header-links span {
   color: var(--lobby-label-color);
-  opacity: 1;
-  font-size: 16px;
+  opacity: 0.45;
+}
+
+.panel-header-links a,
+.panel-header-links a:visited {
+  color: var(--lobby-label-color);
   text-decoration: none;
+}
+
+.panel-header-links a:hover {
   text-decoration: underline;
-}
-
-.panel-header-about:hover,
-.panel-header-about:visited {
-  color: var(--lobby-label-color);
-}
-
-.panel-header-about:hover {
-  opacity: 1;
-  text-decoration: none;
 }
 
 /* The lobby form has always toggled this class on sign in and sign out, but the
@@ -314,112 +326,133 @@ html {
   display: none !important;
 }
 
-/* Footer strip of plain icon buttons. No tile behind them: six dark slabs
-   stacked under the room form read as a second toolbar competing with the
-   panel, and the panel is meant to be the room form. The glyph alone, muted
-   until you reach for it, is enough for links nobody came here to click. */
+/* Two columns of labelled tiles under the header. Bare glyphs looked tidy but
+   nobody could tell what they did; a short label next to each one settles it. */
 .external-links {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  align-items: center;
-  gap: 4px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
   margin-bottom: 14px;
   width: 100%;
 }
 
 .external-links a {
-  /* content-box plus flex-basis:100% is what pushed the full-width link 24px
-     wider than the panel's content area and 6px off its right edge. */
   box-sizing: border-box;
   display: flex;
   align-items: center;
+  gap: 9px;
   min-width: 0;
-  border: 1px solid transparent;
-  border-radius: 5px;
+  padding: 9px 11px;
+  background-color: var(--external-links-background-color);
+  border: var(--tk-border-width, 1px) solid var(--tk-border);
+  border-radius: var(--tk-radius, 5px);
   color: var(--external-links-color);
   text-decoration: none;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: bold;
   letter-spacing: 0.2px;
   line-height: 1.25;
-  white-space: normal;
-  overflow-wrap: break-word;
   transition:
     background-color 0.15s ease,
-    border-color 0.15s ease,
-    color 0.15s ease,
-    opacity 0.15s ease;
+    border-color 0.15s ease;
 }
 
-.external-links a > i,
-.external-links a > svg {
+.external-links a:hover {
+  background-color: var(--hover-external-links-background-color);
+  border-color: var(--tk-accent);
+}
+
+.external-links a > i {
   flex: none;
+  width: 16px;
+  /* The page-wide .fa-discord / .fa-paintbrush rules carry a margin-right
+     that would push these two labels out of line with the rest. */
+  margin: 0;
   text-align: center;
+  font-size: 14px;
 }
 
-/* Icon buttons: a bare square holding a glyph, no fill and no outline. Each
-   glyph carries its own colour, which is the only thing telling them apart
-   with the labels gone - so no opacity fade here, that was what made the
-   Discord mark look washed out. Hover just lifts a tile in behind it. */
-.external-links a.icon-only {
-  flex: 0 0 auto;
-  width: 34px;
-  height: 34px;
-  padding: 0;
-  justify-content: center;
-  background: none;
-}
-
-.external-links a.icon-only > i {
-  margin-right: 0;
-  /* A shared fixed width would clip a wider glyph like the Discord mark. */
-  width: auto;
-  font-size: 17px;
-  line-height: 1;
-}
-
-.external-links a.icon-only:hover {
-  background: rgba(255, 255, 255, 0.09);
-  border-color: transparent;
+.external-links a > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Scoped to this strip on purpose: .fa-bullhorn and friends are used in other
-   menus too, and those should keep whatever they already look like. */
-.external-links a.icon-only .fa-discord {
+   menus too, and those should keep whatever they already look like. One
+   distinct colour per tile: Discord blurple, themes the pink every palette
+   icon wears, announcements red, stats green, staff blue like the mod chips,
+   bots the same teal as the room's robot toggle. */
+.external-links .fa-discord {
   color: var(--discord-icon-color);
 }
-.external-links a.icon-only .fa-palette {
+.external-links .fa-paintbrush {
   color: #e91e63;
+  background: none;
 }
-.external-links a.icon-only .fa-bullhorn {
-  color: #ffa726;
+.external-links .fa-bullhorn {
+  color: #ff5468;
 }
-.external-links a.icon-only .fa-key,
-.external-links a.icon-only .fa-gauge-high {
+.external-links .fa-chart-column {
+  color: #57d9a3;
+}
+.external-links .fa-key,
+.external-links .fa-gauge-high {
   color: #5aa9ff;
 }
-.external-links a.icon-only .fa-robot {
+.external-links .fa-robot {
   color: #26c6da;
 }
-
-/* "Apply to be a mod" keeps a label, so it keeps a button's shape and takes a
-   row of its own under the icons. */
-.external-links a.wide {
-  flex: 0 0 100%;
-  justify-content: center;
-  padding: 9px 11px;
-  margin-top: 8px;
-  background-color: var(--external-links-background-color);
+.external-links .fa-user-pen {
+  color: var(--tk-accent);
 }
 
-.external-links a.wide > i {
-  margin-right: 8px;
+/* "Apply to be a mod" takes a full row of its own under the grid. */
+.external-links a.wide {
+  grid-column: 1 / -1;
+  justify-content: center;
+  margin-top: 2px;
 }
 
 .external-links a.wide:hover {
-  background-color: var(--hover-external-links-background-color);
   border-color: rgba(255, 152, 0, 0.55);
+}
+
+/* Floating tools pinned to the top right of the room list, outside both
+   panels so more can join them later without touching either. */
+.corner-tools {
+  position: fixed;
+  top: 30px;
+  right: 16px;
+  z-index: 900;
+  display: flex;
+  gap: 8px;
+}
+
+.corner-tool {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  background-color: var(--external-links-background-color);
+  border: var(--tk-border-width, 1px) solid var(--tk-border);
+  border-radius: var(--tk-radius, 5px);
+  color: #e91e63;
+  font-size: 16px;
+  text-decoration: none;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.corner-tool i {
+  margin: 0;
+}
+
+.corner-tool:hover {
+  background-color: var(--hover-external-links-background-color);
+  border-color: var(--tk-accent);
 }
 
 /* ── Ideas & Bugs card ──────────────────────────────────────────────────────
@@ -431,7 +464,7 @@ html {
   /* Square-cornered and borderless, it read as a slab of background rather
      than a card. The amber edge ties it to the lightbulb and marks it as the
      one thing in this panel worth acting on. */
-  border: 1px solid rgba(255, 167, 38, 0.28);
+  border: 1px solid color-mix(in srgb, var(--accent-bright) 28%, transparent);
   border-radius: 7px;
   /* Its own padding replaced the 18px inset .left-panel > * gives every child
      (same specificity, later rule), so the card sat flush against both panel
@@ -462,9 +495,9 @@ html {
   height: 26px;
   margin-right: 10px;
   border-radius: 50%;
-  background: rgba(255, 167, 38, 0.16);
+  background: color-mix(in srgb, var(--accent-bright) 16%, transparent);
   font-size: 13px;
-  color: #ffa726;
+  color: var(--accent-bright);
 }
 
 .ideas-card-sub {
@@ -479,8 +512,8 @@ html {
   display: block;
   padding: 10px 12px;
   border: none;
-  border-radius: 5px;
-  background-color: #ff9800;
+  border-radius: var(--tk-radius, 5px);
+  background-color: var(--tk-accent);
   color: #1a1a1a;
   font-size: 13px;
   font-weight: bold;
@@ -497,7 +530,7 @@ html {
 }
 
 .ideas-card-btn:hover {
-  background-color: #ffa726;
+  background-color: var(--accent-bright);
 }
 
 .ideas-card-btn:active {
@@ -922,6 +955,17 @@ html {
   color: var(--primary); /* Orange color */
 }
 
+/* Away users: the row dims and gets a tag, so a glance at a big room shows
+   who is actually there. */
+.users-detail div.afk-lobby-user {
+  opacity: 0.6;
+}
+
+.users-detail .user-afk {
+  color: var(--tk-muted);
+  font-size: 13px;
+}
+
 /* Enter room button */
 .enter-button {
   position: absolute;
@@ -1341,7 +1385,8 @@ html {
     position: fixed;
     top: 0;
     left: 0;
-    height: 100%; /* Full height on mobile */
+    height: 100vh;
+    height: 100dvh; /* Keeps the panel bottom above the mobile browser bar */
     width: 320px;
     max-width: 100%; /* Ensure the panel fits the screen */
     z-index: 1000; /* Above other elements */
@@ -1877,83 +1922,60 @@ button:disabled {
   vertical-align: middle;
 }
 
-/* Theme editor menu icon */
-.fa-palette {
-  margin-right: 10px;
-  color: #e91e63;
-}
-
-/* ── Discord avatar card in the sign-in form ── */
+/* ── Profile picture card in the sign-in form ──
+   A light card, same family as the white inputs above it. The switch turns
+   the whole thing on; a segmented control below picks where the picture
+   comes from. */
 .pfp-card {
   margin-bottom: 15px;
-  border: 1px solid #ddd3bd;
-  border-radius: 10px;
-  background: #ffffff;
+  background-color: var(--tk-input-bg);
+  border-radius: var(--tk-radius, 5px);
   font-family: var(--tk-font-main, talkoSS, Arial, sans-serif);
   overflow: hidden;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
-  transition:
-    border-color 0.2s ease,
-    box-shadow 0.2s ease;
-}
-
-.pfp-card.pfp-on {
-  border-color: #5865f2;
-  box-shadow: 0 1px 8px rgba(88, 101, 242, 0.22);
 }
 
 .pfp-card-head {
   display: flex;
   align-items: center;
-  gap: 11px;
-  padding: 11px 13px;
+  gap: 10px;
+  padding: 10px 12px;
 }
 
+/* The empty-avatar head, the way every profile app draws it. */
 .pfp-ico {
-  display: block;
-  width: 38px;
-  height: 38px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, #6a76f5, #4752c4);
-  box-shadow: 0 2px 6px rgba(88, 101, 242, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
   flex-shrink: 0;
-  text-align: center;
+  border-radius: 50%;
+  background: #e7e7e7;
+  color: #8d8d8d;
 }
 
 .pfp-ico i {
-  font-size: 20px;
-  color: #fff;
-  line-height: 38px;
+  font-size: 14px;
   margin: 0;
 }
 
-.pfp-card-text {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  flex: 1;
-}
-
 .pfp-card-title {
+  flex: 1;
+  min-width: 0;
   font-size: 13px;
   font-weight: bold;
   color: #111;
   letter-spacing: 0.2px;
 }
 
-.pfp-card-sub {
-  font-size: 11px;
-  color: #777;
-  line-height: 1.35;
-  margin-top: 1px;
-}
-
 .pfp-preview {
-  width: 34px;
-  height: 34px;
-  border-radius: 8px;
-  object-fit: cover;
-  border: 2px solid #5865f2;
+  box-sizing: border-box;
+  width: 32px;
+  height: 32px;
+  padding: 3px;
+  border-radius: 4px;
+  background: #f1f1f1;
+  object-fit: contain;
   flex-shrink: 0;
 }
 
@@ -1980,7 +2002,7 @@ button:disabled {
 .pfp-slider {
   position: absolute;
   inset: 0;
-  background: #ccc;
+  background: #c9c9c9;
   border-radius: 22px;
   transition: background 0.2s ease;
 }
@@ -1998,36 +2020,71 @@ button:disabled {
 }
 
 .pfp-switch input:checked + .pfp-slider {
-  background: #5865f2;
+  background: var(--tk-accent);
 }
 
 .pfp-switch input:checked + .pfp-slider::before {
   transform: translateX(16px);
 }
 
-/* Expanded body: ID input + help */
+/* Expanded body: source picker plus whichever pane is active */
 .pfp-card-body {
-  padding: 10px 13px 13px;
-  border-top: 1px solid #efe8d6;
-  background: #fafaff;
+  padding: 11px 12px 12px;
+  border-top: 1px solid #ececec;
 }
 
-#logform .pfp-card-body #pfpDiscordId {
-  margin-bottom: 8px;
+/* Keep the #logform prefix on the buttons: it overrides #logform button. */
+.pfp-seg {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 3px;
+  margin-bottom: 11px;
+  background-color: #efefef;
+  border-radius: var(--tk-radius, 5px);
+}
+
+#logform .pfp-seg-btn {
+  position: static;
+  width: 100%;
+  margin: 0;
+  padding: 7px 8px;
+  background: none;
+  border: none;
+  border-radius: calc(var(--tk-radius, 5px) - 2px);
+  color: #666;
+  font-size: 12px;
+  font-weight: bold;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+#logform .pfp-seg-btn:hover {
+  background-color: #e2e2e2;
+  color: #111;
+  border-color: transparent;
+}
+
+#logform .pfp-seg-btn.active,
+#logform .pfp-seg-btn.active:hover {
+  background-color: var(--tk-accent);
+  color: #000;
+}
+
+#logform #pfpDiscordId {
+  margin-bottom: 9px;
   font-size: 14px;
   padding: 10px 12px;
-  border: 1px solid #cfd3ee;
-  border-radius: 7px;
-  background: #fff;
-  transition:
-    border-color 0.2s ease,
-    box-shadow 0.2s ease;
+  border: 1px solid #c9c9c9;
+  border-radius: 4px;
 }
 
-#logform .pfp-card-body #pfpDiscordId:focus {
+#logform #pfpDiscordId:focus {
   outline: none;
-  border-color: #5865f2;
-  box-shadow: 0 0 0 3px rgba(88, 101, 242, 0.12);
+  border-color: var(--tk-accent);
 }
 
 #logform .pfp-help-btn {
@@ -2036,7 +2093,7 @@ button:disabled {
   padding: 0;
   background: none;
   border: none;
-  color: #5865f2;
+  color: var(--tk-accent);
   font-size: 12px;
   font-weight: bold;
   cursor: pointer;
@@ -2046,17 +2103,16 @@ button:disabled {
 #logform .pfp-help-btn:hover {
   background: none;
   text-decoration: underline;
-  color: #4752c4;
+  color: var(--accent-bright);
 }
 
 .pfp-help {
   margin-top: 9px;
-  background: #fff;
-
-  border-radius: 7px;
+  background: #f4f4f4;
+  border-radius: var(--tk-radius, 5px);
   padding: 11px 13px;
   font-size: 12px;
-  color: #333;
+  color: #555;
   line-height: 1.55;
 }
 
@@ -2070,40 +2126,41 @@ button:disabled {
 }
 
 .pfp-help li::marker {
-  color: #5865f2;
+  color: var(--tk-accent);
   font-weight: bold;
 }
 
 .pfp-help p {
   margin: 0;
-  color: #777;
+  opacity: 0.75;
 }
 
 /* Preset pictures */
-.preset-card.pfp-on {
-  border-color: #ff9800;
-  box-shadow: 0 1px 8px rgba(255, 152, 0, 0.24);
-}
-
-.preset-ico {
-  background: linear-gradient(135deg, #ffb14d, #e07b00);
-  box-shadow: 0 2px 6px rgba(255, 152, 0, 0.35);
-}
-
-.preset-preview {
-  border-color: #ff9800;
-}
-
-.preset-card .pfp-switch input:checked + .pfp-slider {
-  background: #ff9800;
-}
-
 .preset-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
   gap: 8px;
   max-height: 232px;
   overflow-y: auto;
+  /* Breathing room between the tiles and the scrollbar. */
+  padding-right: 6px;
+  /* Firefox and Chromium style the bar from these two; older WebKit falls
+     back to the pseudo-element rules below. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--tk-accent) transparent;
+}
+
+.preset-grid::-webkit-scrollbar {
+  width: 5px;
+}
+
+.preset-grid::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.preset-grid::-webkit-scrollbar-thumb {
+  background: var(--tk-accent);
+  border-radius: 999px;
 }
 
 .preset-grid.preset-empty {
@@ -2124,9 +2181,9 @@ button:disabled {
   min-height: 0;
   margin: 0;
   padding: 4px;
-  border: 2px solid #ddd3bd;
-  border-radius: 10px;
-  background: #fff;
+  border: 2px solid #e3e3e3;
+  border-radius: var(--tk-radius, 5px);
+  background: #fbfbfb;
   cursor: pointer;
   aspect-ratio: 1 / 1;
   overflow: hidden;
@@ -2145,19 +2202,19 @@ button:disabled {
 }
 
 #logform .preset-grid .preset-opt:hover {
-  border-color: #ffb14d;
+  border-color: var(--accent-bright);
   background: #fff;
   transform: translateY(-1px);
 }
 
 #logform .preset-grid .preset-opt:focus-visible {
-  outline: 2px solid #ff9800;
+  outline: 2px solid var(--tk-accent);
   outline-offset: 2px;
 }
 
 #logform .preset-grid .preset-opt.selected {
-  border-color: #ff9800;
-  box-shadow: 0 0 0 3px rgba(255, 152, 0, 0.22);
+  border-color: var(--tk-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--tk-accent) 22%, transparent);
 }
 
 #logform .preset-grid .preset-opt.selected::after {
@@ -2168,7 +2225,7 @@ button:disabled {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: #ff9800;
+  background: var(--tk-accent);
   color: #fff;
   font-size: 10px;
   font-weight: bold;
@@ -2238,4 +2295,777 @@ button:disabled {
 .sb-nb-reply {
   background-color: #ffffff;
   color: #1a1a1a;
+}
+
+/* ── Styles that used to be injected from lobby-client.js ───────────────────
+   Everything below is inert until the matching element exists: staff badges
+   and dev controls in the room list, the ticker and maintenance bars, the
+   paused-tab overlay, and the ban screen. */
+
+.mod-lobby-badge {
+  display: inline-block;
+  background: #00bcd4;
+  color: #003;
+  font-size: 8px;
+  font-weight: bold;
+  padding: 1px 4px;
+  border-radius: 6px;
+  margin: 0 4px;
+  letter-spacing: 0.5px;
+  vertical-align: middle;
+}
+
+.mod-lobby-badge.mod-lobby-badge-jr {
+  background: #ab47bc;
+  color: #fff;
+}
+
+.mod-lobby-badge.mod-lobby-badge-lead {
+  background: #4ade80;
+  color: #00220f;
+}
+
+.bot-lobby-badge {
+  display: inline-block;
+  background: var(--bot-flair, #9aa3ae);
+  color: #16191d;
+  font-size: 8px;
+  font-weight: bold;
+  padding: 1px 4px;
+  border-radius: 6px;
+  margin: 0 4px 0 0;
+  letter-spacing: 0.5px;
+  vertical-align: middle;
+}
+
+.official-badge {
+  display: inline-block;
+  background: #ffd700;
+  color: #3a2c00;
+  font-size: 9px;
+  font-weight: bold;
+  padding: 1px 6px;
+  border-radius: 8px;
+  margin-right: 6px;
+  letter-spacing: 0.5px;
+}
+
+.room.spotlight-room {
+  border: 1px solid #ffd700 !important;
+  box-shadow: 0 0 0 1px rgba(255, 215, 0, 0.25) inset;
+}
+
+.lobby-dev-controls {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.lobby-dev-btn {
+  flex: 1;
+  background: var(--tk-card);
+  color: var(--tk-accent);
+  border: 1px solid var(--tk-border);
+  border-radius: 4px;
+  padding: 6px 7px;
+  font-size: 11px;
+  cursor: pointer;
+  font-weight: bold;
+  font-family: inherit;
+  transition: all 0.2s ease;
+}
+
+.lobby-dev-btn:hover {
+  border-color: var(--tk-accent);
+  background: var(--tk-accent);
+  color: #000;
+}
+
+#devPanelButton {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  z-index: 99990;
+  background: var(--tk-card);
+  color: var(--tk-text);
+  border: 1px solid var(--tk-accent);
+  border-radius: 4px;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: bold;
+  font-family: inherit;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+  transition: all 0.2s ease;
+}
+
+#devPanelButton:hover {
+  background: var(--tk-accent);
+  color: #000;
+}
+
+#lobbyTickerBar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 99980;
+  background: var(--tk-accent);
+  color: #1a1206;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 7px 16px;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-sizing: border-box;
+}
+
+#lobbyMaintenanceBar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 99980;
+  background: #5c2d91;
+  color: #fff;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 7px 16px;
+  box-sizing: border-box;
+}
+
+/* Paused-tab overlay: shown when Talkomatic opens in another tab. */
+#supersededOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000002;
+  background: #0a0a0a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  font-family: Arial, sans-serif;
+}
+
+#supersededOverlay .ss-card {
+  max-width: 460px;
+  width: 100%;
+  background: #181818;
+  border: 1px solid var(--tk-border);
+  border-radius: 10px;
+  padding: 36px 30px;
+  text-align: center;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+}
+
+#supersededOverlay .ss-icon {
+  font-size: 52px;
+  color: var(--tk-accent);
+  margin-bottom: 16px;
+}
+
+#supersededOverlay h1 {
+  color: var(--tk-accent);
+  font-size: 24px;
+  margin: 0 0 10px;
+}
+
+#supersededOverlay p {
+  color: #dddddd;
+  font-size: 15px;
+  line-height: 1.6;
+  margin: 0 0 22px;
+}
+
+#supersededOverlay button {
+  background: var(--tk-accent);
+  color: #000;
+  border: none;
+  border-radius: 6px;
+  padding: 12px 26px;
+  font-size: 15px;
+  font-weight: bold;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+#supersededOverlay button:hover {
+  background: var(--accent-bright);
+}
+
+/* ── Ban screen ──
+   Talkomatic's own language: flat page background, black cards, thin #333
+   lines, a cream section strip with a coloured icon, orange fills. Square
+   corners throughout, same as the dashboard. */
+#banScreen {
+  position: fixed;
+  inset: 0;
+  z-index: 1000001;
+  background: var(--tk-bg);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 20px 16px;
+  overflow: auto;
+  font-family: talkoSS, Arial, sans-serif;
+}
+
+#banScreen .ban-card {
+  max-width: 620px;
+  width: 100%;
+  background: #000;
+  border: 1px solid var(--tk-border);
+  border-radius: 0;
+  text-align: left;
+  overflow: hidden;
+  margin: auto;
+}
+
+#banScreen .ban-hd {
+  background: var(--tk-cream);
+  color: #000;
+  padding: 13px 16px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+#banScreen .ban-icon {
+  font-size: 17px;
+  color: #c62828;
+}
+
+#banScreen h1 {
+  color: #000;
+  font-size: 16px;
+  margin: 0;
+  font-weight: bold;
+  letter-spacing: 0.2px;
+  flex: 1;
+}
+
+#banScreen .ban-hd-sub {
+  font-size: 12px;
+  color: #5f5346;
+  font-weight: bold;
+}
+
+#banScreen .ban-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+#banScreen .ban-sub {
+  color: #dcdcdc;
+  font-size: 14px;
+  line-height: 1.6;
+  margin: 0;
+}
+
+#banScreen .ban-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: 0;
+}
+
+#banScreen .ban-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--tk-tile);
+  border: 1px solid #333;
+  border-radius: 0;
+  padding: 6px 10px;
+  font-size: 12.5px;
+  color: #c3c3c3;
+}
+
+#banScreen .ban-chip i {
+  color: var(--tk-accent);
+  font-size: 11px;
+}
+
+#banScreen .ban-chip b {
+  color: #fff;
+  font-weight: bold;
+}
+
+/* Section strip, the same one the dashboard uses to open a block. */
+#banScreen .ban-strip {
+  background: var(--tk-tile);
+  border: 1px solid #333;
+  border-left: 3px solid var(--tk-accent);
+  border-radius: 0;
+  padding: 11px 13px;
+  margin: 0;
+  text-align: left;
+}
+
+#banScreen .ban-strip .lbl {
+  color: var(--tk-accent);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  font-weight: bold;
+  margin-bottom: 5px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+#banScreen .ban-strip .txt {
+  color: #e6e6e6;
+  font-size: 14px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+#banScreen .ban-timer {
+  background: var(--tk-tile);
+  border: 1px solid #333;
+  border-radius: 0;
+  padding: 13px;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+#banScreen .ban-timer-label {
+  color: #8d8d8d;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+
+#banScreen .ban-timer-value {
+  color: #fff;
+  font-size: 26px;
+  font-weight: bold;
+  font-variant-numeric: tabular-nums;
+  font-family: "Courier New", monospace;
+}
+
+#banScreen .ban-perm {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--tk-tile);
+  border: 1px solid #333;
+  border-left: 3px solid #ff5468;
+  color: #ff5468;
+  font-weight: bold;
+  font-size: 13px;
+  padding: 11px 13px;
+  border-radius: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  margin: 0;
+}
+
+/* The appeal panel is its own card, the way the dashboard and the suggestion
+   board stack sections. */
+#banScreen .ban-appeal {
+  background: #0d0d0d;
+  border: 1px solid #333;
+  padding: 0;
+  text-align: left;
+}
+
+#banScreen .ban-appeal-h {
+  background: var(--tk-tile);
+  border-bottom: 1px solid #333;
+  color: #fff;
+  font-size: 13px;
+  font-weight: bold;
+  margin: 0;
+  padding: 10px 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  letter-spacing: 0.2px;
+}
+
+#banScreen .ban-appeal-h i {
+  color: var(--tk-accent);
+  font-size: 12px;
+}
+
+#banScreen .ban-appeal-p {
+  color: #9a9a9a;
+  font-size: 12.5px;
+  line-height: 1.6;
+  margin: 0;
+  padding: 11px 13px 0;
+}
+
+#banScreen textarea#banAppealText {
+  width: calc(100% - 26px);
+  min-height: 74px;
+  resize: vertical;
+  background: #000;
+  color: #fff;
+  border: 1px solid var(--tk-border);
+  border-radius: 0;
+  padding: 10px 11px;
+  font-family: talkoSS, Arial, sans-serif;
+  font-size: 13.5px;
+  line-height: 1.5;
+  box-sizing: border-box;
+  margin: 11px 13px 0;
+  display: block;
+}
+
+#banScreen textarea#banAppealText:focus {
+  outline: none;
+  border-color: var(--tk-accent);
+}
+
+#banScreen .ban-appeal-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 10px 13px 13px;
+  flex-wrap: wrap;
+}
+
+#banScreen button#banAppealSend {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--tk-accent);
+  color: #000;
+  border: none;
+  border-radius: 0;
+  padding: 9px 16px;
+  font-size: 13px;
+  font-weight: bold;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+#banScreen button#banAppealSend:hover {
+  background: var(--accent-bright);
+}
+
+#banScreen button#banAppealSend:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+#banScreen .ban-appeal-msg {
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+#banScreen .ban-appeal-msg.ok {
+  color: #57d9a3;
+}
+
+#banScreen .ban-appeal-msg.err {
+  color: #ff5468;
+}
+
+#banScreen .ban-appeal-done {
+  background: var(--tk-tile);
+  border: none;
+  border-left: 3px solid #57d9a3;
+  border-radius: 0;
+  padding: 13px;
+  color: #d7f3e7;
+  font-size: 13.5px;
+  line-height: 1.55;
+  text-align: left;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin: 11px 13px 13px;
+}
+
+#banScreen .ban-appeal-done i {
+  color: #57d9a3;
+  margin-top: 2px;
+}
+
+/* The appeal conversation. Bubbles: staff on the left with their face and
+   rank, you on the right. Nobody should have to work out who they are
+   talking to. */
+#banScreen .ac-log {
+  background: #000;
+  border-top: 1px solid #333;
+  border-bottom: 1px solid #333;
+  padding: 12px 13px;
+  max-height: 340px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  scrollbar-width: thin;
+  scrollbar-color: #3d3d3d transparent;
+}
+
+#banScreen .ac-log::-webkit-scrollbar {
+  width: 7px;
+}
+
+#banScreen .ac-log::-webkit-scrollbar-thumb {
+  background: #3d3d3d;
+  border-radius: 4px;
+}
+
+#banScreen .ac-m {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 88%;
+  margin-top: 12px;
+}
+
+#banScreen .ac-m:first-child {
+  margin-top: 0;
+}
+
+#banScreen .ac-m.user {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
+#banScreen .ac-m.staff {
+  align-self: flex-start;
+}
+
+#banScreen .ac-who {
+  font-size: 11px;
+  color: #8d8d8d;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+/* Who you are talking to: face, name, rank. */
+#banScreen .ac-av {
+  position: relative;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: #2b5e9e;
+  color: #fff;
+  font-size: 11px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#banScreen .ac-av.dev {
+  background: #a3323f;
+}
+
+#banScreen .ac-av-i {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Taken out once the picture is really there: a transparent avatar does not
+   cover the letter, so the initial showed through its gaps. */
+#banScreen .ac-av.has-pic .ac-av-i {
+  display: none;
+}
+
+#banScreen .ac-av img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+#banScreen .ac-name {
+  color: #fff;
+  font-size: 12.5px;
+}
+
+#banScreen .ac-rank {
+  font-size: 9.5px;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: #5aa9ff;
+  border: 1px solid #5aa9ff;
+  padding: 1px 5px;
+}
+
+#banScreen .ac-rank.dev {
+  color: #ff5468;
+  border-color: #ff5468;
+}
+
+#banScreen .ac-b {
+  background: #262626;
+  padding: 9px 12px;
+  border-radius: 12px 12px 12px 3px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: #ededed;
+  white-space: pre-wrap;
+  word-break: break-word;
+  text-align: left;
+  max-width: 100%;
+}
+
+#banScreen .ac-m.user .ac-b {
+  background: #7a4d05;
+  color: #fff;
+  border-radius: 12px 12px 3px 12px;
+}
+
+#banScreen .ac-q {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.6);
+  border-left: 2px solid rgba(255, 255, 255, 0.3);
+  padding-left: 7px;
+  margin-bottom: 5px;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+#banScreen .ac-t {
+  font-size: 10.5px;
+  color: #6f6f6f;
+}
+
+#banScreen .ac-sys {
+  align-self: center;
+  max-width: 100%;
+  text-align: center;
+  font-size: 12px;
+  color: #9a9a9a;
+  background: var(--tk-tile);
+  border: 1px solid #333;
+  padding: 6px 11px;
+  line-height: 1.5;
+  margin-top: 12px;
+}
+
+#banScreen .ac-reply {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--tk-tile);
+  border-left: 3px solid var(--tk-accent);
+  padding: 7px 10px;
+  margin: 11px 13px 0;
+  font-size: 12.5px;
+  color: #c3c3c3;
+  text-align: left;
+}
+
+#banScreen .ac-reply span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#banScreen .ac-reply button {
+  background: none;
+  border: none;
+  color: #8d8d8d;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 4px;
+  font-family: inherit;
+}
+
+#banScreen .ac-rbtn {
+  background: none;
+  border: none;
+  color: #6f6f6f;
+  cursor: pointer;
+  font-size: 11px;
+  font-family: inherit;
+  padding: 0;
+  text-decoration: underline;
+}
+
+#banScreen .ac-rbtn:hover {
+  color: var(--tk-accent);
+}
+
+#banScreen .ac-closed {
+  background: var(--tk-tile);
+  border-left: 3px solid var(--tk-border);
+  padding: 11px 13px;
+  margin: 11px 13px 13px;
+  font-size: 12.5px;
+  color: #9a9a9a;
+  line-height: 1.55;
+  text-align: left;
+}
+
+#banScreen .ban-foot {
+  padding-top: 2px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+#banScreen .ban-discord {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  background: #5865f2;
+  color: #fff;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: bold;
+  padding: 9px 16px;
+  border-radius: 0;
+  transition: background 0.2s;
+}
+
+#banScreen .ban-discord:hover {
+  background: #4752c4;
+}
+
+#banScreen .ban-note {
+  color: #8d8d8d;
+  font-size: 12px;
+  margin: 0;
+  line-height: 1.55;
+}
+
+@media (max-width: 520px) {
+  #banScreen {
+    padding: 0;
+  }
+
+  #banScreen .ban-card {
+    border: none;
+    min-height: 100%;
+  }
+
+  #banScreen .ac-m {
+    max-width: 96%;
+  }
 }

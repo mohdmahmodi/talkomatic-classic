@@ -72,8 +72,8 @@
       crown.src = "images/icons/crown.gif";
       crown.alt = "";
       b.appendChild(crown);
-      b.appendChild(document.createTextNode("DEV"));
-      b.title = "Talkomatic developer";
+      b.appendChild(document.createTextNode("ADMIN"));
+      b.title = "Talkomatic admin";
       return b;
     }
     if (role === "mod") {
