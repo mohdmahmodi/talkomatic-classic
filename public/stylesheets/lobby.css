@@ -3037,24 +3037,6 @@ button:disabled {
   gap: 10px;
 }
 
-#banScreen .ban-discord {
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  background: #5865f2;
-  color: #fff;
-  text-decoration: none;
-  font-size: 13px;
-  font-weight: bold;
-  padding: 9px 16px;
-  border-radius: 0;
-  transition: background 0.2s;
-}
-
-#banScreen .ban-discord:hover {
-  background: #4752c4;
-}
-
 #banScreen .ban-note {
   color: #8d8d8d;
   font-size: 12px;

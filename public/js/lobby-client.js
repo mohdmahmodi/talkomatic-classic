@@ -667,7 +667,6 @@ let banScreenShown = false;
 function showBanScreen(info) {
   if (banScreenShown) return;
   banScreenShown = true;
-  const DISCORD = "https://discord.gg/N7tJznESrE";
 
   const permanent = !!info.permanent;
   const timerHtml = permanent
@@ -676,10 +675,6 @@ function showBanScreen(info) {
       '<div class="ban-timer-value" id="banCountdown">--:--:--</div></div>';
   const foot =
     '<div class="ban-foot">' +
-    '<a class="ban-discord" href="' +
-    DISCORD +
-    '" target="_blank" rel="noopener noreferrer">' +
-    '<i class="fab fa-discord"></i> Talkomatic Discord</a>' +
     '<p class="ban-note">' +
     (permanent ? "" : "This page updates itself the moment your ban ends. ") +
     "Every appeal is read by a person." +
