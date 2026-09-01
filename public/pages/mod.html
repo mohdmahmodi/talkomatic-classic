@@ -646,6 +646,14 @@
         color: #17a2b8;
         margin-top: 0.1875rem;
       }
+      .note-box.warn {
+        background: rgba(255, 82, 82, 0.08);
+        border: 1px solid rgba(255, 82, 82, 0.35);
+        color: var(--text);
+      }
+      .note-box.warn i {
+        color: #ff5252;
+      }
 
       .focusbar {
         display: flex;
@@ -3905,7 +3913,7 @@
           <button class="nav-item" data-tab="links" data-dev>
             <i class="fas fa-link"></i> Allowed links
           </button>
-          <button class="nav-item" data-tab="announce" data-dev>
+          <button class="nav-item" data-tab="announce" data-lead>
             <i class="fas fa-bullhorn"></i> Announcements
             <span class="ni-badge" id="announceBadge">0</span>
           </button>
@@ -4290,6 +4298,20 @@
               <code>#</code> headings, <code>-</code> lists,
               <code>**bold**</code>, <code>`code`</code>, <code>&gt;</code>
               quotes and links.
+            </span>
+          </p>
+          <!-- Shown only to mod leaders, never to admins. Posting reaches
+               every person on the site, so leaders get the tool for
+               emergencies, not as a regular channel. -->
+          <p class="note-box warn" id="anLeaderWarn" style="display: none">
+            <i class="fas fa-triangle-exclamation"></i>
+            <span>
+              <b>For mod leaders:</b> this reaches every single person on the
+              site, full screen. It is an admin tool that leaders can use in an
+              emergency, not a regular channel. Do not post here unless
+              something genuinely needs everyone's attention right now and no
+              admin is available. Notices posted by admins cannot be edited,
+              hidden, or deleted from here.
             </span>
           </p>
 
@@ -4824,7 +4846,7 @@
          it the key watch cannot tell this tab from a second person's. -->
     <script src="js/identity.js?v=1.0.2"></script>
     <script src="js/staff-ui.js?v=1.9.0"></script>
-    <script src="js/desk.js?v=1.0.3"></script>
-    <script src="js/mod.js?v=4.12.0"></script>
+    <script src="js/desk.js?v=1.0.4"></script>
+    <script src="js/mod.js?v=4.13.0"></script>
   </body>
 </html>

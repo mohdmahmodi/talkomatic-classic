@@ -2430,10 +2430,19 @@ function createUserRow(user, container) {
       : user.isMod && !user.isHidden
         ? "mod"
         : null;
+  // Mod leaders get the gear on L1/L2 mods too: their menu carries only the
+  // team actions (promote, demote, revoke), never room discipline on staff.
+  const leaderCanManage =
+    currentUserIsMod &&
+    !currentUserIsDev &&
+    currentUserModLevel >= 3 &&
+    targetVisibleRole === "mod" &&
+    !user.isDev &&
+    (user.modLevel || 1) < 3;
   const canActOnTarget = currentUserIsDev
     ? targetVisibleRole !== "dev"
     : currentUserIsMod
-      ? targetVisibleRole === null
+      ? targetVisibleRole === null || leaderCanManage
       : false;
   if (isStaff()) {
     if (user.id === currentUserId) {
@@ -3847,6 +3856,14 @@ function openUserStaffMenu(user) {
   const name = user.username || "user";
   const isFullMod =
     currentUserIsDev || (currentUserIsMod && currentUserModLevel >= 2);
+  // A leader opening the menu on an L1/L2 mod: team management only.
+  const leaderManagingMod =
+    currentUserIsMod &&
+    !currentUserIsDev &&
+    currentUserModLevel >= 3 &&
+    user.isMod &&
+    !user.isDev &&
+    (user.modLevel || 1) < 3;
   const cleanup = [];
   const items = [];
 
@@ -4060,15 +4077,20 @@ function openUserStaffMenu(user) {
         }),
     });
     if (!user.isDev && !user.isMod) roles.push(makeModItem);
-    if (user.isMod && !user.isDev) {
+  }
+  // Team actions on a mod target: admins get the full range, leaders manage
+  // L1/L2 but can never mint or touch a leader (the server refuses it too).
+  if ((currentUserIsDev || leaderManagingMod) && user.isMod && !user.isDev) {
+    {
       const lvl = user.modLevel >= 3 ? 3 : user.modLevel === 1 ? 1 : 2;
       const LEVEL_NAMES = {
         1: "junior mod (L1)",
         2: "full mod (L2)",
         3: "mod leader (L3)",
       };
+      const maxLevel = currentUserIsDev ? 3 : 2;
       const steps = [];
-      if (lvl < 3) steps.push(lvl + 1);
+      if (lvl < maxLevel) steps.push(lvl + 1);
       if (lvl > 1) steps.push(lvl - 1);
       for (const toLevel of steps) {
         const up = toLevel > lvl;
@@ -4126,16 +4148,21 @@ function openUserStaffMenu(user) {
     }
   }
 
-  const groups = [
-    { title: "Clean up what they show", items: cleanup },
-    { title: "Warn and remove", items },
-  ];
-  if (roles.length) groups.push({ title: "Role", items: roles });
+  // A leader on a mod target sees the team actions and nothing else: room
+  // discipline (warn, kick, wipe) on fellow staff stays out of their menu.
+  const groups = leaderManagingMod
+    ? [{ title: "Mod team", items: roles }]
+    : [
+        { title: "Clean up what they show", items: cleanup },
+        { title: "Warn and remove", items },
+      ];
+  if (!leaderManagingMod && roles.length)
+    groups.push({ title: "Role", items: roles });
 
   StaffUI.menu({
     title: `Actions: ${name}`,
     icon: '<i class="fas fa-shield-halved"></i>',
-    subtitle: "Per-user moderation",
+    subtitle: leaderManagingMod ? "Mod team management" : "Per-user moderation",
     groups,
     onHelp: () => StaffUI.help(staffRole()),
   });

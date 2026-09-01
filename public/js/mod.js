@@ -1587,17 +1587,28 @@
     card.appendChild(grid);
 
     const actions = divc("mc-actions");
+    // Every mod can open their own record (without its flags); reading other
+    // people's records stays with leaders and admins.
+    const isOwnRow =
+      !viewerIsDev() &&
+      m.rank !== "dev" &&
+      !!(me && me.label) &&
+      String(m.label || "").toLowerCase() === me.label.toLowerCase();
     const canSeeRecord =
       viewerIsOps() ||
+      isOwnRow ||
       (m.rank !== "dev" &&
         (viewerIsDev() || (viewerIsLeader() && m.rank !== "l3")));
     if (canSeeRecord) {
       const histBtn = document.createElement("button");
       histBtn.className = "btn sm";
       histBtn.appendChild(icon("fa-clock-rotate-left"));
-      histBtn.appendChild(document.createTextNode(" Their record"));
-      histBtn.title =
-        "Everything " + (m.label || "this person") + " has ever done";
+      histBtn.appendChild(
+        document.createTextNode(isOwnRow ? " My record" : " Their record"),
+      );
+      histBtn.title = isOwnRow
+        ? "Everything you have ever done as a mod"
+        : "Everything " + (m.label || "this person") + " has ever done";
       histBtn.addEventListener("click", () => openModHistory(m));
       actions.appendChild(histBtn);
     }
@@ -4587,6 +4598,11 @@
       n.style.display = viewerIsFullMod() ? "" : "none";
     });
 
+    // Leaders get the announcements tab as an emergency path; the warning
+    // above the composer is for them, so admins never see it.
+    const lw = $("anLeaderWarn");
+    if (lw) lw.style.display = viewerIsLeader() && !viewerIsDev() ? "" : "none";
+
     const gated = [
       ["grantMod", viewerIsDev()],
       ["appsToggle", viewerIsLeader()],
@@ -5435,6 +5451,24 @@
         item.appendChild(rr);
       }
 
+      // Leaders manage only mod-side notices; an admin's notice is read-only
+      // to them (the server refuses it too, this just keeps the UI honest).
+      const canManage = viewerIsDev() || a.byRole !== "dev";
+      if (!canManage) {
+        const ro = document.createElement("div");
+        ro.className = "an-item-meta";
+        ro.innerHTML =
+          '<i class="fas fa-lock"></i> Posted by an admin. Only admins can change it.';
+        item.appendChild(ro);
+        const preview0 = document.createElement("div");
+        preview0.className = "an-preview-box";
+        preview0.style.marginTop = "10px";
+        preview0.innerHTML = anMarkdown(a.body);
+        item.appendChild(preview0);
+        wrap.appendChild(item);
+        return;
+      }
+
       const acts = document.createElement("div");
       acts.className = "an-item-actions";
       const mk = (label, icon, fn, cls) => {
@@ -5529,8 +5563,9 @@
       if (window.StaffUI)
         StaffUI.confirm({
           title: "Post this notice?",
-          message:
-            "Everyone in the lobby sees it full-screen, once, until they close it.",
+          message: viewerIsDev()
+            ? "Everyone in the lobby sees it full-screen, once, until they close it."
+            : "This goes to every single person on the site, full screen. Leaders should only post when it is genuinely needed and no admin is available. Sure?",
           confirmText: "Post it",
         }).then((ok) => ok && go());
       else go();

@@ -1050,11 +1050,21 @@ function canViewModRecord(socket, label, role) {
   return lvl != null && lvl < 3;
 }
 
-function emitModHistory(socket, label, role, opts) {
+function emitModHistory(socket, label, role, opts, selfView) {
   const h = audit.historyFor(label, role, opts);
   if (socket.isMainDev)
     return socket.emit("staff mod history", { ...h, canReview: true });
   const view = { ip: false, names: !!socket.isDev };
+  // Own record: the actions and counts, but never the abuse flags. Those
+  // exist to catch farming and misuse, and telling someone they tripped one
+  // defeats the point.
+  if (selfView)
+    return socket.emit("staff mod history", {
+      ...h,
+      canReview: false,
+      flags: [],
+      entries: (h.entries || []).map((e) => audit.redactEntry(e, view)),
+    });
   socket.emit("staff mod history", {
     ...h,
     canReview: true,
@@ -7232,17 +7242,34 @@ function registerSocketHandlers(opts) {
       "staff get mod history",
       safe(async (data) => {
         if (!requireStaff(socket)) return;
-        if (!requireModLevel(socket, 3)) return;
         const label = typeof data?.label === "string" ? data.label : "";
         const role = data?.role === "dev" ? "dev" : "mod";
-        if (!canViewModRecord(socket, label, role)) return;
-        emitModHistory(socket, label, role, {
-          offset: data?.offset,
-          limit: data?.limit,
-          group: typeof data?.group === "string" ? data.group : null,
-          targetUid:
-            typeof data?.targetUid === "string" ? data.targetUid : null,
-        });
+        // Any mod can read their own record; the flags stay off it (see
+        // emitModHistory). Everything else keeps the leader-and-up rules.
+        const selfView =
+          role === "mod" &&
+          socket.isMod &&
+          !socket.isDev &&
+          !!socket.staffLabel &&
+          String(socket.staffLabel).toLowerCase() === label.toLowerCase() &&
+          !canViewModRecord(socket, label, role);
+        if (!selfView) {
+          if (!requireModLevel(socket, 3)) return;
+          if (!canViewModRecord(socket, label, role)) return;
+        }
+        emitModHistory(
+          socket,
+          label,
+          role,
+          {
+            offset: data?.offset,
+            limit: data?.limit,
+            group: typeof data?.group === "string" ? data.group : null,
+            targetUid:
+              typeof data?.targetUid === "string" ? data.targetUid : null,
+          },
+          selfView,
+        );
       }),
     );
 
@@ -7856,11 +7883,22 @@ function registerSocketHandlers(opts) {
       }),
     );
 
-    // ── Announcements: the dev side ─────────────────────────────────────────
+    // ── Announcements: the staff side ───────────────────────────────────────
+    // Admins, plus mod leaders (L3) as a break-glass path for when something
+    // needs everyone's attention and no admin is around. The dashboard tells
+    // leaders to treat it that way. A leader can manage only notices posted
+    // by the mod side: anything an admin wrote is read-only to them.
+
+    const canTouchNotice = (s, id) => {
+      if (s.isDev) return true;
+      const a = announcements.get(Number(id));
+      return !!a && a.byRole !== "dev";
+    };
+
     socket.on(
       "announcement list",
       safe(async () => {
-        if (!requireDev(socket)) return;
+        if (!requireModLevel(socket, 3)) return;
         socket.emit("announcement list", {
           items: announcements.listFor(socket.deviceId || null),
         });
@@ -7870,7 +7908,7 @@ function registerSocketHandlers(opts) {
     socket.on(
       "announcement post",
       safe(async (data) => {
-        if (!requireDev(socket)) return;
+        if (!requireModLevel(socket, 3)) return;
         const fail = (error) =>
           socket.emit("announcement result", { ok: false, error });
         const title = sanitizeMessage(
@@ -7888,7 +7926,7 @@ function registerSocketHandlers(opts) {
           title,
           body,
           by,
-          byRole: "dev",
+          byRole: socket.isDev ? "dev" : "mod",
         });
         if (!r.ok)
           return fail(
@@ -7908,7 +7946,12 @@ function registerSocketHandlers(opts) {
     socket.on(
       "announcement edit",
       safe(async (data) => {
-        if (!requireDev(socket)) return;
+        if (!requireModLevel(socket, 3)) return;
+        if (!canTouchNotice(socket, data?.id))
+          return socket.emit("announcement result", {
+            ok: false,
+            error: "Only an admin can change an admin's notice.",
+          });
         const r = announcements.edit({
           id: Number(data?.id),
           kind: data?.kind,
@@ -7937,7 +7980,12 @@ function registerSocketHandlers(opts) {
     socket.on(
       "announcement live",
       safe(async (data) => {
-        if (!requireDev(socket)) return;
+        if (!requireModLevel(socket, 3)) return;
+        if (!canTouchNotice(socket, data?.id))
+          return socket.emit("announcement result", {
+            ok: false,
+            error: "Only an admin can change an admin's notice.",
+          });
         const live = !!data?.live;
         if (!announcements.setLive(Number(data?.id), live)) return;
         logStaff(
@@ -7956,7 +8004,12 @@ function registerSocketHandlers(opts) {
     socket.on(
       "announcement delete",
       safe(async (data) => {
-        if (!requireDev(socket)) return;
+        if (!requireModLevel(socket, 3)) return;
+        if (!canTouchNotice(socket, data?.id))
+          return socket.emit("announcement result", {
+            ok: false,
+            error: "Only an admin can change an admin's notice.",
+          });
         if (!announcements.remove(Number(data?.id))) return;
         logStaff(socket, "delete announcement", String(data?.id || "?"), "-");
         socket.emit("announcement list", {

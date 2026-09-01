@@ -196,3 +196,36 @@ html.tk-fx-crt .tked-panel,
 html.tk-fx-crt .tked-panel * {
   text-shadow: none;
 }
+
+/* ── Light themes ──
+   html.tk-light flips on when the theme's page background is light. The room
+   chrome below was inked for dark pages only (yellow clock, cyan room type,
+   yellow invite line, dark name bars), so light themes re-ink it for
+   contrast. Dark themes never carry this class and are untouched. */
+
+html.tk-light .date-time {
+  color: #8a6a00;
+}
+
+html.tk-light .room-type {
+  color: #00697d;
+}
+
+html.tk-light .invite-text {
+  color: #8a6a00;
+}
+
+html.tk-light .second-navbar .room-uptime {
+  color: #1e7c35;
+}
+
+/* The name bar's gradient bottom defaults to a dark shade; on a light theme
+   fall back to the tile color instead so dark text on it stays readable. A
+   theme that sets the name-bar token keeps full control. */
+html.tk-light .user-info {
+  background: linear-gradient(
+    to bottom,
+    var(--tk-border),
+    var(--tk-userbar-bottom, var(--tk-tile, #303030))
+  );
+}

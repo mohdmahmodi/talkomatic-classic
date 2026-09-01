@@ -336,6 +336,18 @@
     if (any) ensureImgStyles();
   }
 
+  // A light page background flips html.tk-light on, and the stylesheets use
+  // that to re-ink chrome that was only ever drawn for dark themes (the
+  // yellow room clock, cyan room type, name bars). Dark themes never get it.
+  function isLightHex(hex) {
+    var h = String(hex).replace("#", "");
+    if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    var r = parseInt(h.slice(0, 2), 16);
+    var g = parseInt(h.slice(2, 4), 16);
+    var b = parseInt(h.slice(4, 6), 16);
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b > 140;
+  }
+
   function applyProfile(profile, css) {
     var root = document.documentElement;
     profile = profile || blankProfile();
@@ -365,6 +377,12 @@
     root.classList.toggle("tk-shaped", shaped);
     root.classList.toggle("tk-borderw", borderw);
     root.classList.toggle("tk-chat-sized", chatSized);
+
+    var bgTok =
+      profile.tokens && HEX.test(profile.tokens.bg || "")
+        ? profile.tokens.bg
+        : "#202020";
+    root.classList.toggle("tk-light", isLightHex(bgTok));
 
     for (var e = 0; e < EFFECTS.length; e++)
       if (EFFECTS[e].id)

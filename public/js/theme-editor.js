@@ -178,6 +178,7 @@
       panel: "#d8d0c0", tile: "#e6e0d2", "tile-hover": "#ddd5c5",
       card: "#fffdf7", cream: "#2e2a24", "cream-text": "#ffffff",
       "chat-text": "#b35f00", "chat-bg": "#fffdf7", "input-bg": "#ffffff",
+      "userbar-bottom": "#cfc5b0",
     },
     Grape: {
       accent: "#b388ff", "accent-hover": "#9a6fe8", detail: "#64ffda",
@@ -226,6 +227,7 @@
       t.tile = hslHex(b.h, sat, b.l - 5);
       t["tile-hover"] = hslHex(b.h, sat, b.l - 10);
       t.panel = hslHex(b.h, sat, b.l - 14);
+      t["userbar-bottom"] = hslHex(b.h, sat, b.l - 16);
       t.border = hslHex(b.h, Math.min(sat, 20), b.l - 32);
       t.text = hslHex(b.h, 15, 10);
       t.muted = hslHex(b.h, 10, 32);

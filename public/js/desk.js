@@ -3721,9 +3721,21 @@
     return fallback;
   }
 
-  function canOpenRecord(role, level) {
+  function isOwnRecord(label, role) {
+    return (
+      !!me &&
+      me.role !== "dev" &&
+      role !== "dev" &&
+      String(me.label || "").toLowerCase() ===
+        String(label || "").toLowerCase()
+    );
+  }
+
+  function canOpenRecord(role, level, label) {
     if (!me) return false;
     if (me.mainDev) return true;
+    // Your own record is always open to you (the flags on it are not).
+    if (isOwnRecord(label, role)) return true;
     if (role === "dev") return false;
     if (me.role === "dev") return true;
     if ((me.level || 1) < 3) return false;
@@ -3734,8 +3746,12 @@
     if (!label) return;
     const known = levelFor(label, level);
     const r = role === "dev" ? "dev" : "mod";
-    if (!canOpenRecord(r, known))
-      return toast("Their record sits above your level.");
+    if (!canOpenRecord(r, known, label))
+      return toast(
+        me && me.role !== "dev" && (me.level || 1) < 3
+          ? "Only mod leaders and admins read other mods' records. Your own is always open to you."
+          : "Their record sits above your level.",
+      );
     recordFor = {
       label,
       role: r,
