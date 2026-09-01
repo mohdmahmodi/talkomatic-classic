@@ -42,13 +42,125 @@
     { id: "glass", label: "Glassmorphism" },
     { id: "brutal", label: "Neo-brutalism" },
     { id: "soft", label: "Soft (neumorphic)" },
+    { id: "crt", label: "Terminal (CRT glow)" },
   ];
 
-  var FONTS = [
-    "", "Inter", "Poppins", "Nunito", "Montserrat", "Lato", "Roboto Slab",
-    "Merriweather", "JetBrains Mono", "Space Mono", "VT323", "Press Start 2P",
-    "Orbitron", "Bebas Neue", "Comic Neue",
+  // Image backgrounds. Stored per profile under images: {slot: {src, fit,
+  // dim}}. Device-only: publishing strips them, sharing as text keeps them.
+  var IMG_SLOTS = [
+    {
+      id: "bg",
+      label: "Page background",
+      hint: "Behind the whole page",
+      pages: ["lobby", "room"],
+      dim: true,
+    },
+    {
+      id: "panel",
+      label: "Menu panel",
+      hint: "The left side panel",
+      pages: ["lobby"],
+    },
+    {
+      id: "chat",
+      label: "Chat boxes",
+      hint: "Behind everyone's typing",
+      pages: ["room"],
+    },
   ];
+
+  var IMG_FITS = ["cover", "tile", "pixel"];
+
+  // Font catalog. google:false means a system font: no CDN fetch, it either
+  // exists on the device or the fallback kicks in. "gen" is the generic
+  // family used at the end of the stack.
+  var FONT_GROUPS = [
+    {
+      label: "Clean & modern",
+      fonts: [
+        { name: "Inter", gen: "sans-serif" },
+        { name: "Poppins", gen: "sans-serif" },
+        { name: "Nunito", gen: "sans-serif" },
+        { name: "Montserrat", gen: "sans-serif" },
+        { name: "Lato", gen: "sans-serif" },
+        { name: "Open Sans", gen: "sans-serif" },
+        { name: "Raleway", gen: "sans-serif" },
+        { name: "Quicksand", gen: "sans-serif" },
+        { name: "Josefin Sans", gen: "sans-serif" },
+      ],
+    },
+    {
+      label: "Serif & bookish",
+      fonts: [
+        { name: "Roboto Slab", gen: "serif" },
+        { name: "Merriweather", gen: "serif" },
+        { name: "Playfair Display", gen: "serif" },
+        { name: "Lora", gen: "serif" },
+        { name: "EB Garamond", gen: "serif" },
+      ],
+    },
+    {
+      label: "Display & loud",
+      fonts: [
+        { name: "Bebas Neue", gen: "sans-serif" },
+        { name: "Oswald", gen: "sans-serif" },
+        { name: "Orbitron", gen: "sans-serif" },
+        { name: "Audiowide", gen: "sans-serif" },
+        { name: "Righteous", gen: "sans-serif" },
+        { name: "Bangers", gen: "cursive" },
+        { name: "Luckiest Guy", gen: "cursive" },
+        { name: "Alfa Slab One", gen: "serif" },
+      ],
+    },
+    {
+      label: "Mono & retro",
+      fonts: [
+        { name: "JetBrains Mono", gen: "monospace" },
+        { name: "Fira Code", gen: "monospace" },
+        { name: "Space Mono", gen: "monospace" },
+        { name: "IBM Plex Mono", gen: "monospace" },
+        { name: "VT323", gen: "monospace" },
+        { name: "Press Start 2P", gen: "monospace" },
+        { name: "Silkscreen", gen: "monospace" },
+      ],
+    },
+    {
+      label: "Handwriting & fun",
+      fonts: [
+        { name: "Comic Neue", gen: "cursive" },
+        { name: "Patrick Hand", gen: "cursive" },
+        { name: "Caveat", gen: "cursive" },
+        { name: "Indie Flower", gen: "cursive" },
+        { name: "Pacifico", gen: "cursive" },
+        { name: "Lobster", gen: "cursive" },
+        { name: "Dancing Script", gen: "cursive" },
+        { name: "Amatic SC", gen: "cursive" },
+      ],
+    },
+    {
+      label: "System classics",
+      fonts: [
+        { name: "Comic Sans MS", gen: "cursive", google: false },
+        { name: "Arial", gen: "sans-serif", google: false },
+        { name: "Verdana", gen: "sans-serif", google: false },
+        { name: "Trebuchet MS", gen: "sans-serif", google: false },
+        { name: "Tahoma", gen: "sans-serif", google: false },
+        { name: "Georgia", gen: "serif", google: false },
+        { name: "Times New Roman", gen: "serif", google: false },
+        { name: "Courier New", gen: "monospace", google: false },
+        { name: "Impact", gen: "sans-serif", google: false },
+      ],
+    },
+  ];
+
+  var FONT_META = {};
+  var FONTS = [""];
+  FONT_GROUPS.forEach(function (g) {
+    g.fonts.forEach(function (f) {
+      FONT_META[f.name] = { gen: f.gen, google: f.google !== false };
+      FONTS.push(f.name);
+    });
+  });
 
   var FONT_SLOTS = {
     lobby: [
@@ -65,7 +177,7 @@
   // ── State ─────────────────────────────────────────────────────────────────
 
   function blankProfile() {
-    return { tokens: {}, effect: "", fonts: {} };
+    return { tokens: {}, effect: "", fonts: {}, images: {} };
   }
 
   function blankState() {
@@ -99,9 +211,17 @@
     return blankState();
   }
 
+  // False when the browser refuses the write (images can push a theme past
+  // the localStorage quota); the editor tells the user instead of silently
+  // losing the save.
   function saveState(state) {
-    localStorage.setItem(KEY, JSON.stringify(state));
+    try {
+      localStorage.setItem(KEY, JSON.stringify(state));
+    } catch (e) {
+      return false;
+    }
     applyProfile(state[PAGE], state.css);
+    return true;
   }
 
   function hasCustom() {
@@ -110,6 +230,7 @@
     return (
       Object.keys(p.tokens).length > 0 || !!p.effect ||
       Object.keys(p.fonts || {}).some(function (k) { return p.fonts[k]; }) ||
+      Object.keys(p.images || {}).length > 0 ||
       !!st.css
     );
   }
@@ -120,6 +241,8 @@
 
   function ensureFont(family) {
     if (!family || loadedFonts[family]) return;
+    var meta = FONT_META[family];
+    if (meta && !meta.google) return;
     loadedFonts[family] = true;
     var link = document.createElement("link");
     link.rel = "stylesheet";
@@ -131,7 +254,86 @@
   }
 
   function fontStack(family) {
-    return '"' + family + '", talkoSS, Arial, sans-serif';
+    var meta = FONT_META[family];
+    var gen = (meta && meta.gen) || "sans-serif";
+    return '"' + family + '", talkoSS, Arial, ' + gen;
+  }
+
+  // ── Image backgrounds ─────────────────────────────────────────────────────
+  // The surface rules are injected once, here, because the engine must be
+  // able to paint a saved theme on any page it loads on, editor or not. The
+  // page-background dim is a gradient layer over the image, not an overlay
+  // element, so it can never sit on top of content.
+
+  var IMG_CSS = [
+    "html.tk-img-bg body{background-image:linear-gradient(rgba(0,0,0,var(--tk-img-bg-dim,0)),",
+    "rgba(0,0,0,var(--tk-img-bg-dim,0))),var(--tk-img-bg) !important;",
+    "background-size:cover;background-position:center;background-attachment:fixed;",
+    "background-repeat:no-repeat;}",
+    "html.tk-img-bg-tile body{background-size:auto;background-repeat:repeat;}",
+    "html.tk-img-bg-pixel body{background-size:96px;background-repeat:repeat;",
+    "image-rendering:pixelated;}",
+    // The full-page containers each paint --tk-bg over the body; they go
+    // transparent while a page image is set so it can actually be seen.
+    "html.tk-img-bg .right-panel,html.tk-img-bg .chat-container{",
+    "background:transparent !important;}",
+    "html.tk-img-panel .left-panel{background-image:var(--tk-img-panel) !important;",
+    "background-size:cover;background-position:center;}",
+    "html.tk-img-panel-tile .left-panel{background-size:auto;background-repeat:repeat;}",
+    "html.tk-img-panel-pixel .left-panel{background-size:96px;background-repeat:repeat;",
+    "image-rendering:pixelated;}",
+    "html.tk-img-chat .chat-input{background-image:var(--tk-img-chat) !important;",
+    "background-size:cover;background-position:center;}",
+    "html.tk-img-chat-tile .chat-input{background-size:auto;background-repeat:repeat;}",
+    "html.tk-img-chat-pixel .chat-input{background-size:96px;background-repeat:repeat;",
+    "image-rendering:pixelated;}",
+  ].join("");
+
+  function ensureImgStyles() {
+    if (document.getElementById("tkImgStyles")) return;
+    var s = document.createElement("style");
+    s.id = "tkImgStyles";
+    s.textContent = IMG_CSS;
+    (document.head || document.documentElement).appendChild(s);
+  }
+
+  function validImageSrc(src) {
+    if (typeof src !== "string" || src.length > 3000000) return false;
+    if (/["'\\\n\r]/.test(src)) return false;
+    return /^(https?:\/\/|data:image\/)/i.test(src);
+  }
+
+  function applyImages(root, images) {
+    var any = false;
+    for (var i = 0; i < IMG_SLOTS.length; i++) {
+      var slot = IMG_SLOTS[i];
+      var val = images ? images[slot.id] : null;
+      var on = !!(val && validImageSrc(val.src));
+      if (on) any = true;
+      root.classList.toggle("tk-img-" + slot.id, on);
+      root.classList.toggle(
+        "tk-img-" + slot.id + "-tile",
+        on && val.fit === "tile",
+      );
+      root.classList.toggle(
+        "tk-img-" + slot.id + "-pixel",
+        on && val.fit === "pixel",
+      );
+      if (on) {
+        root.style.setProperty("--tk-img-" + slot.id, 'url("' + val.src + '")');
+        if (slot.dim) {
+          var d = Number(val.dim);
+          root.style.setProperty(
+            "--tk-img-" + slot.id + "-dim",
+            Number.isFinite(d) ? Math.max(0, Math.min(0.8, d)) : 0,
+          );
+        }
+      } else {
+        root.style.removeProperty("--tk-img-" + slot.id);
+        if (slot.dim) root.style.removeProperty("--tk-img-" + slot.id + "-dim");
+      }
+    }
+    if (any) ensureImgStyles();
   }
 
   function applyProfile(profile, css) {
@@ -171,6 +373,8 @@
           profile.effect === EFFECTS[e].id,
         );
 
+    applyImages(root, profile.images);
+
     var slots = ["main", "heading", "chat"];
     for (var f = 0; f < slots.length; f++) {
       var slot = slots[f];
@@ -198,7 +402,14 @@
     TOKENS: TOKENS,
     EFFECTS: EFFECTS,
     FONTS: FONTS,
+    FONT_GROUPS: FONT_GROUPS,
+    FONT_META: FONT_META,
     FONT_SLOTS: FONT_SLOTS,
+    IMG_SLOTS: IMG_SLOTS,
+    IMG_FITS: IMG_FITS,
+    validImageSrc: validImageSrc,
+    ensureFont: ensureFont,
+    fontStack: fontStack,
     HEX: HEX,
     blankProfile: blankProfile,
     getState: getState,

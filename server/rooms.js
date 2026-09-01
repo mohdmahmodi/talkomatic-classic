@@ -45,6 +45,7 @@ const reports = require("./reports");
 const lastseen = require("./lastseen");
 const appeals = require("./appeals");
 const suggestions = require("./suggestions");
+const communityThemes = require("./themes");
 const rules = require("./rules");
 const announcements = require("./announcements");
 const banhistory = require("./banhistory");
@@ -1376,6 +1377,14 @@ function broadcastBoard() {
     if (s.boardSince != null && s.deviceId)
       s.emit("board badges", suggestions.unreadFor(s.deviceId, s.boardSince));
   }
+}
+
+// Vote deltas go to every socket that has the themes page open, so counts
+// stay live without resending the whole library.
+function broadcastThemeVote(id, up, down) {
+  if (!io()) return;
+  for (const [, s] of io().sockets.sockets)
+    if (s.themesPageOpen) s.emit("themes vote update", { id, up, down });
 }
 
 function broadcastAnnouncement(changed) {
@@ -7711,6 +7720,61 @@ function registerSocketHandlers(opts) {
           "board badges",
           suggestions.unreadFor(socket.deviceId || null, since),
         );
+      }),
+    );
+
+    // ── Community themes page ──────────────────────────────────────────────
+
+    socket.on(
+      "themes open",
+      safe(async () => {
+        socket.themesPageOpen = true;
+        socket.emit("themes data", {
+          themes: communityThemes.publicList(500, socket.deviceId || null),
+        });
+      }),
+    );
+
+    socket.on(
+      "themes close",
+      safe(async () => {
+        socket.themesPageOpen = false;
+      }),
+    );
+
+    socket.on(
+      "themes vote",
+      safe(async (data) => {
+        const id = Number(data?.id);
+        const dir = [1, -1, 0].includes(data?.dir) ? data.dir : null;
+        if (!id || dir === null) return;
+        const fail = (error) =>
+          socket.emit("themes result", { ok: false, action: "vote", error });
+        if (!socket.deviceId) return fail("Could not register your vote.");
+        const now = Date.now();
+        if (now - (socket._lastThemeVote || 0) < 700) return;
+        socket._lastThemeVote = now;
+        const r = communityThemes.vote({
+          id,
+          deviceId: socket.deviceId,
+          ip: socket.clientIp || null,
+          dir,
+        });
+        if (!r.ok)
+          return fail(
+            r.code === "ip_cap"
+              ? "Vote limit reached for your network on this theme."
+              : "Could not register your vote.",
+          );
+        socket.emit("themes result", {
+          ok: true,
+          action: "vote",
+          id,
+          up: r.up,
+          down: r.down,
+          myVote: r.myVote,
+        });
+        broadcastThemeVote(id, r.up, r.down);
       }),
     );
 

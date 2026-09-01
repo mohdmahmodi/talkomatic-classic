@@ -6,7 +6,7 @@
     <title>Themes - Talkomatic</title>
     <meta
       name="description"
-      content="Browse featured and community-made Talkomatic themes, apply them with one click, or build and publish your own in the visual theme editor."
+      content="Browse featured and community-made Talkomatic themes, apply them with one click, vote for your favorites, or build and publish your own in the visual theme editor."
     />
     <link
       rel="stylesheet"
@@ -18,7 +18,7 @@
     <link rel="stylesheet" href="stylesheets/toastr.min.css?v=1.0.1" />
     <link rel="stylesheet" href="stylesheets/toastr.css?v=1.2.1" />
     <link rel="icon" type="image/png" href="images/icons/favicon.png" />
-    <script src="js/theme-engine.js?v=2.2.0"></script>
+    <script src="js/theme-engine.js?v=2.4.0"></script>
     <style>
       @font-face {
         font-family: "talkoSS";
@@ -50,6 +50,7 @@
         font-family: talkoSS, Arial, sans-serif;
       }
       .wrap { max-width: 1150px; margin: 0 auto; padding: 20px 16px 60px; }
+
       .page-head {
         display: flex;
         align-items: center;
@@ -74,6 +75,51 @@
         transition: background-color 0.15s ease, color 0.15s ease;
       }
       .back:hover { background: var(--tk-accent); color: #000; }
+
+      /* ── Search, front and center ── */
+
+      .search-hero {
+        max-width: 620px;
+        margin: 0 auto 22px;
+        text-align: center;
+      }
+      .search-box {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        background: var(--tk-tile);
+        border: 1px solid var(--tk-border);
+        border-radius: 8px;
+        padding: 0 16px;
+        transition: border-color 0.15s ease;
+      }
+      .search-box:focus-within { border-color: var(--tk-accent); }
+      .search-box i { color: var(--tk-muted); font-size: 14px; flex: none; }
+      .search-box input {
+        flex: 1;
+        background: transparent;
+        border: none;
+        outline: none;
+        color: var(--tk-text);
+        font-family: inherit;
+        font-size: 15px;
+        padding: 13px 0;
+        min-width: 0;
+      }
+      .search-box input::placeholder { color: #888; }
+      .search-clear {
+        flex: none;
+        background: none;
+        border: none;
+        color: var(--tk-muted);
+        font-size: 15px;
+        cursor: pointer;
+        padding: 4px;
+        display: none;
+      }
+      .search-clear:hover { color: var(--tk-accent); }
+      .search-hint { font-size: 11.5px; color: #888; margin-top: 7px; }
+
       .strip {
         background: var(--tk-cream);
         color: var(--tk-cream-text);
@@ -93,7 +139,8 @@
       .note { font-size: 12px; color: var(--tk-muted); line-height: 1.5; }
       .note b { color: var(--tk-accent); }
 
-      /* Featured cards */
+      /* ── Featured cards ── */
+
       .featured-grid {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
@@ -121,11 +168,43 @@
       .feat-desc { font-size: 12.5px; color: var(--tk-muted); line-height: 1.4; flex: 1; }
       .feat-by { font-size: 11px; color: #888; }
 
-      /* Community cards */
+      /* ── Community controls ── */
+
+      .comm-controls {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 14px;
+      }
+      .sort-chips { display: flex; gap: 6px; }
+      .chip {
+        background: var(--tk-card);
+        color: var(--tk-muted);
+        border: 1px solid var(--tk-border);
+        border-radius: 999px;
+        padding: 6px 15px;
+        font-size: 12px;
+        font-weight: bold;
+        font-family: inherit;
+        cursor: pointer;
+        transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+      }
+      .chip:hover { color: var(--tk-text); border-color: var(--tk-accent); }
+      .chip.active {
+        background: var(--tk-accent);
+        border-color: var(--tk-accent);
+        color: #1a1a1a;
+      }
+      .comm-count { margin-left: auto; font-size: 12px; color: #888; }
+
+      /* ── Community cards ── */
+
       .comm-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
         gap: 14px;
+        align-items: start;
       }
       .theme-card {
         background: var(--tk-card);
@@ -135,14 +214,63 @@
         transition: border-color 0.15s ease;
       }
       .theme-card:hover { border-color: var(--tk-accent); }
-      .swatches { display: flex; height: 14px; }
+      .swatches { display: flex; height: 16px; }
       .swatches i { flex: 1; }
       .theme-body { padding: 12px; }
-      .theme-title { font-size: 15px; font-weight: bold; }
-      .theme-desc { font-size: 12.5px; color: var(--tk-muted); margin-top: 4px; line-height: 1.4; min-height: 17px; }
+      .theme-title { font-size: 15px; font-weight: bold; overflow-wrap: anywhere; }
+      .theme-desc {
+        font-size: 12.5px;
+        color: var(--tk-muted);
+        margin-top: 4px;
+        line-height: 1.45;
+        overflow-wrap: anywhere;
+      }
       .theme-meta { font-size: 11px; color: #888; margin-top: 8px; }
       .theme-meta b { color: var(--tk-accent); font-weight: bold; }
-      .card-actions { display: flex; gap: 8px; margin-top: 10px; }
+
+      .card-foot {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 11px;
+        flex-wrap: wrap;
+      }
+
+      /* Vote group: server-counted, one vote per browser */
+      .votes {
+        display: inline-flex;
+        align-items: center;
+        background: var(--tk-tile);
+        border: 1px solid var(--tk-border);
+        border-radius: 5px;
+        overflow: hidden;
+      }
+      .vote-btn {
+        background: transparent;
+        border: none;
+        color: var(--tk-muted);
+        width: 34px;
+        height: 32px;
+        font-size: 13px;
+        cursor: pointer;
+        font-family: inherit;
+        transition: background-color 0.15s ease, color 0.15s ease;
+      }
+      .vote-btn:hover { background: var(--tk-tile-hover); color: var(--tk-text); }
+      .vote-btn.on-up { color: #1a1a1a; background: var(--tk-accent); }
+      .vote-btn.on-down { color: #1a1a1a; background: #64b5f6; }
+      .vote-score {
+        min-width: 30px;
+        text-align: center;
+        font-size: 13px;
+        font-weight: bold;
+        color: var(--tk-text);
+        padding: 0 4px;
+      }
+      .vote-score.pos { color: var(--tk-accent); }
+      .vote-score.neg { color: #64b5f6; }
+
+      .card-actions { display: flex; gap: 8px; margin-left: auto; }
       .btn {
         background: var(--tk-tile);
         color: var(--tk-text);
@@ -197,6 +325,7 @@
         font-size: 11px;
         font-weight: bold;
       }
+
       .empty { text-align: center; color: var(--tk-muted); padding: 30px 0; font-size: 14px; }
       .empty i { font-size: 34px; color: var(--tk-accent); display: block; margin-bottom: 10px; }
 
@@ -207,8 +336,13 @@
         flex-wrap: wrap;
       }
       .make-own p { margin: 0; flex: 1 1 300px; }
-      @media (max-width: 520px) {
+
+      @media (max-width: 640px) {
         .page-title { font-size: 19px; }
+        .comm-grid { grid-template-columns: 1fr; }
+        .featured-grid { grid-template-columns: 1fr; }
+        .search-box input { font-size: 14px; padding: 12px 0; }
+        .comm-count { margin-left: 0; width: 100%; }
       }
     </style>
   </head>
@@ -219,7 +353,26 @@
         <a class="back" href="index.html"><i class="fas fa-arrow-left"></i> Back to Lobby</a>
       </div>
 
-      <div class="section">
+      <div class="search-hero">
+        <div class="search-box">
+          <i class="fas fa-magnifying-glass"></i>
+          <input
+            id="themeSearch"
+            type="search"
+            placeholder="Search themes by name or creator..."
+            autocomplete="off"
+          />
+          <button id="searchClear" class="search-clear" aria-label="Clear search">
+            <i class="fas fa-xmark"></i>
+          </button>
+        </div>
+        <div class="search-hint">
+          Apply any theme with one click. Vote for the ones you like: one vote
+          per browser, counted on the server.
+        </div>
+      </div>
+
+      <div class="section" id="makeOwnSection">
         <div class="strip">Make Your Own...</div>
         <div class="section-body make-own">
           <p class="note">
@@ -233,7 +386,7 @@
         </div>
       </div>
 
-      <div class="section">
+      <div class="section" id="featuredSection">
         <div class="strip">Featured...</div>
         <div class="section-body">
           <div id="featured" class="featured-grid"></div>
@@ -243,21 +396,34 @@
       <div class="section">
         <div class="strip">Community Themes...</div>
         <div class="section-body">
-          <p class="note" style="margin-top: 0">
-            Published straight from the theme editor by players like you.
-            Names and descriptions are automatically filtered.
-          </p>
+          <div class="comm-controls">
+            <div class="sort-chips">
+              <button class="chip active" id="sortTop" type="button">
+                <i class="fas fa-arrow-trend-up"></i> Top
+              </button>
+              <button class="chip" id="sortNew" type="button">
+                <i class="fas fa-clock"></i> New
+              </button>
+            </div>
+            <div class="comm-count" id="commCount"></div>
+          </div>
           <div id="community" class="comm-grid"></div>
           <div id="commEmpty" class="empty" style="display: none">
             <i class="fas fa-palette"></i>
             No community themes yet. Yours could be the first!
           </div>
+          <div id="commNoMatch" class="empty" style="display: none">
+            <i class="fas fa-magnifying-glass"></i>
+            Nothing matches that search.
+          </div>
         </div>
       </div>
     </div>
 
+    <script src="/socket.io/socket.io.js"></script>
     <script src="js/jquery.min.js?v=1.0.2"></script>
     <script src="js/toastr.min.js?v=1.0.1"></script>
-    <script src="js/themes-page.js?v=1.0.0"></script>
+    <script src="js/identity.js"></script>
+    <script src="js/themes-page.js?v=2.0.0"></script>
   </body>
 </html>

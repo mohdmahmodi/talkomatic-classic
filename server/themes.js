@@ -12,13 +12,25 @@ const STORE_PATH = path.join(DATA_DIR, "community-themes.json");
 const MAX = 500;
 const PER_DAY = 3;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const VOTES_PER_IP = 2;
 
 const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
-const EFFECTS = ["", "glass", "brutal", "soft"];
+const EFFECTS = ["", "glass", "brutal", "soft", "crt"];
+// Mirrors the catalog in public/js/theme-engine.js. A font missing here gets
+// silently stripped from published themes, so keep the two lists in step.
 const FONTS = [
-  "", "Inter", "Poppins", "Nunito", "Montserrat", "Lato", "Roboto Slab",
-  "Merriweather", "JetBrains Mono", "Space Mono", "VT323", "Press Start 2P",
-  "Orbitron", "Bebas Neue", "Comic Neue",
+  "",
+  "Inter", "Poppins", "Nunito", "Montserrat", "Lato", "Open Sans", "Raleway",
+  "Quicksand", "Josefin Sans",
+  "Roboto Slab", "Merriweather", "Playfair Display", "Lora", "EB Garamond",
+  "Bebas Neue", "Oswald", "Orbitron", "Audiowide", "Righteous", "Bangers",
+  "Luckiest Guy", "Alfa Slab One",
+  "JetBrains Mono", "Fira Code", "Space Mono", "IBM Plex Mono", "VT323",
+  "Press Start 2P", "Silkscreen",
+  "Comic Neue", "Patrick Hand", "Caveat", "Indie Flower", "Pacifico",
+  "Lobster", "Dancing Script", "Amatic SC",
+  "Comic Sans MS", "Arial", "Verdana", "Trebuchet MS", "Tahoma", "Georgia",
+  "Times New Roman", "Courier New", "Impact",
 ];
 const RANGES = { radius: [0, 24], "border-width": [1, 4], blur: [4, 30] };
 
@@ -30,6 +42,8 @@ function load() {
   try {
     const arr = JSON.parse(fs.readFileSync(STORE_PATH, "utf8"));
     themes = Array.isArray(arr) ? arr : [];
+    for (const t of themes)
+      if (!t.voters || typeof t.voters !== "object") t.voters = {};
     seq = themes.reduce((m, t) => Math.max(m, t.id || 0), 0);
   } catch (err) {
     if (err.code !== "ENOENT")
@@ -131,6 +145,7 @@ function submit({ deviceId, ip, userId, by, title, desc, state }) {
     ipKey,
     state: clean,
     at: Date.now(),
+    voters: {},
   };
   themes.push(t);
   if (themes.length > MAX) themes = themes.slice(-MAX);
@@ -146,21 +161,69 @@ function remove(id) {
   return true;
 }
 
-function publicList(limit = 100) {
+function get(id) {
+  return themes.find((t) => t.id === id) || null;
+}
+
+function voteCounts(t) {
+  let up = 0,
+    down = 0;
+  for (const v of Object.values(t.voters || {})) v.v === 1 ? up++ : down++;
+  return { up, down };
+}
+
+// One vote per browser, capped per hashed IP, same as the suggestion board.
+// dir 0 withdraws the vote. Counts are always recomputed from the voter map,
+// so there is no separate number a client could bump.
+function vote({ id, deviceId, ip, dir }) {
+  const t = get(id);
+  if (!t) return { ok: false, code: "not_found" };
+  if (!deviceId) return { ok: false, code: "no_device" };
+  const ipKey = ipKeyFor(ip);
+  if (!t.voters || typeof t.voters !== "object") t.voters = {};
+  const existing = t.voters[deviceId];
+
+  if (dir === 0) {
+    delete t.voters[deviceId];
+  } else if (dir === 1 || dir === -1) {
+    if (!existing) {
+      let sameIp = 0;
+      for (const v of Object.values(t.voters))
+        if (ipKey && v.ip === ipKey) sameIp++;
+      if (sameIp >= VOTES_PER_IP) return { ok: false, code: "ip_cap" };
+    }
+    t.voters[deviceId] = { v: dir, ip: ipKey, at: Date.now() };
+  } else {
+    return { ok: false, code: "bad_dir" };
+  }
+  saveSoon();
+  const { up, down } = voteCounts(t);
+  return { ok: true, up, down, myVote: t.voters[deviceId]?.v || 0 };
+}
+
+function publicOne(t, deviceId) {
+  const { up, down } = voteCounts(t);
+  return {
+    id: t.id,
+    title: t.title,
+    desc: t.desc,
+    by: t.by,
+    at: t.at,
+    state: t.state,
+    up,
+    down,
+    myVote: (deviceId && t.voters?.[deviceId]?.v) || 0,
+  };
+}
+
+function publicList(limit = 500, deviceId = null) {
   return themes
     .slice()
     .sort((a, b) => b.at - a.at)
     .slice(0, limit)
-    .map((t) => ({
-      id: t.id,
-      title: t.title,
-      desc: t.desc,
-      by: t.by,
-      at: t.at,
-      state: t.state,
-    }));
+    .map((t) => publicOne(t, deviceId));
 }
 
 load();
 
-module.exports = { submit, remove, publicList, flushSync };
+module.exports = { submit, remove, publicList, vote, get, publicOne, flushSync };

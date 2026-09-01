@@ -1215,10 +1215,30 @@ class Talkoboard {
     return this.lerpColor(stops[i], stops[i + 1], seg - i);
   }
 
+  // Mirrored sweep: t runs 0 -> 1 -> 0 over two periods, so the gradient
+  // folds back on itself instead of snapping from the last color to the first.
+  gradientT(i) {
+    const p = this.GRADIENT_PERIOD;
+    const c = ((i % (2 * p)) + 2 * p) % (2 * p);
+    return c <= p ? c / p : (2 * p - c) / p;
+  }
+
   strokeSegmentColor(stroke, i) {
     if (!stroke.gradient || stroke.gradient.length < 2) return stroke.color;
-    const p = this.GRADIENT_PERIOD;
-    return this.sampleGradient(stroke.gradient, (i % p) / p);
+    return this.sampleGradient(stroke.gradient, this.gradientT(i));
+  }
+
+  // A two-stop canvas gradient across one drawn piece, from the previous
+  // sample color to this one, so the color blends inside the piece rather
+  // than stepping flat from piece to piece.
+  segmentGradientStyle(ctx, stroke, i, x0, y0, x1, y1) {
+    const a = this.strokeSegmentColor(stroke, i - 1);
+    const b = this.strokeSegmentColor(stroke, i);
+    if (a === b || (x0 === x1 && y0 === y1)) return b;
+    const g = ctx.createLinearGradient(x0, y0, x1, y1);
+    g.addColorStop(0, a);
+    g.addColorStop(1, b);
+    return g;
   }
 
   updateGradientSelection() {
@@ -2534,10 +2554,22 @@ class Talkoboard {
       const seg = this.clipSegToRect(pts[i - 1], pts[i], rect);
       if (!seg) continue;
       if (grad) {
-        ctx.strokeStyle = this.strokeSegmentColor(stroke, i);
+        const gx0 = (seg[0].x - rox) * k,
+          gy0 = (seg[0].y - roy) * k;
+        const gx1 = (seg[1].x - rox) * k,
+          gy1 = (seg[1].y - roy) * k;
+        ctx.strokeStyle = this.segmentGradientStyle(
+          ctx,
+          stroke,
+          i,
+          gx0,
+          gy0,
+          gx1,
+          gy1,
+        );
         ctx.beginPath();
-        ctx.moveTo((seg[0].x - rox) * k, (seg[0].y - roy) * k);
-        ctx.lineTo((seg[1].x - rox) * k, (seg[1].y - roy) * k);
+        ctx.moveTo(gx0, gy0);
+        ctx.lineTo(gx1, gy1);
         ctx.stroke();
       } else {
         ctx.moveTo((seg[0].x - rox) * k, (seg[0].y - roy) * k);
@@ -2654,10 +2686,14 @@ class Talkoboard {
     ctx.globalCompositeOperation = "source-over";
     const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
     if (n === 2) {
-      ctx.strokeStyle = this.strokeSegmentColor(stroke, 1);
+      const x0 = (pts[0].x - ox) * k,
+        y0 = (pts[0].y - oy) * k;
+      const x1 = (pts[1].x - ox) * k,
+        y1 = (pts[1].y - oy) * k;
+      ctx.strokeStyle = this.segmentGradientStyle(ctx, stroke, 1, x0, y0, x1, y1);
       ctx.beginPath();
-      ctx.moveTo((pts[0].x - ox) * k, (pts[0].y - oy) * k);
-      ctx.lineTo((pts[1].x - ox) * k, (pts[1].y - oy) * k);
+      ctx.moveTo(x0, y0);
+      ctx.lineTo(x1, y1);
       ctx.stroke();
       return;
     }
@@ -2665,22 +2701,33 @@ class Talkoboard {
     for (let i = startI; i <= n - 2; i++) {
       const s = i === 1 ? pts[0] : mid(pts[i - 1], pts[i]);
       const e = mid(pts[i], pts[i + 1]);
-      ctx.strokeStyle = this.strokeSegmentColor(stroke, i);
+      const sx = (s.x - ox) * k,
+        sy = (s.y - oy) * k;
+      const ex = (e.x - ox) * k,
+        ey = (e.y - oy) * k;
+      ctx.strokeStyle = this.segmentGradientStyle(ctx, stroke, i, sx, sy, ex, ey);
       ctx.beginPath();
-      ctx.moveTo((s.x - ox) * k, (s.y - oy) * k);
-      ctx.quadraticCurveTo(
-        (pts[i].x - ox) * k,
-        (pts[i].y - oy) * k,
-        (e.x - ox) * k,
-        (e.y - oy) * k,
-      );
+      ctx.moveTo(sx, sy);
+      ctx.quadraticCurveTo((pts[i].x - ox) * k, (pts[i].y - oy) * k, ex, ey);
       ctx.stroke();
     }
     const fs = mid(pts[n - 2], pts[n - 1]);
-    ctx.strokeStyle = this.strokeSegmentColor(stroke, n - 1);
+    const fx0 = (fs.x - ox) * k,
+      fy0 = (fs.y - oy) * k;
+    const fx1 = (pts[n - 1].x - ox) * k,
+      fy1 = (pts[n - 1].y - oy) * k;
+    ctx.strokeStyle = this.segmentGradientStyle(
+      ctx,
+      stroke,
+      n - 1,
+      fx0,
+      fy0,
+      fx1,
+      fy1,
+    );
     ctx.beginPath();
-    ctx.moveTo((fs.x - ox) * k, (fs.y - oy) * k);
-    ctx.lineTo((pts[n - 1].x - ox) * k, (pts[n - 1].y - oy) * k);
+    ctx.moveTo(fx0, fy0);
+    ctx.lineTo(fx1, fy1);
     ctx.stroke();
   }
 

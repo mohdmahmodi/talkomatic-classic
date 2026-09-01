@@ -5,7 +5,7 @@
 
   var overlay,
     modalEl,
-    listEl,
+    bodyEl,
     closeBtnEl,
     footerEl = null,
     built = false,
@@ -22,84 +22,46 @@
     return e;
   }
 
-  function styles() {
-    if (document.getElementById("tkRulesStyles")) return;
-    var s = document.createElement("style");
-    s.id = "tkRulesStyles";
-    s.textContent = [
-      ".tkr-tabs{display:flex;gap:8px;padding:12px 24px 0;flex-shrink:0;flex-wrap:wrap;}",
-      ".tkr-tab{background:var(--tk-tile);color:var(--tk-muted);border:1px solid transparent;",
-      "border-radius:5px;padding:9px 16px;font-size:13px;font-weight:bold;font-family:inherit;",
-      "cursor:pointer;transition:background-color .15s ease,color .15s ease;}",
-      ".tkr-tab:hover{background:var(--tk-tile-hover);color:var(--tk-text);}",
-      ".tkr-tab.active{background:var(--tk-card);color:var(--primary,var(--tk-accent));",
-      "border-color:var(--primary,var(--tk-accent));}",
-      ".tkr-intro{margin:14px 24px 0;padding:12px 14px;border-radius:6px;background:var(--tk-tile);",
-      "var(--tk-accent));color:var(--tk-muted);font-size:13px;line-height:1.55;}",
-      ".tkr-rule{background:var(--room-background-color,#000);border:1px solid var(--tk-border);",
-      "border-radius:6px;padding:14px 16px;margin-bottom:10px;}",
-      ".tkr-rule-top{display:flex;align-items:baseline;gap:10px;}",
-      ".tkr-num{flex:none;color:var(--primary,var(--tk-accent));font-weight:bold;font-size:13px;min-width:22px;}",
-      ".tkr-title{color:var(--tk-text);font-weight:bold;font-size:15px;line-height:1.35;}",
-      ".tkr-body{margin:7px 0 0 32px;color:var(--tk-muted);font-size:13.5px;line-height:1.6;}",
-      ".tkr-why{margin:9px 0 0 32px;padding-left:11px;border-left:2px solid var(--tk-border);",
-      "color:var(--tk-dim,#9aa3ae);font-size:12.5px;line-height:1.55;font-style:italic;}",
-      ".tkr-lvl{flex:none;margin-left:auto;font-size:10px;font-weight:bold;letter-spacing:.5px;",
-      "text-transform:uppercase;padding:2px 7px;border-radius:9px;white-space:nowrap;}",
-      ".tkr-lvl-jr{background:rgba(171,71,188,.18);color:#ce93d8;}",
-      ".tkr-lvl-full{background:rgba(0,188,212,.16);color:#4dd0e1;}",
-      ".tkr-lvl-leader{background:rgba(119,221,119,.16);color:#77dd77;}",
-      ".tkr-empty{color:var(--tk-muted);text-align:center;padding:40px 0;font-size:14px;}",
-      ".tkr-gate{flex-shrink:0;display:flex;align-items:center;gap:14px;flex-wrap:wrap;",
-      "padding:13px 24px;border-top:1px solid var(--tk-border);background:var(--tk-tile);}",
-      ".tkr-gate-msg{flex:1;min-width:200px;color:var(--tk-text);font-size:13px;line-height:1.55;}",
-      ".tkr-gate-btn{background:var(--tk-accent);color:#1a1a1a;border:none;border-radius:5px;",
-      "padding:10px 20px;font-size:14px;font-weight:bold;font-family:inherit;cursor:pointer;}",
-      ".tkr-gate-btn:disabled{background:var(--tk-tile-hover);color:var(--tk-muted);cursor:default;}",
-      "@media (max-width:640px){.tkr-body,.tkr-why{margin-left:0;}}",
-    ].join("");
-    document.head.appendChild(s);
-  }
-
   function build() {
     if (built) return;
     built = true;
-    styles();
 
-    overlay = el("div", "sb-overlay");
+    overlay = el("div", "tkm-overlay");
     overlay.id = "tkRulesOverlay";
-    var modal = el("div", "sb-modal");
+    var modal = el("div", "tkm-modal");
+    modal.setAttribute("role", "dialog");
+    modal.setAttribute("aria-modal", "true");
+    modal.setAttribute("aria-label", "Talkomatic Rules");
     modalEl = modal;
 
-    var head = el("div", "sb-head");
-    var titleWrap = el("div", "sb-title-wrap");
-    var title = el("div", "sb-title");
+    var head = el("div", "tkm-head");
+    var headText = el("div", "tkm-head-text");
+    var title = el("div", "tkm-title");
     title.innerHTML = '<i class="fas fa-scale-balanced"></i> Talkomatic Rules';
     var sub = el(
       "div",
-      "sb-sub",
+      "tkm-sub",
       "How this place works, and what moderators may and may not do.",
     );
-    titleWrap.appendChild(title);
-    titleWrap.appendChild(sub);
+    headText.appendChild(title);
+    headText.appendChild(sub);
 
-    var headBtns = el("div", "sb-head-btns");
-    var closeBtn = el("button", "sb-icon-btn sb-close", "×");
+    var closeBtn = el("button", "tkm-close", "×");
+    closeBtn.type = "button";
     closeBtn.setAttribute("aria-label", "Close");
     closeBtn.addEventListener("click", close);
-    headBtns.appendChild(closeBtn);
     closeBtnEl = closeBtn;
 
-    head.appendChild(titleWrap);
-    head.appendChild(headBtns);
+    head.appendChild(headText);
+    head.appendChild(closeBtn);
 
-    var tabs = el("div", "tkr-tabs");
-    tabBtns.community = el("button", "tkr-tab active", "Community Rules");
+    var tabs = el("div", "tkm-tabs");
+    tabBtns.community = el("button", "tkm-tab active", "Community Rules");
     tabBtns.community.type = "button";
     tabBtns.community.addEventListener("click", function () {
       switchTo("community");
     });
-    tabBtns.mod = el("button", "tkr-tab", "Moderator Rules");
+    tabBtns.mod = el("button", "tkm-tab", "Moderator Rules");
     tabBtns.mod.type = "button";
     tabBtns.mod.addEventListener("click", function () {
       switchTo("mod");
@@ -107,11 +69,11 @@
     tabs.appendChild(tabBtns.community);
     tabs.appendChild(tabBtns.mod);
 
-    listEl = el("div", "sb-list");
+    bodyEl = el("div", "tkm-body");
 
     modal.appendChild(head);
     modal.appendChild(tabs);
-    modal.appendChild(listEl);
+    modal.appendChild(bodyEl);
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
 
@@ -126,6 +88,7 @@
     tabBtns.community.classList.toggle("active", which === "community");
     tabBtns.mod.classList.toggle("active", which === "mod");
     render();
+    bodyEl.scrollTop = 0;
   }
 
   var INTRO = {
@@ -135,26 +98,24 @@
   };
 
   function render() {
-    if (!listEl) return;
-    listEl.textContent = "";
+    if (!bodyEl) return;
+    bodyEl.textContent = "";
 
-    var intro = el("div", "tkr-intro", INTRO[tab]);
-    listEl.appendChild(intro);
+    bodyEl.appendChild(el("div", "tkr-intro", INTRO[tab]));
 
     var list = data[tab] || [];
     if (!loaded) {
-      listEl.appendChild(el("div", "tkr-empty", "Loading rules..."));
+      bodyEl.appendChild(el("div", "tkm-empty", "Loading rules..."));
       return;
     }
     if (!list.length) {
-      listEl.appendChild(
-        el("div", "tkr-empty", "No rules have been written yet."),
+      bodyEl.appendChild(
+        el("div", "tkm-empty", "No rules have been written yet."),
       );
       return;
     }
 
-    var wrap = el("div");
-    wrap.style.marginTop = "14px";
+    var wrap = el("div", "tkr-rules");
     list.forEach(function (r, i) {
       var card = el("div", "tkr-rule");
 
@@ -183,7 +144,7 @@
       if (r.why) card.appendChild(el("p", "tkr-why", "Why: " + r.why));
       wrap.appendChild(card);
     });
-    listEl.appendChild(wrap);
+    bodyEl.appendChild(wrap);
   }
 
   // First-visit gate: the modal cannot be dismissed until the button at the
@@ -195,15 +156,15 @@
       footerEl = null;
     }
     if (!gateCb) return;
-    footerEl = el("div", "tkr-gate");
+    footerEl = el("div", "tkm-gate");
     footerEl.appendChild(
       el(
         "div",
-        "tkr-gate-msg",
+        "tkm-gate-msg",
         "Welcome to Talkomatic. Before you start chatting, please take a minute to read the rules. They apply to everyone here.",
       ),
     );
-    var btn = el("button", "tkr-gate-btn");
+    var btn = el("button", "tkm-gate-btn");
     btn.type = "button";
     btn.disabled = true;
     var left = 5;
@@ -239,6 +200,7 @@
     if (closeBtnEl) closeBtnEl.style.display = gateCb ? "none" : "";
     setGateFooter();
     overlay.classList.add("show");
+    document.body.classList.add("tkm-lock");
     document.addEventListener("keydown", esc);
     render();
     if (socket.connected) socket.emit("rules get");
@@ -251,6 +213,7 @@
   function close() {
     if (!overlay || gateCb) return;
     overlay.classList.remove("show");
+    document.body.classList.remove("tkm-lock");
     document.removeEventListener("keydown", esc);
   }
 

@@ -1,0 +1,750 @@
+/* Theme editor panel (v3). A draggable floating panel over the live page.
+   Deliberately hardcoded colors: the editor must stay readable no matter how
+   broken the theme being edited becomes. */
+
+.tked-panel {
+  position: fixed;
+  top: 64px;
+  right: 16px;
+  width: 340px;
+  max-width: calc(100vw - 16px);
+  max-height: min(78vh, 760px);
+  z-index: 100001;
+  background: #161616;
+  border: 1px solid #3a3a3a;
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+  display: none;
+  flex-direction: column;
+  overflow: hidden;
+  font-family: talkoSS, Arial, sans-serif;
+  color: #fff;
+}
+
+.tked-panel.show {
+  display: flex;
+}
+
+.tked-panel.collapsed {
+  max-height: none;
+  height: auto;
+}
+
+.tked-panel.collapsed .tked-tabs,
+.tked-panel.collapsed .tked-body,
+.tked-panel.collapsed .tked-foot,
+.tked-panel.collapsed .tked-scope {
+  display: none;
+}
+
+/* While dragging or picking, don't let text selection fight the pointer */
+.tked-dragging,
+.tked-dragging * {
+  user-select: none !important;
+}
+
+/* ── Header: the drag handle ── */
+
+.tked-head {
+  background: #fdf5e6;
+  color: #000;
+  padding: 9px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  cursor: move;
+  touch-action: none;
+}
+
+.tked-head-t {
+  flex: 1;
+  min-width: 0;
+}
+
+.tked-title {
+  font-weight: bold;
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tked-subtitle {
+  font-size: 10px;
+  color: #666;
+  margin-top: 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tked-hbtn {
+  background: #000;
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  width: 28px;
+  height: 28px;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-family: inherit;
+}
+
+.tked-hbtn:hover {
+  background: #ff9800;
+  color: #000;
+}
+
+.tked-hbtn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.tked-hbtn:disabled:hover {
+  background: #000;
+  color: #fff;
+}
+
+.tked-hbtn.active {
+  background: #ff9800;
+  color: #000;
+}
+
+/* ── Tabs ── */
+
+.tked-tabs {
+  display: flex;
+  background: #101010;
+  border-bottom: 1px solid #2c2c2c;
+  flex-shrink: 0;
+}
+
+.tked-tab {
+  flex: 1;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #999;
+  padding: 9px 4px;
+  font-size: 12px;
+  font-weight: bold;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.tked-tab:hover {
+  color: #fff;
+}
+
+.tked-tab.active {
+  color: #ff9800;
+  border-bottom-color: #ff9800;
+}
+
+/* ── Body ── */
+
+.tked-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 12px;
+}
+
+.tked-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.tked-body::-webkit-scrollbar-thumb {
+  background: #444;
+  border-radius: 4px;
+}
+
+.tked-page {
+  display: none;
+}
+
+.tked-page.active {
+  display: block;
+}
+
+.tked-sec {
+  background: #0e0e0e;
+  border: 1px solid #2c2c2c;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+
+.tked-sec-t {
+  font-size: 10.5px;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 1.1px;
+  color: #ff9800;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.tked-hint {
+  font-size: 10.5px;
+  color: #8f8f8f;
+  margin-top: 1px;
+  line-height: 1.35;
+}
+
+/* ── Presets ── */
+
+.tked-presets {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+}
+
+.tked-preset {
+  background: #000;
+  color: #fff;
+  border: 1px solid #3a3a3a;
+  border-radius: 7px;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: bold;
+  cursor: pointer;
+  font-family: inherit;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+}
+
+.tked-preset:hover {
+  border-color: #ff9800;
+}
+
+.tked-dots {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.tked-dots i {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  margin-left: -3px;
+}
+
+.tked-dots i:first-child {
+  margin-left: 0;
+}
+
+/* ── Theme builder (palette generator) ── */
+
+.tked-gen-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+}
+
+.tked-gen-row .tked-name {
+  flex: 1;
+}
+
+.tked-gen-btn {
+  width: 100%;
+  margin-top: 8px;
+  background: #ff9800;
+  color: #000;
+  border: none;
+  border-radius: 6px;
+  padding: 9px;
+  font-size: 12.5px;
+  font-weight: bold;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.tked-gen-btn:hover {
+  background: #f57c00;
+}
+
+.tked-contrast {
+  margin-top: 8px;
+  font-size: 10.5px;
+  line-height: 1.4;
+  border-radius: 5px;
+  padding: 6px 9px;
+  display: none;
+}
+
+.tked-contrast.warn {
+  display: block;
+  background: rgba(255, 82, 82, 0.12);
+  color: #ff8a80;
+  border: 1px solid rgba(255, 82, 82, 0.4);
+}
+
+.tked-contrast.ok {
+  display: block;
+  background: rgba(76, 175, 80, 0.1);
+  color: #a5d6a7;
+  border: 1px solid rgba(76, 175, 80, 0.35);
+}
+
+/* ── Token rows ── */
+
+.tked-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 0;
+  border-bottom: 1px solid #222;
+}
+
+.tked-row:last-child {
+  border-bottom: none;
+}
+
+.tked-row.flash {
+  animation: tkedFlash 1.6s ease-out;
+}
+
+@keyframes tkedFlash {
+  0%,
+  60% {
+    background: rgba(255, 152, 0, 0.18);
+    box-shadow: 0 0 0 4px rgba(255, 152, 0, 0.18);
+  }
+  100% {
+    background: transparent;
+    box-shadow: none;
+  }
+}
+
+.tked-labels {
+  flex: 1;
+  min-width: 0;
+}
+
+.tked-name {
+  font-size: 12.5px;
+  font-weight: bold;
+}
+
+.tked-row input[type="color"] {
+  width: 38px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid #4a4a4a;
+  border-radius: 6px;
+  background: #000;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.tked-hex {
+  width: 70px;
+  background: #000;
+  color: #fff;
+  border: 1px solid #4a4a4a;
+  border-radius: 5px;
+  padding: 6px 7px;
+  font-size: 11.5px;
+  font-family: inherit;
+  text-transform: lowercase;
+  flex-shrink: 0;
+}
+
+.tked-hex:focus,
+.tked-select:focus {
+  outline: none;
+  border-color: #ff9800;
+}
+
+.tked-select {
+  background: #000;
+  color: #fff;
+  border: 1px solid #4a4a4a;
+  border-radius: 5px;
+  padding: 7px 8px;
+  font-size: 12px;
+  font-family: inherit;
+  max-width: 150px;
+}
+
+.tked-range {
+  width: 104px;
+  accent-color: #ff9800;
+  flex-shrink: 0;
+}
+
+.tked-rangeval {
+  width: 42px;
+  text-align: right;
+  font-size: 11.5px;
+  color: #ccc;
+  flex-shrink: 0;
+}
+
+/* ── Font picker: button + searchable popup, entries drawn in their font ── */
+
+.tked-fontdd {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.tked-font-btn {
+  background: #000;
+  color: #fff;
+  border: 1px solid #4a4a4a;
+  border-radius: 5px;
+  padding: 7px 10px;
+  font-size: 12.5px;
+  font-family: inherit;
+  cursor: pointer;
+  width: 150px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tked-font-btn:hover {
+  border-color: #ff9800;
+}
+
+/* Positioned fixed from JS so the panel body's scroll clipping cannot cut
+   it off. */
+.tked-font-pop {
+  position: fixed;
+  width: 220px;
+  max-height: 280px;
+  background: #0c0c0c;
+  border: 1px solid #4a4a4a;
+  border-radius: 8px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.6);
+  z-index: 10;
+  display: none;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.tked-font-pop.show {
+  display: flex;
+}
+
+.tked-font-search {
+  background: #000;
+  color: #fff;
+  border: none;
+  border-bottom: 1px solid #2c2c2c;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+}
+
+.tked-font-list {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.tked-font-list::-webkit-scrollbar {
+  width: 7px;
+}
+
+.tked-font-list::-webkit-scrollbar-thumb {
+  background: #444;
+  border-radius: 4px;
+}
+
+.tked-font-group {
+  font-size: 9.5px;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #777;
+  padding: 7px 10px 3px;
+}
+
+.tked-font-item {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  color: #ddd;
+  text-align: left;
+  padding: 6px 10px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.tked-font-item:hover {
+  background: #1e1e1e;
+  color: #fff;
+}
+
+.tked-font-item.on {
+  color: #ff9800;
+}
+
+/* ── Image background rows ── */
+
+.tked-img-row {
+  padding: 8px 0;
+  border-bottom: 1px solid #222;
+}
+
+.tked-img-row:last-child {
+  border-bottom: none;
+}
+
+.tked-img-top {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.tked-thumb {
+  flex-shrink: 0;
+  width: 52px;
+  height: 34px;
+  border: 1px solid #4a4a4a;
+  border-radius: 5px;
+  background-color: #000;
+  background-size: cover;
+  background-position: center;
+  color: #666;
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tked-thumb.set {
+  border-color: #ff9800;
+}
+
+.tked-img-btns {
+  display: flex;
+  gap: 6px;
+  margin-top: 7px;
+}
+
+.tked-btn.slim {
+  flex: none;
+  padding: 6px 11px;
+  font-size: 11px;
+}
+
+.tked-img-opts {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 7px;
+}
+
+.tked-img-opts .tked-select {
+  max-width: 140px;
+}
+
+.tked-img-opts .tked-range {
+  flex: 1;
+  width: auto;
+  min-width: 60px;
+}
+
+/* ── Buttons & misc ── */
+
+.tked-wide-btn {
+  background: #0e0e0e;
+  color: #ccc;
+  border: 1px dashed #4a4a4a;
+  border-radius: 8px;
+  padding: 9px;
+  font-size: 12px;
+  font-weight: bold;
+  cursor: pointer;
+  font-family: inherit;
+  width: 100%;
+  margin-bottom: 10px;
+}
+
+.tked-wide-btn:hover {
+  border-color: #ff9800;
+  color: #ff9800;
+}
+
+.tked-css {
+  width: 100%;
+  height: 110px;
+  background: #000;
+  color: #c8facc;
+  border: 1px solid #4a4a4a;
+  border-radius: 5px;
+  padding: 8px;
+  font-size: 11px;
+  font-family: monospace;
+  box-sizing: border-box;
+  resize: vertical;
+  margin-top: 6px;
+}
+
+.tked-io textarea {
+  width: 100%;
+  height: 70px;
+  background: #000;
+  color: #ccc;
+  border: 1px solid #4a4a4a;
+  border-radius: 5px;
+  padding: 7px;
+  font-size: 11px;
+  font-family: monospace;
+  box-sizing: border-box;
+  resize: none;
+  margin-top: 6px;
+}
+
+.tked-io-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+/* ── Footer ── */
+
+.tked-foot {
+  border-top: 1px solid #2c2c2c;
+  padding: 10px 12px;
+  flex-shrink: 0;
+  background: #111;
+}
+
+.tked-save {
+  width: 100%;
+  background: #ff9800;
+  color: #000;
+  border: none;
+  border-radius: 6px;
+  padding: 10px;
+  font-size: 13.5px;
+  font-weight: bold;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.tked-save:hover {
+  background: #f57c00;
+}
+
+.tked-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.tked-btn {
+  flex: 1;
+  background: #000;
+  color: #ccc;
+  border: 1px solid #4a4a4a;
+  border-radius: 5px;
+  padding: 8px 6px;
+  font-size: 11.5px;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+}
+
+.tked-btn:hover {
+  border-color: #ff9800;
+  color: #ff9800;
+}
+
+.tked-btn.danger:hover {
+  border-color: #ff5252;
+  color: #ff5252;
+}
+
+.tked-scope {
+  background: #0c0c0c;
+  border-top: 1px solid #2c2c2c;
+  padding: 7px 12px;
+  font-size: 10px;
+  color: #8f8f8f;
+  flex-shrink: 0;
+  line-height: 1.4;
+}
+
+.tked-scope b {
+  color: #ff9800;
+}
+
+/* ── Pick-from-page mode ── */
+
+body.tked-picking,
+body.tked-picking * {
+  cursor: crosshair !important;
+}
+
+.tked-pick-box {
+  position: fixed;
+  z-index: 100000;
+  pointer-events: none;
+  border: 2px solid #ff9800;
+  border-radius: 4px;
+  background: rgba(255, 152, 0, 0.12);
+  display: none;
+}
+
+.tked-pick-tag {
+  position: absolute;
+  left: -2px;
+  top: -24px;
+  background: #ff9800;
+  color: #000;
+  font-family: talkoSS, Arial, sans-serif;
+  font-size: 11px;
+  font-weight: bold;
+  border-radius: 4px;
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+
+.tked-pick-tag.below {
+  top: auto;
+  bottom: -24px;
+}
+
+/* ── Mobile: bottom sheet, no dragging ── */
+
+@media (max-width: 640px) {
+  .tked-panel {
+    top: auto !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0;
+    width: 100%;
+    max-width: 100%;
+    max-height: 64vh;
+    border-radius: 14px 14px 0 0;
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+  }
+  .tked-head {
+    cursor: default;
+    border-radius: 13px 13px 0 0;
+  }
+  .tked-font-pop {
+    width: 200px;
+  }
+}

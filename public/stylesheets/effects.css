@@ -163,3 +163,36 @@ html.tk-fx-soft .chat-row {
 html.tk-fx-soft .chat-input {
   border-radius: 12px !important;
 }
+
+/* TERMINAL: phosphor glow on every piece of text (each glows in its own
+   color, so a green theme reads like a green CRT) plus faint scanlines over
+   the whole screen. The scanline layer ignores the pointer, and the theme
+   editor panel is kept crisp so the controls stay easy to read. */
+
+html.tk-fx-crt body {
+  text-shadow: 0 0 3px currentColor;
+}
+
+html.tk-fx-crt body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2147483000;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0, 0, 0, 0.13) 0,
+    rgba(0, 0, 0, 0.13) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+}
+
+html.tk-fx-crt .chat-input {
+  text-shadow: 0 0 4px currentColor;
+}
+
+html.tk-fx-crt .tked-panel,
+html.tk-fx-crt .tked-panel * {
+  text-shadow: none;
+}

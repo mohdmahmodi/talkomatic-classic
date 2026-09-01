@@ -8,6 +8,7 @@
 
   var overlay,
     modalEl,
+    bodyEl,
     listEl,
     closeBtnEl,
     footerEl = null,
@@ -118,43 +119,6 @@
 
   var ORDER = ["jr", "full", "lead", "admin"];
 
-  function styles() {
-    if (document.getElementById("tkStaffGuideStyles")) return;
-    var s = document.createElement("style");
-    s.id = "tkStaffGuideStyles";
-    s.textContent = [
-      ".tksg-tabs{display:flex;gap:8px;padding:12px 24px 0;flex-shrink:0;flex-wrap:wrap;}",
-      ".tksg-tab{background:var(--tk-tile);color:var(--tk-muted);border:1px solid transparent;",
-      "border-radius:5px;padding:9px 14px;font-size:13px;font-weight:bold;font-family:inherit;",
-      "cursor:pointer;transition:background-color .15s ease,color .15s ease;}",
-      ".tksg-tab:hover{background:var(--tk-tile-hover);color:var(--tk-text);}",
-      ".tksg-tab.active{background:var(--tk-card);}",
-      ".tksg-intro{margin:14px 24px 0;padding:12px 14px;border-radius:6px;background:var(--tk-tile);",
-      "color:var(--tk-muted);font-size:13px;line-height:1.6;flex-shrink:0;}",
-      ".tksg-intro b{color:var(--tk-text);}",
-      ".tksg-badge{display:inline-block;font-size:9px;font-weight:bold;padding:1px 6px;",
-      "border-radius:8px;letter-spacing:.5px;vertical-align:middle;color:#0d1117;}",
-      ".tksg-head-card{background:var(--room-background-color,#000);border:1px solid var(--tk-border);",
-      "border-radius:6px;padding:14px 16px;margin:14px 0 10px;}",
-      ".tksg-rank-name{font-size:17px;font-weight:bold;display:flex;align-items:center;gap:10px;}",
-      ".tksg-tagline{margin:7px 0 0;color:var(--tk-muted);font-size:13.5px;line-height:1.6;}",
-      ".tksg-card{background:var(--room-background-color,#000);border:1px solid var(--tk-border);",
-      "border-radius:6px;padding:13px 16px;margin-bottom:10px;}",
-      ".tksg-sec{font-size:11px;font-weight:bold;letter-spacing:.6px;text-transform:uppercase;",
-      "margin-bottom:8px;display:flex;align-items:center;gap:7px;}",
-      ".tksg-card ul{margin:0;padding-left:19px;color:var(--tk-muted);font-size:13.5px;line-height:1.65;}",
-      ".tksg-card li{margin-bottom:5px;}",
-      ".tksg-card li:last-child{margin-bottom:0;}",
-      ".tksg-gate{flex-shrink:0;display:flex;align-items:center;gap:14px;flex-wrap:wrap;",
-      "padding:13px 24px;border-top:1px solid var(--tk-border);background:var(--tk-tile);}",
-      ".tksg-gate-msg{flex:1;min-width:200px;color:var(--tk-text);font-size:13px;line-height:1.55;}",
-      ".tksg-gate-btn{background:var(--tk-accent);color:#1a1a1a;border:none;border-radius:5px;",
-      "padding:10px 20px;font-size:14px;font-weight:bold;font-family:inherit;cursor:pointer;}",
-      ".tksg-gate-btn:disabled{background:var(--tk-tile-hover);color:var(--tk-muted);cursor:default;}",
-    ].join("");
-    document.head.appendChild(s);
-  }
-
   function badgeEl(rank) {
     var b = el("span", "tksg-badge", rank.badge);
     b.style.background = rank.color;
@@ -164,34 +128,49 @@
   function build() {
     if (built) return;
     built = true;
-    styles();
 
-    overlay = el("div", "sb-overlay");
+    overlay = el("div", "tkm-overlay");
     overlay.id = "tkStaffGuideOverlay";
-    var modal = el("div", "sb-modal");
+    var modal = el("div", "tkm-modal");
+    modal.setAttribute("role", "dialog");
+    modal.setAttribute("aria-modal", "true");
+    modal.setAttribute("aria-label", "Who's who on staff");
     modalEl = modal;
 
-    var head = el("div", "sb-head");
-    var titleWrap = el("div", "sb-title-wrap");
-    var title = el("div", "sb-title");
+    var head = el("div", "tkm-head");
+    var headText = el("div", "tkm-head-text");
+    var title = el("div", "tkm-title");
     title.innerHTML = '<i class="fas fa-user-shield"></i> Who\'s who on staff';
     var sub = el(
       "div",
-      "sb-sub",
+      "tkm-sub",
       "What each badge means, what that person can do for you, and who handles what.",
     );
-    titleWrap.appendChild(title);
-    titleWrap.appendChild(sub);
+    headText.appendChild(title);
+    headText.appendChild(sub);
 
-    var headBtns = el("div", "sb-head-btns");
-    var closeBtn = el("button", "sb-icon-btn sb-close", "×");
+    var closeBtn = el("button", "tkm-close", "×");
+    closeBtn.type = "button";
     closeBtn.setAttribute("aria-label", "Close");
     closeBtn.addEventListener("click", close);
-    headBtns.appendChild(closeBtn);
     closeBtnEl = closeBtn;
-    head.appendChild(titleWrap);
-    head.appendChild(headBtns);
+    head.appendChild(headText);
+    head.appendChild(closeBtn);
 
+    var tabs = el("div", "tkm-tabs");
+    ORDER.forEach(function (key) {
+      var r = RANKS[key];
+      var b = el("button", "tkm-tab", r.name);
+      b.type = "button";
+      b.addEventListener("click", function () {
+        switchTo(key);
+      });
+      tabBtns[key] = b;
+      tabs.appendChild(b);
+    });
+
+    // The badge intro scrolls with the content, so on a phone the tabs and
+    // the rank being read are what stay on screen.
     var intro = el("div", "tksg-intro");
     intro.appendChild(
       document.createTextNode(
@@ -209,24 +188,14 @@
       ". Their box in a room glows the same color. The badge <b>cannot be typed or faked</b>: a name that merely claims to be staff is not staff. Anything a rank cannot handle, it hands to the rank above, so being told \"I'll get a full mod\" is the ladder working.";
     intro.appendChild(intro2);
 
-    var tabs = el("div", "tksg-tabs");
-    ORDER.forEach(function (key) {
-      var r = RANKS[key];
-      var b = el("button", "tksg-tab", r.name);
-      b.type = "button";
-      b.addEventListener("click", function () {
-        switchTo(key);
-      });
-      tabBtns[key] = b;
-      tabs.appendChild(b);
-    });
-
-    listEl = el("div", "sb-list");
+    bodyEl = el("div", "tkm-body");
+    bodyEl.appendChild(intro);
+    listEl = el("div");
+    bodyEl.appendChild(listEl);
 
     modal.appendChild(head);
-    modal.appendChild(intro);
     modal.appendChild(tabs);
-    modal.appendChild(listEl);
+    modal.appendChild(bodyEl);
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
 
@@ -241,7 +210,7 @@
       var on = key === tab;
       b.classList.toggle("active", on);
       b.style.color = on ? RANKS[key].color : "";
-      b.style.borderColor = on ? RANKS[key].color : "transparent";
+      b.style.borderColor = on ? RANKS[key].color : "";
     });
   }
 
@@ -292,6 +261,7 @@
     if (tab === which) return;
     tab = which;
     render();
+    bodyEl.scrollTop = 0;
   }
 
   // First-visit gate: the modal cannot be dismissed until the button at the
@@ -303,15 +273,15 @@
       footerEl = null;
     }
     if (!gateCb) return;
-    footerEl = el("div", "tksg-gate");
+    footerEl = el("div", "tkm-gate");
     footerEl.appendChild(
       el(
         "div",
-        "tksg-gate-msg",
+        "tkm-gate-msg",
         "One more thing: this is who runs Talkomatic. Knowing what each badge means makes it easier to get help when you need it.",
       ),
     );
-    var btn = el("button", "tksg-gate-btn");
+    var btn = el("button", "tkm-gate-btn");
     btn.type = "button";
     btn.disabled = true;
     var left = 5;
@@ -346,6 +316,7 @@
     if (closeBtnEl) closeBtnEl.style.display = gateCb ? "none" : "";
     setGateFooter();
     overlay.classList.add("show");
+    document.body.classList.add("tkm-lock");
     document.addEventListener("keydown", esc);
     render();
   }
@@ -353,6 +324,7 @@
   function close() {
     if (!overlay || gateCb) return;
     overlay.classList.remove("show");
+    document.body.classList.remove("tkm-lock");
     document.removeEventListener("keydown", esc);
   }
 

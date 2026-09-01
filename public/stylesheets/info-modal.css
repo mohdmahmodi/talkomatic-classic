@@ -1,0 +1,460 @@
+/* Shared shell for the lobby info modals (Rules, Staff guide). A centered
+   card that sizes to its content on desktop and mobile, never fullscreen.
+   Same flat lobby look: tiles, borders, black cards, no gradients. */
+
+.tkm-lock {
+  overflow: hidden;
+}
+
+.tkm-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgba(0, 0, 0, 0.78);
+  padding: 24px;
+  box-sizing: border-box;
+}
+
+.tkm-overlay.show {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: tkmFadeIn 0.18s ease-out;
+}
+
+@keyframes tkmFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.tkm-modal {
+  background: var(--background-color, var(--tk-bg));
+  border: 1px solid var(--tk-border);
+  border-radius: 10px;
+  width: 100%;
+  max-width: 620px;
+  max-height: min(calc(100vh - 48px), 780px);
+  max-height: min(calc(100dvh - 48px), 780px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: tkmRise 0.18s ease-out;
+}
+
+@keyframes tkmRise {
+  from {
+    transform: translateY(10px) scale(0.97);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+/* ── Header ── */
+
+.tkm-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 15px 18px 13px;
+  border-bottom: 1px solid var(--tk-border);
+  flex-shrink: 0;
+}
+
+.tkm-head-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.tkm-title {
+  color: var(--primary, var(--tk-accent));
+  font-size: 17px;
+  font-weight: bold;
+  line-height: 1.3;
+}
+
+.tkm-title i {
+  margin-right: 8px;
+  color: #ffc107;
+}
+
+.tkm-sub {
+  color: var(--tk-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  margin-top: 3px;
+}
+
+.tkm-close {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--tk-border);
+  border-radius: 6px;
+  background: var(--tk-tile);
+  color: var(--tk-muted);
+  font-size: 16px;
+  font-weight: bold;
+  line-height: 1;
+  cursor: pointer;
+  font-family: inherit;
+  touch-action: manipulation;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.tkm-close:hover {
+  background: var(--tk-tile-hover);
+  color: var(--primary, var(--tk-accent));
+  border-color: var(--primary, var(--tk-accent));
+}
+
+/* ── Tabs: one row, scrolls sideways instead of wrapping ── */
+
+.tkm-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 10px 18px 0;
+  flex-shrink: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.tkm-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.tkm-tab {
+  flex: none;
+  white-space: nowrap;
+  background: var(--tk-tile);
+  color: var(--tk-muted);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 8px 13px;
+  font-size: 13px;
+  font-weight: bold;
+  font-family: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.tkm-tab:hover {
+  background: var(--tk-tile-hover);
+  color: var(--tk-text);
+}
+
+.tkm-tab.active {
+  background: var(--tk-card);
+  color: var(--primary, var(--tk-accent));
+  border-color: var(--primary, var(--tk-accent));
+}
+
+/* ── Scrollable body ── */
+
+.tkm-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 14px 18px 18px;
+}
+
+.tkm-body::-webkit-scrollbar {
+  width: 8px;
+}
+.tkm-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+.tkm-body::-webkit-scrollbar-thumb {
+  background: var(--tk-border);
+  border-radius: 4px;
+}
+.tkm-body::-webkit-scrollbar-thumb:hover {
+  background: var(--primary, var(--tk-accent));
+}
+
+.tkm-empty {
+  color: var(--tk-muted);
+  text-align: center;
+  padding: 36px 0;
+  font-size: 13.5px;
+}
+
+/* ── First-visit gate footer ── */
+
+.tkm-gate {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--tk-border);
+  background: var(--tk-tile);
+}
+
+.tkm-gate-msg {
+  flex: 1;
+  min-width: 0;
+  color: var(--tk-text);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.tkm-gate-btn {
+  flex: none;
+  background: var(--tk-accent);
+  color: #1a1a1a;
+  border: none;
+  border-radius: 6px;
+  padding: 10px 18px;
+  min-height: 40px;
+  font-size: 14px;
+  font-weight: bold;
+  font-family: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: filter 0.15s ease;
+}
+
+.tkm-gate-btn:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.tkm-gate-btn:disabled {
+  background: var(--tk-tile-hover);
+  color: var(--tk-muted);
+  cursor: default;
+}
+
+/* ── Rules content ── */
+
+.tkr-intro {
+  padding: 11px 13px;
+  border-radius: 6px;
+  background: var(--tk-tile);
+  color: var(--tk-muted);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.tkr-rules {
+  margin-top: 12px;
+}
+
+.tkr-rule {
+  background: var(--room-background-color, #000);
+  border: 1px solid var(--tk-border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+}
+
+.tkr-rule-top {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+}
+
+.tkr-num {
+  flex: none;
+  color: var(--primary, var(--tk-accent));
+  font-weight: bold;
+  font-size: 13px;
+  min-width: 20px;
+}
+
+.tkr-title {
+  color: var(--tk-text);
+  font-weight: bold;
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.tkr-body {
+  margin: 6px 0 0 29px;
+  color: var(--tk-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.tkr-why {
+  margin: 8px 0 0 29px;
+  padding-left: 10px;
+  border-left: 2px solid var(--tk-border);
+  color: var(--tk-dim, #9aa3ae);
+  font-size: 12px;
+  line-height: 1.5;
+  font-style: italic;
+}
+
+.tkr-lvl {
+  flex: none;
+  margin-left: auto;
+  font-size: 9px;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 9px;
+  white-space: nowrap;
+}
+
+.tkr-lvl-jr {
+  background: rgba(171, 71, 188, 0.18);
+  color: #ce93d8;
+}
+.tkr-lvl-full {
+  background: rgba(0, 188, 212, 0.16);
+  color: #4dd0e1;
+}
+.tkr-lvl-leader {
+  background: rgba(119, 221, 119, 0.16);
+  color: #77dd77;
+}
+
+/* ── Staff guide content ── */
+
+.tksg-intro {
+  padding: 11px 13px;
+  border-radius: 6px;
+  background: var(--tk-tile);
+  color: var(--tk-muted);
+  font-size: 12.5px;
+  line-height: 1.6;
+  margin-bottom: 12px;
+}
+
+.tksg-intro b {
+  color: var(--tk-text);
+}
+
+.tksg-badge {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: bold;
+  padding: 1px 6px;
+  border-radius: 8px;
+  letter-spacing: 0.5px;
+  vertical-align: middle;
+  color: #0d1117;
+}
+
+.tksg-head-card {
+  background: var(--room-background-color, #000);
+  border: 1px solid var(--tk-border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+}
+
+.tksg-rank-name {
+  font-size: 16px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+.tksg-tagline {
+  margin: 6px 0 0;
+  color: var(--tk-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.tksg-card {
+  background: var(--room-background-color, #000);
+  border: 1px solid var(--tk-border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+}
+
+.tksg-sec {
+  font-size: 10.5px;
+  font-weight: bold;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  margin-bottom: 7px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.tksg-card ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--tk-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.tksg-card li {
+  margin-bottom: 5px;
+}
+
+.tksg-card li:last-child {
+  margin-bottom: 0;
+}
+
+/* ── Mobile: stays a card with breathing room, never fullscreen ── */
+
+@media (max-width: 640px) {
+  .tkm-overlay {
+    padding: 12px;
+  }
+  .tkm-modal {
+    max-height: calc(100vh - 24px);
+    max-height: calc(100dvh - 24px);
+  }
+  .tkm-head {
+    padding: 12px 14px 11px;
+  }
+  .tkm-title {
+    font-size: 15.5px;
+  }
+  .tkm-sub {
+    font-size: 11.5px;
+  }
+  .tkm-tabs {
+    padding: 9px 14px 0;
+  }
+  .tkm-tab {
+    font-size: 12.5px;
+    padding: 7px 11px;
+  }
+  .tkm-body {
+    padding: 12px 14px 16px;
+  }
+  .tkm-gate {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 9px;
+    padding: 11px 14px;
+  }
+  .tkm-gate-btn {
+    width: 100%;
+    padding: 11px 16px;
+  }
+  .tkr-body,
+  .tkr-why {
+    margin-left: 0;
+  }
+}
