@@ -15,14 +15,14 @@ The following is a set of guidelines for contributing to Talkomatic. These are m
 
 ## Code of Conduct
 
-This project and everyone participating in it is governed by the [Talkomatic Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code. Please report unacceptable behavior to contact@mohdmahmodi.com.
+This project and everyone participating in it is governed by the [Talkomatic Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code. Please report unacceptable behavior to The Talkomatic Project team through the [Talkomatic Discord](https://discord.gg/N7tJznESrE).
 
 ## How Can I Contribute?
 
 ### Reporting Bugs
 
-- Ensure the bug was not already reported by searching on GitHub under [Issues](https://github.com/MohdYahyaMahmodi/talkomatic-classic/issues).
-- If you're unable to find an open issue addressing the problem, [open a new one](https://github.com/MohdYahyaMahmodi/talkomatic-classic/issues/new). Be sure to include a title and clear description, as much relevant information as possible, and a code sample or an executable test case demonstrating the expected behavior that is not occurring.
+- Ensure the bug was not already reported by searching on GitHub under [Issues](../../issues).
+- If you're unable to find an open issue addressing the problem, [open a new one](../../issues/new). Be sure to include a title and clear description, as much relevant information as possible, and a code sample or an executable test case demonstrating the expected behavior that is not occurring.
 
 ### Suggesting Enhancements
 
