@@ -229,3 +229,24 @@ html.tk-light .user-info {
     var(--tk-userbar-bottom, var(--tk-tile, #303030))
   );
 }
+
+/* Staff name bars: the rank tints are dark by design, which buries a light
+   theme's dark name text. On a light page each rank keeps its color as a
+   light tint instead: red for devs, blue for full mods, purple for juniors,
+   green for leaders. The animated rank borders stay as they are. */
+
+html.tk-light .chat-row.dev-user .user-info {
+  background: linear-gradient(to bottom, #f2c6c6, #e2a5a5);
+}
+
+html.tk-light .chat-row.mod-user .user-info {
+  background: linear-gradient(to bottom, #c8dff7, #a6c5e8);
+}
+
+html.tk-light .chat-row.jrmod-user .user-info {
+  background: linear-gradient(to bottom, #e4d3f8, #ccb2ea);
+}
+
+html.tk-light .chat-row.leadmod-user .user-info {
+  background: linear-gradient(to bottom, #c9ecc9, #a4d8aa);
+}
