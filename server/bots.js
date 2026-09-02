@@ -845,7 +845,7 @@ function runAction(rt, act, ctx) {
       }
       const text = polishSay(rt, act, ctx);
       if (!text.trim()) return true;
-      const cur = state.userMessageBuffers.get(rt.userId) || "";
+      const cur = state.getBuffer(rt.userId, rt.roomId);
       let combined = cur ? cur + "\n" + text : text;
       while (combined.length > CONFIG.LIMITS.MAX_MESSAGE_LENGTH) {
         const nl = combined.indexOf("\n");
@@ -899,7 +899,7 @@ function runAction(rt, act, ctx) {
 }
 
 function setBotText(rt, text) {
-  state.userMessageBuffers.set(rt.userId, text);
+  state.setBuffer(rt.userId, rt.roomId, text);
   deps.emitChat(rt.fake, {
     userId: rt.userId,
     username: rt.name,
@@ -965,7 +965,7 @@ function deploy(socket, bot, room, ownerKey) {
   active.set(botUserId, rt);
   ownerSeen.set(ownerId, Date.now());
 
-  state.userMessageBuffers.set(botUserId, "");
+  state.setBuffer(botUserId, room.id, "");
   deps.userJoined(room, entry);
   deps.updateRoom(room.id);
   deps.updateLobby();
@@ -1001,7 +1001,7 @@ function retire(rt, why) {
       if (room.users.length === 0) deps.startRoomDeletionTimer(rt.roomId);
     }
   }
-  state.userMessageBuffers.delete(rt.userId);
+  state.deleteBuffer(rt.userId, rt.roomId);
   if (rt.varsDirty) saveSoon();
   stampStop(rt, why);
   notifyOwner(rt, "bot stopped", { botId: rt.bot.id, why: why || "stopped" });
@@ -1131,7 +1131,7 @@ function sweep() {
     const room = state.rooms.get(rt.roomId);
     if (!room || !(room.users || []).some((u) => u.id === rt.userId)) {
       active.delete(rt.userId);
-      state.userMessageBuffers.delete(rt.userId);
+      state.deleteBuffer(rt.userId, rt.roomId);
       if (rt.varsDirty) saveSoon();
       stampStop(rt, "removed from the room");
       notifyOwner(rt, "bot stopped", { botId: rt.bot.id, why: "removed from the room" });
@@ -1214,7 +1214,7 @@ function noteEvicted(botUserId) {
   const room = state.rooms.get(rt.roomId);
   if (room?.bannedUserIds?.has(botUserId)) room.bannedUserIds.add(rt.bot.id);
   active.delete(botUserId);
-  state.userMessageBuffers.delete(botUserId);
+  state.deleteBuffer(botUserId, rt.roomId);
   if (rt.varsDirty) saveSoon();
   stampStop(rt, "removed from the room");
   notifyOwner(rt, "bot stopped", { botId: rt.bot.id, why: "removed from the room" });

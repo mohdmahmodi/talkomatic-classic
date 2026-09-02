@@ -78,12 +78,14 @@ function cancelLinkSweep(userId) {
 
 function armLinkSweep(socket, userId) {
   cancelLinkSweep(userId);
+  const roomId = socket.roomId;
   const t = setTimeout(() => {
     linkSweepTimers.delete(userId);
-    const raw = state.userMessageBuffers.get(userId) || "";
+    if (!roomId || socket.roomId !== roomId) return;
+    const raw = state.getBuffer(userId, roomId);
     const clean = linkfilter.redact(raw);
     if (clean === raw) return;
-    state.userMessageBuffers.set(userId, clean);
+    state.setBuffer(userId, roomId, clean);
     const username = socket.handshake?.session?.username;
     const diff = { type: "full-replace", text: clean };
     emitRoomChatUpdate(socket, { userId, username, diff });
@@ -1591,6 +1593,17 @@ function applyNamePolicy(socket, username) {
   }, wait);
 }
 
+// Writes a block without ever shortening one that is already active, so a
+// second ban landing on a shared key cannot cut the first one short.
+function placeBlock(key, entry) {
+  const held = state.blockedIPs.get(key);
+  if (held !== undefined && ipban.isActiveBlock(held)) {
+    const heldExpiry = held && typeof held === "object" ? held.expiry : held;
+    if (heldExpiry > entry.expiry) entry = { ...entry, expiry: heldExpiry };
+  }
+  state.blockedIPs.set(key, entry);
+}
+
 async function settleNamePolicy(socket, username) {
   const ip = socket.clientIp || null;
   const did = socket.deviceId || null;
@@ -1604,8 +1617,8 @@ async function settleNamePolicy(socket, username) {
     reason: null,
     did,
   };
-  if (ip) state.blockedIPs.set(ip, { ...entry });
-  if (did) state.blockedIPs.set(ipban.idKey(did), { ...entry });
+  if (ip) placeBlock(ipban.computeRangeCidr(ip) || ip, { ...entry });
+  if (did) placeBlock(ipban.idKey(did), { ...entry });
   blocklist.saveSoon();
   evasion.invalidate();
   banhistory.record({
@@ -1818,16 +1831,6 @@ function generateRoomId() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-function getCurrentMessages(usersInRoom) {
-  const msgs = {};
-  if (Array.isArray(usersInRoom)) {
-    usersInRoom.forEach((u) => {
-      msgs[u.id] = state.userMessageBuffers.get(u.id) || "";
-    });
-  }
-  return msgs;
-}
-
 // ── Dev Mode: Visibility Helpers (vanish / hide) ────────────────────────────
 
 function getJoinableUserCount(room) {
@@ -2017,7 +2020,7 @@ function filterCurrentMessagesForSocket(room, recipientSocket) {
       messages[user.id] = "";
       continue;
     }
-    const text = state.userMessageBuffers.get(user.id) || "";
+    const text = state.getBuffer(user.id, room?.id);
     messages[user.id] = raw || mine ? text : scrubRoomText(text);
   }
   return messages;
@@ -2589,7 +2592,7 @@ async function processPendingChatUpdates(userId, socket) {
       state.batchProcessingTimers.delete(userId);
     }
 
-    let msg = state.userMessageBuffers.get(userId) || "";
+    let msg = state.getBuffer(userId, socket.roomId);
     const username = socket.handshake.session.username || "Anonymous";
 
     let shouldRateLimit = false;
@@ -2630,8 +2633,8 @@ async function processPendingChatUpdates(userId, socket) {
     }
 
     msg = sanitizeMessage(msg);
-    noteBufferShrink(userId, state.userMessageBuffers.get(userId) || "", msg);
-    state.userMessageBuffers.set(userId, msg);
+    noteBufferShrink(userId, state.getBuffer(userId, socket.roomId), msg);
+    state.setBuffer(userId, socket.roomId, msg);
 
     if (linkfilter.containsLink(msg)) armLinkSweep(socket, userId);
     else cancelLinkSweep(userId);
@@ -2736,7 +2739,7 @@ async function leaveRoom(socket, userId) {
         console.error("Session save in leaveRoom:", e),
       );
     }
-    state.userMessageBuffers.delete(userId);
+    state.deleteBuffer(userId, roomId);
     state.devUsers.delete(userId);
 
     socket.roomId = null;
@@ -3099,9 +3102,9 @@ function registerSocketHandlers(opts) {
       if (!socket || socket.roomId !== roomId) return;
       if (playing) {
         if (!gamePrevText.has(userId))
-          gamePrevText.set(userId, state.userMessageBuffers.get(userId) || "");
+          gamePrevText.set(userId, state.getBuffer(userId, roomId));
         const text = `[ playing ${label || "mini games"} ]`;
-        state.userMessageBuffers.set(userId, text);
+        state.setBuffer(userId, roomId, text);
         emitRoomChatUpdate(socket, {
           userId,
           username: socket.handshake?.session?.username,
@@ -3116,7 +3119,7 @@ function registerSocketHandlers(opts) {
       } else {
         const prev = gamePrevText.get(userId) || "";
         gamePrevText.delete(userId);
-        state.userMessageBuffers.set(userId, prev);
+        state.setBuffer(userId, roomId, prev);
         emitRoomChatUpdate(socket, {
           userId,
           username: socket.handshake?.session?.username,
@@ -3673,7 +3676,6 @@ function registerSocketHandlers(opts) {
           );
         }
 
-        const userId = socket.handshake.sessionID;
         if (!socket.handshake.session)
           return socket.emit(
             "error",
@@ -3682,6 +3684,17 @@ function registerSocketHandlers(opts) {
               "Session not available.",
             ),
           );
+        // The userId sticks to the device: derived from the signed device
+        // token, so it survives session rotation. IP-guest ids are shared
+        // per address and never carried into a real sign-in.
+        const prevId = socket.handshake.session.userId;
+        const userId =
+          (prevId &&
+            !socket.handshake.session.isIPBased &&
+            !String(prevId).startsWith("ip_") &&
+            prevId) ||
+          socket.stableUserId ||
+          socket.handshake.sessionID;
         Object.assign(socket.handshake.session, {
           username,
           location,
@@ -4619,7 +4632,7 @@ function registerSocketHandlers(opts) {
             ),
           );
         if (!userId) {
-          userId = socket.handshake.sessionID;
+          userId = socket.stableUserId || socket.handshake.sessionID;
           socket.handshake.session.userId = userId;
         }
         location = location || "On The Web";
@@ -5279,9 +5292,7 @@ function registerSocketHandlers(opts) {
             typeof data?.reason === "string" ? data.reason : "",
           ).slice(0, 500) || null;
 
-        const cidr =
-          ipban.autoRangeCidr(ip) ||
-          (data?.banRange ? ipban.computeRangeCidr(ip) : null);
+        const cidr = ipban.computeRangeCidr(ip);
         const blockKey = cidr || ip;
         if (
           !socket.isDev &&
@@ -5295,7 +5306,7 @@ function registerSocketHandlers(opts) {
             ),
           );
 
-        state.blockedIPs.set(blockKey, {
+        const blockEntry = {
           expiry,
           label: blockedName,
           by: socket.staffLabel || null,
@@ -5303,7 +5314,9 @@ function registerSocketHandlers(opts) {
           ts: Date.now(),
           reason,
           did: blockedDid,
-        });
+        };
+        placeBlock(blockKey, { ...blockEntry });
+        if (blockedDid) placeBlock(ipban.idKey(blockedDid), { ...blockEntry });
         blocklist.saveSoon();
         evasion.invalidate();
         banhistory.record({
@@ -5431,9 +5444,7 @@ function registerSocketHandlers(opts) {
             range = ipban.isRangeKey(key);
           } else if (ipban.isValidIp(entry)) {
             const ip = ipban.normalizeIp(entry);
-            const cidr =
-              ipban.autoRangeCidr(ip) ||
-              (data?.banRange ? ipban.computeRangeCidr(ip) : null);
+            const cidr = ipban.computeRangeCidr(ip);
             key = cidr || ip;
             range = !!cidr;
           } else if (/^[a-f0-9-]{8,64}$/i.test(entry) && entry.includes("-")) {
@@ -5471,7 +5482,7 @@ function registerSocketHandlers(opts) {
           );
 
         for (const t of targets) {
-          state.blockedIPs.set(t.key, {
+          placeBlock(t.key, {
             expiry,
             label: t.name,
             by: socket.staffLabel || null,
@@ -5628,7 +5639,7 @@ function registerSocketHandlers(opts) {
             ),
           );
         const targetUser = room.users.find((u) => u.id === targetUserId);
-        state.userMessageBuffers.set(targetUserId, "");
+        state.setBuffer(targetUserId, roomId, "");
         if (state.batchProcessingTimers.has(targetUserId)) {
           clearTimeout(state.batchProcessingTimers.get(targetUserId));
           state.batchProcessingTimers.delete(targetUserId);
@@ -8329,7 +8340,7 @@ function registerSocketHandlers(opts) {
         // Current box first; if they wiped it before the report landed, use
         // what it said just before the wipe.
         let targetText = sanitizeMessage(
-          state.userMessageBuffers.get(targetUserId) || "",
+          state.getBuffer(targetUserId, socket.roomId),
         ).slice(0, 300);
         let targetTextWiped = false;
         if (targetText.trim().length < 3) {
@@ -8941,7 +8952,6 @@ function registerSocketHandlers(opts) {
         if (userId) {
           clearAFKTimers(userId);
           await leaveRoom(socket, userId);
-          state.userMessageBuffers.delete(userId);
           state.devUsers.delete(userId);
           cancelLinkSweep(userId);
           if (state.typingTimeouts.has(userId)) {
@@ -9035,11 +9045,16 @@ function startCleanupIntervals() {
 
   setInterval(() => {
     const active = new Set();
-    for (const [, room] of state.rooms) {
-      if (room.users) room.users.forEach((u) => active.add(u.id));
+    const activeBufKeys = new Set();
+    for (const [roomId, room] of state.rooms) {
+      if (room.users)
+        room.users.forEach((u) => {
+          active.add(u.id);
+          activeBufKeys.add(roomId + ":" + u.id);
+        });
     }
     for (const id of state.userMessageBuffers.keys()) {
-      if (!active.has(id)) state.userMessageBuffers.delete(id);
+      if (!activeBufKeys.has(id)) state.userMessageBuffers.delete(id);
     }
     for (const id of [...linkSweepTimers.keys()])
       if (!active.has(id)) cancelLinkSweep(id);
@@ -9162,7 +9177,7 @@ function startCleanupIntervals() {
         if (diag.isHeld(u.id)) return true;
         if (!activeIds.has(u.id)) {
           console.log(`Ghost removed: "${u.username}" from "${room.name}"`);
-          state.userMessageBuffers.delete(u.id);
+          state.deleteBuffer(u.id, roomId);
           clearAFKTimers(u.id);
           state.devUsers.delete(u.id);
           finalizeBoardUserStroke(roomId, u.id);
@@ -9247,7 +9262,7 @@ function purgeAllGhostUsers() {
       if (activeIds.has(u.id)) return true;
       if (u.isBotUser && bots.isActiveBot(u.id)) return true;
       if (diag.isHeld(u.id)) return true;
-      state.userMessageBuffers.delete(u.id);
+      state.deleteBuffer(u.id, roomId);
       clearAFKTimers(u.id);
       state.devUsers.delete(u.id);
       if (room.votes) {

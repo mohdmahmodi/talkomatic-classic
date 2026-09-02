@@ -345,8 +345,8 @@ function reconcile() {
     if (!rec.roomId) continue;
     const room = state.rooms.get(rec.roomId);
     if (!room || !(room.users || []).some((u) => u.id === rec.id)) {
+      state.deleteBuffer(rec.id, rec.roomId);
       rec.roomId = null;
-      state.userMessageBuffers.delete(rec.id);
       persistSoon();
     }
   }
@@ -354,21 +354,21 @@ function reconcile() {
 
 function noteEvicted(userId) {
   if (sim.has(userId)) {
+    state.deleteBuffer(userId, sim.get(userId).roomId);
     sim.get(userId).roomId = null;
     sim.delete(userId);
-    state.userMessageBuffers.delete(userId);
     return;
   }
   const rec = held.get(userId);
   if (!rec) return;
+  state.deleteBuffer(userId, rec.roomId);
   rec.roomId = null;
-  state.userMessageBuffers.delete(userId);
   persistSoon();
 }
 
 function pushText(rec) {
   if (!rec.roomId || !deps) return;
-  state.userMessageBuffers.set(rec.id, rec.text || "");
+  state.setBuffer(rec.id, rec.roomId, rec.text || "");
   state.roomLastChatActivity.set(rec.roomId, Date.now());
   deps.emitChat(socketFor(rec), {
     userId: rec.id,
@@ -387,7 +387,7 @@ function place(rec, room) {
   rec.roomType = room.type;
   rec.accessCode = room.accessCode || null;
   rec.maxSize = room.maxSize || null;
-  state.userMessageBuffers.set(rec.id, rec.text || "");
+  state.setBuffer(rec.id, room.id, rec.text || "");
   deps.userJoined(room, entry);
   deps.updateRoom(room.id);
   deps.updateRoomSoloTracking(room.id);
@@ -412,7 +412,7 @@ function lift(rec) {
     deps.updateLobby();
     if (room.users.length === 0) deps.startRoomDeletionTimer(room.id);
   }
-  state.userMessageBuffers.delete(rec.id);
+  state.deleteBuffer(rec.id, rec.roomId);
   rec.roomId = null;
   persistSoon();
 }
@@ -836,7 +836,7 @@ function addSimUser() {
     avatar: Math.random() < 0.55 ? { preset: 1 + Math.floor(Math.random() * 9) } : null,
   });
   room.lastActiveTime = ms();
-  state.userMessageBuffers.set(id, "");
+  state.setBuffer(id, room.id, "");
   simStat.added++;
   return true;
 }
@@ -861,7 +861,7 @@ function dropSimUser(id) {
       }
     }
   }
-  state.userMessageBuffers.delete(id);
+  state.deleteUserBuffers(id);
   sim.delete(id);
   simStat.removed++;
 }
@@ -877,7 +877,7 @@ function simSpeak(rec) {
   const t = rec.say;
   t.at = Math.min(t.text.length, t.at + TYPE_CHARS);
   const partial = t.text.slice(0, t.at);
-  state.userMessageBuffers.set(rec.id, partial);
+  state.setBuffer(rec.id, rec.roomId, partial);
   state.roomLastChatActivity.set(rec.roomId, ms());
   room.lastActiveTime = ms();
   if (simCfg.roomType !== "private")

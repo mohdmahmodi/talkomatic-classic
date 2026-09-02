@@ -93,7 +93,7 @@ function placeAutoBlock({ deviceId, ip, username, signal }) {
   };
 
   const targets = [ipban.idKey(deviceId)];
-  if (ip && ipban.isValidIp(ip)) targets.push(ipban.autoRangeCidr(ip) || ip);
+  if (ip && ipban.isValidIp(ip)) targets.push(ipban.computeRangeCidr(ip) || ip);
 
   const placed = [];
   for (const key of targets) {

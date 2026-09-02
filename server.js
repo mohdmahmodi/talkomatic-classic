@@ -48,6 +48,7 @@ const diag = require("./server/diag");
 const roles = require("./server/roles");
 const appeals = require("./server/appeals");
 const ipban = require("./server/ipban");
+const devicetoken = require("./server/devicetoken");
 const ipredact = require("./server/ipredact");
 const communityThemes = require("./server/themes");
 
@@ -174,6 +175,7 @@ const corsOptions = {
 app.use(express.json({ limit: "100kb" }));
 app.use(cors(corsOptions));
 app.use(cookieParser());
+app.use(devicetoken.middleware);
 
 app.use((req, res, next) => {
   const m = req.method;
@@ -402,16 +404,22 @@ io.use((socket, next) => {
       socket.handshake.auth.token || socket.handshake.query.token;
     const browser = detectBrowserRequest(socket.handshake);
 
-    // Durable per-browser device id (active-vs-new + invite credit). Parsed
-    // before the block check and mirrored onto the session so HTTP routes see
-    // the same identity as the socket layer.
+    // Device identity. The server-signed cookie is authoritative when
+    // present; the client-supplied id stays as the fallback for cookie-less
+    // clients and keeps bans placed on the old ids matching.
+    const signedId = devicetoken.idFromCookieHeader(
+      socket.handshake.headers.cookie,
+    );
     const rawDeviceId = socket.handshake.auth.deviceId;
-    const deviceId =
+    const legacyId =
       typeof rawDeviceId === "string" && /^[a-f0-9-]{8,64}$/i.test(rawDeviceId)
         ? rawDeviceId.toLowerCase()
         : null;
+    const deviceId = signedId || legacyId;
     if (deviceId) {
       socket.deviceId = deviceId;
+      if (legacyId && legacyId !== deviceId) socket.legacyDeviceId = legacyId;
+      if (signedId) socket.stableUserId = devicetoken.userIdFor(signedId);
       try {
         const sess = socket.handshake.session;
         if (sess && sess.did !== deviceId) {
@@ -421,11 +429,14 @@ io.use((socket, next) => {
       } catch (_) {}
     }
 
-    // Blocked if the exact address is banned OR it falls inside a banned range
-    // (IPv6 /64), so rotating within a /64 does not evade the ban.
+    // Blocked if the address is banned, it falls inside a banned range, or
+    // either of the device ids carries a block.
     const activeBlock =
       ipban.findActiveBlock(clientIp) ||
-      (deviceId ? ipban.findActiveIdBlock(deviceId) : null);
+      (deviceId ? ipban.findActiveIdBlock(deviceId) : null) ||
+      (socket.legacyDeviceId
+        ? ipban.findActiveIdBlock(socket.legacyDeviceId)
+        : null);
     if (activeBlock) {
       const block = activeBlock.block;
       const expiry = block && typeof block === "object" ? block.expiry : block;
@@ -1055,14 +1066,18 @@ app.post(`${API}/appeal`, (req, res) => {
       typeof req.body?.deviceId === "string"
         ? req.body.deviceId
         : req.session?.did || "";
-    const deviceId = /^[a-f0-9-]{8,64}$/i.test(rawDevice)
+    const legacyId = /^[a-f0-9-]{8,64}$/i.test(rawDevice)
       ? rawDevice.toLowerCase()
       : null;
+    const deviceId = req.deviceId || legacyId;
     // Match a range ban too, so a range-banned user (whose exact address is not
     // itself a key) can still submit an appeal from the ban screen.
     const active =
       ipban.findActiveBlock(ip) ||
-      (deviceId ? ipban.findActiveIdBlock(deviceId) : null);
+      (deviceId ? ipban.findActiveIdBlock(deviceId) : null) ||
+      (legacyId && legacyId !== deviceId
+        ? ipban.findActiveIdBlock(legacyId)
+        : null);
     if (!active) return res.json({ ok: false, code: "not_banned" });
     const block = active.block;
 
@@ -1119,15 +1134,19 @@ function appealForBrowser(req) {
       : typeof req.body?.deviceId === "string"
         ? req.body.deviceId
         : req.session?.did || "";
-  const deviceId = /^[a-f0-9-]{8,64}$/i.test(rawDevice)
+  const legacyId = /^[a-f0-9-]{8,64}$/i.test(rawDevice)
     ? rawDevice.toLowerCase()
     : null;
+  const deviceId = req.deviceId || legacyId;
   // Which ban they are serving right now. The appeal shown is the one about
   // THIS ban: an old one from a ban they already served is history and must
   // not stand in the way of appealing the ban they are actually under.
   const active =
     ipban.findActiveBlock(ip) ||
-    (deviceId ? ipban.findActiveIdBlock(deviceId) : null);
+    (deviceId ? ipban.findActiveIdBlock(deviceId) : null) ||
+    (legacyId && legacyId !== deviceId
+      ? ipban.findActiveIdBlock(legacyId)
+      : null);
   const b = active && typeof active.block === "object" ? active.block : null;
   const banKey = active
     ? appeals.banKeyOf({
@@ -1486,9 +1505,9 @@ app.post(`${API}/themes`, (req, res) => {
 
     const rawDevice =
       typeof req.body?.deviceId === "string" ? req.body.deviceId : "";
-    const deviceId = /^[a-f0-9-]{8,64}$/i.test(rawDevice)
-      ? rawDevice.toLowerCase()
-      : null;
+    const deviceId =
+      req.deviceId ||
+      (/^[a-f0-9-]{8,64}$/i.test(rawDevice) ? rawDevice.toLowerCase() : null);
 
     const result = communityThemes.submit({
       deviceId,

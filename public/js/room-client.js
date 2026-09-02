@@ -4198,26 +4198,17 @@ function openIpBlockPicker(user) {
             const fields = [];
             const ruleField = await StaffUI.communityRuleField();
             if (ruleField) fields.push(ruleField);
-            fields.push(
-              {
-                name: "reason",
-                label: "Message to show the blocked user (optional)",
-                type: "textarea",
-                placeholder: "e.g. Repeated harassment after warnings.",
-                maxLength: 500,
-              },
-              {
-                name: "banRange",
-                type: "checkbox",
-                label: "Also block their surrounding range",
-                value: false,
-                help: "Covers the whole network they sit on (IPv6 /64, or IPv4 /24, which is up to 256 addresses) instead of the single address. Use it for someone who keeps returning on a neighbouring address, not as a matter of course.",
-              },
-            );
+            fields.push({
+              name: "reason",
+              label: "Message to show the blocked user (optional)",
+              type: "textarea",
+              placeholder: "e.g. Repeated harassment after warnings.",
+              maxLength: 500,
+            });
             const res = await StaffUI.prompt({
               title: "Block IP",
               icon: '<i class="fas fa-ban"></i>',
-              message: `Block this user's IP for ${d.label}? They'll be disconnected immediately.`,
+              message: `Block this user for ${d.label}? The block covers their device and the network their address sits on (IPv6 /64, IPv4 /24). They'll be disconnected immediately.`,
               fields,
               danger: true,
               confirmText: "Block IP",
@@ -4227,7 +4218,6 @@ function openIpBlockPicker(user) {
                 targetUserId: user.id,
                 duration: d.value,
                 reason: StaffUI.ruleReason(res.rule, res.reason),
-                banRange: !!res.banRange,
               });
           },
         })),

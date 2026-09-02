@@ -135,6 +135,10 @@ try {
 
 // ── Shared Mutable State ────────────────────────────────────────────────────
 
+function bufferKey(userId, roomId) {
+  return (roomId || "?") + ":" + userId;
+}
+
 const state = {
   io: null,
 
@@ -144,7 +148,22 @@ const state = {
   lastRoomCreationTimes: new Map(),
 
   typingTimeouts: new Map(),
+  // Typed chat text, one buffer per user per room
   userMessageBuffers: new Map(),
+  getBuffer(userId, roomId) {
+    return this.userMessageBuffers.get(bufferKey(userId, roomId)) || "";
+  },
+  setBuffer(userId, roomId, text) {
+    this.userMessageBuffers.set(bufferKey(userId, roomId), text);
+  },
+  deleteBuffer(userId, roomId) {
+    this.userMessageBuffers.delete(bufferKey(userId, roomId));
+  },
+  deleteUserBuffers(userId) {
+    const suffix = ":" + userId;
+    for (const key of [...this.userMessageBuffers.keys()])
+      if (key.endsWith(suffix)) this.userMessageBuffers.delete(key);
+  },
   pendingChatUpdates: new Map(),
   batchProcessingTimers: new Map(),
 

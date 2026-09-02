@@ -2684,39 +2684,30 @@
   }
 
   async function banReported(r, duration) {
-    const go = (reason, banRange) =>
+    const go = (reason) =>
       socket.emit("staff ip block", {
         targetUserId: r.targetUserId,
         duration,
         reason: reason || "",
-        banRange: !!banRange,
       });
-    if (!window.StaffUI) return go("", false);
+    if (!window.StaffUI) return go("");
     const fields = [];
     const ruleField = await StaffUI.communityRuleField();
     if (ruleField) fields.push(ruleField);
-    fields.push(
-      {
-        name: "value",
-        label: "Reason (optional, saved to the ban list)",
-        type: "textarea",
-        placeholder: "e.g. Repeated harassment after warnings.",
-        maxLength: 500,
-      },
-      {
-        name: "banRange",
-        type: "checkbox",
-        label: "Also block the surrounding range",
-        value: false,
-        help: "Covers the whole network they sit on (IPv6 /64, or IPv4 /24, which is up to 256 addresses). Use it for someone returning on neighbouring addresses.",
-      },
-    );
+    fields.push({
+      name: "value",
+      label: "Reason (optional, saved to the ban list)",
+      type: "textarea",
+      placeholder: "e.g. Repeated harassment after warnings.",
+      maxLength: 500,
+    });
     StaffUI.prompt({
       title: "IP block " + (r.name || "user"),
       icon: '<i class="fas fa-ban"></i>',
       message:
-        "Block this user's IP " +
+        "Block this user " +
         durationLabel(duration) +
+        "? The block covers their device and the network their address sits on (IPv6 /64, IPv4 /24)" +
         (r.online
           ? ". They are disconnected immediately."
           : ". They are offline; the block uses their last known address."),
@@ -2724,7 +2715,7 @@
       danger: true,
       confirmText: "Block " + durationLabel(duration),
     }).then((res) => {
-      if (res != null) go(StaffUI.ruleReason(res.rule, res.value), res.banRange);
+      if (res != null) go(StaffUI.ruleReason(res.rule, res.value));
     });
   }
   function dismissReport(r) {
@@ -2796,7 +2787,7 @@
           required: true,
           placeholder:
             "203.0.113.7\n151.57.212.0/24\n2601:c4:4200:4890::/64",
-          help: "One per line, or separated by commas, so a list can be pasted straight in. A range is written CIDR-style: /24 covers 256 IPv4 addresses, /64 covers an IPv6 network. Everything on the list gets the same duration and message.",
+          help: "One per line, or separated by commas, so a list can be pasted straight in. A plain address blocks the whole network it sits on (IPv6 /64, IPv4 /24). Anything written CIDR-style is used at the size you wrote, so /32 pins one exact IPv4 address. Everything on the list gets the same duration and message.",
         },
         {
           name: "duration",
@@ -2804,12 +2795,6 @@
           type: "select",
           options: banDurationOptions(),
           value: "24h",
-        },
-        {
-          name: "banRange",
-          type: "checkbox",
-          label: "Also block the surrounding range",
-          help: "For the plain addresses on the list: blocks the whole network each one sits on (IPv6 /64, IPv4 /24), so a neighbouring address in the same pool is covered too. Anything already written as a range is left at the size you wrote.",
         },
         {
           name: "reason",
@@ -2826,7 +2811,6 @@
         ip: v.ip.trim(),
         duration: v.duration || "24h",
         reason: (v.reason || "").trim(),
-        banRange: !!v.banRange,
       });
     });
   }
