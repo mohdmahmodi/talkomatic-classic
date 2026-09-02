@@ -5265,12 +5265,14 @@ function registerSocketHandlers(opts) {
             null;
         } else {
           const off = resolveOfflineTarget(targetUserId);
-          if (!off || !off.ip)
+          // A device id is a durable target on its own: an offline user whose
+          // address has rotated away is still blockable by the client id.
+          if (!off || (!off.ip && !off.deviceId))
             return socket.emit(
               "error",
               createErrorResponse(
                 ERROR_CODES.NOT_FOUND,
-                "No address on file for this user. They have not been seen in the last 30 days, so there is nothing to block.",
+                "Nothing on file for this user. They have not been seen in the last 30 days, so there is nothing to block.",
               ),
             );
           if (off.role === "dev" || (off.role && !socket.isDev))
@@ -5281,7 +5283,7 @@ function registerSocketHandlers(opts) {
                 "You cannot act on this user.",
               ),
             );
-          ip = off.ip;
+          ip = off.ip || null;
           blockedName = off.name || null;
           blockedDid = off.deviceId || null;
         }
@@ -5292,12 +5294,14 @@ function registerSocketHandlers(opts) {
             typeof data?.reason === "string" ? data.reason : "",
           ).slice(0, 500) || null;
 
-        const cidr = ipban.computeRangeCidr(ip);
-        const blockKey = cidr || ip;
-        if (
-          !socket.isDev &&
-          ipban.isPermanentBlock((ipban.findActiveBlock(ip) || {}).block)
-        )
+        const cidr = ip ? ipban.computeRangeCidr(ip) : null;
+        const blockKey = cidr || ip || null;
+        const coveringHit = ip
+          ? ipban.findActiveBlock(ip)
+          : blockedDid
+            ? ipban.findActiveIdBlock(blockedDid)
+            : null;
+        if (!socket.isDev && ipban.isPermanentBlock(coveringHit && coveringHit.block))
           return socket.emit(
             "error",
             createErrorResponse(
@@ -5315,12 +5319,12 @@ function registerSocketHandlers(opts) {
           reason,
           did: blockedDid,
         };
-        placeBlock(blockKey, { ...blockEntry });
+        if (blockKey) placeBlock(blockKey, { ...blockEntry });
         if (blockedDid) placeBlock(ipban.idKey(blockedDid), { ...blockEntry });
         blocklist.saveSoon();
         evasion.invalidate();
         banhistory.record({
-          ip: blockKey,
+          ip: blockKey || ipban.idKey(blockedDid),
           name: blockedName,
           action: "ban",
           by: socket.staffLabel || null,
@@ -5331,11 +5335,14 @@ function registerSocketHandlers(opts) {
         broadcastBlockList();
         broadcastBanHistory();
 
-        const affected = cidr
-          ? [...io().sockets.sockets.values()].filter((s) =>
+        const affected = [];
+        if (cidr)
+          affected.push(
+            ...[...io().sockets.sockets.values()].filter((s) =>
               ipban.ipInCidr(s.clientIp, cidr),
-            )
-          : findSocketsByIp(ip);
+            ),
+          );
+        else if (ip) affected.push(...findSocketsByIp(ip));
         if (blockedDid) {
           for (const s of io().sockets.sockets.values()) {
             if (s.deviceId === blockedDid && !affected.includes(s))
@@ -5354,7 +5361,9 @@ function registerSocketHandlers(opts) {
         }
         logStaff(
           socket,
-          `ip block ${duration}${cidr ? " (range)" : ""}`,
+          ip
+            ? `ip block ${duration}${cidr ? " (range)" : ""}`
+            : `id block ${duration}`,
           targetUser || { id: targetUserId, name: blockedName },
           room || "-",
           reason || undefined,
