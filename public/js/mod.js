@@ -4341,140 +4341,122 @@
     e.appendChild(document.createTextNode(text));
     wrap.appendChild(e);
   }
-  function keyLevelChip(h) {
-    if (h.role === "dev") return span("chip dev", "ADMIN");
-    const lvl = h.level || 1;
-    return span(
-      "chip mod l" + lvl,
-      lvl >= 3 ? "LEADER" : lvl >= 2 ? "MOD" : "JR MOD",
-    );
-  }
-
   function plural(n, word) {
     return n + " " + word + (n === 1 ? "" : /s$/.test(word) ? "es" : "s");
   }
 
-  // What the network history means, in one sentence, plus the pill colour.
+  function keyRank(h) {
+    if (h.role === "dev") return "dev";
+    const lvl = h.level || 1;
+    return lvl >= 3 ? "l3" : lvl >= 2 ? "l2" : "l1";
+  }
+
+  // What the network history means, in one sentence, plus the pill it gets.
   function netStatus(h, live) {
     const n = h.network || { level: "ok", v4Count: 0, v6Count: 0, windowDays: 7 };
-    if (h.removed) return { cls: "off", pill: "removed", text: "This key no longer works." };
+    if (h.removed) return { pill: "off", label: "Removed", text: "This key no longer works." };
     const liveNets = live ? groupNetworks(live.ips || []).length || live.ipCount || 1 : 0;
     if (liveNets > 1)
       return {
-        cls: "bad",
-        pill: liveNets + " networks at once",
+        pill: "perm",
+        label: liveNets + " networks at once",
         text: "Connected from " + liveNets + " different networks right now. Two people may be holding this key.",
+        cls: "cold",
       };
     switch (n.level) {
       case "review":
       case "revoke":
         return {
-          cls: "bad",
-          pill: n.v4Count + " networks",
-          text: "Used from " + n.v4Count + " different network families in the last " + n.windowDays + " days. A phone on the move does this, a shared key does too. Worth a look.",
+          pill: "perm",
+          label: n.v4Count + " networks",
+          text: n.v4Count + " network families in " + n.windowDays + " days. A phone on the move does this, a shared key does too. Worth a look.",
+          cls: "cold",
         };
       case "warn":
         return {
-          cls: "warn",
-          pill: "2 networks",
-          text: "Used from two network families in the last " + n.windowDays + " days. Keep an eye on it.",
+          pill: "warn",
+          label: "2 networks",
+          text: "Two network families in " + n.windowDays + " days. Keep an eye on it.",
+          cls: "stale",
         };
       case "mixed":
-        return { cls: "mixed", pill: "IPv4 + IPv6", text: "One connection speaking IPv4 and IPv6. Nothing to do." };
+        return { pill: "mixed", label: "IPv4 + IPv6", text: "One connection speaking IPv4 and IPv6. Nothing to do." };
       default:
-        return { cls: "ok", pill: "OK", text: "All use comes from one network." };
+        return { pill: "live", label: "OK", text: "All use comes from one network.", cls: "fresh" };
     }
-  }
-
-  function statTile(value, label, title) {
-    const t = divc("kc-stat");
-    const b = document.createElement("b");
-    b.textContent = value;
-    t.appendChild(b);
-    t.appendChild(span("", label));
-    if (title) t.title = title;
-    return t;
   }
 
   function keyCard(h, online, live) {
+    const rankKey = keyRank(h);
+    const rank = RANKS[rankKey] || RANKS.l2;
     const st = netStatus(h, live);
-    const card = divc("keycard " + st.cls + (h.removed ? " removed" : ""));
+    const card = divc("modcard rank-" + rankKey + (h.removed ? " former" : ""));
 
-    const head = divc("kc-head");
+    const top = divc("mc-top");
     const av = divc("avatar");
-    av.style.background = h.role === "dev" ? "var(--red)" : "var(--orange)";
+    av.style.background = rank.color;
     av.textContent = initialOf(h.label);
-    head.appendChild(av);
-    const who = divc("kc-who");
-    const name = divc("kc-name");
-    name.appendChild(document.createTextNode(h.label || "?"));
-    name.appendChild(keyLevelChip(h));
-    who.appendChild(name);
-    const line = divc("kc-line");
-    const dot = span("dot" + (online ? " on" : ""));
-    line.appendChild(dot);
-    line.appendChild(
-      document.createTextNode(
-        online
-          ? " Connected now" + (live ? ", " + plural(live.sessionCount || 1, "tab") + " open" : "")
-          : h.lastSeen
-            ? " Last seen " + relTime(h.lastSeen)
-            : " Never seen",
-      ),
+    top.appendChild(av);
+    const title = divc("mc-title");
+    title.appendChild(span("nm", h.label || "?"));
+    title.appendChild(span(rank.chip, rank.name));
+    top.appendChild(title);
+    const dot = span("live-dot " + (online ? "on" : "off"));
+    dot.appendChild(document.createTextNode(online ? "Online now" : "Offline"));
+    top.appendChild(dot);
+    card.appendChild(top);
+
+    const grid = divc("mc-grid");
+    const status = divc("mc-stat");
+    status.appendChild(span("mc-k", "Status"));
+    const sv = span("mc-v");
+    sv.appendChild(span("pill " + st.pill, st.label));
+    sv.title = st.text;
+    status.appendChild(sv);
+    grid.appendChild(status);
+    if (live) grid.appendChild(modStat("Open tabs", String(live.sessionCount || 1)));
+    if (h.profile && h.profile.name) grid.appendChild(modStat("Signs in as", h.profile.name));
+    const ls = h.lastSeen ? lastSeenMeta(h.lastSeen) : null;
+    grid.appendChild(
+      modStat("Last seen", ls ? ls.text : "Never", ls ? ls.cls : "dim", h.lastSeen ? fmtTime(h.lastSeen) : null),
     );
-    if (h.lastSeen) line.title = fmtTime(h.lastSeen);
-    who.appendChild(line);
-    if (h.profile && h.profile.name) {
-      const as = divc("kc-line");
-      as.textContent = "Signs in as " + h.profile.name;
-      who.appendChild(as);
-    }
-    head.appendChild(who);
-    const pill = span("netpill " + st.cls, st.pill);
-    pill.title = st.text;
-    head.appendChild(pill);
-    card.appendChild(head);
-
-    const stats = divc("kc-stats");
     const nets = h.network ? h.network.v4Count + h.network.v6Count : h.ipCount || 0;
-    stats.appendChild(statTile(String(nets), plural(nets, "network").replace(/^\d+ /, ""), "Network families used in the last 7 days"));
-    stats.appendChild(statTile(String((h.devices || []).length), plural((h.devices || []).length, "device").replace(/^\d+ /, ""), "Browsers this key has been used in"));
-    stats.appendChild(statTile(String(h.entered || 0), "typed in", h.enteredLast ? "Last typed in " + fmtTime(h.enteredLast) : "Times the key was typed into the staff box"));
-    stats.appendChild(statTile(String(h.ipCount || (h.ips || []).length || 0), "addresses", "Distinct addresses on record"));
-    card.appendChild(stats);
+    grid.appendChild(modStat("Networks", nets ? String(nets) : "None yet", nets ? null : "dim", "Network families used in the last 7 days"));
+    const devs = (h.devices || []).length;
+    grid.appendChild(modStat("Devices", devs ? String(devs) : "None yet", devs ? null : "dim", "Browsers this key has been used in"));
+    grid.appendChild(
+      modStat("Typed in", plural(h.entered || 0, "time"), h.entered ? null : "dim", h.enteredLast ? "Last typed in " + fmtTime(h.enteredLast) : "Times the key was typed into the staff box"),
+    );
+    if (h.removed)
+      grid.appendChild(
+        modStat(
+          "Removed",
+          (h.removed.at ? relTime(h.removed.at) : "Unknown") + (h.removed.by ? " by " + h.removed.by : "") + (h.removed.reason ? ". " + h.removed.reason : ""),
+          "cold",
+          h.removed.at ? fmtTime(h.removed.at) : null,
+        ),
+      );
+    card.appendChild(grid);
 
-    const note = divc("kc-note");
+    const note = divc("mc-note");
     note.textContent = st.text;
     card.appendChild(note);
 
-    if (h.removed) {
-      const r = divc("kc-removed");
-      r.appendChild(icon("fa-user-slash"));
-      r.appendChild(
-        document.createTextNode(
-          " Removed" +
-            (h.removed.at ? " " + relTime(h.removed.at) : "") +
-            (h.removed.by ? " by " + h.removed.by : "") +
-            (h.removed.reason ? ". " + h.removed.reason : ""),
-        ),
-      );
-      if (h.removed.at) r.title = fmtTime(h.removed.at);
-      card.appendChild(r);
-    }
-
-    const foot = divc("kc-foot");
+    const actions = divc("mc-actions");
     const toggle = document.createElement("button");
-    toggle.className = "kc-btn";
-    toggle.textContent = "Show networks and devices";
+    toggle.className = "btn sm";
+    toggle.appendChild(icon("fa-network-wired"));
+    toggle.appendChild(document.createTextNode(" Networks and devices"));
     toggle.addEventListener("click", () => {
       const open = card.classList.toggle("open");
-      toggle.textContent = open ? "Hide networks and devices" : "Show networks and devices";
+      toggle.lastChild.textContent = open ? " Hide networks and devices" : " Networks and devices";
     });
-    foot.appendChild(toggle);
+    actions.appendChild(toggle);
     if (h.actHash && !h.removed) {
       const rm = document.createElement("button");
-      rm.className = "kc-btn danger";
-      rm.textContent = "Remove key";
+      rm.className = "btn sm danger";
+      rm.appendChild(icon("fa-user-slash"));
+      rm.appendChild(document.createTextNode(" Remove key"));
       rm.addEventListener("click", async () => {
         if (!window.StaffUI) return;
         const v = await StaffUI.prompt({
@@ -4488,38 +4470,35 @@
         socket.emit("dev revoke mod", { hash: h.actHash, reason: v.reason.trim() });
         setTimeout(() => socket.emit("dev get sessions"), 600);
       });
-      foot.appendChild(rm);
+      actions.appendChild(rm);
     }
-    card.appendChild(foot);
+    card.appendChild(actions);
 
-    const det = divc("kc-details");
-    const nh = document.createElement("h5");
-    nh.textContent = "Networks";
+    const det = divc("mc-details");
+    const nh = span("mc-k", "Networks");
     det.appendChild(nh);
     const groups = groupNetworks(h.ips || []);
     if (groups.length) groups.forEach((g) => det.appendChild(netRow(g)));
     else
       det.appendChild(
         span(
-          "cnt",
-          h.ipCount
-            ? plural(h.ipCount, "address") + " on file. Only the main admin sees addresses."
-            : "No addresses recorded yet.",
+          "mc-v dim",
+          h.ipCount ? plural(h.ipCount, "address") + " on file. Only the main admin sees addresses." : "No addresses recorded yet.",
         ),
       );
-    const dh = document.createElement("h5");
-    dh.textContent = "Devices";
-    det.appendChild(dh);
+    det.appendChild(span("mc-k", "Devices"));
     if ((h.devices || []).length) {
+      const list = divc("devlist");
       for (const d of h.devices) {
         const chip = divc("devchip");
         chip.appendChild(span("id", d.id));
         chip.appendChild(span("sub", "seen " + plural(d.count || 1, "time") + ", last " + relTime(d.last)));
         if (d.ips && d.ips.length) chip.appendChild(span("sub", d.ips.join(", ")));
         else if (d.ipCount) chip.appendChild(span("sub", plural(d.ipCount, "address")));
-        det.appendChild(chip);
+        list.appendChild(chip);
       }
-    } else det.appendChild(span("cnt", "No devices recorded yet."));
+      det.appendChild(list);
+    } else det.appendChild(span("mc-v dim", "No devices recorded yet."));
     card.appendChild(det);
     return card;
   }
