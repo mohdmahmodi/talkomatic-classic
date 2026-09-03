@@ -116,7 +116,7 @@ class Talkoboard {
     // ── Network batching ────────────────────────────────────────────
     this.pointBuffer = [];
     this.flushTimer = null;
-    this.FLUSH_INTERVAL = 25;
+    this.FLUSH_INTERVAL = 20;
 
     // ── Point simplification ────────────────────────────────────────
     this.MIN_POINT_DISTANCE_SQ = 2.25;
@@ -124,7 +124,7 @@ class Talkoboard {
     // ── Live cursors (entity interpolation) ──────
     this.remoteCursors = new Map();
     this.cursorThrottle = 0;
-    this.CURSOR_SEND_INTERVAL = 45;
+    this.CURSOR_SEND_INTERVAL = 40;
     this.CURSOR_RENDER_DELAY = 80;
     this.CURSOR_TIMEOUT = 3000;
     this._cursorRaf = null;
@@ -891,6 +891,7 @@ class Talkoboard {
       "touchstart",
       (e) => {
         if (e.touches.length !== 2) return;
+        this.stopZoom();
         this._abortCurrentStroke();
         this._gesturing = true;
         this.isPanning = true;
@@ -906,7 +907,7 @@ class Talkoboard {
         this.panX += g.cx - gesture.cx;
         this.panY += g.cy - gesture.cy;
         if (gesture.dist > 0 && g.dist > 0) {
-          const rect = c.getBoundingClientRect();
+          const rect = this.canvasWrap.getBoundingClientRect();
           this.zoomAt(this.zoom * (g.dist / gesture.dist), g.cx - rect.left, g.cy - rect.top);
         }
         gesture = g;
@@ -1243,7 +1244,7 @@ class Talkoboard {
 
   sampleCanvasColor(e) {
     try {
-      const rect = this.canvas.getBoundingClientRect();
+      const rect = this.canvasWrap.getBoundingClientRect();
       const x = Math.round((e.clientX - rect.left) * this.dpr);
       const y = Math.round((e.clientY - rect.top) * this.dpr);
       const d = this.ctx.getImageData(x, y, 1, 1).data;
@@ -2017,7 +2018,7 @@ class Talkoboard {
   }
 
   getCanvasPoint(e) {
-    const rect = this.canvas.getBoundingClientRect();
+    const rect = this.canvasWrap.getBoundingClientRect();
     const sx = e.clientX - rect.left;
     const sy = e.clientY - rect.top;
     return this.screenToWorld(sx, sy);
@@ -2049,11 +2050,36 @@ class Talkoboard {
   }
 
   wheelZoom(e, pinch) {
-    const rect = this.canvas.getBoundingClientRect();
+    const rect = this.canvasWrap.getBoundingClientRect();
     const dy = Math.max(-150, Math.min(150, e.deltaY));
-    const factor = Math.exp(-dy * (pinch ? 0.01 : 0.0028));
-    this.zoomAt(this.zoom * factor, e.clientX - rect.left, e.clientY - rect.top);
-    this.viewChanged();
+    const factor = Math.exp(-dy * (pinch ? 0.006 : 0.0018));
+    this.zoomTo((this._zoomGoal || this.zoom) * factor, e.clientX - rect.left, e.clientY - rect.top);
+  }
+
+  // Zooms glide to their target over a few frames, around the point under
+  // the pointer, so a wheel notch or a button press reads as motion rather
+  // than a jump. Later input moves the target; the glide keeps going.
+  zoomTo(target, ax, ay) {
+    this._zoomGoal = Math.min(this.MAX_ZOOM, Math.max(this.MIN_ZOOM, target));
+    this._zoomAnchor = { ax, ay };
+    if (this._zoomRaf) return;
+    const step = () => {
+      this._zoomRaf = null;
+      const goal = this._zoomGoal;
+      const ratio = goal / this.zoom;
+      const next = Math.abs(Math.log(ratio)) < 0.01 ? goal : this.zoom * Math.pow(ratio, 0.35);
+      this.zoomAt(next, this._zoomAnchor.ax, this._zoomAnchor.ay);
+      this.viewChanged();
+      if (next !== goal) this._zoomRaf = requestAnimationFrame(step);
+      else this._zoomGoal = null;
+    };
+    this._zoomRaf = requestAnimationFrame(step);
+  }
+
+  stopZoom() {
+    cancelAnimationFrame(this._zoomRaf);
+    this._zoomRaf = null;
+    this._zoomGoal = null;
   }
 
   setWheelMode(mode) {
@@ -2070,14 +2096,14 @@ class Talkoboard {
   }
 
   adjustZoom(delta, e) {
-    const rect = this.canvas.getBoundingClientRect();
+    const rect = this.canvasWrap.getBoundingClientRect();
     const ax = e && e.clientX != null ? e.clientX - rect.left : this.displayWidth / 2;
     const ay = e && e.clientY != null ? e.clientY - rect.top : this.displayHeight / 2;
-    this.zoomAt(this.zoom * Math.pow(1.32, delta / 0.15), ax, ay);
-    this.viewChanged();
+    this.zoomTo((this._zoomGoal || this.zoom) * Math.pow(1.25, delta / 0.15), ax, ay);
   }
 
   resetView() {
+    this.stopZoom();
     this.panX = 0;
     this.panY = 0;
     this.zoom = 1;
@@ -2118,6 +2144,7 @@ class Talkoboard {
   }
 
   fitToView() {
+    this.stopZoom();
     const bb = this.boundsOf(this.allStrokes());
     if (!bb) return this.showHint("Nothing to fit yet");
     const pad = 60;
@@ -2953,7 +2980,7 @@ class Talkoboard {
     if (this.blockedByClaim(this.getCanvasPoint(e))) return;
 
     if (this.tool === "bucket") {
-      const rect = this.canvas.getBoundingClientRect();
+      const rect = this.canvasWrap.getBoundingClientRect();
       this.bucketFill({ x: e.clientX - rect.left, y: e.clientY - rect.top });
       return;
     }

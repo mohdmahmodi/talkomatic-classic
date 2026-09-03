@@ -398,25 +398,7 @@
       else render();
       return;
     }
-    if (current.id > seenId()) {
-      // On a first visit to the lobby the rules and staff read-through goes
-      // first; the notice waits its turn instead of stacking on top.
-      var welcomePending = false;
-      try {
-        welcomePending =
-          !!document.getElementById("staffGuideLink") &&
-          localStorage.getItem("tkWelcomeDone") !== "1";
-      } catch (e) {}
-      if (welcomePending)
-        document.addEventListener(
-          "tk-welcome-done",
-          function () {
-            if (current && !isOpen) open();
-          },
-          { once: true },
-        );
-      else open();
-    }
+    if (current.id > seenId()) open();
   });
 
   socket.on("announcement result", function (d) {

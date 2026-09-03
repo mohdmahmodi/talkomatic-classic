@@ -21,7 +21,7 @@ const {
 const socketRateLimiter = new RateLimiterMemory({
   points: CONFIG.LIMITS.SOCKET_MAX_REQUESTS_PER_WINDOW,
   duration: CONFIG.LIMITS.SOCKET_MAX_REQUESTS_WINDOW,
-  blockDuration: 5,
+  blockDuration: 2,
 });
 
 const chatUpdateLimiter = new RateLimiterMemory({
@@ -35,10 +35,13 @@ const typingLimiter = new RateLimiterMemory({
   duration: 1,
 });
 
+// Connection attempts per address. Schools and phone carriers put many
+// people behind one address, every room join opens two sockets, and a
+// restart makes all of them reconnect at once.
 const ipRateLimiter = new RateLimiterMemory({
-  points: 20,
+  points: 60,
   duration: 15,
-  blockDuration: 30,
+  blockDuration: 10,
 });
 
 const enhancedRateLimiters = {
@@ -60,7 +63,7 @@ const enhancedRateLimiters = {
   humanApi: new RateLimiterMemory({
     points: CONFIG.LIMITS.MAX_REQUESTS_PER_MINUTE,
     duration: 60,
-    blockDuration: 300,
+    blockDuration: 60,
   }),
 };
 

@@ -1598,6 +1598,124 @@ function initializeAppDirectory() {
   });
 }
 
+// ── Staff "@rules name": pick a person, the rules open on their screen ──────
+let rulesPickerActive = false;
+let rulesPickerItems = [];
+let rulesPickerIndex = 0;
+
+function roomPeopleForPicker() {
+  return [...document.querySelectorAll(".chat-row[data-user-id]")]
+    .filter((r) => r.dataset.userId !== currentUserId && !r.classList.contains("bot-user"))
+    .map((r) => ({ id: r.dataset.userId, name: r.dataset.username || "" }))
+    .filter((p) => p.name);
+}
+
+function showRulesPicker(prefix) {
+  const low = prefix.toLowerCase();
+  const people = roomPeopleForPicker().filter((p) => p.name.toLowerCase().startsWith(low));
+  rulesPickerItems = [{ id: null, name: "Show me the rules" }].concat(people);
+  if (low && !people.length) return hideRulesPicker();
+  showAutocomplete.pickerHost = showAutocomplete.pickerHost || (() => {
+    const el = document.createElement("div");
+    el.id = "rulesPicker";
+    el.className = "emote-autocomplete";
+    document.body.appendChild(el);
+    return el;
+  })();
+  const host = showAutocomplete.pickerHost;
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return hideRulesPicker();
+  let rect = sel.getRangeAt(0).getBoundingClientRect();
+  if (!rect.width && !rect.height && chatInput) {
+    const box = chatInput.getBoundingClientRect();
+    rect = { left: box.left + 8, bottom: box.top + 28 };
+  }
+  host.innerHTML = "";
+  const header = document.createElement("div");
+  header.className = "emote-autocomplete-header";
+  header.textContent = "Show the rules to";
+  host.appendChild(header);
+  const list = document.createElement("div");
+  list.className = "emote-autocomplete-list";
+  rulesPickerItems.forEach((p, i) => {
+    const item = document.createElement("div");
+    item.className = "emote-autocomplete-item" + (i === rulesPickerIndex ? " selected" : "");
+    const icon = document.createElement("i");
+    icon.className = "fas " + (p.id ? "fa-user" : "fa-book");
+    icon.style.width = "20px";
+    const span = document.createElement("span");
+    span.textContent = p.name;
+    item.appendChild(icon);
+    item.appendChild(span);
+    item.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      pickRulesTarget(p);
+    });
+    item.addEventListener("mouseover", () => {
+      rulesPickerIndex = i;
+      list.querySelectorAll(".emote-autocomplete-item").forEach((el, j) =>
+        el.classList.toggle("selected", j === i),
+      );
+    });
+    list.appendChild(item);
+  });
+  host.appendChild(list);
+  host.style.top = `${rect.bottom + window.scrollY + 5}px`;
+  host.style.left = `${rect.left + window.scrollX}px`;
+  host.style.display = "block";
+  rulesPickerActive = true;
+  if (rulesPickerIndex >= rulesPickerItems.length) rulesPickerIndex = 0;
+}
+
+function hideRulesPicker() {
+  if (showAutocomplete.pickerHost) showAutocomplete.pickerHost.style.display = "none";
+  rulesPickerActive = false;
+  rulesPickerIndex = 0;
+}
+
+function pickRulesTarget(p) {
+  hideRulesPicker();
+  if (chatInput) {
+    stripTypedWord(chatInput, /\s?@rules(\s+\S*)?$/i);
+    updateSentMessage();
+  }
+  if (!p.id) return window.TalkomaticRules && window.TalkomaticRules.open();
+  socket.emit("staff show rules", { targetUserId: p.id });
+}
+
+function handleRulesPickerNav(e) {
+  if (!rulesPickerActive) return false;
+  const n = rulesPickerItems.length;
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    rulesPickerIndex = (rulesPickerIndex + (e.key === "ArrowDown" ? 1 : n - 1)) % n;
+    showAutocomplete.pickerHost
+      .querySelectorAll(".emote-autocomplete-item")
+      .forEach((el, i) => el.classList.toggle("selected", i === rulesPickerIndex));
+    return true;
+  }
+  if (e.key === "Enter" || e.key === "Tab") {
+    e.preventDefault();
+    pickRulesTarget(rulesPickerItems[rulesPickerIndex] || rulesPickerItems[0]);
+    return true;
+  }
+  if (e.key === "Escape") {
+    hideRulesPicker();
+    return true;
+  }
+  return false;
+}
+
+function stripTypedWord(div, re) {
+  const walker = document.createTreeWalker(div, NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    if (!re.test(n.nodeValue)) continue;
+    n.nodeValue = n.nodeValue.replace(re, "");
+    if (getPlainText(div).trim() === "") div.innerHTML = "";
+    return;
+  }
+}
+
 // ── 8. TALKOBOARD INTEGRATION ───────────────────────────────────────────────
 
 function openTalkoboard() {
@@ -1991,8 +2109,7 @@ function applyDevAppearanceToRow(row, user) {
   // Admins and mod leaders both see through concealed flair; the server only
   // ever sends a leader the hidden state of MODS, so dev privacy holds.
   const devSeesConcealed =
-    (currentUserIsDev || currentUserModLevel >= 3) &&
-    user.id !== currentUserId;
+    (currentUserIsDev || currentUserIsMod) && user.id !== currentUserId;
   const crown = info.querySelector(".dev-crown");
   const loudDev = !!user.isDev && !user.isHidden;
   const showCrown = !!user.isDev && (!user.isHidden || devSeesConcealed);
@@ -2070,6 +2187,10 @@ function applyDevAppearanceToRow(row, user) {
     if (!marker) info.insertBefore(fresh, info.querySelector(".ui-tools"));
     else if (marker.dataset.state !== fresh.dataset.state)
       marker.replaceWith(fresh);
+    // The marker sits directly left of the flair it explains.
+    const mk = info.querySelector(".staff-concealed-marker");
+    const flair = info.querySelector(".dev-crown, .mod-badge");
+    if (mk && flair && mk.nextSibling !== flair) info.insertBefore(mk, flair);
   } else if (marker) {
     marker.remove();
   }
@@ -2324,8 +2445,7 @@ function createUserRow(user, container) {
   // Admins and mod leaders both see through concealed flair; the server only
   // ever sends a leader the hidden state of MODS, so dev privacy holds.
   const devSeesConcealed =
-    (currentUserIsDev || currentUserModLevel >= 3) &&
-    user.id !== currentUserId;
+    (currentUserIsDev || currentUserIsMod) && user.id !== currentUserId;
 
   if (user.isDev && !user.isHidden) {
     row.classList.add("dev-user");
@@ -2343,6 +2463,10 @@ function createUserRow(user, container) {
 
   info.appendChild(deviceIconFor(user.deviceType));
 
+  if (devSeesConcealed && (user.isDev || user.isMod) && (user.isHidden || user.isVanished)) {
+    info.appendChild(makeStaffConcealedMarker(user));
+  }
+
   if (user.isDev && (!user.isHidden || devSeesConcealed)) {
     const crown = document.createElement("img");
     crown.src = "images/icons/crown.gif";
@@ -2358,10 +2482,6 @@ function createUserRow(user, container) {
   if (user.isBotUser) {
     row.classList.add("bot-user");
     info.appendChild(createBotBadge(user.botOwner));
-  }
-
-  if (devSeesConcealed && (user.isDev || user.isMod) && (user.isHidden || user.isVanished)) {
-    info.appendChild(makeStaffConcealedMarker(user));
   }
 
   if (user.avatar) {
@@ -2568,6 +2688,17 @@ function createUserRow(user, container) {
       } else hideAutocomplete();
       const text = getPlainText(div);
       if (/[;:]/.test(text)) replaceEmotes(div);
+      // "@rules" opens the rules for the person typing it and never reaches
+      // the room: the word is taken back out of the box before it is sent.
+      // Staff get a picker instead, so "@rules name" puts the rules in front
+      // of that person.
+      const rulesCmd = text.match(/(^|\s)@rules(?:\s+(\S*))?$/i);
+      if (rulesCmd && isStaff()) showRulesPicker(rulesCmd[2] || "");
+      else if (rulesPickerActive) hideRulesPicker();
+      if (!isStaff() && /(^|\s)@rules\b/i.test(text) && window.TalkomaticRules) {
+        stripTypedWord(div, /\s?@rules\b/i);
+        window.TalkomaticRules.open();
+      }
       if (
         !currentUserIsDev &&
         !currentUserIsMod &&
@@ -2583,6 +2714,7 @@ function createUserRow(user, container) {
       updateSentMessage();
     });
     div.addEventListener("keydown", (e) => {
+      if (handleRulesPickerNav(e)) return;
       if (handleEmoteNavigation(e)) return;
 
       if (e.key === "Backspace" || e.key === "Delete") {
@@ -3129,6 +3261,11 @@ socket.on("room full", () => {
   );
 });
 
+socket.on("rules show", () => {
+  if (window.TalkomaticRules) window.TalkomaticRules.open();
+  if (window.toastr) toastr.info("A moderator asked you to read the rules.");
+});
+
 socket.on("room joined", (data) => {
   if (data.protocol != null && data.protocol !== CLIENT_PROTOCOL) {
     if (!sessionStorage.getItem("tkProtoReload")) {
@@ -3139,6 +3276,7 @@ socket.on("room joined", (data) => {
   } else {
     sessionStorage.removeItem("tkProtoReload");
   }
+  document.dispatchEvent(new Event("tk-room-joined"));
 
   currentUserId = data.userId;
   currentRoomId = data.roomId;

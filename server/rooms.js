@@ -1959,17 +1959,14 @@ function formatUserForSocket(user, recipientSocket) {
   }
   if (user.avatar) formatted.avatar = user.avatar;
   const recipientIsDev = canSeeConcealed(recipientSocket, user);
-  // Leaders see which MOD has their flair off, the way admins do. Hidden and
-  // vanished devs stay a dev-only matter.
-  const leaderSeesHiddenMod =
-    !user.isDev &&
-    !!user.isMod &&
-    !!recipientSocket?.isMod &&
-    (recipientSocket.modLevel || 1) >= 3;
+  // Every mod sees which MOD has their flair off, the way admins do. Hidden
+  // and vanished devs stay a dev-only matter.
+  const modSeesHiddenMod =
+    !user.isDev && !!user.isMod && !!recipientSocket?.isMod;
   if (
     (user.isHidden || isOpsUser(user)) &&
     !recipientIsDev &&
-    !leaderSeesHiddenMod
+    !modSeesHiddenMod
   ) {
     return formatted;
   }
@@ -5271,6 +5268,36 @@ function registerSocketHandlers(opts) {
           roomId,
         });
         clearReportAfterAction(socket, targetUserId);
+      }),
+    );
+
+    // ── Put the rules in front of one person ─────────────────────────────
+    socket.on(
+      "staff show rules",
+      safe(async (data) => {
+        if (!requireStaff(socket)) return;
+        const targetUserId = data?.targetUserId;
+        if (!targetUserId || typeof targetUserId !== "string") return;
+        const roomId = getUserCurrentRoom(targetUserId);
+        const room = roomId ? state.rooms.get(roomId) : null;
+        const targetUser = room?.users.find((u) => u.id === targetUserId);
+        const target = findSocketByUserId(targetUserId, roomId);
+        if (!targetUser || !target)
+          return socket.emit(
+            "error",
+            createErrorResponse(
+              ERROR_CODES.NOT_FOUND,
+              "That person is not in a room right now.",
+            ),
+          );
+        target.emit("rules show", {});
+        logStaff(socket, "show rules", targetUser, room);
+        socket.emit("staff action result", {
+          action: "show rules",
+          ok: true,
+          targetUserId,
+          username: targetUser.username,
+        });
       }),
     );
 

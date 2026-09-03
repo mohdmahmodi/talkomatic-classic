@@ -23,9 +23,10 @@ const CONFIG = {
     // Live sockets, not people: schools and carrier NAT put many users behind
     // one address, and a frozen phone tab holds its slot until the ping
     // timeout reaps it. 8 locked whole networks out of the lobby.
-    MAX_CONNECTIONS_PER_IP: 30,
+    // A room join holds two sockets per person, so 60 is thirty people.
+    MAX_CONNECTIONS_PER_IP: 60,
     SOCKET_MAX_REQUESTS_WINDOW: 1,
-    SOCKET_MAX_REQUESTS_PER_WINDOW: 75,
+    SOCKET_MAX_REQUESTS_PER_WINDOW: 150,
     CHAT_UPDATE_RATE_LIMIT: 500,
     TYPING_RATE_LIMIT: 60,
     CONNECTION_DELAY: 100,
@@ -34,7 +35,7 @@ const CONFIG = {
     MAX_ROOMS_PER_USER: 1,
     BOT_DETECTION_JOIN_THRESHOLD: 10,
     BOT_DETECTION_WINDOW: 60000,
-    MAX_REQUESTS_PER_MINUTE: 100,
+    MAX_REQUESTS_PER_MINUTE: 300,
     MAX_BOT_REQUESTS_PER_MINUTE: 500,
     MAX_BOT_TOKENS_PER_IP: 3,
     BOT_TOKEN_REQUEST_COOLDOWN: 300000,

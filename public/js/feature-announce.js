@@ -1,6 +1,7 @@
 // feature-announce.js - One-time card for the personal toggles (word filter,
 // hide bots). Dismissed via cookie for 60 days. The name is versioned so a
-// reworded card shows once more to people who dismissed an older one.
+// reworded card shows once more to people who dismissed an older one. It is
+// shown by first-visit.js in its turn, never on its own.
 (function () {
   var COOKIE_NAME = "tk_announce_seen2";
   var COOKIE_DAYS = 60;
@@ -17,26 +18,31 @@
       name + "=" + value + ";expires=" + d.toUTCString() + ";path=/";
   }
 
-  if (getCookie(COOKIE_NAME)) return;
-
   var overlay = document.getElementById("featureAnnounce");
   var closeBtn = document.getElementById("featureAnnounceClose");
-  if (!overlay || !closeBtn) return;
 
-  setTimeout(function () {
-    overlay.classList.add("show");
-  }, 1500);
+  function seen() {
+    return !overlay || !closeBtn || !!getCookie(COOKIE_NAME);
+  }
+
+  function show() {
+    if (!seen()) overlay.classList.add("show");
+  }
 
   function dismiss() {
     overlay.classList.remove("show");
     setCookie(COOKIE_NAME, "1", COOKIE_DAYS);
   }
 
-  closeBtn.addEventListener("click", dismiss);
-  overlay.addEventListener("click", function (e) {
-    if (e.target === overlay) dismiss();
-  });
-  document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape" && overlay.classList.contains("show")) dismiss();
-  });
+  if (overlay && closeBtn) {
+    closeBtn.addEventListener("click", dismiss);
+    overlay.addEventListener("click", function (e) {
+      if (e.target === overlay) dismiss();
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && overlay.classList.contains("show")) dismiss();
+    });
+  }
+
+  window.TkFeatureAnnounce = { seen: seen, show: show };
 })();

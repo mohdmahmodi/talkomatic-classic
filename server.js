@@ -251,21 +251,20 @@ const helmetMiddleware = helmet({
 app.use(xss());
 app.use(hpp());
 
-// Rate limiter, skips static assets and socket.io so they don't eat the limit
+// Slow brake on the API only. Pages, assets and socket.io never count: a
+// shared address (a school, a phone carrier) loads hundreds of pages an hour
+// between everyone on it, and that is not abuse.
 app.use(
   rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 100,
+    max: 1200,
     standardHeaders: true,
     legacyHeaders: false,
     keyGenerator: (req) => getClientIP(req),
     skip: (req) => {
       const url = req.path || req.url;
       return (
-        /\.(js|css|png|jpg|jpeg|gif|ico|svg|ttf|otf|woff|woff2|mp3|wav|ogg|json|map)$/i.test(
-          url,
-        ) ||
-        url.startsWith("/socket.io/") ||
+        !url.startsWith("/api/") ||
         // The ban screen polls ban-status every 20s as its ONLY channel to learn
         // it has been unbanned (its socket stays refused while blocked). It must
         // never eat the rate budget: if it 429s, the banned user can't detect an
@@ -591,6 +590,10 @@ io.use((socket, next) => {
               // Same story for Draw & Guess strokes: batched, and capped by
               // its own per-second limit in server/games/socket.js.
               "games draw",
+              // Talkoboard pen and cursor streams: small, frequent, and
+              // capped by the points-per-stroke limit in rooms.js.
+              "board stroke move",
+              "board cursor",
               "get rooms",
               "get room state",
             ].includes(evt)

@@ -41,7 +41,7 @@
     var sub = el(
       "div",
       "tkm-sub",
-      "How this place works, and what moderators may and may not do.",
+      "How this place works, and what moderators may and may not do. Type @rules in your box any time to see this again.",
     );
     headText.appendChild(title);
     headText.appendChild(sub);

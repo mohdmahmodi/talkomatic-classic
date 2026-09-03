@@ -1,40 +1,78 @@
 // public/js/first-visit.js
-// First visit to the lobby: everyone reads the rules, then the staff guide,
-// once, before anything else. Both open in gate mode (no closing until the
-// button at the bottom is pressed). The dev announcement waits until this is
-// done - see announce.js.
+// New people are walked in one card per room visit, inside the room, instead
+// of being stopped at the lobby door: the rules first, then the automod and
+// bot switches, then the staff guide. Each card shows once, never two in a
+// row, and only after the room has loaded around them.
 (function () {
   "use strict";
-  var KEY = "tkWelcomeDone";
+  var RULES = "tkWelcomeDone";
+  var GUIDE = "tkStaffGuideDone";
 
-  function done() {
+  function flag(key) {
     try {
-      return localStorage.getItem(KEY) === "1";
+      return localStorage.getItem(key) === "1";
     } catch (e) {
       return true;
     }
   }
-
-  function finish() {
+  function mark(key) {
     try {
-      localStorage.setItem(KEY, "1");
+      localStorage.setItem(key, "1");
     } catch (e) {}
-    document.dispatchEvent(new Event("tk-welcome-done"));
   }
 
-  document.addEventListener("DOMContentLoaded", function () {
-    if (done()) return;
-    if (!window.TalkomaticRules || !window.StaffGuide) return;
-    // A short beat so the lobby paints before the modal lands on it.
-    setTimeout(function () {
-      window.TalkomaticRules.open({
-        gate: true,
-        onDone: function () {
-          window.StaffGuide.open({ gate: true, onDone: finish });
-        },
-      });
-    }, 700);
+  var steps = [
+    {
+      due: function () {
+        return !flag(RULES) && !!window.TalkomaticRules;
+      },
+      show: function () {
+        window.TalkomaticRules.open({
+          gate: true,
+          onDone: function () {
+            mark(RULES);
+            document.dispatchEvent(new Event("tk-welcome-done"));
+          },
+        });
+      },
+    },
+    {
+      due: function () {
+        return !!window.TkFeatureAnnounce && !window.TkFeatureAnnounce.seen();
+      },
+      show: function () {
+        window.TkFeatureAnnounce.show();
+      },
+    },
+    {
+      due: function () {
+        return !flag(GUIDE) && !!window.StaffGuide;
+      },
+      show: function () {
+        window.StaffGuide.open({
+          gate: true,
+          onDone: function () {
+            mark(GUIDE);
+          },
+        });
+      },
+    },
+  ];
+
+  var shown = false;
+  document.addEventListener("tk-room-joined", function () {
+    if (shown) return;
+    var step = steps.find(function (s) {
+      return s.due();
+    });
+    if (!step) return;
+    shown = true;
+    setTimeout(step.show, 1200);
   });
 
-  window.TkFirstVisit = { done: done };
+  window.TkFirstVisit = {
+    done: function () {
+      return flag(RULES);
+    },
+  };
 })();
