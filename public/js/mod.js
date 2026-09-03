@@ -4350,90 +4350,130 @@
     );
   }
 
-  function netPill(net) {
-    const n = net || { level: "ok" };
-    const cls = { ok: "ok", mixed: "mixed", warn: "warn", review: "bad", revoke: "bad" }[n.level] || "ok";
-    const text =
-      n.level === "warn" || n.level === "review" || n.level === "revoke"
-        ? n.v4Count + " networks"
-        : n.level === "mixed"
-          ? "IPv4 + IPv6"
-          : "OK";
-    const p = span("netpill " + cls, text);
-    p.title =
-      n.level === "review" || n.level === "revoke"
-        ? "Used from " + n.v4Count + " different IPv4 network families in " + n.windowDays + " days. Worth a look: a phone on the move does this, a shared key does too."
-        : n.level === "warn"
-          ? "Two IPv4 network families in " + n.windowDays + " days. Keep an eye on it."
-          : n.level === "mixed"
-            ? "Seen on IPv4 and IPv6. Usually one connection speaking both."
-            : "All use comes from one network.";
-    return p;
+  function plural(n, word) {
+    return n + " " + word + (n === 1 ? "" : /s$/.test(word) ? "es" : "s");
   }
 
-  function fact(ic, label, value, title) {
-    const f = span("fact");
-    f.appendChild(icon(ic));
-    f.appendChild(document.createTextNode(label + " "));
+  // What the network history means, in one sentence, plus the pill colour.
+  function netStatus(h, live) {
+    const n = h.network || { level: "ok", v4Count: 0, v6Count: 0, windowDays: 7 };
+    if (h.removed) return { cls: "off", pill: "removed", text: "This key no longer works." };
+    const liveNets = live ? groupNetworks(live.ips || []).length || live.ipCount || 1 : 0;
+    if (liveNets > 1)
+      return {
+        cls: "bad",
+        pill: liveNets + " networks at once",
+        text: "Connected from " + liveNets + " different networks right now. Two people may be holding this key.",
+      };
+    switch (n.level) {
+      case "review":
+      case "revoke":
+        return {
+          cls: "bad",
+          pill: n.v4Count + " networks",
+          text: "Used from " + n.v4Count + " different network families in the last " + n.windowDays + " days. A phone on the move does this, a shared key does too. Worth a look.",
+        };
+      case "warn":
+        return {
+          cls: "warn",
+          pill: "2 networks",
+          text: "Used from two network families in the last " + n.windowDays + " days. Keep an eye on it.",
+        };
+      case "mixed":
+        return { cls: "mixed", pill: "IPv4 + IPv6", text: "One connection speaking IPv4 and IPv6. Nothing to do." };
+      default:
+        return { cls: "ok", pill: "OK", text: "All use comes from one network." };
+    }
+  }
+
+  function statTile(value, label, title) {
+    const t = divc("kc-stat");
     const b = document.createElement("b");
     b.textContent = value;
-    f.appendChild(b);
-    if (title) f.title = title;
-    return f;
+    t.appendChild(b);
+    t.appendChild(span("", label));
+    if (title) t.title = title;
+    return t;
   }
 
-  function plural(n, word) {
-    return n + " " + word + (n === 1 ? "" : "s");
-  }
+  function keyCard(h, online, live) {
+    const st = netStatus(h, live);
+    const card = divc("keycard " + st.cls + (h.removed ? " removed" : ""));
 
-  function keyRow(h, online, live) {
-    const row = divc("keyrow" + (h.removed ? " removed" : ""));
-    const head = divc("keyrow-head");
+    const head = divc("kc-head");
     const av = divc("avatar");
     av.style.background = h.role === "dev" ? "var(--red)" : "var(--orange)";
     av.textContent = initialOf(h.label);
     head.appendChild(av);
-    const name = divc("keyrow-name");
+    const who = divc("kc-who");
+    const name = divc("kc-name");
     name.appendChild(document.createTextNode(h.label || "?"));
     name.appendChild(keyLevelChip(h));
-    if (h.profile && h.profile.name)
-      name.appendChild(span("as", "signs in as " + h.profile.name));
-    head.appendChild(name);
-    const right = divc("keyrow-right");
+    who.appendChild(name);
+    const line = divc("kc-line");
     const dot = span("dot" + (online ? " on" : ""));
-    dot.title = online ? "Connected right now" : "Not connected";
-    right.appendChild(dot);
-    right.appendChild(h.removed ? span("netpill off", "removed") : netPill(h.network));
-    head.appendChild(right);
-    row.appendChild(head);
-
-    const facts = divc("keyrow-facts");
-    if (live) facts.appendChild(fact("fa-window-restore", "open", plural(live.sessionCount || 1, "tab")));
-    facts.appendChild(
-      fact(
-        "fa-keyboard",
-        "typed in",
-        plural(h.entered || 0, "time"),
-        h.enteredLast ? "Last typed in " + fmtTime(h.enteredLast) : "Never typed in on this record",
+    line.appendChild(dot);
+    line.appendChild(
+      document.createTextNode(
+        online
+          ? " Connected now" + (live ? ", " + plural(live.sessionCount || 1, "tab") + " open" : "")
+          : h.lastSeen
+            ? " Last seen " + relTime(h.lastSeen)
+            : " Never seen",
       ),
     );
-    const netCount = h.network ? h.network.v4Count + h.network.v6Count : h.ipCount || 0;
-    facts.appendChild(fact("fa-network-wired", "", plural(netCount, "network")));
-    facts.appendChild(fact("fa-laptop", "", plural((h.devices || []).length, "device")));
-    if (h.lastSeen) facts.appendChild(fact("fa-clock", "last seen", relTime(h.lastSeen), fmtTime(h.lastSeen)));
+    if (h.lastSeen) line.title = fmtTime(h.lastSeen);
+    who.appendChild(line);
+    if (h.profile && h.profile.name) {
+      const as = divc("kc-line");
+      as.textContent = "Signs in as " + h.profile.name;
+      who.appendChild(as);
+    }
+    head.appendChild(who);
+    const pill = span("netpill " + st.cls, st.pill);
+    pill.title = st.text;
+    head.appendChild(pill);
+    card.appendChild(head);
+
+    const stats = divc("kc-stats");
+    const nets = h.network ? h.network.v4Count + h.network.v6Count : h.ipCount || 0;
+    stats.appendChild(statTile(String(nets), plural(nets, "network").replace(/^\d+ /, ""), "Network families used in the last 7 days"));
+    stats.appendChild(statTile(String((h.devices || []).length), plural((h.devices || []).length, "device").replace(/^\d+ /, ""), "Browsers this key has been used in"));
+    stats.appendChild(statTile(String(h.entered || 0), "typed in", h.enteredLast ? "Last typed in " + fmtTime(h.enteredLast) : "Times the key was typed into the staff box"));
+    stats.appendChild(statTile(String(h.ipCount || (h.ips || []).length || 0), "addresses", "Distinct addresses on record"));
+    card.appendChild(stats);
+
+    const note = divc("kc-note");
+    note.textContent = st.text;
+    card.appendChild(note);
+
+    if (h.removed) {
+      const r = divc("kc-removed");
+      r.appendChild(icon("fa-user-slash"));
+      r.appendChild(
+        document.createTextNode(
+          " Removed" +
+            (h.removed.at ? " " + relTime(h.removed.at) : "") +
+            (h.removed.by ? " by " + h.removed.by : "") +
+            (h.removed.reason ? ". " + h.removed.reason : ""),
+        ),
+      );
+      if (h.removed.at) r.title = fmtTime(h.removed.at);
+      card.appendChild(r);
+    }
+
+    const foot = divc("kc-foot");
     const toggle = document.createElement("button");
-    toggle.className = "keyrow-toggle";
-    toggle.textContent = "Details";
+    toggle.className = "kc-btn";
+    toggle.textContent = "Show networks and devices";
     toggle.addEventListener("click", () => {
-      const open = row.classList.toggle("open");
-      toggle.textContent = open ? "Hide details" : "Details";
+      const open = card.classList.toggle("open");
+      toggle.textContent = open ? "Hide networks and devices" : "Show networks and devices";
     });
-    facts.appendChild(toggle);
+    foot.appendChild(toggle);
     if (h.actHash && !h.removed) {
       const rm = document.createElement("button");
-      rm.className = "keyrow-toggle";
-      rm.style.color = "var(--red)";
-      rm.style.marginLeft = "0.9rem";
+      rm.className = "kc-btn danger";
       rm.textContent = "Remove key";
       rm.addEventListener("click", async () => {
         if (!window.StaffUI) return;
@@ -4448,26 +4488,11 @@
         socket.emit("dev revoke mod", { hash: h.actHash, reason: v.reason.trim() });
         setTimeout(() => socket.emit("dev get sessions"), 600);
       });
-      facts.appendChild(rm);
+      foot.appendChild(rm);
     }
-    row.appendChild(facts);
+    card.appendChild(foot);
 
-    if (h.removed) {
-      const r = divc("keyrow-removed");
-      r.appendChild(icon("fa-user-slash"));
-      r.appendChild(
-        document.createTextNode(
-          " Removed" +
-            (h.removed.at ? " " + relTime(h.removed.at) : "") +
-            (h.removed.by ? " by " + h.removed.by : "") +
-            (h.removed.reason ? ": " + h.removed.reason : ""),
-        ),
-      );
-      if (h.removed.at) r.title = fmtTime(h.removed.at);
-      row.appendChild(r);
-    }
-
-    const det = divc("keyrow-details");
+    const det = divc("kc-details");
     const nh = document.createElement("h5");
     nh.textContent = "Networks";
     det.appendChild(nh);
@@ -4495,8 +4520,8 @@
         det.appendChild(chip);
       }
     } else det.appendChild(span("cnt", "No devices recorded yet."));
-    row.appendChild(det);
-    return row;
+    card.appendChild(det);
+    return card;
   }
 
   function renderSessions() {
@@ -4527,14 +4552,7 @@
         ipCount: s.ipCount,
         devices: [],
       };
-      const row = keyRow(h, true, s);
-      const nets = groupNetworks(s.ips || []).length || s.ipCount || 1;
-      if (nets > 1) {
-        const p = span("netpill warn", nets + " networks at once");
-        p.title = "Connected from more than one network right now. The key may be shared.";
-        row.querySelector(".keyrow-right").appendChild(p);
-      }
-      active.appendChild(row);
+      active.appendChild(keyCard(h, true, s));
     }
 
     const current = history.filter((h) => !h.removed);
@@ -4543,12 +4561,12 @@
     if (!current.length) emptyCard(hist, "fa-clock-rotate-left", "No key history yet.");
     current
       .sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0))
-      .forEach((h) => hist.appendChild(keyRow(h, onlineSet.has(h.hash))));
+      .forEach((h) => hist.appendChild(keyCard(h, onlineSet.has(h.hash))));
     removed.textContent = "";
     if (!gone.length) emptyCard(removed, "fa-user-check", "No keys have been removed.");
     gone
       .sort((a, b) => ((b.removed && b.removed.at) || 0) - ((a.removed && a.removed.at) || 0))
-      .forEach((h) => removed.appendChild(keyRow(h, false)));
+      .forEach((h) => removed.appendChild(keyCard(h, false)));
   }
 
   // ── Allowed link domains ──────────────────────────────────────────────────

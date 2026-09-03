@@ -732,7 +732,7 @@ class ClientWordFilter {
 
   // ── Scanning (IDENTICAL to server) ─────────────────────────────────────────
 
-  scanNormalized(normalized, offensiveTrie, whitelistTrie) {
+  scanNormalized(normalized, offensiveTrie, whitelistTrie, embedded) {
     const matches = [];
     let i = 0;
 
@@ -761,7 +761,12 @@ class ClientWordFilter {
         maxOffensiveMatchLength >= maxWhitelistMatchLength
       ) {
         if (
-          this.isValidOffensiveMatch(normalized, i, i + maxOffensiveMatchLength)
+          this.isValidOffensiveMatch(
+            normalized,
+            i,
+            i + maxOffensiveMatchLength,
+            embedded,
+          )
         ) {
           matches.push([i, i + maxOffensiveMatchLength]);
         }
@@ -773,7 +778,11 @@ class ClientWordFilter {
     return matches;
   }
 
-  isValidOffensiveMatch(normalizedText, startPos, endPos) {
+  // Short words only count on their own, not inside another word. The
+  // normalized text has its spaces stripped, so "what the fuck man" reads as
+  // one word there; the caller passes a check against the original text so
+  // real spaces still count as boundaries.
+  isValidOffensiveMatch(normalizedText, startPos, endPos, embedded) {
     const matchLength = endPos - startPos;
 
     if (matchLength <= 2) {
@@ -781,11 +790,14 @@ class ClientWordFilter {
     }
 
     if (matchLength <= 4) {
-      const beforeChar = startPos > 0 ? normalizedText[startPos - 1] : "";
-      const afterChar =
-        endPos < normalizedText.length ? normalizedText[endPos] : "";
-      const isEmbedded =
-        /[a-z0-9]/.test(beforeChar) && /[a-z0-9]/.test(afterChar);
+      let isEmbedded;
+      if (embedded) isEmbedded = embedded(startPos, endPos);
+      else {
+        const beforeChar = startPos > 0 ? normalizedText[startPos - 1] : "";
+        const afterChar =
+          endPos < normalizedText.length ? normalizedText[endPos] : "";
+        isEmbedded = /[a-z0-9]/.test(beforeChar) && /[a-z0-9]/.test(afterChar);
+      }
       if (isEmbedded) {
         return false;
       }
@@ -798,17 +810,24 @@ class ClientWordFilter {
     const { normalized, map } = this.buildNormalizedWithMap(text, options);
     if (normalized.length === 0) return [];
 
+    const letter = /[\p{L}\p{N}]/u;
+    const embedded = (s, e) =>
+      letter.test(text[map[s] - 1] || "") &&
+      letter.test(text[map[e - 1] + 1] || "");
     const matches = this.scanNormalized(
       normalized,
       offensiveTrie,
       whitelistTrie,
+      embedded,
     );
     const ranges = [];
 
     for (const [start, end] of matches) {
       const origStart = map[start];
-      const origEnd = end < map.length ? map[end] : text.length;
+      let origEnd = end < map.length ? map[end] : text.length;
       if (gate && origEnd - origStart <= end - start) continue;
+      // Stop at the last matched letter, not at the next word.
+      while (origEnd > origStart + 1 && !letter.test(text[origEnd - 1])) origEnd--;
       ranges.push([origStart, origEnd]);
     }
     return ranges;

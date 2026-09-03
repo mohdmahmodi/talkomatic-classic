@@ -7008,6 +7008,30 @@ function registerSocketHandlers(opts) {
                 ? rosterHashFor(socket, { hash: h.hash, level: keyLevel(h.hash) })
                 : null,
           }));
+        // Removed keys that were never used still belong on the record.
+        if (leader) {
+          const known = new Set(history.map((h) => h.hash));
+          for (const f of roles.listFormerMods(roles.viewFor(socket))) {
+            const hash = showIp ? f.hash : String(f.hash || "").slice(0, 8);
+            if (!f.hash || known.has(hash)) continue;
+            known.add(hash);
+            history.push({
+              hash,
+              label: f.label,
+              role: "mod",
+              ips: [],
+              ipCount: 0,
+              devices: [],
+              entered: 0,
+              profile: null,
+              lastSeen: 0,
+              level: f.level,
+              network: { level: "ok", v4Count: 0, v6Count: 0 },
+              removed: { at: f.removedAt || null, by: f.removedBy || null, reason: f.reason || null },
+              actHash: null,
+            });
+          }
+        }
         socket.emit("dev sessions", { sessions, history });
       }),
     );

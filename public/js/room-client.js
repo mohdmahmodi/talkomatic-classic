@@ -57,6 +57,7 @@ const isStaff = () => currentUserIsDev || currentUserIsMod;
 
 let selfRawText = "";
 let selfIsFiltered = false;
+let selfDisplay = "";
 
 const mutedUsers = new Set();
 const afkUsers = new Set();
@@ -93,32 +94,45 @@ function hasEmote(code) {
   return Object.prototype.hasOwnProperty.call(emoteList, code);
 }
 
+// Offensive spans trimmed to the letters: the matcher works on a normalized
+// copy and can hand back a span that drags a space or a neighbour along.
+function offensiveSpans(text) {
+  return clientWordFilter
+    .checkText(text)
+    .offensiveRanges.map(([s, e]) => {
+      while (s < e && /\s/.test(text[s])) s++;
+      while (e > s && /\s/.test(text[e - 1])) e--;
+      return [s, e];
+    })
+    .filter(([s, e]) => e > s);
+}
+
+function maskSpans(text, spans) {
+  let out = text;
+  for (const [s, e] of spans)
+    out = out.slice(0, s) + "*".repeat(e - s) + out.slice(e);
+  return out;
+}
+
 function filterTextPreservingEmotes(text) {
-  if (!text.includes(":") && !text.includes(";")) {
-    return clientWordFilter.filterText(text);
-  }
+  const mask = (seg) => maskSpans(seg, offensiveSpans(seg));
+  if (!text.includes(":") && !text.includes(";")) return mask(text);
 
   const regex = /(:([A-Za-z0-9_.-]+):|;([A-Za-z0-9_.-]+);)/g;
   let result = "";
   let lastIndex = 0;
   let foundEmote = false;
   let match;
-
-
   while ((match = regex.exec(text)) !== null) {
     const code = match[2] || match[3];
     if (!code || !hasEmote(code)) continue;
     foundEmote = true;
-    result += clientWordFilter.filterText(text.slice(lastIndex, match.index));
+    result += mask(text.slice(lastIndex, match.index));
     result += match[0];
     lastIndex = match.index + match[0].length;
   }
-
-  if (!foundEmote) {
-    return clientWordFilter.filterText(text);
-  }
-
-  result += clientWordFilter.filterText(text.slice(lastIndex));
+  if (!foundEmote) return mask(text);
+  result += mask(text.slice(lastIndex));
   return result;
 }
 
@@ -154,18 +168,7 @@ function toggleWordFilter() {
 
   if (chatInput && selfRawText) {
     const cursor = getCursorPosition(chatInput);
-    const display = wordFilterEnabled
-      ? applyWordFilter(selfRawText)
-      : selfRawText;
-    chatInput.innerHTML = "";
-    chatInput.textContent = display;
-    replaceEmotes(chatInput);
-    try {
-      setCursorPosition(chatInput, cursor);
-    } catch {
-      placeCursorAtEnd(chatInput);
-    }
-    selfIsFiltered = wordFilterEnabled && clientWordFilter?.ready;
+    renderSelfBox(maskSelf(selfRawText), cursor);
   }
 
   document.querySelectorAll(".chat-row").forEach((row) => {
@@ -1214,14 +1217,30 @@ function insertEmote(emoteCode, emoteInfo, options = {}) {
 
 function renderChatInputFromRaw() {
   if (!chatInput) return;
-  const display =
-    wordFilterEnabled && clientWordFilter?.ready
-      ? applyWordFilter(selfRawText)
-      : selfRawText;
+  renderSelfBox(maskSelf(selfRawText));
+  placeCursorAtEnd(chatInput);
+}
+
+// The filter on your own box: a word is starred the moment it matches, as it
+// is typed. Star runs keep the word's length, so a position in the box is
+// the same position in the raw text.
+function maskSelf(raw) {
+  if (!wordFilterEnabled || !clientWordFilter?.ready || !raw) return raw;
+  return filterTextPreservingEmotes(raw);
+}
+
+function renderSelfBox(display, cursor) {
   chatInput.innerHTML = "";
   chatInput.textContent = display;
-  replaceEmotes(chatInput);
-  placeCursorAtEnd(chatInput);
+  if (/[;:]/.test(display)) replaceEmotes(chatInput);
+  selfDisplay = display;
+  selfIsFiltered = wordFilterEnabled && !!clientWordFilter?.ready;
+  if (cursor == null || cursor < 0) return;
+  try {
+    setCursorPosition(chatInput, Math.min(cursor, display.length));
+  } catch {
+    placeCursorAtEnd(chatInput);
+  }
 }
 
 function updateSentMessage() {
@@ -1229,16 +1248,14 @@ function updateSentMessage() {
   try {
     const currentDisplay = getPlainText(chatInput);
 
-    if (selfIsFiltered && wordFilterEnabled && clientWordFilter?.ready) {
-      const prevDisplay = applyWordFilter(selfRawText);
+    if (selfIsFiltered && wordFilterEnabled && clientWordFilter?.ready)
       selfRawText = reconstructRawText(
-        prevDisplay,
+        selfDisplay,
         currentDisplay,
         selfRawText,
+        getCursorPosition(chatInput),
       );
-    } else {
-      selfRawText = currentDisplay;
-    }
+    else selfRawText = currentDisplay;
 
     const diff = getDiff(lastSentMessage, selfRawText);
     if (diff) {
@@ -1252,8 +1269,29 @@ function updateSentMessage() {
   }
 }
 
-function reconstructRawText(prevFiltered, currentDisplay, prevRaw) {
+function reconstructRawText(prevFiltered, currentDisplay, prevRaw, caret) {
   if (prevFiltered === currentDisplay) return prevRaw;
+
+  // A plain insert ends at the caret and a plain delete starts there. Both
+  // are exact, which a text diff cannot be once the change sits inside a run
+  // of stars that all look the same.
+  const delta = currentDisplay.length - prevFiltered.length;
+  if (caret != null && prevFiltered.length === prevRaw.length) {
+    if (delta > 0) {
+      const at = caret - delta;
+      if (
+        at >= 0 &&
+        prevFiltered.slice(0, at) === currentDisplay.slice(0, at) &&
+        prevFiltered.slice(at) === currentDisplay.slice(caret)
+      )
+        return prevRaw.slice(0, at) + currentDisplay.slice(at, caret) + prevRaw.slice(at);
+    } else if (
+      delta < 0 &&
+      prevFiltered.slice(0, caret) === currentDisplay.slice(0, caret) &&
+      prevFiltered.slice(caret - delta) === currentDisplay.slice(caret)
+    )
+      return prevRaw.slice(0, caret) + prevRaw.slice(caret - delta);
+  }
 
   let start = 0;
   while (
@@ -1281,25 +1319,17 @@ function reconstructRawText(prevFiltered, currentDisplay, prevRaw) {
 
 function applySelfFilter() {
   if (!chatInput) return;
-
-  if (wordFilterEnabled && clientWordFilter?.ready) {
-    const filtered = applyWordFilter(selfRawText);
-    const currentDisplay = getPlainText(chatInput);
-
-    if (filtered !== currentDisplay) {
-      const cursor = getCursorPosition(chatInput);
-      chatInput.innerHTML = "";
-      chatInput.textContent = filtered;
-      replaceEmotes(chatInput);
-      try {
-        setCursorPosition(chatInput, cursor);
-      } catch {
-        placeCursorAtEnd(chatInput);
-      }
-    }
-    selfIsFiltered = true;
-  } else {
+  if (!(wordFilterEnabled && clientWordFilter?.ready)) {
     selfIsFiltered = false;
+    selfDisplay = selfRawText;
+    return;
+  }
+  const display = maskSelf(selfRawText);
+  if (display !== getPlainText(chatInput))
+    renderSelfBox(display, getCursorPosition(chatInput));
+  else {
+    selfDisplay = display;
+    selfIsFiltered = true;
   }
 }
 
@@ -1911,6 +1941,9 @@ function renderOtherUserMessage(element, rawMessage) {
   if (!element) return;
   element.dataset.rawText = rawMessage;
   const display = applyWordFilter(rawMessage);
+  // Same picture as before: leave the box alone, so emotes do not blink.
+  if (element.dataset.display === display) return;
+  element.dataset.display = display;
   element.innerHTML = "";
   element.appendChild(document.createTextNode(display));
   replaceEmotes(element);
@@ -1926,20 +1959,8 @@ function updateCurrentMessages(messages) {
     if (uid === currentUserId) {
       selfRawText = text;
       lastSentMessage = text;
-      const isActive = document.activeElement === chatDiv;
-      let cursor = isActive ? getCursorPosition(chatDiv) : 0;
-      const display = applyWordFilter(text);
-      chatDiv.innerHTML = "";
-      chatDiv.textContent = display;
-      replaceEmotes(chatDiv);
-      selfIsFiltered = wordFilterEnabled && clientWordFilter?.ready;
-      if (isActive) {
-        try {
-          setCursorPosition(chatDiv, Math.min(cursor, display.length));
-        } catch {
-          placeCursorAtEnd(chatDiv);
-        }
-      }
+      const cursor = document.activeElement === chatDiv ? getCursorPosition(chatDiv) : null;
+      renderSelfBox(maskSelf(text), cursor);
     } else {
       renderOtherUserMessage(chatDiv, text);
     }
@@ -1983,20 +2004,8 @@ function displayChatMessage(data) {
   if (data.userId === currentUserId) {
     selfRawText = newText;
     lastSentMessage = newText;
-    const isActive = document.activeElement === chatDiv;
-    let cursor = isActive ? getCursorPosition(chatDiv) : 0;
-    const display = applyWordFilter(selfRawText);
-    chatDiv.innerHTML = "";
-    chatDiv.textContent = display;
-    if (/[;:]/.test(display)) replaceEmotes(chatDiv);
-    selfIsFiltered = wordFilterEnabled && clientWordFilter?.ready;
-    if (isActive) {
-      try {
-        setCursorPosition(chatDiv, Math.min(cursor, display.length));
-      } catch {
-        placeCursorAtEnd(chatDiv);
-      }
-    }
+    const cursor = document.activeElement === chatDiv ? getCursorPosition(chatDiv) : null;
+    renderSelfBox(maskSelf(newText), cursor);
   } else {
     renderOtherUserMessage(chatDiv, newText);
   }
@@ -3477,11 +3486,7 @@ socket.on("room update", (roomData) => {
         return;
       }
       selfRawText = rawVal;
-      const display = applyWordFilter(rawVal);
-      ci.innerHTML = "";
-      ci.textContent = display;
-      replaceEmotes(ci);
-      selfIsFiltered = wordFilterEnabled && clientWordFilter?.ready;
+      renderSelfBox(maskSelf(rawVal));
     } else if (ci.dataset.rawText !== rawVal) {
       renderOtherUserMessage(ci, rawVal);
     }

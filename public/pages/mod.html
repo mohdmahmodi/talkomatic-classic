@@ -3340,29 +3340,49 @@
         color: var(--dim2);
       }
       .keylist {
-        display: flex;
-        flex-direction: column;
-        gap: 0.5rem;
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(21rem, 1fr));
+        gap: 0.75rem;
         margin-bottom: 1.1rem;
       }
-      .keyrow {
+      .keylist > .empty {
+        grid-column: 1 / -1;
+      }
+      .keycard {
         background: var(--tile);
         border: 1px solid #2c2c2c;
-        border-radius: 0.5rem;
-        padding: 0.6rem 0.8rem;
-      }
-      .keyrow.removed {
-        opacity: 0.8;
-      }
-      .keyrow-head {
+        border-left: 3px solid #2c2c2c;
+        border-radius: 0.6rem;
+        padding: 0.8rem;
         display: flex;
-        align-items: center;
+        flex-direction: column;
         gap: 0.6rem;
-        flex-wrap: wrap;
+        min-width: 0;
       }
-      .keyrow-head .avatar {
-        width: 2rem;
-        height: 2rem;
+      .keycard.ok {
+        border-left-color: var(--green);
+      }
+      .keycard.mixed {
+        border-left-color: var(--cyan);
+      }
+      .keycard.warn {
+        border-left-color: var(--amber);
+      }
+      .keycard.bad {
+        border-left-color: var(--red);
+      }
+      .keycard.removed {
+        opacity: 0.75;
+        border-left-color: #444;
+      }
+      .kc-head {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.6rem;
+      }
+      .kc-head .avatar {
+        width: 2.25rem;
+        height: 2.25rem;
         border-radius: 50%;
         display: inline-flex;
         align-items: center;
@@ -3371,26 +3391,25 @@
         color: #000;
         flex: none;
       }
-      .keyrow-name {
+      .kc-who {
+        flex: 1;
+        min-width: 0;
+      }
+      .kc-name {
         font-weight: bold;
         font-size: 0.95rem;
         display: flex;
         align-items: center;
         gap: 0.45rem;
         flex-wrap: wrap;
-        min-width: 0;
       }
-      .keyrow-name .as {
-        font-weight: normal;
+      .kc-line {
+        font-size: 0.75rem;
         color: var(--dim2);
-        font-size: 0.78rem;
-      }
-      .keyrow-right {
-        margin-left: auto;
+        margin-top: 0.15rem;
         display: flex;
         align-items: center;
-        gap: 0.5rem;
-        flex-wrap: wrap;
+        gap: 0.3rem;
       }
       .dot {
         width: 0.55rem;
@@ -3398,55 +3417,85 @@
         border-radius: 50%;
         background: #444;
         display: inline-block;
+        flex: none;
       }
       .dot.on {
         background: var(--green);
         box-shadow: 0 0 6px var(--green);
       }
-      .keyrow-facts {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        gap: 0.35rem 1.1rem;
-        margin-top: 0.5rem;
-        font-size: 0.76rem;
-        color: var(--dim);
+      .kc-stats {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 0.4rem;
       }
-      .keyrow-facts b {
+      .kc-stat {
+        background: #111;
+        border-radius: 0.4rem;
+        padding: 0.45rem 0.3rem;
+        text-align: center;
+        min-width: 0;
+      }
+      .kc-stat b {
+        display: block;
+        font-size: 1.1rem;
         color: #fff;
-        font-weight: 600;
+        line-height: 1.2;
       }
-      .keyrow-facts i {
+      .kc-stat span {
+        display: block;
+        font-size: 0.62rem;
         color: var(--dim2);
-        margin-right: 0.3rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
-      .keyrow-toggle {
+      .kc-note {
+        font-size: 0.78rem;
+        color: var(--dim);
+        line-height: 1.4;
+      }
+      .kc-removed {
+        font-size: 0.76rem;
+        color: var(--red);
+        line-height: 1.4;
+      }
+      .kc-foot {
+        display: flex;
+        gap: 1rem;
+        margin-top: auto;
+        padding-top: 0.2rem;
+      }
+      .kc-btn {
         background: none;
         border: 0;
+        padding: 0;
         color: var(--orange);
         cursor: pointer;
         font: inherit;
         font-size: 0.76rem;
-        padding: 0;
+      }
+      .kc-btn.danger {
+        color: var(--red);
         margin-left: auto;
       }
-      .keyrow-details {
+      .kc-details {
         display: none;
-        margin-top: 0.55rem;
         padding-top: 0.55rem;
         border-top: 1px dashed #333;
       }
-      .keyrow.open .keyrow-details {
+      .keycard.open .kc-details {
         display: block;
       }
-      .keyrow-details h5 {
+      .kc-details h5 {
         margin: 0.4rem 0 0.3rem;
         font-size: 0.7rem;
         text-transform: uppercase;
         letter-spacing: 0.05em;
         color: var(--dim2);
       }
-      .keyrow-details .netrow {
+      .kc-details .netrow {
         background: #111;
       }
       .devchip {
@@ -3458,18 +3507,15 @@
         padding: 0.35rem 0.55rem;
         margin: 0 0.35rem 0.35rem 0;
         font-size: 0.72rem;
+        max-width: 100%;
       }
       .devchip .id {
         font-family: "Courier New", monospace;
         color: var(--amber);
+        word-break: break-all;
       }
       .devchip .sub {
         color: var(--dim2);
-      }
-      .keyrow-removed {
-        margin-top: 0.4rem;
-        font-size: 0.76rem;
-        color: var(--red);
       }
       .netrow {
         display: flex;
@@ -4388,7 +4434,7 @@
             <div><span class="netpill ok">OK</span><span>All use comes from one network.</span></div>
             <div><span class="netpill mixed">IPv4 + IPv6</span><span>One connection speaking both. Nothing to do.</span></div>
             <div><span class="netpill warn">2 networks</span><span>Two IPv4 network families in 7 days. Keep an eye on it.</span></div>
-            <div><span class="netpill bad">3 networks</span><span>Three or more. Have a look: a phone on the move does this, a shared key does too. Two networks holding a key at the same moment still removes it automatically.</span></div>
+            <div><span class="netpill bad">3 networks</span><span>Three or more in 7 days. Worth a look: phones on the move do this, shared keys do too.</span></div>
           </div>
           <div class="strip mini">
             <i class="fas fa-plug lead" style="color: #57d9a3"></i> Connected now
@@ -4396,7 +4442,7 @@
           <div id="sessionsActive" class="keylist"></div>
           <div class="strip mini">
             <i class="fas fa-key lead ic-orange"></i> Active keys
-            <span class="sub">Every key that works today. Open a row for its networks and devices.</span>
+            <span class="sub">Every key that works today. Open a card for its networks and devices.</span>
           </div>
           <div id="sessionsHistory" class="keylist"></div>
           <div class="strip mini">
@@ -5018,6 +5064,6 @@
     <script src="js/identity.js?v=1.0.2"></script>
     <script src="js/staff-ui.js?v=1.9.0"></script>
     <script src="js/desk.js?v=1.0.4"></script>
-    <script src="js/mod.js?v=4.16.0"></script>
+    <script src="js/mod.js?v=4.18.0"></script>
   </body>
 </html>
