@@ -732,77 +732,63 @@ class ClientWordFilter {
 
   // ── Scanning (IDENTICAL to server) ─────────────────────────────────────────
 
-  scanNormalized(normalized, offensiveTrie, whitelistTrie, embedded) {
+  // Allowed words shield whatever sits inside them, wherever they start, so
+  // "therapist" covers the "rapist" in it. Short offensive stems (up to four
+  // letters) only count as whole words; longer ones match anywhere, so a
+  // compound does not slip past by gluing words together.
+  scanNormalized(normalized, offensiveTrie, whitelistTrie, edges) {
+    const n = normalized.length;
+    const cover = new Array(n + 1).fill(0);
+    let reach = 0;
+    for (let i = 0; i < n; i++) {
+      let node = whitelistTrie.root;
+      let j = i;
+      while (j < n && node.children[normalized[j]]) {
+        node = node.children[normalized[j]];
+        j++;
+        if (node.isEndOfWord && j > reach) reach = j;
+      }
+      cover[i] = reach;
+    }
+
     const matches = [];
     let i = 0;
-
-    while (i < normalized.length) {
-      let maxOffensiveMatchLength = 0;
-      let maxWhitelistMatchLength = 0;
-
+    while (i < n) {
       let node = offensiveTrie.root;
       let j = i;
-      while (j < normalized.length && node.children[normalized[j]]) {
+      let len = 0;
+      while (j < n && node.children[normalized[j]]) {
         node = node.children[normalized[j]];
         j++;
-        if (node.isEndOfWord) maxOffensiveMatchLength = j - i;
+        if (node.isEndOfWord) len = j - i;
       }
-
-      node = whitelistTrie.root;
-      j = i;
-      while (j < normalized.length && node.children[normalized[j]]) {
-        node = node.children[normalized[j]];
-        j++;
-        if (node.isEndOfWord) maxWhitelistMatchLength = j - i;
-      }
-
       if (
-        maxOffensiveMatchLength > 0 &&
-        maxOffensiveMatchLength >= maxWhitelistMatchLength
+        len > 0 &&
+        cover[i] < i + len &&
+        this.isValidOffensiveMatch(normalized, i, i + len, edges)
       ) {
-        if (
-          this.isValidOffensiveMatch(
-            normalized,
-            i,
-            i + maxOffensiveMatchLength,
-            embedded,
-          )
-        ) {
-          matches.push([i, i + maxOffensiveMatchLength]);
-        }
-        i += maxOffensiveMatchLength;
-      } else {
-        i++;
-      }
+        matches.push([i, i + len]);
+        i += len;
+      } else i++;
     }
     return matches;
   }
 
-  // Short words only count on their own, not inside another word. The
-  // normalized text has its spaces stripped, so "what the fuck man" reads as
-  // one word there; the caller passes a check against the original text so
-  // real spaces still count as boundaries.
-  isValidOffensiveMatch(normalizedText, startPos, endPos, embedded) {
+  // A stem of four letters or fewer only counts on its own: "grape", "cockatoo"
+  // and "Dickens" are words, not swearing. `edges` looks at the original
+  // text, where spaces still exist, so "what the fuck man" is four whole words.
+  isValidOffensiveMatch(normalizedText, startPos, endPos, edges) {
     const matchLength = endPos - startPos;
-
-    if (matchLength <= 2) {
-      return false;
-    }
-
+    if (matchLength <= 2) return false;
     if (matchLength <= 4) {
-      let isEmbedded;
-      if (embedded) isEmbedded = embedded(startPos, endPos);
-      else {
-        const beforeChar = startPos > 0 ? normalizedText[startPos - 1] : "";
-        const afterChar =
-          endPos < normalizedText.length ? normalizedText[endPos] : "";
-        isEmbedded = /[a-z0-9]/.test(beforeChar) && /[a-z0-9]/.test(afterChar);
-      }
-      if (isEmbedded) {
-        return false;
-      }
+      const [before, after] = edges
+        ? edges(startPos, endPos)
+        : [
+            /[a-z0-9]/.test(normalizedText[startPos - 1] || ""),
+            /[a-z0-9]/.test(normalizedText[endPos] || ""),
+          ];
+      if (before || after) return false;
     }
-
     return true;
   }
 
@@ -810,15 +796,16 @@ class ClientWordFilter {
     const { normalized, map } = this.buildNormalizedWithMap(text, options);
     if (normalized.length === 0) return [];
 
-    const letter = /[\p{L}\p{N}]/u;
-    const embedded = (s, e) =>
-      letter.test(text[map[s] - 1] || "") &&
-      letter.test(text[map[e - 1] + 1] || "");
+    const letter = /\p{L}/u;
+    const edges = (s, e) => [
+      letter.test(text[map[s] - 1] || ""),
+      letter.test(text[map[e - 1] + 1] || ""),
+    ];
     const matches = this.scanNormalized(
       normalized,
       offensiveTrie,
       whitelistTrie,
-      embedded,
+      edges,
     );
     const ranges = [];
 

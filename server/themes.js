@@ -153,6 +153,25 @@ function submit({ deviceId, ip, userId, by, title, desc, state }) {
   return { ok: true, id: t.id };
 }
 
+// Themes and votes made under the old browser-held device id follow the
+// browser to its signed id (see suggestions.adoptDevice).
+function adoptDevice(from, to) {
+  if (!from || !to || from === to) return;
+  let changed = false;
+  for (const t of themes) {
+    if (t.deviceId === from) {
+      t.deviceId = to;
+      changed = true;
+    }
+    if (t.voters && t.voters[from]) {
+      t.voters[to] = t.voters[to] || t.voters[from];
+      delete t.voters[from];
+      changed = true;
+    }
+  }
+  if (changed) saveSoon();
+}
+
 function remove(id) {
   const before = themes.length;
   themes = themes.filter((t) => t.id !== id);
@@ -226,4 +245,13 @@ function publicList(limit = 500, deviceId = null) {
 
 load();
 
-module.exports = { submit, remove, publicList, vote, get, publicOne, flushSync };
+module.exports = {
+  adoptDevice,
+  submit,
+  remove,
+  publicList,
+  vote,
+  get,
+  publicOne,
+  flushSync,
+};

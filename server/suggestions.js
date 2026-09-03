@@ -220,6 +220,31 @@ function ownsPost(s, deviceId) {
   return !!(s && deviceId && s.deviceId === deviceId);
 }
 
+// The signed device cookie replaced the browser-held id in September 2026.
+// Posts, replies and votes made under the old id follow the browser to its
+// new one, so "My posts", edit and delete keep working.
+function adoptDevice(from, to) {
+  if (!from || !to || from === to) return;
+  let changed = false;
+  for (const s of suggestions) {
+    if (s.deviceId === from) {
+      s.deviceId = to;
+      changed = true;
+    }
+    for (const r of s.replies || [])
+      if (r.deviceId === from) {
+        r.deviceId = to;
+        changed = true;
+      }
+    if (s.voters && s.voters[from]) {
+      s.voters[to] = s.voters[to] || s.voters[from];
+      delete s.voters[from];
+      changed = true;
+    }
+  }
+  if (changed) saveSoon();
+}
+
 function editPost({ id, replyId, deviceId, text }) {
   const s = get(id);
   if (!s) return { ok: false, code: "not_found" };
@@ -346,6 +371,7 @@ function list() {
 load();
 
 module.exports = {
+  adoptDevice,
   post,
   reply,
   vote,

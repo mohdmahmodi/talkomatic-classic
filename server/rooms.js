@@ -3303,6 +3303,10 @@ function registerSocketHandlers(opts) {
   });
 
   io().on("connection", (socket) => {
+    if (socket.legacyDeviceId) {
+      suggestions.adoptDevice(socket.legacyDeviceId, socket.deviceId);
+      communityThemes.adoptDevice(socket.legacyDeviceId, socket.deviceId);
+    }
     const clientIp = socket.clientIp || socket.handshake.address;
 
     // The slot itself is released by the engine-close hook in server.js
