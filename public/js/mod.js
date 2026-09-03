@@ -4483,7 +4483,7 @@
       det.appendChild(
         span(
           "mc-v dim",
-          h.ipCount ? plural(h.ipCount, "address") + " on file. Only the main admin sees addresses." : "No addresses recorded yet.",
+          h.ipCount ? plural(h.ipCount, "address") + " on file." : "No addresses recorded yet.",
         ),
       );
     det.appendChild(span("mc-k", "Devices"));
