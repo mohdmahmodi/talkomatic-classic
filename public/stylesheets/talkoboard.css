@@ -754,3 +754,176 @@
     bottom: calc(116px + env(safe-area-inset-bottom));
   }
 }
+
+/* ── Labelled tools, tooltips and the help panel ─────────────────────────── */
+
+.tb-tool {
+  flex-direction: column;
+  gap: 3px;
+  width: auto;
+  min-width: 46px;
+  height: 46px;
+  padding: 0 6px;
+}
+.tb-tool > i {
+  font-size: 15px;
+}
+.tb-btn-label {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  line-height: 1;
+  white-space: nowrap;
+}
+.tb-tools .tb-sep {
+  height: 30px;
+}
+.tb-pop {
+  top: 72px;
+}
+.tb-save-panel,
+.tb-help-panel {
+  top: 60px;
+  left: 12px;
+  right: auto;
+  transform: none;
+}
+.tb-help-panel {
+  width: 350px;
+  max-height: calc(100% - 80px);
+  overflow-y: auto;
+}
+.tb-help-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.tb-help-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: #2b2b33;
+}
+.tb-help-row.tb-help-star {
+  background: #fff4e3;
+}
+.tb-help-ico {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: #f0f0f4;
+  color: #2b2b33;
+  font-size: 12px;
+}
+.tb-help-star .tb-help-ico {
+  background: #ffe6c2;
+  color: #a85400;
+}
+.tb-help-text {
+  flex: 1;
+}
+.tb-help-text b {
+  font-weight: 600;
+}
+.tb-help-key {
+  flex: none;
+  margin-top: 4px;
+  padding: 1px 6px;
+  border: 1px solid #e4e4ea;
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: #fafafc;
+  font-family: inherit;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #6b6b78;
+}
+.tb-help-notes {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #4a4a55;
+}
+.tb-help-notes li + li {
+  margin-top: 4px;
+}
+.tb-help-btn.tb-attn::after {
+  content: "";
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ff9800;
+  box-shadow: 0 0 0 0 rgba(255, 152, 0, 0.6);
+  animation: tbAttn 1.6s ease-out infinite;
+}
+@keyframes tbAttn {
+  to {
+    box-shadow: 0 0 0 8px rgba(255, 152, 0, 0);
+  }
+}
+.tb-tip {
+  position: absolute;
+  z-index: 6;
+  max-width: 250px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: #1e1e24;
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: center;
+  transform: translateX(-50%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s;
+}
+.tb-tip.show {
+  opacity: 1;
+}
+
+@media (max-width: 768px) {
+  .tb-tools .tb-tool {
+    width: auto;
+    min-width: 52px;
+    height: 46px;
+  }
+  .tb-history {
+    bottom: calc(76px + env(safe-area-inset-bottom));
+  }
+  .tb-pop {
+    top: auto;
+    bottom: calc(76px + env(safe-area-inset-bottom));
+  }
+  .tb-save-panel,
+  .tb-help-panel {
+    top: 58px;
+    bottom: auto;
+    left: 10px;
+    width: 290px;
+    max-width: calc(100% - 20px);
+  }
+  .tb-help-panel {
+    max-height: calc(100% - 140px);
+  }
+  .tb-chat {
+    bottom: calc(76px + env(safe-area-inset-bottom));
+  }
+  .tb-hint {
+    bottom: calc(126px + env(safe-area-inset-bottom));
+  }
+  .tb-tip {
+    display: none;
+  }
+}

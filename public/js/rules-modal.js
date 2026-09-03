@@ -194,14 +194,18 @@
     modalEl.appendChild(footerEl);
   }
 
+  var closeCb = null;
+
   function open(opts) {
     build();
     gateCb = opts && opts.gate ? opts.onDone || function () {} : null;
+    closeCb = opts && typeof opts.onClose === "function" ? opts.onClose : null;
     if (closeBtnEl) closeBtnEl.style.display = gateCb ? "none" : "";
     setGateFooter();
     overlay.classList.add("show");
     document.body.classList.add("tkm-lock");
     document.addEventListener("keydown", esc);
+    if (opts && opts.tab && tabBtns[opts.tab]) switchTo(opts.tab);
     render();
     if (socket.connected) socket.emit("rules get");
     else
@@ -215,6 +219,9 @@
     overlay.classList.remove("show");
     document.body.classList.remove("tkm-lock");
     document.removeEventListener("keydown", esc);
+    var cb = closeCb;
+    closeCb = null;
+    if (cb) cb();
   }
 
   function esc(e) {

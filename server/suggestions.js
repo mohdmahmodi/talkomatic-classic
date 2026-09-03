@@ -329,19 +329,48 @@ function publicList({ deviceId, isDev, isStaff, limit = MAX } = {}) {
   return out;
 }
 
+function headline(s) {
+  if (s.title) return s.title;
+  const flat = String(s.text || "").replace(/\s+/g, " ").trim();
+  return flat.length > 70 ? flat.slice(0, 70) + "…" : flat;
+}
+
+// What happened to this browser's own posts since `since`: counts for the
+// lobby badge, plus the posts themselves so the board can point at them.
 function unreadFor(deviceId, since) {
-  const out = { approved: 0, declined: 0, replies: 0 };
+  const out = { approved: 0, declined: 0, replies: 0, items: [] };
   if (!deviceId) return out;
   const from = Number(since) || 0;
   for (const s of suggestions) {
     if (s.deviceId !== deviceId) continue;
-    if ((s.statusAt || 0) > from) {
-      if (s.status === "approved" || s.status === "implemented") out.approved++;
-      else if (s.status === "declined") out.declined++;
-    }
+    const decided =
+      (s.statusAt || 0) > from &&
+      ["approved", "implemented", "declined"].includes(s.status);
+    let newReplies = 0;
+    let latest = decided ? s.statusAt : 0;
     for (const r of s.replies || [])
-      if ((r.at || 0) > from && r.deviceId !== deviceId) out.replies++;
+      if ((r.at || 0) > from && r.deviceId !== deviceId) {
+        newReplies++;
+        latest = Math.max(latest, r.at);
+      }
+    if (decided) {
+      if (s.status === "declined") out.declined++;
+      else out.approved++;
+    }
+    out.replies += newReplies;
+    if (decided || newReplies)
+      out.items.push({
+        id: s.id,
+        kind: s.kind || "idea",
+        title: headline(s),
+        status: s.status,
+        decided,
+        newReplies,
+        latest,
+      });
   }
+  out.items.sort((a, b) => b.latest - a.latest);
+  out.items = out.items.slice(0, 8);
   return out;
 }
 

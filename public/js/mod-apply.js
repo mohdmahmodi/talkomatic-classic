@@ -155,7 +155,7 @@
     reqs.appendChild(
       reqRow(
         "fa-circle-check",
-        "<b>You need to be an active member.</b> Your account already meets this, which is why you can see this form.",
+        "<b>You need to be an established member:</b> at least a month on Talkomatic and twelve hours of active time in rooms. You already meet this, which is why you can see this form.",
         true,
       ),
     );
@@ -445,15 +445,45 @@
     submitBtn.disabled = false;
   }
 
+  function showClosedNotice() {
+    var body = el("div", "ma-closed");
+    body.appendChild(
+      el(
+        "p",
+        null,
+        "We are not taking on new moderators at the moment. The team is full for now, so applications are paused.",
+      ),
+    );
+    body.appendChild(
+      el(
+        "p",
+        null,
+        "When they open again, the tag on “Apply to be a mod” in the lobby changes from Closed to Open and this button opens the form.",
+      ),
+    );
+    var note = el("p", "ma-closed-note");
+    note.appendChild(el("span", "ma-note-label", "Please note"));
+    note.appendChild(
+      el(
+        "div",
+        null,
+        "Do not ask staff for mod in the rooms. It does not get you in any sooner, and it makes an application less likely to be accepted later.",
+      ),
+    );
+    body.appendChild(note);
+    StaffUI.modal({
+      title: "Applications are closed",
+      subtitle: "Not accepting new moderators right now",
+      icon: '<i class="fas fa-lock"></i>',
+      body: body,
+      actions: [{ label: "Got it", kind: "primary", onClick: function () {} }],
+    });
+  }
+
   function openForm() {
     if (!window.StaffUI) return;
     if (appsOpen === false) {
-      StaffUI.modal({
-        title: "Applications are closed",
-        icon: '<i class="fas fa-lock"></i>',
-        body: "Moderator applications are closed right now. Please check back later.",
-        actions: [{ label: "OK", kind: "primary", onClick: function () {} }],
-      });
+      showClosedNotice();
       return;
     }
     var act = window.TalkomaticIdentity && window.TalkomaticIdentity.activity;
@@ -481,18 +511,17 @@
   }
 
   function showActivityGate(act) {
-    var need = (act && act.need) || { days: 7, minutes: 300, acts: 200 };
+    var need = (act && act.need) || { memberDays: 30, activeMinutes: 720 };
     var have = {
-      days: (act && act.days) || 0,
-      minutes: (act && act.minutes) || 0,
-      acts: (act && act.acts) || 0,
+      memberDays: (act && act.ageDays) || 0,
+      activeMinutes: (act && act.activeMinutes) || 0,
     };
     var body = el("div", "ma-gate");
     body.appendChild(
       el(
         "p",
         "ma-gate-intro",
-        "Moderator applications are open to established members. Once your activity reaches the levels below, the application form unlocks on its own.",
+        "Moderator applications are open to members who have been around for a while. Once you reach both marks below, the form unlocks on its own.",
       ),
     );
     var row = function (icon, label, desc, haveText, h, w) {
@@ -516,43 +545,38 @@
     body.appendChild(
       row(
         "fa-calendar-days",
-        "Separate days visited",
-        "Each day you show up counts once. The days do not need to be in a row.",
-        Math.min(have.days, need.days) + " of " + need.days + " days",
-        have.days,
-        need.days,
+        "Time as a member",
+        "Counted from the first day this browser visited Talkomatic.",
+        Math.min(have.memberDays, need.memberDays) +
+          " of " +
+          need.memberDays +
+          " days",
+        have.memberDays,
+        need.memberDays,
       ),
     );
     body.appendChild(
       row(
         "fa-stopwatch",
-        "Time in rooms",
-        "Total time spent inside chat rooms.",
-        fmtMin(Math.min(have.minutes, need.minutes)) + " of " + fmtMin(need.minutes),
-        have.minutes,
-        need.minutes,
-      ),
-    );
-    body.appendChild(
-      row(
-        "fa-keyboard",
-        "Time spent chatting",
-        "Counts up only while you are typing in a room, not while sitting idle.",
-        fmtMin(Math.min(have.acts, need.acts) / 2) + " of " + fmtMin(need.acts / 2),
-        have.acts,
-        need.acts,
+        "Active time in rooms",
+        "Counts while you are in a room with the tab in front. Time away, idle or in a hidden tab does not count.",
+        fmtMin(Math.min(have.activeMinutes, need.activeMinutes)) +
+          " of " +
+          fmtMin(need.activeMinutes),
+        have.activeMinutes,
+        need.activeMinutes,
       ),
     );
     body.appendChild(
       el(
         "div",
         "ma-gate-note",
-        "Activity counts up on its own while you chat. There is nothing to request and nobody to ask. Come back once all three are met.",
+        "Both count up on their own while you chat. There is nothing to request and nobody to ask. Come back once both are met.",
       ),
     );
     StaffUI.modal({
       title: "Apply to be a mod",
-      subtitle: "Applications are open to established members",
+      subtitle: "Open to established members",
       icon: '<i class="fas fa-user-shield"></i>',
       body: body,
       actions: [{ label: "Got it", kind: "primary", onClick: function () {} }],
@@ -582,6 +606,11 @@
       fa: "fa-user-slash",
       title: "Moderator access revoked",
     },
+    withdrawn: {
+      color: "#8d8d8d",
+      fa: "fa-hand",
+      title: "Role turned down",
+    },
   };
 
   function staffMsgBox(text, color) {
@@ -607,18 +636,21 @@
     var st = myStatus;
     if (!st || !st.has) return openForm();
     if (!window.StaffUI) return;
+    if (st.status === "approved" && st.offer) return showAcceptance(st);
     var m = STATUS_META[st.status] || STATUS_META.pending;
     var body = document.createElement("div");
     var p = document.createElement("p");
     p.style.margin = "0 0 6px";
     p.textContent =
       st.status === "approved"
-        ? "Your application was accepted. Your moderator access is delivered to this browser automatically. Reload the page if you do not see it yet."
+        ? "Your application was accepted and you took the role. Reload the page if your mod tools are not showing yet."
         : st.status === "rejected"
           ? "Your application was reviewed and declined this time. You can apply again below."
           : st.status === "revoked"
             ? "Your moderator access has been revoked. If you would like to help out again, you can apply again below."
-            : "Your application is in the queue. A mod leader will review it soon. Thanks for your patience.";
+            : st.status === "withdrawn"
+              ? "You turned down the junior moderator role. If you change your mind, you can apply again below."
+              : "Your application is in the queue. A mod leader will review it soon. Thanks for your patience.";
     body.appendChild(p);
     if (st.submittedAt) {
       var s = document.createElement("p");
@@ -633,7 +665,11 @@
     var actions = [
       { label: "Close", kind: "primary", onClick: function () {} },
     ];
-    if (st.status === "rejected" || st.status === "revoked")
+    if (
+      st.status === "rejected" ||
+      st.status === "revoked" ||
+      st.status === "withdrawn"
+    )
       actions.unshift({
         label: "Apply again",
         onClick: function () {
@@ -648,11 +684,17 @@
     });
   }
 
-  // ── Decision popup ────────────────────────────────────────────────────────
+  // ── Decision popups ───────────────────────────────────────────────────────
+  // A declined application shows once. An approved one is an offer: it comes
+  // back every visit until the applicant accepts it or turns it down.
 
   function maybeShowDecision(st) {
-    if (!st || !st.has || !st.reviewedAt) return;
-    if (st.status !== "approved" && st.status !== "rejected") return;
+    if (!st || !st.has) return;
+    if (st.status === "approved") {
+      if (st.offer) showAcceptance(st);
+      return;
+    }
+    if (st.status !== "rejected" || !st.reviewedAt) return;
     var key = st.status + ":" + st.reviewedAt;
     var seen = null;
     try {
@@ -663,46 +705,188 @@
     try {
       localStorage.setItem(SEEN_KEY, key);
     } catch (_) {}
-    showDecision(st);
+    showDeclined(st);
   }
 
-  function showDecision(st) {
+  function showDeclined(st) {
     if (!window.StaffUI) return;
     close();
-    var approved = st.status === "approved";
-    var m = STATUS_META[st.status];
+    var m = STATUS_META.rejected;
     var body = document.createElement("div");
     var p = document.createElement("p");
     p.style.margin = "0 0 6px";
-    p.textContent = approved
-      ? "Your moderator application was accepted. You now have the junior moderator role. Welcome to the team."
-      : "Your moderator application was reviewed and declined this time. This is not a punishment, and you can apply again later.";
+    p.textContent =
+      "Your moderator application was reviewed and declined this time. This is not a punishment, and you can apply again later.";
     body.appendChild(p);
     if (st.reason) body.appendChild(staffMsgBox(st.reason, m.color));
     if (st.by) body.appendChild(byLine(st.by));
-    if (approved) {
-      var note = document.createElement("p");
-      note.style.cssText = "margin:12px 0 0;color:#8d8d8d;font-size:13px;";
-      note.textContent =
-        "The page reloads when you close this, to switch on your mod tools.";
-      body.appendChild(note);
-    }
     decisionIsOpen = true;
     StaffUI.modal({
-      title: approved ? "Application approved" : "Application declined",
+      title: "Application declined",
       icon: '<i class="fas ' + m.fa + '" style="color:' + m.color + '"></i>',
       body: body,
       onClose: function () {
         decisionIsOpen = false;
-        if (reloadWhenClosed) window.location.reload();
+      },
+      actions: [{ label: "Close", kind: "primary", onClick: function () {} }],
+    });
+  }
+
+  // ── Accepting the role ────────────────────────────────────────────────────
+
+  var acceptDialog = null;
+
+  function rulesButton(label, tab, onOpen) {
+    var b = el("button", "ma-accept-link");
+    b.type = "button";
+    b.innerHTML = '<i class="fas fa-book-open"></i>' + label;
+    b.addEventListener("click", function () {
+      if (window.TalkomaticRules) onOpen(tab);
+    });
+    return b;
+  }
+
+  function showAcceptance(st, state) {
+    if (!window.StaffUI) return;
+    if (acceptDialog) return;
+    close();
+    var m = STATUS_META.approved;
+    var body = el("div", "ma-accept");
+    body.appendChild(
+      el(
+        "p",
+        "ma-accept-lead",
+        "Your application was reviewed and accepted. Welcome to the team.",
+      ),
+    );
+    if (st.reason) body.appendChild(staffMsgBox(st.reason, m.color));
+    if (st.by) body.appendChild(byLine(st.by));
+
+    var sec = el("div", "ma-accept-section");
+    sec.appendChild(el("div", "ma-accept-title", "Before you take the role"));
+    sec.appendChild(
+      el(
+        "p",
+        null,
+        "Junior moderators follow the same rules as everyone else, plus the moderator rules. Read both, then confirm below. The role is voluntary, and it can be handed back or taken back at any time.",
+      ),
+    );
+    var links = el("div", "ma-accept-links");
+    var openRules = function (tab) {
+      next = "rules";
+      savedAgreed = check.box.checked;
+      dialog.close();
+      TalkomaticRules.open({
+        tab: tab,
+        onClose: function () {
+          showAcceptance(st, { agreed: savedAgreed });
+        },
+      });
+    };
+    links.appendChild(rulesButton("Talkomatic rules", "community", openRules));
+    links.appendChild(rulesButton("Moderator rules", "mod", openRules));
+    sec.appendChild(links);
+
+    var check = checkRow(
+      "I have read and understand the Talkomatic rules and the moderator rules.",
+    );
+    check.box.checked = !!(state && state.agreed);
+    var err = el("div", "ma-err", "");
+    check.box.addEventListener("change", function () {
+      check.row.classList.remove("bad");
+      err.textContent = "";
+    });
+    sec.appendChild(check.row);
+    sec.appendChild(err);
+    body.appendChild(sec);
+    body.appendChild(
+      el(
+        "p",
+        "ma-accept-note",
+        "Not ready, or changed your mind? You can turn the role down. That is not held against you, and you can apply again later.",
+      ),
+    );
+
+    var next = null;
+    var savedAgreed = false;
+    var busy = false;
+    var dialog = StaffUI.modal({
+      title: "Application approved",
+      subtitle: "Read the rules, then accept the role",
+      icon: '<i class="fas ' + m.fa + '" style="color:' + m.color + '"></i>',
+      body: body,
+      onClose: function () {
+        decisionIsOpen = false;
+        acceptDialog = null;
+        if (next === "welcome") showWelcome();
+        else if (next !== "rules" && reloadWhenClosed) window.location.reload();
       },
       actions: [
         {
-          label: approved ? "Continue" : "Close",
+          label: "Turn down",
+          kind: "ghost",
+          onClick: function () {
+            if (busy) return false;
+            StaffUI.confirm({
+              title: "Turn down the role",
+              message:
+                "You will not get the moderator key. You can apply again another time if you change your mind.",
+              confirmText: "Turn it down",
+            }).then(function (ok) {
+              if (!ok || busy) return;
+              busy = true;
+              socket.emit("mod application accept", { accept: false });
+            });
+            return false;
+          },
+        },
+        {
+          label: "Accept the role",
           kind: "primary",
-          onClick: function () {},
+          onClick: function () {
+            if (busy) return false;
+            if (!check.box.checked) {
+              check.row.classList.add("bad");
+              err.textContent =
+                "Tick the box to confirm you have read both sets of rules.";
+              return false;
+            }
+            busy = true;
+            acceptBtn.disabled = true;
+            acceptBtn.textContent = "Setting you up…";
+            socket.emit("mod application accept", { accept: true, agree: true });
+            return false;
+          },
         },
       ],
+    });
+    var acceptBtn = dialog.card.querySelector(".tk-primary");
+    decisionIsOpen = true;
+    acceptDialog = {
+      finish: function (what) {
+        next = what;
+        dialog.close();
+      },
+      reset: function () {
+        busy = false;
+        acceptBtn.disabled = false;
+        acceptBtn.textContent = "Accept the role";
+      },
+    };
+  }
+
+  function showWelcome() {
+    if (!window.StaffUI) return;
+    decisionIsOpen = true;
+    StaffUI.modal({
+      title: "Welcome to the team",
+      icon: '<i class="fas fa-user-shield" style="color:#57d9a3"></i>',
+      body: "You are now a junior moderator. Your key is saved in this browser, and the page reloads when you close this to switch on your mod tools. Take it slow, ask a full mod when you are unsure, and use the tools on rule-breaking only.",
+      onClose: function () {
+        decisionIsOpen = false;
+        if (reloadWhenClosed) window.location.reload();
+      },
+      actions: [{ label: "Let's go", kind: "primary", onClick: function () {} }],
     });
   }
 
@@ -715,6 +899,23 @@
 
   socket.on("applications state", function (d) {
     appsOpen = !d || d.open !== false;
+  });
+
+  socket.on("mod application accept result", function (d) {
+    if (!d) return;
+    if (!d.ok) {
+      toast(d.error || "Could not do that right now.", "error");
+      if (acceptDialog) acceptDialog.reset();
+      return;
+    }
+    if (d.accepted) {
+      if (acceptDialog) acceptDialog.finish("welcome");
+      else showWelcome();
+      return;
+    }
+    myStatus = { has: true, status: "withdrawn" };
+    if (acceptDialog) acceptDialog.finish(null);
+    toast("You turned down the role. You can apply again any time.", "info");
   });
 
   socket.on("mod application result", function (d) {

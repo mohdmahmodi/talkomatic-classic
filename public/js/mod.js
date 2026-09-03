@@ -3898,6 +3898,13 @@
         icon: "fa-circle-xmark",
         av: "#3a3f4a",
       };
+    if (status === "withdrawn")
+      return {
+        cls: "st-rejected",
+        badge: "off",
+        icon: "fa-hand",
+        av: "#3a3f4a",
+      };
     return {
       cls: "st-pending",
       badge: "warm",
@@ -4023,7 +4030,11 @@
       const rline = span(null, "");
       rline.appendChild(
         document.createTextNode(
-          (a.status === "approved" ? "Approved" : "Rejected") + " ",
+          (a.status === "approved"
+            ? "Approved"
+            : a.status === "withdrawn"
+              ? "Approved, then turned down by the applicant. Reviewed"
+              : "Rejected") + " ",
         ),
       );
       if (a.reviewedBy) {
@@ -4041,7 +4052,10 @@
       if (a.reason) info.appendChild(span(null, "Reason: " + a.reason));
       if (a.status === "approved")
         info.appendChild(
-          span(null, a.claimed ? "Key claimed" : "Key pending claim"),
+          span(
+            null,
+            a.claimed ? "Role accepted" : "Waiting for them to accept the role",
+          ),
         );
     }
     if (a.discord || a.discordId) {
@@ -4188,7 +4202,11 @@
 
     let list = applicationsList.slice();
     if (appsFilter !== "all")
-      list = list.filter((a) => (a.status || "pending") === appsFilter);
+      list = list.filter((a) =>
+        appsFilter === "rejected"
+          ? a.status === "rejected" || a.status === "withdrawn"
+          : (a.status || "pending") === appsFilter,
+      );
     if (appsQuery)
       list = list.filter((a) =>
         [

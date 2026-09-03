@@ -425,6 +425,28 @@ a,
   border-color: rgba(255, 152, 0, 0.55);
 }
 
+/* The tag on that button: green OPEN means the form opens, red CLOSED means
+   the click explains why it will not. An applicant sees their own decision
+   in its colour instead. Same greens and reds as the board badges. */
+.external-links .apply-state {
+  flex: none;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: bold;
+  letter-spacing: 0.6px;
+  line-height: 1.5;
+  text-transform: uppercase;
+}
+.external-links .apply-state.is-open {
+  background-color: #2e7d32;
+}
+.external-links .apply-state.is-closed {
+  background-color: #c62828;
+}
+
 /* Floating tools pinned to the top right of the room list, outside both
    panels so more can join them later without touching either. */
 .corner-tools {

@@ -9,17 +9,17 @@ const { DATA_DIR } = require("./datadir");
 
 const STORE_PATH = path.join(DATA_DIR, "identity.json");
 
-// Bar for "active member" (currently only gates mod applications).
-// acts tick at most once per 30s of typing, so 200 acts is roughly
-// 100 minutes of actually chatting.
-const ACTIVE_DAYS = 7;
-const ACTIVE_SEC = 5 * 60 * 60;
-const ACTIVE_ACTS = 200;
+// Bar for "active member" (currently only gates mod applications): a month
+// since this browser first showed up, and twelve hours in rooms with the tab
+// in front. Hidden tabs, spectating and idle time do not count.
+const MEMBER_DAYS = 30;
+const ACTIVE_SEC = 12 * 60 * 60;
 
 const MAX_DEVICES = 50000;
 const MAX_IPS = 8;
 const MAX_DAYS = 90;
 const SESSION_CAP_SEC = 2 * 60 * 60;
+const ACTIVE_SEGMENT_CAP_SEC = 3 * 60 * 60;
 const TOTAL_SEC_CAP = 100 * 24 * 60 * 60;
 const PRUNE_AFTER_MS = 45 * 24 * 60 * 60 * 1000;
 
@@ -74,6 +74,7 @@ function rec(id) {
       last: now,
       days: [],
       sec: 0,
+      active: 0,
       acts: 0,
       ips: {},
       name: null,
@@ -119,6 +120,18 @@ function addTime(id, ms) {
   const r = store[id];
   if (!r) return;
   r.sec = Math.min(TOTAL_SEC_CAP, (r.sec || 0) + Math.min(SESSION_CAP_SEC, ms / 1000));
+  r.last = Date.now();
+  saveSoon();
+}
+
+function addActiveTime(id, ms) {
+  if (!validId(id) || !(ms > 0)) return;
+  const r = store[id];
+  if (!r) return;
+  r.active = Math.min(
+    TOTAL_SEC_CAP,
+    (r.active || 0) + Math.min(ACTIVE_SEGMENT_CAP_SEC, ms / 1000),
+  );
   r.last = Date.now();
   saveSoon();
 }
@@ -195,22 +208,21 @@ function isSilenced(id) {
   return !!(r && r.mute);
 }
 
+function memberDays(r) {
+  return Math.floor((Date.now() - (r.first || Date.now())) / 86400000);
+}
+
 function isActive(id) {
   const r = store[id];
   if (!r) return false;
-  return (
-    (r.days ? r.days.length : 0) >= ACTIVE_DAYS &&
-    (r.sec || 0) >= ACTIVE_SEC &&
-    (r.acts || 0) >= ACTIVE_ACTS
-  );
+  return memberDays(r) >= MEMBER_DAYS && (r.active || 0) >= ACTIVE_SEC;
 }
 
 function summary(id) {
   const r = store[id];
   const need = {
-    days: ACTIVE_DAYS,
-    minutes: Math.round(ACTIVE_SEC / 60),
-    acts: ACTIVE_ACTS,
+    memberDays: MEMBER_DAYS,
+    activeMinutes: Math.round(ACTIVE_SEC / 60),
   };
   if (!r)
     return {
@@ -218,6 +230,7 @@ function summary(id) {
       active: false,
       days: 0,
       minutes: 0,
+      activeMinutes: 0,
       acts: 0,
       ageDays: 0,
       need,
@@ -227,8 +240,9 @@ function summary(id) {
     active: isActive(id),
     days: r.days ? r.days.length : 0,
     minutes: Math.round((r.sec || 0) / 60),
+    activeMinutes: Math.round((r.active || 0) / 60),
     acts: r.acts || 0,
-    ageDays: Math.floor((Date.now() - (r.first || Date.now())) / 86400000),
+    ageDays: memberDays(r),
     need,
   };
 }
@@ -313,6 +327,7 @@ module.exports = {
   validId,
   touch,
   addTime,
+  addActiveTime,
   tick,
   setName,
   setNote,
@@ -327,7 +342,6 @@ module.exports = {
   devicesMatching,
   devicesByKeys,
   flushSync,
-  ACTIVE_DAYS,
+  MEMBER_DAYS,
   ACTIVE_SEC,
-  ACTIVE_ACTS,
 };

@@ -545,6 +545,118 @@
   line-height: 1.5;
 }
 
+/* ── "Application approved": read the rules, then accept ── */
+
+.ma-accept-lead {
+  margin: 0 0 10px;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.ma-accept-section {
+  margin-top: 14px;
+  padding: 12px 14px 6px;
+  border: 1px solid var(--tk-border);
+  border-radius: 6px;
+  background: var(--tk-card, #000);
+}
+
+.ma-accept-section p {
+  margin: 0 0 10px;
+  color: var(--tk-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.ma-accept-title {
+  margin-bottom: 6px;
+  color: var(--primary, var(--tk-accent));
+  font-size: 12px;
+  font-weight: bold;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+.ma-accept-links {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.ma-accept-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 12px;
+  border: 1px solid var(--tk-border);
+  border-radius: 5px;
+  background: var(--tk-tile);
+  color: var(--tk-text);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: bold;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.ma-accept-link:hover {
+  background: var(--tk-tile-hover);
+  border-color: var(--primary, var(--tk-accent));
+}
+
+.ma-accept-link i {
+  color: var(--primary, var(--tk-accent));
+}
+
+.ma-accept .ma-check-row {
+  margin-bottom: 6px;
+}
+
+.ma-accept .ma-err {
+  min-height: 0;
+  margin-bottom: 6px;
+}
+
+.ma-accept-note {
+  margin: 12px 0 0;
+  color: var(--tk-muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+/* ── "Applications are closed" notice ── */
+
+.ma-closed p {
+  margin: 0 0 10px;
+  line-height: 1.55;
+}
+
+.ma-closed-note {
+  margin: 14px 0 0 !important;
+  padding: 10px 12px;
+  border: 1px solid var(--tk-border);
+  border-radius: 5px;
+  background: var(--tk-tile);
+  color: var(--tk-muted);
+  font-size: 13px;
+}
+
+.ma-note-label {
+  display: inline-block;
+  margin: 0 0 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #c62828;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: bold;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
 /* ── Decision / status modal bits (rendered inside StaffUI modals) ── */
 
 .ma-staff-msg {

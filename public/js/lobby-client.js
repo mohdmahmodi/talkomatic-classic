@@ -3059,24 +3059,57 @@ const APP_STATUS_META = {
     fa: "fa-user-slash",
     title: "Moderator access revoked",
   },
+  withdrawn: {
+    color: "#8d8d8d",
+    fa: "fa-hand",
+    title: "Role turned down",
+  },
+};
+
+// The tag on the apply button says whether applications are open or closed,
+// and once someone has applied it carries their own decision instead. The
+// button itself always stays.
+const APP_STATUS_TAG = {
+  pending: "Pending",
+  approved: "Approved",
+  rejected: "Declined",
+  revoked: "Revoked",
+  withdrawn: "Turned down",
 };
 
 function updateModApplyLink() {
   const link = document.getElementById("modApplyLink");
   if (!link || currentUserIsDev || currentUserIsMod) return;
-  const closed = applicationsOpen === false;
+  link.style.display = "";
   const mine = !!(myAppStatus && myAppStatus.has);
-  link.style.display = closed && !mine ? "none" : "";
-  if (closed && !mine) return;
   if (mine && APP_STATUS_META[myAppStatus.status]) {
     const m = APP_STATUS_META[myAppStatus.status];
     link.innerHTML =
-      '<i class="fas fa-circle" style="color:' +
+      '<i class="fas fa-user-pen"></i> Check status' +
+      '<span class="apply-state" style="background:' +
       m.color +
-      '"></i> Check status';
-  } else {
-    link.innerHTML = '<i class="fas fa-user-pen"></i> Apply to be a mod';
+      ';color:#1a1a1a">' +
+      APP_STATUS_TAG[myAppStatus.status] +
+      "</span>";
+    link.title = m.title;
+    return;
   }
+  if (applicationsOpen === null) {
+    link.innerHTML = '<i class="fas fa-user-pen"></i> Apply to be a mod';
+    link.title = "";
+    return;
+  }
+  const open = applicationsOpen !== false;
+  link.innerHTML =
+    '<i class="fas fa-user-pen"></i> Apply to be a mod' +
+    '<span class="apply-state ' +
+    (open ? "is-open" : "is-closed") +
+    '">' +
+    (open ? "Open" : "Closed") +
+    "</span>";
+  link.title = open
+    ? "Applications are open"
+    : "Applications are closed right now";
 }
 
 // The application form, status view, and decision popups live in mod-apply.js.

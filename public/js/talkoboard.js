@@ -1,5 +1,29 @@
-// talkoboard.js v4.0 - Collaborative whiteboard for Talkomatic
+// talkoboard.js v4.4 - Collaborative whiteboard for Talkomatic
 //
+// Every drawing tool takes its label, tooltip, shortcut and help entry from
+// this one table, so the toolbar and the "?" panel cannot drift apart.
+const TOOL_HELP = [
+  { name: "pan", fa: "fa-hand", label: "Move", key: "H", tip: "Move around the board. Hold Space to move while drawing." },
+  { name: "pen", fa: "fa-pen", label: "Pen", key: "P", tip: "Draw freehand." },
+  { name: "eraser", fa: "fa-eraser", label: "Eraser", key: "E", tip: "Rub out strokes." },
+  { name: "line", fa: "fa-slash", label: "Line", key: "L", tip: "Straight line. Hold Shift to snap the angle." },
+  { name: "rect", fa: "fa-square", label: "Box", key: "R", tip: "Rectangle. Hold Shift for a square." },
+  { name: "ellipse", fa: "fa-circle", label: "Circle", key: "O", tip: "Ellipse. Hold Shift for a circle." },
+  { name: "triangle", fa: "fa-play", label: "Triangle", key: "T", tip: "Triangle." },
+  { name: "fill", fa: "fa-fill", label: "Filled", tip: "Filled shapes on or off. Boxes, circles and triangles come out solid." },
+  { name: "bucket", fa: "fa-fill-drip", label: "Bucket", key: "B", tip: "Tap inside a closed shape to fill it with color." },
+  { name: "claim", fa: "fa-vector-square", label: "Protect", tip: "Drag a box around your art. Only you can draw inside it, and other people's strokes stop at the edge." },
+  { name: "release", fa: "fa-square-xmark", label: "Release", tip: "Give your protected area back so anyone can draw there again." },
+  { name: "color", fa: "fa-palette", label: "Color", key: "C", tip: "Pick a color or a gradient." },
+  { name: "size", fa: "fa-circle", label: "Size", key: "S", tip: "Brush thickness." },
+  { name: "inspect", fa: "fa-user-shield", label: "Inspect", staff: true, tip: "Mod tools: tap a drawing to see who made it." },
+];
+
+const BOARD_TIPS = [
+  "Protect keeps a drawing yours. Everyone can still see it, nobody else can draw over it.",
+  "Scroll to zoom and hold Space to move. Shift snaps lines and makes squares and circles.",
+  "Ctrl+Z undoes your last stroke and Ctrl+Y brings it back.",
+];
 
 class Talkoboard {
   constructor(socketRef, userId, username, staff) {
@@ -314,13 +338,18 @@ class Talkoboard {
     }, 1000);
   }
 
-  makeBtn(className, label, title) {
+  makeBtn(className, label, tip) {
     const b = document.createElement("button");
     b.type = "button";
     b.className = className;
     if (label != null) b.innerHTML = label;
-    if (title) b.title = title;
+    if (tip) this.setTip(b, tip);
     return b;
+  }
+
+  setTip(b, tip) {
+    b.dataset.tip = tip;
+    b.setAttribute("aria-label", tip);
   }
 
   icon(name) {
@@ -358,8 +387,20 @@ class Talkoboard {
       return s;
     };
     this.toolBtns = {};
-    const tool = (name, fa, title, cls) => {
-      const b = this.makeBtn("tb-btn" + (cls ? " " + cls : ""), this.icon(fa), title);
+    const helpFor = (name) => TOOL_HELP.find((t) => t.name === name);
+    const tipText = (entry) => entry.tip + (entry.key ? " (" + entry.key + ")" : "");
+    const labelled = (b, entry) => {
+      b.classList.add("tb-tool");
+      const span = document.createElement("span");
+      span.className = "tb-btn-label";
+      span.textContent = entry.label;
+      b.appendChild(span);
+      return b;
+    };
+    const tool = (name, cls) => {
+      const entry = helpFor(name);
+      const b = this.makeBtn("tb-btn" + (cls ? " " + cls : ""), this.icon(entry.fa), tipText(entry));
+      labelled(b, entry);
       b.addEventListener("click", () => this.setTool(name));
       this.toolBtns[name] = b;
       return b;
@@ -369,38 +410,40 @@ class Talkoboard {
     brand.innerHTML = this.icon("fa-paintbrush") + "<span>Talkoboard</span>";
     this.saveBtn = this.makeBtn("tb-btn", this.icon("fa-download"), "Save as image");
     this.saveBtn.addEventListener("click", () => this.togglePop("save"));
+    this.helpBtn = this.makeBtn("tb-btn tb-help-btn", this.icon("fa-circle-question"), "What do the tools do?");
+    this.helpBtn.addEventListener("click", () => this.togglePop("help"));
     brand.appendChild(this.saveBtn);
+    brand.appendChild(this.helpBtn);
 
     const tools = panel("tb-tools");
-    this.panBtn = tool("pan", "fa-hand", "Move around (H, or hold Space)");
-    this.penBtn = tool("pen", "fa-pen", "Pen (P)");
-    this.eraserBtn = tool("eraser", "fa-eraser", "Eraser (E)");
-    const shapes = [
-      tool("line", "fa-slash", "Line (L), Shift snaps the angle"),
-      tool("rect", "fa-square", "Rectangle (R), Shift for a square"),
-      tool("ellipse", "fa-circle", "Ellipse (O), Shift for a circle"),
-      tool("triangle", "fa-play", "Triangle (T)"),
-    ];
+    this.panBtn = tool("pan");
+    this.penBtn = tool("pen");
+    this.eraserBtn = tool("eraser");
+    const shapes = [tool("line"), tool("rect"), tool("ellipse"), tool("triangle")];
     shapes[3].querySelector("i").style.transform = "rotate(-90deg)";
-    this.fillBtn = this.makeBtn("tb-btn off", this.icon("fa-fill"), "Filled shapes");
+    const fillHelp = helpFor("fill");
+    this.fillBtn = labelled(this.makeBtn("tb-btn off", this.icon(fillHelp.fa), fillHelp.tip), fillHelp);
     this.fillBtn.addEventListener("click", () => this.setFillShapes(!this.fillShapes));
-    const bucket = tool("bucket", "fa-fill-drip", "Fill a closed area (B)");
-    const claim = tool("claim", "fa-vector-square", "Claim an area only you can draw in");
-    this.releaseBtn = this.makeBtn("tb-btn", this.icon("fa-square-xmark"), "Give your area back");
+    const bucket = tool("bucket");
+    const claim = tool("claim");
+    const releaseHelp = helpFor("release");
+    this.releaseBtn = labelled(this.makeBtn("tb-btn", this.icon(releaseHelp.fa), releaseHelp.tip), releaseHelp);
     this.releaseBtn.addEventListener("click", () => this.socket.emit("board unclaim", {}));
     this.releaseBtn.style.display = "none";
 
-    this.colorBtn = this.makeBtn("tb-btn tb-color-btn", "", "Color (C)");
+    const colorHelp = helpFor("color");
+    this.colorBtn = labelled(this.makeBtn("tb-btn tb-color-btn", "", tipText(colorHelp)), colorHelp);
     this.colorSwatch = document.createElement("span");
     this.colorSwatch.className = "tb-color-current";
     this.colorSwatch.style.background = this.color;
-    this.colorBtn.appendChild(this.colorSwatch);
+    this.colorBtn.insertBefore(this.colorSwatch, this.colorBtn.firstChild);
     this.colorBtn.addEventListener("click", () => this.togglePop("color"));
 
-    this.sizeBtn = this.makeBtn("tb-btn tb-size-btn", "", "Brush size (S)");
+    const sizeHelp = helpFor("size");
+    this.sizeBtn = labelled(this.makeBtn("tb-btn tb-size-btn", "", tipText(sizeHelp)), sizeHelp);
     this.sizeDot = document.createElement("span");
     this.sizeDot.className = "tb-size-dot";
-    this.sizeBtn.appendChild(this.sizeDot);
+    this.sizeBtn.insertBefore(this.sizeDot, this.sizeBtn.firstChild);
     this.sizeBtn.addEventListener("click", () => this.togglePop("size"));
 
     const drawTools = [
@@ -420,12 +463,7 @@ class Talkoboard {
     tools.appendChild(this.panBtn);
     for (const el of drawTools) tools.appendChild(el);
     if (this.isStaff) {
-      this.inspectBtn = tool(
-        "inspect",
-        "fa-user-shield",
-        "Mod tools: tap a drawing to see who made it",
-        "tb-mod-btn",
-      );
+      this.inspectBtn = tool("inspect", "tb-mod-btn");
       tools.appendChild(sep());
       tools.appendChild(this.inspectBtn);
     }
@@ -482,6 +520,8 @@ class Talkoboard {
     this.pops.color = { panel: this.colorPanel, btn: this.colorBtn };
     this.buildSizePanel(this.modal);
     this.buildSavePanel(this.modal);
+    this.buildHelpPanel(this.modal);
+    this.buildTooltip();
     this.buildChat(this.modal);
     document.body.appendChild(this.modal);
 
@@ -564,6 +604,113 @@ class Talkoboard {
     this.pops.save = { panel, btn: this.saveBtn };
   }
 
+  // ── Help panel and tooltips ──────────────────────────────────────
+  buildHelpPanel(parent) {
+    const panel = document.createElement("div");
+    panel.className = "tb-pop tb-help-panel";
+    panel.addEventListener("pointerdown", (e) => e.stopPropagation());
+
+    const title = document.createElement("div");
+    title.className = "tb-pop-title";
+    title.textContent = "What the tools do";
+    panel.appendChild(title);
+
+    const list = document.createElement("div");
+    list.className = "tb-help-list";
+    for (const t of TOOL_HELP) {
+      if (t.staff && !this.isStaff) continue;
+      const row = document.createElement("div");
+      row.className = "tb-help-row" + (t.name === "claim" ? " tb-help-star" : "");
+      row.innerHTML =
+        '<span class="tb-help-ico">' + this.icon(t.fa) + "</span>" +
+        '<span class="tb-help-text"><b>' + t.label + "</b> " + t.tip + "</span>" +
+        (t.key ? '<kbd class="tb-help-key">' + t.key + "</kbd>" : "");
+      list.appendChild(row);
+    }
+    panel.appendChild(list);
+
+    const more = document.createElement("div");
+    more.className = "tb-pop-title";
+    more.textContent = "Good to know";
+    panel.appendChild(more);
+    const notes = document.createElement("ul");
+    notes.className = "tb-help-notes";
+    for (const text of BOARD_TIPS) {
+      const li = document.createElement("li");
+      li.textContent = text;
+      notes.appendChild(li);
+    }
+    panel.appendChild(notes);
+
+    parent.appendChild(panel);
+    this.pops.help = { panel, btn: this.helpBtn };
+  }
+
+  // One floating tooltip serves every button with a data-tip. Native titles
+  // take a second to appear and never show on touch; this one is quick on
+  // hover and keyboard focus, and the labels under the icons cover touch.
+  buildTooltip() {
+    this.tipEl = document.createElement("div");
+    this.tipEl.className = "tb-tip";
+    this.modal.appendChild(this.tipEl);
+    const target = (e) => (e.target.closest ? e.target.closest("[data-tip]") : null);
+    const withinSame = (e, b) => !!(e.relatedTarget && b.contains(e.relatedTarget));
+    this.modal.addEventListener("pointerover", (e) => {
+      const b = target(e);
+      if (!b || e.pointerType === "touch" || withinSame(e, b)) return;
+      this.showTip(b);
+    });
+    this.modal.addEventListener("pointerout", (e) => {
+      const b = target(e);
+      if (b && !withinSame(e, b)) this.hideTip();
+    });
+    this.modal.addEventListener("pointerdown", () => this.hideTip(), true);
+    this.modal.addEventListener("focusin", (e) => {
+      const b = target(e);
+      if (b && b.matches(":focus-visible")) this.showTip(b);
+    });
+    this.modal.addEventListener("focusout", () => this.hideTip());
+  }
+
+  showTip(btn) {
+    clearTimeout(this._tipTimer);
+    this._tipTimer = setTimeout(() => {
+      const text = btn.dataset.tip;
+      if (!text || !this.isOpen) return;
+      const tip = this.tipEl;
+      tip.textContent = text;
+      tip.classList.add("show");
+      const r = btn.getBoundingClientRect();
+      const m = this.modal.getBoundingClientRect();
+      const below = r.top - m.top < m.height / 2;
+      const half = tip.offsetWidth / 2;
+      const x = r.left + r.width / 2 - m.left;
+      tip.style.left = Math.max(8 + half, Math.min(m.width - 8 - half, x)) + "px";
+      tip.style.top = below ? Math.round(r.bottom - m.top + 8) + "px" : "auto";
+      tip.style.bottom = below ? "auto" : Math.round(m.bottom - r.top + 8) + "px";
+    }, 300);
+  }
+
+  hideTip() {
+    clearTimeout(this._tipTimer);
+    if (this.tipEl) this.tipEl.classList.remove("show");
+  }
+
+  introSeen() {
+    try {
+      return localStorage.getItem("tb_intro") === "1";
+    } catch (_) {
+      return true;
+    }
+  }
+
+  markIntroSeen() {
+    if (this.helpBtn) this.helpBtn.classList.remove("tb-attn");
+    try {
+      localStorage.setItem("tb_intro", "1");
+    } catch (_) {}
+  }
+
   // Popovers hang off their toolbar button; opening one closes the rest.
   togglePop(name, force) {
     const pop = this.pops[name];
@@ -573,6 +720,7 @@ class Talkoboard {
     if (!open) return;
     pop.panel.classList.add("show");
     pop.btn.classList.add("active");
+    if (name === "help") this.markIntroSeen();
     if (name === "color") {
       this.renderRecentColors();
       this.renderUserColors();
@@ -1059,6 +1207,8 @@ class Talkoboard {
       this.showHint("Mod tools: tap a drawing to see who made it");
     else this.closeModCard();
     if (name === "bucket") this.showHint("Tap inside a closed shape to fill it");
+    if (name === "claim")
+      this.showHint("Drag a box around your art. Only you can draw inside it", 3200);
     if (this.fillBtn)
       this.fillBtn.classList.toggle(
         "off",
@@ -1806,14 +1956,14 @@ class Talkoboard {
     card.style.top = Math.round(top) + "px";
   }
 
-  showHint(text) {
+  showHint(text, ms) {
     if (!this.hintEl) return;
     this.hintEl.textContent = text;
     this.hintEl.classList.add("show");
     clearTimeout(this._hintTimer);
     this._hintTimer = setTimeout(() => {
       this.hintEl.classList.remove("show");
-    }, 1800);
+    }, ms || 1800);
   }
 
   // ── Peer color/name tracking ────────────────────────────────────
@@ -1894,6 +2044,10 @@ class Talkoboard {
     this.redraw();
     this.updateCursor();
     this.updateUndoRedoButtons();
+    if (!this.watching && !this.introSeen()) {
+      this.helpBtn.classList.add("tb-attn");
+      this.showHint("New here? Tap ? in the top left to see what each tool does", 5000);
+    }
 
     this.socket.emit("board open");
 
@@ -2090,9 +2244,12 @@ class Talkoboard {
     if (!this.wheelBtn) return;
     const zoom = this.wheelMode === "zoom";
     this.wheelBtn.innerHTML = this.icon(zoom ? "fa-magnifying-glass" : "fa-arrows-up-down-left-right");
-    this.wheelBtn.title = zoom
-      ? "Scrolling zooms. Click to make it move the board instead. Ctrl+scroll, pinch, + and - always zoom."
-      : "Scrolling moves the board. Click to make it zoom instead. Ctrl+scroll, pinch, + and - always zoom.";
+    this.setTip(
+      this.wheelBtn,
+      zoom
+        ? "Scrolling zooms. Click to make it move the board instead. Ctrl+scroll, pinch, + and - always zoom."
+        : "Scrolling moves the board. Click to make it zoom instead. Ctrl+scroll, pinch, + and - always zoom.",
+    );
   }
 
   adjustZoom(delta, e) {

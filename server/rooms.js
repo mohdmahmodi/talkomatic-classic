@@ -1631,10 +1631,12 @@ function appStatusPayload(deviceId, isStaff) {
     status = "revoked";
     reason = null;
   }
+  if (status === "withdrawn") reason = null;
   return {
     has: true,
     status,
     reason,
+    offer: a.status === "approved" && !a.claimed,
     by:
       status === "approved" || status === "rejected"
         ? reviewerPublicName(a.reviewedBy)
@@ -1643,6 +1645,8 @@ function appStatusPayload(deviceId, isStaff) {
     submittedAt: a.submittedAt || null,
   };
 }
+
+const modClaimsInFlight = new Set();
 
 function sendAppsList(s) {
   if (!s) return;
@@ -2564,6 +2568,22 @@ function updateRoom(roomId) {
 
 // ── AFK ─────────────────────────────────────────────────────────────────────
 
+// Active room time feeds the mod-application bar. The clock runs while a
+// member is in a room with the tab in front, and stops when they hide the
+// tab, go AFK, are moved to spectating, or leave.
+function startActiveTime(socket) {
+  if (!socket.deviceId || socket.isBot || socket.spectating || !socket.roomId)
+    return;
+  if (socket.tabHidden || socket._activeFrom) return;
+  socket._activeFrom = Date.now();
+}
+
+function stopActiveTime(socket) {
+  if (!socket._activeFrom) return;
+  identity.addActiveTime(socket.deviceId, Date.now() - socket._activeFrom);
+  socket._activeFrom = null;
+}
+
 function clearAFKTimers(userId) {
   if (state.afkWarningTimers.has(userId)) {
     clearTimeout(state.afkWarningTimers.get(userId));
@@ -2820,6 +2840,7 @@ async function leaveRoom(socket, userId) {
   try {
     const roomId = socket.roomId;
     if (!roomId) return;
+    stopActiveTime(socket);
     clearAFKTimers(userId);
 
     finalizeBoardUserStroke(roomId, userId);
@@ -3068,6 +3089,7 @@ function joinRoom(socket, roomId, userId) {
     }
 
     setupAFKTimers(socket, userId);
+    startActiveTime(socket);
     updateRoomSoloTracking(roomId);
     if (isStaff) staffchat.presenceDirty();
 
@@ -3393,28 +3415,8 @@ function registerSocketHandlers(opts) {
         }, 1500);
       }
 
-      if (socket.deviceId && !socket.isDev && !socket.isMod) {
-        const claim = applications.unclaimedApproved(socket.deviceId);
-        if (claim) {
-          const reviewedBy = String(claim.reviewedBy || "");
-          const grantedBy =
-            (reviewedBy.includes(":")
-              ? reviewedBy.slice(reviewedBy.indexOf(":") + 1)
-              : reviewedBy) || "application";
-          roles
-            .grantModKey(claim.username || "mod", 1, grantedBy)
-            .then((g) => {
-              applications.markClaimed(claim.id);
-              socket.emit("you are now mod", {
-                key: g.key,
-                label: g.label,
-                level: g.level,
-              });
-            })
-            .catch((e) => console.error("application claim grant failed:", e));
-        }
-      }
-
+      // An approved application is an offer, not a key: the status carries
+      // offer:true and the applicant accepts or turns it down from the lobby.
       if (socket.deviceId && !socket.isDev && !socket.isMod) {
         const st = appStatusPayload(socket.deviceId, false);
         if (st.has) socket.emit("mod application status", st);
@@ -4925,6 +4927,8 @@ function registerSocketHandlers(opts) {
           socket._afkStateTick = now;
         }
         user.isAfk = isAfk;
+        if (isAfk) stopActiveTime(socket);
+        else startActiveTime(socket);
         emitRoomAfkUpdate(socket, userId, isAfk);
         updateLobby();
       }),
@@ -4944,6 +4948,8 @@ function registerSocketHandlers(opts) {
         const hidden = !!data?.hidden;
         if (hidden === !!socket.tabHidden) return;
         socket.tabHidden = hidden;
+        if (hidden) stopActiveTime(socket);
+        else startActiveTime(socket);
         clearAFKTimers(userId);
         if (hidden) {
           state.afkSpectateTimers.set(
@@ -8515,6 +8521,68 @@ function registerSocketHandlers(opts) {
       }),
     );
 
+    // The applicant answers an approved application: accept (after confirming
+    // they read the rules) and the key is minted now, or turn it down.
+    socket.on(
+      "mod application accept",
+      safe(async (data) => {
+        const fail = (error) =>
+          socket.emit("mod application accept result", { ok: false, error });
+        if (!socket.deviceId) return fail("This browser can't be identified.");
+        if (socket.isDev || socket.isMod) return fail("You're already staff.");
+        const app = applications.unclaimedApproved(socket.deviceId);
+        if (!app) return fail("There is no approved application waiting for you.");
+        const who = app.username || "An applicant";
+        if (!data?.accept) {
+          applications.withdraw(app.id);
+          audit.recordNotification({
+            kind: "application",
+            text: `${who} turned down the junior mod role`,
+            by: app.username || null,
+            minLevel: 3,
+          });
+          broadcastAppsList();
+          socket.emit("mod application accept result", { ok: true, accepted: false });
+          socket.emit(
+            "mod application status",
+            appStatusPayload(socket.deviceId, false),
+          );
+          return;
+        }
+        if (!data.agree)
+          return fail("Please confirm you have read the rules first.");
+        if (modClaimsInFlight.has(app.id)) return;
+        modClaimsInFlight.add(app.id);
+        try {
+          const reviewedBy = String(app.reviewedBy || "");
+          const grantedBy =
+            (reviewedBy.includes(":")
+              ? reviewedBy.slice(reviewedBy.indexOf(":") + 1)
+              : reviewedBy) || "application";
+          const granted = await roles.grantModKey(app.username || "mod", 1, grantedBy);
+          applications.markClaimed(app.id);
+          audit.recordNotification({
+            kind: "application",
+            text: `${who} accepted the junior mod role`,
+            by: app.username || null,
+            minLevel: 3,
+          });
+          broadcastAppsList();
+          socket.emit("mod application accept result", { ok: true, accepted: true });
+          socket.emit("you are now mod", {
+            key: granted.key,
+            label: granted.label,
+            level: granted.level,
+          });
+        } catch (e) {
+          console.error("application accept grant failed:", e);
+          fail("Could not set up your key. Please try again in a moment.");
+        } finally {
+          modClaimsInFlight.delete(app.id);
+        }
+      }),
+    );
+
     socket.on(
       "audit comment",
       safe(async (data) => {
@@ -8829,43 +8897,19 @@ function registerSocketHandlers(opts) {
         const reviewer = `${socket.isDev ? "dev" : "mod"}:${socket.staffLabel || ""}`;
         if (decision === "approve") {
           applications.setStatus(id, "approved", reviewer, reason);
-          const targets = [];
-          for (const [, s] of io().sockets.sockets)
-            if (s.deviceId === app.deviceId && !s.isDev && !s.isMod)
-              targets.push(s);
           const live = Object.assign(
             { live: true },
             appStatusPayload(app.deviceId, false),
           );
-          for (const s of targets) s.emit("mod application status", live);
-          if (targets.length) {
-            const granted = await roles.grantModKey(
-              app.username || "mod",
-              1,
-              socket.staffLabel || "dev",
-            );
-            for (const s of targets)
-              s.emit("you are now mod", {
-                key: granted.key,
-                label: granted.label,
-                level: granted.level,
-              });
-            applications.markClaimed(id);
-            logStaff(
-              socket,
-              "approve mod application (delivered)",
-              { id: app.deviceId, username: app.username },
-              "-",
-              `label:${granted.label}`,
-            );
-          } else {
-            logStaff(
-              socket,
-              "approve mod application (pending claim)",
-              { id: app.deviceId, username: app.username },
-              "-",
-            );
-          }
+          for (const [, s] of io().sockets.sockets)
+            if (s.deviceId === app.deviceId && !s.isDev && !s.isMod)
+              s.emit("mod application status", live);
+          logStaff(
+            socket,
+            "approve mod application (awaiting acceptance)",
+            { id: app.deviceId, username: app.username },
+            "-",
+          );
         } else if (decision === "reject") {
           applications.setStatus(id, "rejected", reviewer, reason);
           const live = Object.assign(
@@ -9190,6 +9234,7 @@ function registerSocketHandlers(opts) {
         const userId = socket.handshake.session?.userId;
         const username = socket.handshake.session?.username || "Unknown";
         const location = socket.handshake.session?.location || "Unknown";
+        stopActiveTime(socket);
         if (socket.deviceId)
           identity.addTime(
             socket.deviceId,

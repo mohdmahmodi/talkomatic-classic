@@ -2333,11 +2333,18 @@
     }
 
     if (kind === "suggestion" && c.itemId) {
+      const bug = c.category === "Bug";
       const setStatus = (status) =>
         socket.emit("board status", { id: c.itemId, status });
-      add("Approve", "fa-check", "primary", () => setStatus("approved"));
-      add("Built", "fa-rocket", "", () => setStatus("implemented"));
-      add("Not doing", "fa-xmark", "", () => setStatus("declined"));
+      add(bug ? "Confirm" : "Approve", "fa-check", "primary", () =>
+        setStatus("approved"),
+      );
+      add(bug ? "Fixed" : "Built", bug ? "fa-wrench" : "fa-rocket", "", () =>
+        setStatus("implemented"),
+      );
+      add(bug ? "Won't fix" : "Not doing", "fa-xmark", "", () =>
+        setStatus("declined"),
+      );
       add("Reply", "fa-reply", "", () =>
         ask(
           {

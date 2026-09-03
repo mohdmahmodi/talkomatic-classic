@@ -152,6 +152,16 @@ function markClaimed(id) {
   }
 }
 
+// An approved applicant turned the role down before taking the key.
+function withdraw(id) {
+  const a = get(id);
+  if (!a || a.status !== "approved" || a.claimed) return null;
+  a.status = "withdrawn";
+  a.withdrawnAt = Date.now();
+  saveSoon();
+  return a;
+}
+
 function pendingCount() {
   return apps.reduce((n, a) => n + (a.status === "pending" ? 1 : 0), 0);
 }
@@ -182,6 +192,7 @@ module.exports = {
   unclaimedApproved,
   latestForDevice,
   markClaimed,
+  withdraw,
   pendingForDevice,
   pendingCount,
   list,
