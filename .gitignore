@@ -30,6 +30,7 @@ flag-reviews.json.tmp
 # User bot configs - runtime store, never commit
 bots.json
 bots.json.tmp
+bots.json.bak
 
 # Runtime counters
 anniversary.json

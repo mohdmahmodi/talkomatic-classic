@@ -54,50 +54,118 @@ const TICK_MS = 120;
 const SWEEP_EVERY_TICKS = 16;
 
 // ── Persistence (same flat JSON store pattern as suggestions/appeals) ───────
+// Every save keeps the previous file as bots.json.bak and fsyncs the new one
+// before the rename. A store that fails to parse is never overwritten.
 
-let store = { enabled: true, owners: {} };
+const BACKUP_PATH = STORE_PATH + ".bak";
+const TMP_PATH = STORE_PATH + ".tmp";
+
+let store = { enabled: true, owners: {}, aliases: {} };
 let saveTimer = null;
+let frozen = false;
 
 function load() {
-  try {
-    const raw = JSON.parse(fs.readFileSync(STORE_PATH, "utf8"));
-    if (raw && typeof raw === "object") {
-      store.enabled = raw.enabled !== false;
-      store.owners =
-        raw.owners && typeof raw.owners === "object" ? raw.owners : {};
+  for (const file of [STORE_PATH, BACKUP_PATH]) {
+    try {
+      const raw = JSON.parse(fs.readFileSync(file, "utf8"));
+      store = {
+        enabled: raw.enabled !== false,
+        owners: raw.owners || {},
+        aliases: raw.aliases || {},
+      };
+      return;
+    } catch (err) {
+      if (err.code !== "ENOENT")
+        console.error(`Error loading ${file}:`, err.message);
     }
-  } catch (err) {
-    if (err.code !== "ENOENT") console.error("Error loading bots.json:", err);
-    store = { enabled: true, owners: {} };
   }
+  frozen = fs.existsSync(STORE_PATH);
+  if (frozen) console.error("bots.json is unreadable, refusing to overwrite it");
+}
+
+function ignoreMissing(e) {
+  if (e.code !== "ENOENT") throw e;
+}
+
+async function write() {
+  if (frozen) return;
+  const body = JSON.stringify(store, null, 2);
+  await fsp.copyFile(STORE_PATH, BACKUP_PATH).catch(ignoreMissing);
+  const fh = await fsp.open(TMP_PATH, "w");
+  try {
+    await fh.writeFile(body, "utf8");
+    await fh.sync();
+  } finally {
+    await fh.close();
+  }
+  await fsp.rename(TMP_PATH, STORE_PATH);
+}
+
+function writeSync() {
+  if (frozen) return;
+  const body = JSON.stringify(store, null, 2);
+  try {
+    fs.copyFileSync(STORE_PATH, BACKUP_PATH);
+  } catch (e) {
+    ignoreMissing(e);
+  }
+  const fd = fs.openSync(TMP_PATH, "w");
+  try {
+    fs.writeSync(fd, body);
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  fs.renameSync(TMP_PATH, STORE_PATH);
 }
 
 function saveSoon() {
   if (saveTimer) return;
-  saveTimer = setTimeout(async () => {
+  saveTimer = setTimeout(() => {
     saveTimer = null;
-    try {
-      const tmp = STORE_PATH + ".tmp";
-      await fsp.writeFile(tmp, JSON.stringify(store, null, 2), "utf8");
-      await fsp.rename(tmp, STORE_PATH);
-    } catch (e) {
-      console.error("bots save failed:", e);
-    }
+    write().catch((e) => console.error("bots save failed:", e));
   }, 3000);
 }
 
 function flushSync() {
+  clearTimeout(saveTimer);
+  saveTimer = null;
   try {
-    const tmp = STORE_PATH + ".tmp";
-    fs.writeFileSync(tmp, JSON.stringify(store, null, 2), "utf8");
-    fs.renameSync(tmp, STORE_PATH);
+    writeSync();
   } catch (e) {
     console.error("bots flush failed:", e);
   }
 }
 
+// Bots are keyed by the signed device id. Browsers from before the signed
+// cookie existed still send the id they hold themselves, and their records
+// live under it. That id is remembered as an alias of the signed one, so a
+// lost cookie is not a lost bot list as long as the browser storage survives.
 function ownerKeyOf(socket) {
-  return socket.deviceId || socket.handshake?.session?.userId || null;
+  const key = socket.deviceId || socket.handshake?.session?.userId || null;
+  const old = socket.legacyDeviceId;
+  if (key && old && !socket.botsKeyResolved) {
+    socket.botsKeyResolved = true;
+    adopt(store.aliases[old] || old, key);
+    if (store.aliases[old] !== key) {
+      store.aliases[old] = key;
+      saveSoon();
+    }
+  }
+  return key;
+}
+
+function adopt(from, to) {
+  if (from === to) return;
+  const rec = store.owners[from];
+  if (rec) {
+    ownerRecord(to, true).bots.push(...rec.bots);
+    delete store.owners[from];
+  }
+  for (const r of Object.values(store.owners))
+    for (const b of r.bots)
+      for (const m of b.managers || []) if (m.did === from) m.did = to;
+  saveSoon();
 }
 
 function ownerRecord(ownerKey, create) {
