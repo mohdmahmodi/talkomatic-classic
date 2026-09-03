@@ -835,6 +835,58 @@ function getUserModLevel(userId) {
   return 0;
 }
 
+// A room ban follows the person, not the account: their network (the same
+// range a site ban takes) and their device ids go on the list with the id, so
+// a fresh name in another browser does not get back in.
+function banKeysFor(ip, ...deviceIds) {
+  const keys = [];
+  if (ip) keys.push(ipban.computeRangeCidr(ip) || ip);
+  for (const id of deviceIds) if (id) keys.push(ipban.idKey(id));
+  return keys;
+}
+
+function roomBan(room, userId) {
+  if (!userId) return;
+  if (!room.bannedUserIds) room.bannedUserIds = new Set();
+  if (!room.bannedKeys) room.bannedKeys = new Set();
+  room.bannedUserIds.add(userId);
+  const s = findSocketsByUserId(userId).find((x) => x.clientIp);
+  const seen = s ? null : lastseen.get(userId);
+  const keys = s
+    ? banKeysFor(s.clientIp, s.deviceId, s.legacyDeviceId)
+    : banKeysFor(seen?.ip, seen?.deviceId);
+  for (const k of keys) room.bannedKeys.add(k);
+}
+
+function roomBansSocket(room, socket) {
+  if (!room.bannedKeys?.size) return false;
+  const ids = [socket.deviceId, socket.legacyDeviceId]
+    .filter(Boolean)
+    .map(ipban.idKey);
+  for (const k of room.bannedKeys) {
+    if (ipban.isIdKey(k)) {
+      if (ids.includes(k)) return true;
+    } else if (socket.clientIp && ipban.matchesKey(socket.clientIp, k))
+      return true;
+  }
+  return false;
+}
+
+// A bot is banned with its maker. A creator bot has no socket of its own, so
+// its owner's network and device go on the list and the owner leaves with
+// it; a token bot already carries its owner's address on its own socket.
+async function banBotOwner(room, botUserId, roomId) {
+  const owner = bots.ownerOf(botUserId);
+  if (!owner) return;
+  roomBan(room, owner);
+  const s = findSocketByUserId(owner, roomId);
+  if (!s) return;
+  s.emit("kicked", {
+    message: "Your bot was removed from this room, and you with it.",
+  });
+  await leaveRoom(s, owner);
+}
+
 function canActOn(actorSocket, targetUserId) {
   const targetRole = getUserStaffRole(targetUserId);
   if (actorSocket?.isDev) return targetRole !== "dev";
@@ -2308,6 +2360,7 @@ async function saveRooms(force = false) {
               return clean;
             }),
             bannedUserIds: Array.from(room.bannedUserIds || []),
+            bannedKeys: Array.from(room.bannedKeys || []),
           },
         ];
       });
@@ -2370,6 +2423,9 @@ async function loadRooms() {
               : typeof item[1].bannedUserIds === "object"
                 ? Object.values(item[1].bannedUserIds)
                 : [],
+          );
+          item[1].bannedKeys = new Set(
+            Array.isArray(item[1].bannedKeys) ? item[1].bannedKeys : [],
           );
         }
         return item;
@@ -2775,7 +2831,7 @@ function joinRoom(socket, roomId, userId) {
       );
     const isStaff = !!socket.isDev || !!socket.isMod;
 
-    if (room.bannedUserIds?.has(userId) && !isStaff)
+    if (!isStaff && (room.bannedUserIds?.has(userId) || roomBansSocket(room, socket)))
       return socket.emit(
         "error",
         createErrorResponse(
@@ -3436,6 +3492,11 @@ function registerSocketHandlers(opts) {
           username = null;
           isIPBased = false;
         }
+        const keyHash = socket.devKeyHash || socket.modKeyHash;
+        if (keyHash && !username) {
+          const profile = roles.getProfile(keyHash);
+          if (profile) socket.emit("staff profile", profile);
+        }
         if (username && location && userId) {
           if (socket.isDev) {
             state.devUsers.add(userId);
@@ -3704,6 +3765,9 @@ function registerSocketHandlers(opts) {
         });
         await promisifySessionSave(socket.handshake.session);
         state.users.set(userId, { id: userId, username, location });
+        const keyHash = socket.devKeyHash || socket.modKeyHash;
+        if (keyHash)
+          roles.rememberProfile(keyHash, { name: username, location, avatar });
 
         for (const room of state.rooms.values()) {
           const u = (room.users || []).find((x) => x.id === userId);
@@ -4576,6 +4640,7 @@ function registerSocketHandlers(opts) {
           accessCode: data.type === "semi-private" ? data.accessCode : null,
           votes: {},
           bannedUserIds: new Set(),
+          bannedKeys: new Set(),
           lastActiveTime: now,
           createdAt: now,
         });
@@ -4727,8 +4792,7 @@ function registerSocketHandlers(opts) {
           const target = findSocketByUserId(data.targetUserId, roomId);
           if (target) {
             target.emit("kicked");
-            if (!room.bannedUserIds) room.bannedUserIds = new Set();
-            room.bannedUserIds.add(data.targetUserId);
+            roomBan(room, data.targetUserId);
             // Their bot goes with them; the room ban on their user id also
             // stops them deploying another one here (checked at deploy).
             bots.evictOwner(data.targetUserId, roomId);
@@ -4737,8 +4801,8 @@ function registerSocketHandlers(opts) {
             bots.isActiveBot(data.targetUserId) ||
             diag.isHeld(data.targetUserId)
           ) {
-            if (!room.bannedUserIds) room.bannedUserIds = new Set();
-            room.bannedUserIds.add(data.targetUserId);
+            roomBan(room, data.targetUserId);
+            await banBotOwner(room, data.targetUserId, roomId);
             const gone = room.users.find((u) => u.id === data.targetUserId);
             room.users = room.users.filter((u) => u.id !== data.targetUserId);
             emitRoomUserLeft(roomId, data.targetUserId, gone);
@@ -5179,8 +5243,8 @@ function registerSocketHandlers(opts) {
         const canBan = socket.isDev || socket.isMod;
         const ban = canBan && data.ban !== false;
         if (ban) {
-          if (!room.bannedUserIds) room.bannedUserIds = new Set();
-          room.bannedUserIds.add(targetUserId);
+          roomBan(room, targetUserId);
+          await banBotOwner(room, targetUserId, roomId);
         }
         const targetSocket = findSocketByUserId(targetUserId, roomId);
         if (targetSocket) {
@@ -6281,7 +6345,11 @@ function registerSocketHandlers(opts) {
           );
         // Voted out means out: watching the room would defeat the kick.
         const specUserId = socket.handshake.session?.userId;
-        if (!staff && specUserId && room.bannedUserIds?.has(specUserId))
+        if (
+          !staff &&
+          ((specUserId && room.bannedUserIds?.has(specUserId)) ||
+            roomBansSocket(room, socket))
+        )
           return socket.emit(
             "error",
             createErrorResponse(
@@ -6323,7 +6391,8 @@ function registerSocketHandlers(opts) {
         if (!room) return fail("gone");
         if (!userId || isGuestName(socket.handshake.session?.username))
           return fail("name");
-        if (room.bannedUserIds?.has(userId)) return fail("banned");
+        if (room.bannedUserIds?.has(userId) || roomBansSocket(room, socket))
+          return fail("banned");
         if (state.maintenance) return fail("maintenance");
         if (room.locked) return fail("locked");
         const others = (room.users || []).filter(
@@ -6814,6 +6883,10 @@ function registerSocketHandlers(opts) {
                   count: x.count,
                 })),
             ipCount: (h.ips || []).length,
+            devices: h.devices || [],
+            entered: h.entered,
+            enteredLast: h.enteredLast,
+            profile: h.profile,
           }));
         socket.emit("dev sessions", { sessions, history });
       }),
@@ -8768,6 +8841,7 @@ function registerSocketHandlers(opts) {
         const v = roles.validateKey(key);
         if (v.role) {
           rec.count = 0;
+          roles.noteKeyEntered(v.hash);
           audit.recordAction({
             roleTag: v.role,
             label: v.label,
@@ -8775,7 +8849,11 @@ function registerSocketHandlers(opts) {
             ip,
           });
         }
-        socket.emit("staff key result", { role: v.role, label: v.label });
+        socket.emit("staff key result", {
+          role: v.role,
+          label: v.label,
+          profile: roles.getProfile(v.hash),
+        });
       }),
     );
 

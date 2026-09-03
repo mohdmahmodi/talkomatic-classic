@@ -26,8 +26,12 @@ class Talkoboard {
     this.zoom = 1;
     this.isPanning = false;
     this.panStart = null;
-    this.MIN_ZOOM = 0.01;
+    this.MIN_ZOOM = 1e-5;
     this.MAX_ZOOM = 1e9;
+    this.wheelMode = "zoom";
+    try {
+      if (localStorage.getItem("tb_wheel") === "pan") this.wheelMode = "pan";
+    } catch (_) {}
     this._redrawRaf = null;
     this._gesturing = false;
 
@@ -363,9 +367,9 @@ class Talkoboard {
 
     const brand = panel("tb-brand");
     brand.innerHTML = this.icon("fa-paintbrush") + "<span>Talkoboard</span>";
-    const closeBtn = this.makeBtn("tb-btn", this.icon("fa-xmark"), "Close (Esc)");
-    closeBtn.addEventListener("click", () => this.close());
-    brand.appendChild(closeBtn);
+    this.saveBtn = this.makeBtn("tb-btn", this.icon("fa-download"), "Save as image");
+    this.saveBtn.addEventListener("click", () => this.togglePop("save"));
+    brand.appendChild(this.saveBtn);
 
     const tools = panel("tb-tools");
     this.panBtn = tool("pan", "fa-hand", "Move around (H, or hold Space)");
@@ -435,21 +439,27 @@ class Talkoboard {
     this.chatFab.addEventListener("click", () =>
       this.chatOpen ? this.closeChat() : this.openChat(),
     );
-    this.saveBtn = this.makeBtn("tb-btn", this.icon("fa-download"), "Save as image");
-    this.saveBtn.addEventListener("click", () => this.togglePop("save"));
+    const closeBtn = this.makeBtn("tb-btn", this.icon("fa-xmark"), "Close (Esc)");
+    closeBtn.addEventListener("click", () => this.close());
     actions.appendChild(this.chatFab);
-    actions.appendChild(this.saveBtn);
+    actions.appendChild(closeBtn);
 
     const view = panel("tb-zoom");
-    const zoomOut = this.makeBtn("tb-btn", this.icon("fa-minus"), "Zoom out (-)");
+    const zoomOut = this.makeBtn("tb-btn", this.icon("fa-minus"), "Zoom out (- or Ctrl+-)");
     this.zoomLabel = this.makeBtn("tb-zoom-label", "100%", "Back to 100% (0)");
-    const zoomIn = this.makeBtn("tb-btn", this.icon("fa-plus"), "Zoom in (+)");
+    const zoomIn = this.makeBtn("tb-btn", this.icon("fa-plus"), "Zoom in (+ or Ctrl++)");
     const fitBtn = this.makeBtn("tb-btn", this.icon("fa-expand"), "Fit the drawing on screen (F)");
     zoomOut.addEventListener("click", () => this.adjustZoom(-0.15));
     zoomIn.addEventListener("click", () => this.adjustZoom(0.15));
     this.zoomLabel.addEventListener("click", () => this.resetView());
     fitBtn.addEventListener("click", () => this.fitToView());
-    for (const el of [zoomOut, this.zoomLabel, zoomIn, sep(), fitBtn]) view.appendChild(el);
+    this.wheelBtn = this.makeBtn("tb-btn", "", "");
+    this.wheelBtn.addEventListener("click", () =>
+      this.setWheelMode(this.wheelMode === "zoom" ? "pan" : "zoom"),
+    );
+    for (const el of [zoomOut, this.zoomLabel, zoomIn, sep(), fitBtn, this.wheelBtn])
+      view.appendChild(el);
+    this.setWheelMode(this.wheelMode);
 
     const history = panel("tb-history");
     this.undoBtn = this.makeBtn("tb-btn", this.icon("fa-rotate-left"), "Undo (Ctrl+Z)");
@@ -839,12 +849,21 @@ class Talkoboard {
     );
     c.addEventListener("touchmove", (e) => e.preventDefault(), { passive: false });
 
+    // A mouse wheel clicks in notches; a trackpad streams small deltas on
+    // both axes. Notches zoom, trackpad scrolling moves the board, and a
+    // pinch or Ctrl+wheel always zooms. Zoom scales with the delta, so a
+    // gentle swipe gives a gentle zoom instead of a fixed jump per event.
     c.addEventListener(
       "wheel",
       (e) => {
         e.preventDefault();
-        const step = e.ctrlKey ? 0.04 : 0.08;
-        this.adjustZoom(e.deltaY > 0 ? -step : step, e);
+        const pinch = e.ctrlKey || e.metaKey;
+        const notch = e.deltaMode !== 0 || (e.deltaX === 0 && Math.abs(e.deltaY) >= 40);
+        if (pinch || (notch && this.wheelMode === "zoom")) return this.wheelZoom(e, pinch);
+        const dx = e.shiftKey && !e.deltaX ? e.deltaY : e.deltaX;
+        this.panX -= dx;
+        this.panY -= e.shiftKey && !e.deltaX ? 0 : e.deltaY;
+        this.viewChanged();
       },
       { passive: false },
     );
@@ -929,6 +948,9 @@ class Talkoboard {
       if (e.ctrlKey || e.metaKey) {
         if (k === "z" && !e.shiftKey) this.undo();
         else if (k === "y" || (k === "z" && e.shiftKey)) this.redo();
+        else if (k === "=" || k === "+") this.adjustZoom(0.15);
+        else if (k === "-") this.adjustZoom(-0.15);
+        else if (k === "0") this.resetView();
         else return;
         return e.preventDefault();
       }
@@ -2006,6 +2028,7 @@ class Talkoboard {
 
   formatZoom() {
     const z = this.zoom;
+    if (z < 0.1) return parseFloat((z * 100).toPrecision(2)) + "%";
     if (z < 10) return Math.round(z * 100) + "%";
     if (z < 1000) return Math.round(z) + "×";
     if (z < 1e6) return (z / 1000).toPrecision(3).replace(/\.?0+$/, "") + "k×";
@@ -2023,6 +2046,27 @@ class Talkoboard {
     this.panY = ay - (ay - this.panY) * (nz / this.zoom);
     this.zoom = nz;
     this.updateZoomLabel();
+  }
+
+  wheelZoom(e, pinch) {
+    const rect = this.canvas.getBoundingClientRect();
+    const dy = Math.max(-150, Math.min(150, e.deltaY));
+    const factor = Math.exp(-dy * (pinch ? 0.01 : 0.0028));
+    this.zoomAt(this.zoom * factor, e.clientX - rect.left, e.clientY - rect.top);
+    this.viewChanged();
+  }
+
+  setWheelMode(mode) {
+    this.wheelMode = mode === "pan" ? "pan" : "zoom";
+    try {
+      localStorage.setItem("tb_wheel", this.wheelMode);
+    } catch (_) {}
+    if (!this.wheelBtn) return;
+    const zoom = this.wheelMode === "zoom";
+    this.wheelBtn.innerHTML = this.icon(zoom ? "fa-magnifying-glass" : "fa-arrows-up-down-left-right");
+    this.wheelBtn.title = zoom
+      ? "Scrolling zooms. Click to make it move the board instead. Ctrl+scroll, pinch, + and - always zoom."
+      : "Scrolling moves the board. Click to make it zoom instead. Ctrl+scroll, pinch, + and - always zoom.";
   }
 
   adjustZoom(delta, e) {

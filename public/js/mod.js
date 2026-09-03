@@ -4404,7 +4404,25 @@
             ? n + " network" + (n === 1 ? "" : "s")
             : n + " address" + (n === 1 ? "" : "es"),
         );
-        hist.appendChild(sessKeyCard(h.label, h.role, groups, pill, h.ipCount));
+        const card = sessKeyCard(h.label, h.role, groups, pill, h.ipCount);
+        const nets = card.querySelector(".sess-nets");
+        const typed = span(
+          "cnt",
+          "typed in " + (h.entered || 0) + " time" + (h.entered === 1 ? "" : "s"),
+        );
+        if (h.enteredLast)
+          typed.title = "Last typed in " + new Date(h.enteredLast).toLocaleString();
+        nets.prepend(typed);
+        if (h.profile && h.profile.name)
+          nets.prepend(span("cnt", "signs in as " + h.profile.name));
+        for (const d of h.devices || []) {
+          const chip = span("cnt mono", d.id);
+          chip.title =
+            "Device seen " + d.count + " time" + (d.count === 1 ? "" : "s") +
+            ", last " + new Date(d.last).toLocaleString();
+          nets.appendChild(chip);
+        }
+        hist.appendChild(card);
       });
     }
   }

@@ -2123,10 +2123,16 @@ function init(injected) {
   load();
 }
 
+function ownerOf(botUserId) {
+  const rt = active.get(botUserId);
+  return rt ? rt.ownerId : null;
+}
+
 module.exports = {
   init,
   register,
   flushSync,
+  ownerOf,
   onText,
   onJoin,
   onLeave,

@@ -73,7 +73,7 @@
   font-size: 14px;
 }
 .tb-brand > i {
-  color: #5b5bd6;
+  color: #ff9800;
 }
 .tb-brand > span {
   margin-right: 4px;
@@ -94,7 +94,7 @@
 }
 .tb-history {
   bottom: 12px;
-  left: 216px;
+  left: 256px;
 }
 
 .tb-btn {
@@ -122,8 +122,8 @@
   color: #9a9aa6;
 }
 .tb-btn.active {
-  background: #e3e2ff;
-  color: #3b3bb5;
+  background: #ffe6c2;
+  color: #a85400;
 }
 .tb-btn.disabled {
   opacity: 0.35;
@@ -203,8 +203,8 @@
   width: 260px;
 }
 .tb-save-panel {
-  left: auto;
-  right: 12px;
+  left: 12px;
+  right: auto;
   transform: none;
   width: 290px;
 }
@@ -233,7 +233,7 @@
   transform: scale(1.08);
 }
 .tb-swatch.active {
-  outline: 2px solid #5b5bd6;
+  outline: 2px solid #ff9800;
   outline-offset: 2px;
 }
 .tb-custom-row {
@@ -302,7 +302,7 @@
 }
 .tb-size-row input[type="range"] {
   flex: 1;
-  accent-color: #5b5bd6;
+  accent-color: #ff9800;
 }
 .tb-size-label {
   min-width: 44px;
@@ -336,8 +336,8 @@
   background: #f0f0f4;
 }
 .tb-size-preset.active {
-  border-color: #5b5bd6;
-  background: #e3e2ff;
+  border-color: #ff9800;
+  background: #ffe6c2;
 }
 
 .tb-save-opt {
@@ -365,7 +365,7 @@
   width: 20px;
   text-align: center;
   font-size: 16px;
-  color: #5b5bd6;
+  color: #ff9800;
 }
 .tb-save-opt span {
   display: flex;
@@ -505,22 +505,22 @@
   outline: none;
 }
 .tb-chat-input:focus {
-  border-color: #5b5bd6;
+  border-color: #ff9800;
   background: #fff;
-  box-shadow: 0 0 0 3px rgba(91, 91, 214, 0.15);
+  box-shadow: 0 0 0 3px rgba(255, 152, 0, 0.22);
 }
 .tb-chat-send {
   width: 38px;
   height: 38px;
   border: 0;
   border-radius: 10px;
-  background: #5b5bd6;
+  background: #ff9800;
   color: #fff;
   font-size: 14px;
   cursor: pointer;
 }
 .tb-chat-send:hover {
-  background: #4a4ac4;
+  background: #f57c00;
 }
 .tb-chat-badge {
   position: absolute;
@@ -559,7 +559,7 @@
   margin: -6px 0 0 -6px;
   border: 2px solid #fff;
   border-radius: 50%;
-  background: #5b5bd6;
+  background: #ff9800;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 }
 .tb-cursor-label {
@@ -734,8 +734,8 @@
   .tb-save-panel {
     top: 58px;
     bottom: auto;
-    left: auto;
-    right: 10px;
+    left: 10px;
+    right: auto;
     width: 290px;
     max-width: calc(100% - 20px);
   }

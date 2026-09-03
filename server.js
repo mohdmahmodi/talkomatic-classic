@@ -495,6 +495,7 @@ io.use((socket, next) => {
         devMatch.label,
         "dev",
         clientIp,
+        socket.deviceId,
       ).newIp;
       console.log(
         `[DEV] Dev mode activated (${devMatch.label}) for IP:${clientIp}`,
@@ -518,6 +519,7 @@ io.use((socket, next) => {
           mk.label,
           "mod",
           clientIp,
+          socket.deviceId,
         ).newIp;
         console.log(`[MOD] Mod mode activated (${mk.label}) for IP:${clientIp}`);
       } else if (modKey) {

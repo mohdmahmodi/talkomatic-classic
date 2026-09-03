@@ -2887,6 +2887,43 @@ socket.on("staff revoked notice", (d) => {
   }
 });
 
+// The name, location and picture the key last signed in with, sent by the
+// server when the key is typed in or when it arrives on a device with no
+// name saved yet.
+function applyStaffProfile(p) {
+  if (!p || !p.name) return;
+  localStorage.setItem("talkomaticUsername", p.name);
+  localStorage.setItem("talkomaticLocation", p.location || "On The Web");
+  usernameInput.value = p.name;
+  locationInput.value = p.location || "";
+  const av = p.avatar;
+  if (av && av.preset) {
+    localStorage.setItem("talkomaticPresetPfp", String(av.preset));
+    localStorage.removeItem("talkomaticPfpEnabled");
+  } else if (av && av.id && av.hash) {
+    localStorage.removeItem("talkomaticPresetPfp");
+    localStorage.setItem("talkomaticPfpEnabled", "1");
+    localStorage.setItem(
+      "talkomaticPfp",
+      JSON.stringify({
+        discordId: av.id,
+        hash: av.hash,
+        animated: !!av.animated,
+        fetchedAt: Date.now(),
+      }),
+    );
+  }
+  const master = document.getElementById("pfpMasterEnable");
+  if (av && master && !master.checked) {
+    master.checked = true;
+    master.dispatchEvent(new Event("change"));
+  }
+  if (typeof updatePfpPreview === "function") updatePfpPreview();
+}
+socket.on("staff profile", (p) => {
+  if (!localStorage.getItem("talkomaticUsername")) applyStaffProfile(p);
+});
+
 // ── Staff key entry (no console needed) ──────────────────────────────────────
 let pendingStaffKey = null;
 async function openStaffKeyEntry() {
@@ -2928,6 +2965,7 @@ socket.on("staff key result", (d) => {
     localStorage.setItem("talkomatic_devKey", pendingStaffKey);
   else localStorage.setItem("talkomatic_modKey", pendingStaffKey);
   pendingStaffKey = null;
+  applyStaffProfile(d.profile);
   lobbyNotify(
     `Key accepted. You are ${d.role}${d.label ? " (" + d.label + ")" : ""}. Reloading…`,
     "success",

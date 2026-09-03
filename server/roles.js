@@ -448,23 +448,52 @@ function saveKeyActivitySoon() {
   }, 2000);
 }
 
-function recordKeyUse(hash, label, role, ip) {
-  if (!hash || !ip) return { newIp: false };
+function keyRecord(hash, label, role) {
   let rec = keyActivity[hash];
   if (!rec) rec = keyActivity[hash] = { label: label || role, role, ips: {} };
-  rec.label = label || rec.label;
-  rec.role = role || rec.role;
-  const now = Date.now();
-  const seen = rec.ips[ip];
-  const newIp = !seen;
+  if (label) rec.label = label;
+  if (role) rec.role = role;
+  if (!rec.devices) rec.devices = {};
+  return rec;
+}
+
+function bump(map, key, now) {
+  const seen = map[key];
   if (seen) {
     seen.last = now;
     seen.count = (seen.count || 0) + 1;
-  } else {
-    rec.ips[ip] = { first: now, last: now, count: 1 };
-  }
+  } else map[key] = { first: now, last: now, count: 1 };
+  return !seen;
+}
+
+function recordKeyUse(hash, label, role, ip, deviceId) {
+  if (!hash || !ip) return { newIp: false };
+  const rec = keyRecord(hash, label, role);
+  const now = Date.now();
+  const newIp = bump(rec.ips, ip, now);
+  if (deviceId) bump(rec.devices, deviceId, now);
   saveKeyActivitySoon();
   return { newIp };
+}
+
+// The name, location and picture a key last signed in with, so the next
+// device it is typed into can fill them in.
+function rememberProfile(hash, profile) {
+  if (!hash || !profile?.name) return;
+  keyRecord(hash).profile = { ...profile, at: Date.now() };
+  saveKeyActivitySoon();
+}
+
+function getProfile(hash) {
+  return (hash && keyActivity[hash]?.profile) || null;
+}
+
+function noteKeyEntered(hash) {
+  if (!hash) return;
+  const rec = keyRecord(hash);
+  rec.entered = (rec.entered || 0) + 1;
+  rec.enteredLast = Date.now();
+  saveKeyActivitySoon();
 }
 
 // Stamp "last" for a key+ip without counting a new use. Called when a staff
@@ -495,6 +524,12 @@ function getKeyActivity() {
     ips: Object.entries(r.ips || {})
       .map(([ip, m]) => ({ ip, first: m.first, last: m.last, count: m.count }))
       .sort((a, b) => (b.last || 0) - (a.last || 0)),
+    devices: Object.entries(r.devices || {})
+      .map(([id, m]) => ({ id, first: m.first, last: m.last, count: m.count }))
+      .sort((a, b) => (b.last || 0) - (a.last || 0)),
+    entered: r.entered || 0,
+    enteredLast: r.enteredLast || 0,
+    profile: r.profile ? { name: r.profile.name, at: r.profile.at } : null,
   }));
 }
 
@@ -505,6 +540,9 @@ loadFormerMods();
 
 module.exports = {
   hashKey,
+  rememberProfile,
+  getProfile,
+  noteKeyEntered,
   loadModKeys,
   saveModKeys,
   loadDevKeys,
