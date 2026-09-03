@@ -4320,6 +4320,8 @@ function registerSocketHandlers(opts) {
           {
             userId: socket.handshake.session.userId,
             username: socket.handshake.session.username || "Anonymous",
+            avatar: socket.handshake.session.avatar || null,
+            role: socket.isHidden ? null : staffRoleOf(socket),
             text,
             timestamp: Date.now(),
           },
@@ -5459,6 +5461,18 @@ function registerSocketHandlers(opts) {
           } else if (/^[a-f0-9-]{8,64}$/i.test(entry) && entry.includes("-")) {
             did = entry.toLowerCase();
             key = ipban.idKey(did);
+          } else if (/^[\w-]{20,64}$/.test(entry)) {
+            // A user id copied from the dashboard. Resolve it to the device
+            // behind it through a live socket or the last-seen record.
+            did =
+              findSocketsByUserId(entry).find((s) => s.deviceId)?.deviceId ||
+              lastseen.get(entry)?.deviceId ||
+              null;
+            if (!did) {
+              skipped.push(entry);
+              continue;
+            }
+            key = ipban.idKey(did);
           } else {
             skipped.push(entry);
             continue;
@@ -5486,7 +5500,7 @@ function registerSocketHandlers(opts) {
           return fail(
             ERROR_CODES.BAD_REQUEST,
             skipped.length === 1
-              ? `"${skipped[0]}" is not an address, a range, or a client id.`
+              ? `"${skipped[0]}" is not an address, a range, or a client id. A user id only works while that person is online or was seen recently.`
               : "None of those are an address, a range, or a client id.",
           );
 

@@ -2826,7 +2826,7 @@
       fields: [
         {
           name: "id",
-          label: "Client id",
+          label: "Client id or user id",
           type: "text",
           required: true,
           placeholder: "e.g. 1d9a444c-b844-4a7b-b55c-04c6810fb7bd",

@@ -4692,7 +4692,7 @@
   const looksLikeIp = (s) =>
     /^[0-9a-f.:]+$/i.test(s) && (s.includes(".") || s.includes(":"));
   const looksLikeClientId = (s) =>
-    /^[a-f0-9-]{8,64}$/i.test(s) && s.includes("-");
+    (/^[a-f0-9-]{8,64}$/i.test(s) && s.includes("-")) || /^[\w-]{20,64}$/.test(s);
 
   async function runCommand(line) {
     lastCommandAt = Date.now();

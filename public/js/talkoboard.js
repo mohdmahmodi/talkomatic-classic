@@ -1,4 +1,4 @@
-// talkoboard.js v3.3 - Collaborative whiteboard for Talkomatic
+// talkoboard.js v4.0 - Collaborative whiteboard for Talkomatic
 //
 
 class Talkoboard {
@@ -304,22 +304,11 @@ class Talkoboard {
   showChatRateWarning(text) {
     if (this.chatCooldownActive) return;
     this.chatCooldownActive = true;
-
-    const msg = document.createElement("div");
-    msg.className = "tb-chat-msg tb-chat-system";
-    const span = document.createElement("span");
-    span.className = "tb-chat-text";
-    span.textContent = text;
-    msg.appendChild(span);
-    this._appendChat(msg);
-
+    this.addSystemChat(text);
     setTimeout(() => {
       this.chatCooldownActive = false;
     }, 1000);
   }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // ═══════════════════════════════════════════════════════════════════════════
 
   makeBtn(className, label, title) {
     const b = document.createElement("button");
@@ -330,291 +319,165 @@ class Talkoboard {
     return b;
   }
 
+  icon(name) {
+    return '<i class="fas ' + name + '"></i>';
+  }
+
+  // One full-screen canvas with the controls floating over it: name and close
+  // top left, tools top centre, chat and save top right, zoom and history
+  // bottom left. Phones move the tools to the bottom edge.
   buildModal() {
     this.modal = document.createElement("div");
     this.modal.id = "talkoboardModal";
     this.modal.className = "tb-overlay";
 
-    const container = document.createElement("div");
-    container.className = "tb-container";
-
-    // ── Header / Toolbar ────────────────────────────────────────────
-    const header = document.createElement("div");
-    header.className = "tb-header";
-
-    const toolbar = document.createElement("div");
-    toolbar.className = "tb-toolbar";
-
-    // ── Group: the tools ────────────────────────────────────────────
-    const drawGroup = document.createElement("div");
-    drawGroup.className = "tb-group";
-    this.toolBtns = {};
-
-    const tool = (name, icon, title) => {
-      const b = this.makeBtn(
-        "tb-tool-btn tb-icon-btn" + (name === "pen" ? " active" : ""),
-        '<i class="fas ' + icon + '"></i>',
-        title,
-      );
-      b.addEventListener("click", () => this.setTool(name));
-      this.toolBtns[name] = b;
-      drawGroup.appendChild(b);
-      return b;
-    };
-
-    this.panBtn = tool("pan", "fa-hand", "Move (drag to pan)");
-    this.penBtn = tool("pen", "fa-pen", "Pen");
-    this.eraserBtn = tool("eraser", "fa-eraser", "Eraser");
-
-    const shapeGroup = document.createElement("div");
-    shapeGroup.className = "tb-group";
-    const shape = (name, icon, title) => {
-      const b = this.makeBtn(
-        "tb-tool-btn tb-icon-btn",
-        '<i class="fas ' + icon + '"></i>',
-        title,
-      );
-      b.addEventListener("click", () => this.setTool(name));
-      this.toolBtns[name] = b;
-      shapeGroup.appendChild(b);
-      return b;
-    };
-    shape("line", "fa-slash", "Line - hold Shift to snap the angle");
-    shape("rect", "fa-square", "Rectangle - hold Shift for a square");
-    shape("ellipse", "fa-circle", "Ellipse - hold Shift for a circle");
-    shape("triangle", "fa-play", "Triangle");
-    this.toolBtns.triangle.querySelector("i").style.transform = "rotate(-90deg)";
-    shape("bucket", "fa-fill-drip", "Fill a closed area with the current color");
-
-    this.fillBtn = this.makeBtn(
-      "tb-tool-btn tb-icon-btn off",
-      '<i class="fas fa-square-full"></i>',
-      "Draw shapes filled in",
-    );
-    this.fillBtn.addEventListener("click", () =>
-      this.setFillShapes(!this.fillShapes),
-    );
-    shapeGroup.appendChild(this.fillBtn);
-
-    const areaGroup = document.createElement("div");
-    areaGroup.className = "tb-group";
-    const areaBtn = this.makeBtn(
-      "tb-tool-btn tb-icon-btn",
-      '<i class="fas fa-vector-square"></i>',
-      "Claim an area - drag a box only you can draw in",
-    );
-    areaBtn.addEventListener("click", () => this.setTool("claim"));
-    this.toolBtns.claim = areaBtn;
-    areaGroup.appendChild(areaBtn);
-    this.releaseBtn = this.makeBtn(
-      "tb-tool-btn tb-icon-btn",
-      '<i class="fas fa-square-xmark"></i>',
-      "Give your area back",
-    );
-    this.releaseBtn.addEventListener("click", () =>
-      this.socket.emit("board unclaim", {}),
-    );
-    this.releaseBtn.style.display = "none";
-    areaGroup.appendChild(this.releaseBtn);
-
-    if (this.isStaff) {
-      this.inspectBtn = this.makeBtn(
-        "tb-tool-btn tb-icon-btn tb-mod-btn",
-        '<i class="fas fa-user-shield"></i>',
-        "Mod tools - tap a drawing to see who made it",
-      );
-      this.inspectBtn.addEventListener("click", () => this.setTool("inspect"));
-      this.toolBtns.inspect = this.inspectBtn;
-    }
-
-    // ── Group: color ────────────────────────────────────────────────
-    const colorGroup = document.createElement("div");
-    colorGroup.className = "tb-group";
-
-    this.colorBtn = document.createElement("button");
-    this.colorBtn.type = "button";
-    this.colorBtn.className = "tb-color-btn";
-    this.colorBtn.title = "Colors";
-    this.colorSwatch = document.createElement("span");
-    this.colorSwatch.className = "tb-color-current";
-    this.colorSwatch.style.background = this.color;
-    const colorCaret = document.createElement("span");
-    colorCaret.className = "tb-color-caret";
-    colorCaret.innerHTML = '<i class="fas fa-caret-down"></i>';
-    this.colorBtn.appendChild(this.colorSwatch);
-    this.colorBtn.appendChild(colorCaret);
-    this.colorBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      this.toggleColorPanel();
-    });
-
-    colorGroup.appendChild(this.colorBtn);
-
-    // ── Group: size ─────────────────────────────────────────────────
-    const sizeWrap = document.createElement("div");
-    sizeWrap.className = "tb-group tb-size-wrap";
-    this.sizeDot = document.createElement("span");
-    this.sizeDot.className = "tb-size-dot";
-    this.sizeInput = document.createElement("input");
-    this.sizeInput.type = "range";
-    this.sizeInput.min = "1";
-    this.sizeInput.max = "30";
-    this.sizeInput.value = String(this.size);
-    this.sizeInput.title = "Brush size";
-    this.sizeLabel = document.createElement("span");
-    this.sizeLabel.className = "tb-size-label";
-    this.sizeLabel.textContent = String(this.size);
-    sizeWrap.appendChild(this.sizeDot);
-    sizeWrap.appendChild(this.sizeInput);
-    sizeWrap.appendChild(this.sizeLabel);
-    this.sizeInput.addEventListener("input", (e) => {
-      this.size = parseInt(e.target.value);
-      this.sizeLabel.textContent = String(this.size);
-      this.updateSizeDot();
-      this.updateCursor();
-    });
-    this.updateSizeDot();
-
-    // ── Group: undo / redo ──────────────────────────────────────────
-    const historyGroup = document.createElement("div");
-    historyGroup.className = "tb-group";
-    this.undoBtn = this.makeBtn(
-      "tb-tool-btn tb-icon-btn",
-      '<i class="fas fa-rotate-left"></i>',
-      "Undo (Ctrl+Z)",
-    );
-    this.redoBtn = this.makeBtn(
-      "tb-tool-btn tb-icon-btn",
-      '<i class="fas fa-rotate-right"></i>',
-      "Redo (Ctrl+Y)",
-    );
-    this.undoBtn.addEventListener("click", () => this.undo());
-    this.redoBtn.addEventListener("click", () => this.redo());
-    historyGroup.appendChild(this.undoBtn);
-    historyGroup.appendChild(this.redoBtn);
-
-    const modGroup = document.createElement("div");
-    modGroup.className = "tb-group tb-mod-group";
-    if (this.inspectBtn) modGroup.appendChild(this.inspectBtn);
-
-    toolbar.appendChild(drawGroup);
-    toolbar.appendChild(shapeGroup);
-    toolbar.appendChild(areaGroup);
-    toolbar.appendChild(colorGroup);
-    toolbar.appendChild(sizeWrap);
-    toolbar.appendChild(historyGroup);
-    if (this.inspectBtn) toolbar.appendChild(modGroup);
-
-    // Everything that draws disappears while watching; pan, zoom, save and
-    // the staff inspector stay.
-    this.watchHide = [
-      this.penBtn,
-      this.eraserBtn,
-      shapeGroup,
-      areaGroup,
-      colorGroup,
-      sizeWrap,
-      historyGroup,
-    ];
-
-    // ── Header right: save + zoom + close ───────────────────────────
-    const headerRight = document.createElement("div");
-    headerRight.className = "tb-header-right";
-
-    this.saveBtn = this.makeBtn(
-      "tb-tool-btn tb-icon-btn",
-      '<i class="fas fa-download"></i>',
-      "Save as image",
-    );
-    this.saveBtn.addEventListener("click", () => this.exportBoard());
-    headerRight.appendChild(this.saveBtn);
-
-    const zoomWrap = document.createElement("div");
-    zoomWrap.className = "tb-group tb-zoom-wrap";
-    const zoomOut = this.makeBtn(
-      "tb-tool-btn tb-icon-btn",
-      '<i class="fas fa-magnifying-glass-minus"></i>',
-      "Zoom out",
-    );
-    this.zoomLabel = document.createElement("span");
-    this.zoomLabel.className = "tb-zoom-label";
-    this.zoomLabel.textContent = "100%";
-    const zoomIn = this.makeBtn(
-      "tb-tool-btn tb-icon-btn",
-      '<i class="fas fa-magnifying-glass-plus"></i>',
-      "Zoom in",
-    );
-    const zoomReset = this.makeBtn(
-      "tb-tool-btn tb-icon-btn",
-      '<i class="fas fa-expand"></i>',
-      "Reset view (100%)",
-    );
-    const fitBtn = this.makeBtn(
-      "tb-tool-btn tb-icon-btn",
-      '<i class="fas fa-arrows-to-dot"></i>',
-      "Fit drawing to screen",
-    );
-    zoomOut.addEventListener("click", () => this.adjustZoom(-0.15));
-    zoomIn.addEventListener("click", () => this.adjustZoom(0.15));
-    zoomReset.addEventListener("click", () => this.resetView());
-    fitBtn.addEventListener("click", () => this.fitToView());
-    zoomWrap.appendChild(zoomOut);
-    zoomWrap.appendChild(this.zoomLabel);
-    zoomWrap.appendChild(zoomIn);
-    zoomWrap.appendChild(zoomReset);
-    zoomWrap.appendChild(fitBtn);
-
-    const closeBtn = this.makeBtn(
-      "tb-close",
-      '<i class="fas fa-xmark"></i>',
-      "Close",
-    );
-    closeBtn.addEventListener("click", () => this.close());
-
-    headerRight.appendChild(zoomWrap);
-    headerRight.appendChild(closeBtn);
-
-    const brand = document.createElement("div");
-    brand.className = "tb-brand";
-    brand.innerHTML = '<i class="fas fa-palette"></i><span>Talkoboard</span>';
-
-    header.appendChild(brand);
-    header.appendChild(toolbar);
-    header.appendChild(headerRight);
-
-    // ── Canvas area ─────────────────────────────────────────────────
-    const canvasWrap = document.createElement("div");
-    canvasWrap.className = "tb-canvas-wrap";
-
+    const stage = document.createElement("div");
+    stage.className = "tb-stage";
     this.canvas = document.createElement("canvas");
     this.canvas.id = "tbCanvas";
     this.ctx = this.canvas.getContext("2d");
-
     this.cursorLayer = document.createElement("div");
     this.cursorLayer.className = "tb-cursor-layer";
+    stage.appendChild(this.canvas);
+    stage.appendChild(this.cursorLayer);
+    this.canvasWrap = stage;
 
-    canvasWrap.appendChild(this.canvas);
-    canvasWrap.appendChild(this.cursorLayer);
+    const panel = (cls) => {
+      const p = document.createElement("div");
+      p.className = "tb-panel " + cls;
+      p.addEventListener("pointerdown", (e) => e.stopPropagation());
+      return p;
+    };
+    const sep = () => {
+      const s = document.createElement("span");
+      s.className = "tb-sep";
+      return s;
+    };
+    this.toolBtns = {};
+    const tool = (name, fa, title, cls) => {
+      const b = this.makeBtn("tb-btn" + (cls ? " " + cls : ""), this.icon(fa), title);
+      b.addEventListener("click", () => this.setTool(name));
+      this.toolBtns[name] = b;
+      return b;
+    };
 
-    this.buildColorPanel(canvasWrap);
+    const brand = panel("tb-brand");
+    brand.innerHTML = this.icon("fa-paintbrush") + "<span>Talkoboard</span>";
+    const closeBtn = this.makeBtn("tb-btn", this.icon("fa-xmark"), "Close (Esc)");
+    closeBtn.addEventListener("click", () => this.close());
+    brand.appendChild(closeBtn);
+
+    const tools = panel("tb-tools");
+    this.panBtn = tool("pan", "fa-hand", "Move around (H, or hold Space)");
+    this.penBtn = tool("pen", "fa-pen", "Pen (P)");
+    this.eraserBtn = tool("eraser", "fa-eraser", "Eraser (E)");
+    const shapes = [
+      tool("line", "fa-slash", "Line (L), Shift snaps the angle"),
+      tool("rect", "fa-square", "Rectangle (R), Shift for a square"),
+      tool("ellipse", "fa-circle", "Ellipse (O), Shift for a circle"),
+      tool("triangle", "fa-play", "Triangle (T)"),
+    ];
+    shapes[3].querySelector("i").style.transform = "rotate(-90deg)";
+    this.fillBtn = this.makeBtn("tb-btn off", this.icon("fa-fill"), "Filled shapes");
+    this.fillBtn.addEventListener("click", () => this.setFillShapes(!this.fillShapes));
+    const bucket = tool("bucket", "fa-fill-drip", "Fill a closed area (B)");
+    const claim = tool("claim", "fa-vector-square", "Claim an area only you can draw in");
+    this.releaseBtn = this.makeBtn("tb-btn", this.icon("fa-square-xmark"), "Give your area back");
+    this.releaseBtn.addEventListener("click", () => this.socket.emit("board unclaim", {}));
+    this.releaseBtn.style.display = "none";
+
+    this.colorBtn = this.makeBtn("tb-btn tb-color-btn", "", "Color (C)");
+    this.colorSwatch = document.createElement("span");
+    this.colorSwatch.className = "tb-color-current";
+    this.colorSwatch.style.background = this.color;
+    this.colorBtn.appendChild(this.colorSwatch);
+    this.colorBtn.addEventListener("click", () => this.togglePop("color"));
+
+    this.sizeBtn = this.makeBtn("tb-btn tb-size-btn", "", "Brush size (S)");
+    this.sizeDot = document.createElement("span");
+    this.sizeDot.className = "tb-size-dot";
+    this.sizeBtn.appendChild(this.sizeDot);
+    this.sizeBtn.addEventListener("click", () => this.togglePop("size"));
+
+    const drawTools = [
+      this.penBtn,
+      this.eraserBtn,
+      sep(),
+      ...shapes,
+      this.fillBtn,
+      bucket,
+      sep(),
+      claim,
+      this.releaseBtn,
+      sep(),
+      this.colorBtn,
+      this.sizeBtn,
+    ];
+    tools.appendChild(this.panBtn);
+    for (const el of drawTools) tools.appendChild(el);
+    if (this.isStaff) {
+      this.inspectBtn = tool(
+        "inspect",
+        "fa-user-shield",
+        "Mod tools: tap a drawing to see who made it",
+        "tb-mod-btn",
+      );
+      tools.appendChild(sep());
+      tools.appendChild(this.inspectBtn);
+    }
+
+    const actions = panel("tb-actions");
+    this.chatFab = this.makeBtn(
+      "tb-btn",
+      this.icon("fa-comment") + '<span class="tb-chat-badge"></span>',
+      "Chat",
+    );
+    this.chatFab.addEventListener("click", () =>
+      this.chatOpen ? this.closeChat() : this.openChat(),
+    );
+    this.saveBtn = this.makeBtn("tb-btn", this.icon("fa-download"), "Save as image");
+    this.saveBtn.addEventListener("click", () => this.togglePop("save"));
+    actions.appendChild(this.chatFab);
+    actions.appendChild(this.saveBtn);
+
+    const view = panel("tb-zoom");
+    const zoomOut = this.makeBtn("tb-btn", this.icon("fa-minus"), "Zoom out (-)");
+    this.zoomLabel = this.makeBtn("tb-zoom-label", "100%", "Back to 100% (0)");
+    const zoomIn = this.makeBtn("tb-btn", this.icon("fa-plus"), "Zoom in (+)");
+    const fitBtn = this.makeBtn("tb-btn", this.icon("fa-expand"), "Fit the drawing on screen (F)");
+    zoomOut.addEventListener("click", () => this.adjustZoom(-0.15));
+    zoomIn.addEventListener("click", () => this.adjustZoom(0.15));
+    this.zoomLabel.addEventListener("click", () => this.resetView());
+    fitBtn.addEventListener("click", () => this.fitToView());
+    for (const el of [zoomOut, this.zoomLabel, zoomIn, sep(), fitBtn]) view.appendChild(el);
+
+    const history = panel("tb-history");
+    this.undoBtn = this.makeBtn("tb-btn", this.icon("fa-rotate-left"), "Undo (Ctrl+Z)");
+    this.redoBtn = this.makeBtn("tb-btn", this.icon("fa-rotate-right"), "Redo (Ctrl+Y)");
+    this.undoBtn.addEventListener("click", () => this.undo());
+    this.redoBtn.addEventListener("click", () => this.redo());
+    history.appendChild(this.undoBtn);
+    history.appendChild(this.redoBtn);
+
+    this.watchHide = drawTools.concat([history]);
 
     this.hintEl = document.createElement("div");
     this.hintEl.className = "tb-hint";
-    canvasWrap.appendChild(this.hintEl);
 
-    this.canvasWrap = canvasWrap;
-
-    // ── Chat panel ──────────────────────────────────────────────────
-    this.buildChat(canvasWrap);
-
-    // ── Assemble ────────────────────────────────────────────────────
-    container.appendChild(header);
-    container.appendChild(canvasWrap);
-    this.modal.appendChild(container);
+    for (const el of [stage, brand, tools, actions, view, history, this.hintEl])
+      this.modal.appendChild(el);
+    this.pops = {};
+    this.buildColorPanel(this.modal);
+    this.colorPanel.classList.add("tb-pop");
+    this.pops.color = { panel: this.colorPanel, btn: this.colorBtn };
+    this.buildSizePanel(this.modal);
+    this.buildSavePanel(this.modal);
+    this.buildChat(this.modal);
     document.body.appendChild(this.modal);
 
     this.updateUndoRedoButtons();
     this.bindCanvasEvents();
+    this.setTool("pen");
     this.setWatching(this.watching);
   }
 
@@ -625,6 +488,98 @@ class Talkoboard {
     for (const el of this.watchHide || [])
       if (el) el.style.display = this.watching ? "none" : "";
     if (this.watching) this.setTool("pan");
+    else this.setClaims(this.claims);
+  }
+
+  buildSizePanel(parent) {
+    const panel = document.createElement("div");
+    panel.className = "tb-pop tb-size-panel";
+    panel.addEventListener("pointerdown", (e) => e.stopPropagation());
+    const title = document.createElement("div");
+    title.className = "tb-pop-title";
+    title.textContent = "Brush size";
+    const row = document.createElement("div");
+    row.className = "tb-size-row";
+    this.sizeInput = document.createElement("input");
+    this.sizeInput.type = "range";
+    this.sizeInput.min = "1";
+    this.sizeInput.max = "30";
+    this.sizeInput.addEventListener("input", (e) => this.setSize(+e.target.value));
+    this.sizeLabel = document.createElement("span");
+    this.sizeLabel.className = "tb-size-label";
+    row.appendChild(this.sizeInput);
+    row.appendChild(this.sizeLabel);
+    const presets = document.createElement("div");
+    presets.className = "tb-size-presets";
+    this.sizePresetEls = [];
+    for (const n of [2, 4, 8, 14, 22]) {
+      const b = this.makeBtn("tb-size-preset", "", n + " px");
+      const dot = document.createElement("span");
+      dot.style.width = dot.style.height = Math.min(22, n + 3) + "px";
+      b.appendChild(dot);
+      b.addEventListener("click", () => this.setSize(n));
+      presets.appendChild(b);
+      this.sizePresetEls.push({ el: b, n });
+    }
+    panel.appendChild(title);
+    panel.appendChild(row);
+    panel.appendChild(presets);
+    parent.appendChild(panel);
+    this.pops.size = { panel, btn: this.sizeBtn };
+    this.setSize(this.size);
+  }
+
+  buildSavePanel(parent) {
+    const panel = document.createElement("div");
+    panel.className = "tb-pop tb-save-panel";
+    panel.addEventListener("pointerdown", (e) => e.stopPropagation());
+    const title = document.createElement("div");
+    title.className = "tb-pop-title";
+    title.textContent = "Save as PNG";
+    panel.appendChild(title);
+    const option = (fa, label, note, mode) => {
+      const b = this.makeBtn(
+        "tb-save-opt",
+        this.icon(fa) + "<span><b>" + label + "</b><small>" + note + "</small></span>",
+      );
+      b.addEventListener("click", () => {
+        this.closePops();
+        this.exportBoard(mode);
+      });
+      panel.appendChild(b);
+    };
+    option("fa-crop-simple", "What I can see", "This view, at twice the resolution", "view");
+    option("fa-image", "The whole board", "Everything anyone drew, fitted into one image", "all");
+    parent.appendChild(panel);
+    this.pops.save = { panel, btn: this.saveBtn };
+  }
+
+  // Popovers hang off their toolbar button; opening one closes the rest.
+  togglePop(name, force) {
+    const pop = this.pops[name];
+    if (!pop) return;
+    const open = force != null ? !!force : !pop.panel.classList.contains("show");
+    this.closePops();
+    if (!open) return;
+    pop.panel.classList.add("show");
+    pop.btn.classList.add("active");
+    if (name === "color") {
+      this.renderRecentColors();
+      this.renderUserColors();
+    }
+  }
+
+  closePops() {
+    for (const p of Object.values(this.pops || {})) {
+      p.panel.classList.remove("show");
+      p.btn.classList.remove("active");
+    }
+  }
+
+  popOpen() {
+    return Object.values(this.pops || {}).some((p) =>
+      p.panel.classList.contains("show"),
+    );
   }
 
   // ── Color panel ──────────────────────────────────────────────────
@@ -737,14 +692,7 @@ class Talkoboard {
   }
 
   toggleColorPanel(force) {
-    const open =
-      force != null ? force : !this.colorPanel.classList.contains("show");
-    this.colorPanel.classList.toggle("show", open);
-    this.colorBtn.classList.toggle("active", open);
-    if (open) {
-      this.renderRecentColors();
-      this.renderUserColors();
-    }
+    this.togglePop("color", force);
   }
 
   renderRecentColors() {
@@ -795,32 +743,18 @@ class Talkoboard {
     }
   }
 
-  // ── Chat (closable panel, bottom-right) ──────────────────────────
+  // ── Chat: a light panel docked on the right, a sheet on phones ───
   buildChat(parent) {
     const chat = document.createElement("div");
     chat.className = "tb-chat";
-
-    this.chatFab = document.createElement("button");
-    this.chatFab.type = "button";
-    this.chatFab.className = "tb-chat-fab";
-    this.chatFab.title = "Open chat";
-    this.chatFab.innerHTML =
-      '<i class="fas fa-comment-dots"></i><span class="tb-chat-badge"></span>';
-    this.chatFab.addEventListener("click", () => this.openChat());
-
-    const panel = document.createElement("div");
-    panel.className = "tb-chat-panel";
+    chat.addEventListener("pointerdown", (e) => e.stopPropagation());
 
     const bar = document.createElement("div");
     bar.className = "tb-chat-bar";
     const title = document.createElement("span");
     title.className = "tb-chat-title";
-    title.innerHTML = '<i class="fas fa-comment-dots"></i><span>Chat</span>';
-    const closeChatBtn = document.createElement("button");
-    closeChatBtn.type = "button";
-    closeChatBtn.className = "tb-chat-close-btn";
-    closeChatBtn.title = "Hide chat";
-    closeChatBtn.innerHTML = '<i class="fas fa-xmark"></i>';
+    title.textContent = "Chat";
+    const closeChatBtn = this.makeBtn("tb-btn", this.icon("fa-xmark"), "Hide chat");
     closeChatBtn.addEventListener("click", () => this.closeChat());
     bar.appendChild(title);
     bar.appendChild(closeChatBtn);
@@ -833,7 +767,7 @@ class Talkoboard {
     this.chatInput = document.createElement("input");
     this.chatInput.type = "text";
     this.chatInput.className = "tb-chat-input";
-    this.chatInput.placeholder = "Say something…";
+    this.chatInput.placeholder = "Say something";
     this.chatInput.maxLength = 200;
     this.chatInput.addEventListener("keydown", (e) => {
       if (e.key === "Enter") this.submitChat();
@@ -843,22 +777,14 @@ class Talkoboard {
       }
       e.stopPropagation();
     });
-    this.chatSendBtn = document.createElement("button");
-    this.chatSendBtn.type = "button";
-    this.chatSendBtn.className = "tb-chat-send";
-    this.chatSendBtn.title = "Send";
-    this.chatSendBtn.innerHTML = '<i class="fas fa-paper-plane"></i>';
+    this.chatSendBtn = this.makeBtn("tb-chat-send", this.icon("fa-paper-plane"), "Send");
     this.chatSendBtn.addEventListener("click", () => this.submitChat());
     inputRow.appendChild(this.chatInput);
     inputRow.appendChild(this.chatSendBtn);
 
-    panel.appendChild(bar);
-    panel.appendChild(this.chatLog);
-    panel.appendChild(inputRow);
-
-    chat.appendChild(panel);
-    chat.appendChild(this.chatFab);
-
+    chat.appendChild(bar);
+    chat.appendChild(this.chatLog);
+    chat.appendChild(inputRow);
     this.chatEl = chat;
     parent.appendChild(chat);
   }
@@ -871,177 +797,167 @@ class Talkoboard {
   }
 
   openChat() {
+    this.closePops();
     this.chatOpen = true;
     this.chatEl.classList.add("open");
+    this.chatFab.classList.add("active");
     this.chatUnread = 0;
     this.updateChatBadge();
     setTimeout(() => this.chatInput && this.chatInput.focus(), 30);
-    if (this.chatLog) this.chatLog.scrollTop = this.chatLog.scrollHeight;
+    this.chatLog.scrollTop = this.chatLog.scrollHeight;
   }
 
   closeChat() {
     this.chatOpen = false;
     this.chatEl.classList.remove("open");
-    if (this.chatInput) this.chatInput.blur();
+    this.chatFab.classList.remove("active");
+    this.chatInput.blur();
   }
 
   updateChatBadge() {
-    if (this.chatFab) this.chatFab.classList.toggle("has-unread", this.chatUnread > 0);
+    const badge = this.chatFab.querySelector(".tb-chat-badge");
+    badge.textContent = this.chatUnread > 9 ? "9+" : String(this.chatUnread);
+    this.chatFab.classList.toggle("has-unread", this.chatUnread > 0);
   }
 
   bindCanvasEvents() {
-    this.canvas.addEventListener("pointerdown", (e) => this.onPointerDown(e));
-    this.canvas.addEventListener("pointermove", (e) => this.onPointerMove(e));
-    this.canvas.addEventListener("pointerup", (e) => this.onPointerUp(e));
-    this.canvas.addEventListener("pointerleave", (e) => this.onPointerUp(e));
-    this.canvas.addEventListener("pointercancel", (e) => this.onPointerUp(e));
+    const c = this.canvas;
+    c.addEventListener("pointerdown", (e) => {
+      this.closePops();
+      this.onPointerDown(e);
+    });
+    c.addEventListener("pointermove", (e) => this.onPointerMove(e));
+    for (const ev of ["pointerup", "pointerleave", "pointercancel"])
+      c.addEventListener(ev, (e) => this.onPointerUp(e));
 
-    this.canvas.addEventListener(
+    c.addEventListener(
       "touchstart",
       (e) => {
         if (e.touches.length < 2) e.preventDefault();
       },
       { passive: false },
     );
-    this.canvas.addEventListener("touchmove", (e) => e.preventDefault(), {
-      passive: false,
-    });
+    c.addEventListener("touchmove", (e) => e.preventDefault(), { passive: false });
 
-    this.canvas.addEventListener(
+    c.addEventListener(
       "wheel",
       (e) => {
         e.preventDefault();
-        const delta = e.deltaY > 0 ? -0.08 : 0.08;
-        this.adjustZoom(delta, e);
+        const step = e.ctrlKey ? 0.04 : 0.08;
+        this.adjustZoom(e.deltaY > 0 ? -step : step, e);
       },
       { passive: false },
     );
 
-    this.canvas.addEventListener("mousedown", (e) => {
-      if (e.button === 1) {
-        e.preventDefault();
-        this.isPanning = true;
-        this.panStart = {
-          x: e.clientX,
-          y: e.clientY,
-          px: this.panX,
-          py: this.panY,
-        };
-      }
+    // Middle mouse drags the view from any tool.
+    c.addEventListener("mousedown", (e) => {
+      if (e.button !== 1) return;
+      e.preventDefault();
+      this.isPanning = true;
+      this.panStart = { x: e.clientX, y: e.clientY, px: this.panX, py: this.panY };
     });
     window.addEventListener("mousemove", (e) => {
-      if (this.isPanning && this.panStart) {
-        this.panX = this.panStart.px + (e.clientX - this.panStart.x);
-        this.panY = this.panStart.py + (e.clientY - this.panStart.y);
-        this.scheduleRedraw();
-      }
+      if (!this.isPanning || !this.panStart) return;
+      this.panX = this.panStart.px + (e.clientX - this.panStart.x);
+      this.panY = this.panStart.py + (e.clientY - this.panStart.y);
+      this.viewChanged();
     });
     window.addEventListener("mouseup", (e) => {
       if (e.button === 1) this.isPanning = false;
     });
 
+    // Two fingers pan and pinch; a stroke in progress is dropped.
     let gesture = null;
-    this.canvas.addEventListener(
+    c.addEventListener(
       "touchstart",
       (e) => {
-        if (e.touches.length === 2) {
-          this._abortCurrentStroke();
-          this._gesturing = true;
-          this.isPanning = true;
-          gesture = this.touchGesture(e.touches);
-        }
+        if (e.touches.length !== 2) return;
+        this._abortCurrentStroke();
+        this._gesturing = true;
+        this.isPanning = true;
+        gesture = this.touchGesture(e.touches);
       },
       { passive: true },
     );
-    this.canvas.addEventListener(
+    c.addEventListener(
       "touchmove",
       (e) => {
-        if (e.touches.length === 2 && gesture) {
-          const g = this.touchGesture(e.touches);
-          this.panX += g.cx - gesture.cx;
-          this.panY += g.cy - gesture.cy;
-          if (gesture.dist > 0 && g.dist > 0) {
-            const rect = this.canvas.getBoundingClientRect();
-            const ax = g.cx - rect.left,
-              ay = g.cy - rect.top;
-            const oldZoom = this.zoom;
-            const nz = Math.min(
-              this.MAX_ZOOM,
-              Math.max(this.MIN_ZOOM, oldZoom * (g.dist / gesture.dist)),
-            );
-            this.panX = ax - (ax - this.panX) * (nz / oldZoom);
-            this.panY = ay - (ay - this.panY) * (nz / oldZoom);
-            this.zoom = nz;
-            this.updateZoomLabel();
-          }
-          gesture = g;
-          this.scheduleRedraw();
+        if (e.touches.length !== 2 || !gesture) return;
+        const g = this.touchGesture(e.touches);
+        this.panX += g.cx - gesture.cx;
+        this.panY += g.cy - gesture.cy;
+        if (gesture.dist > 0 && g.dist > 0) {
+          const rect = c.getBoundingClientRect();
+          this.zoomAt(this.zoom * (g.dist / gesture.dist), g.cx - rect.left, g.cy - rect.top);
         }
+        gesture = g;
+        this.viewChanged();
       },
       { passive: true },
     );
     const endGesture = (e) => {
-      if (gesture && (!e.touches || e.touches.length < 2)) {
-        gesture = null;
-        this.isPanning = false;
-        this._gesturing = false;
-      }
+      if (!gesture || (e.touches && e.touches.length >= 2)) return;
+      gesture = null;
+      this.isPanning = false;
+      this._gesturing = false;
     };
-    this.canvas.addEventListener("touchend", endGesture, { passive: true });
-    this.canvas.addEventListener("touchcancel", endGesture, { passive: true });
-
-    this.canvas.addEventListener("pointerdown", () => {
-      this.toggleColorPanel(false);
-    });
+    c.addEventListener("touchend", endGesture, { passive: true });
+    c.addEventListener("touchcancel", endGesture, { passive: true });
 
     this._escHandler = (e) => {
       if (e.key !== "Escape" || !this.isOpen) return;
       if (this.isTypingTarget(e.target) && e.target !== this.chatInput) return;
-      if (this.colorPanel.classList.contains("show")) {
-        this.toggleColorPanel(false);
-        return;
-      }
-      if (this.chatOpen) {
-        this.closeChat();
-        return;
-      }
+      if (this.popOpen()) return this.closePops();
+      if (this.chatOpen) return this.closeChat();
       this.close();
     };
     document.addEventListener("keydown", this._escHandler);
 
-    this._undoKeyHandler = (e) => {
-      if (!this.isOpen) return;
-      if (this.isTypingTarget(e.target)) return;
-      if (!(e.ctrlKey || e.metaKey)) return;
+    const KEYS = {
+      h: "pan",
+      p: "pen",
+      e: "eraser",
+      l: "line",
+      r: "rect",
+      o: "ellipse",
+      t: "triangle",
+      b: "bucket",
+    };
+    this._keyHandler = (e) => {
+      if (!this.isOpen || this.isTypingTarget(e.target) || e.altKey) return;
       const k = e.key.toLowerCase();
-      if (k === "z" && !e.shiftKey) {
-        e.preventDefault();
-        this.undo();
-      } else if (k === "y" || (k === "z" && e.shiftKey)) {
-        e.preventDefault();
-        this.redo();
+      if (e.ctrlKey || e.metaKey) {
+        if (k === "z" && !e.shiftKey) this.undo();
+        else if (k === "y" || (k === "z" && e.shiftKey)) this.redo();
+        else return;
+        return e.preventDefault();
       }
-    };
-    document.addEventListener("keydown", this._undoKeyHandler);
-
-    this._spaceDown = false;
-    this._spaceHandler = (e) => {
-      if (!this.isOpen) return;
-      if (this.isTypingTarget(e.target)) return;
-      if (e.key === " ") {
-        e.preventDefault();
-        this._spaceDown = e.type === "keydown";
+      if (this.watching && (KEYS[k] || k === "c" || k === "s")) return;
+      if (KEYS[k]) this.setTool(KEYS[k]);
+      else if (k === "c") this.togglePop("color");
+      else if (k === "s") this.togglePop("size");
+      else if (k === "f") this.fitToView();
+      else if (k === "=" || k === "+") this.adjustZoom(0.15);
+      else if (k === "-") this.adjustZoom(-0.15);
+      else if (k === "0") this.resetView();
+      else if (k === " ") {
+        this._spaceDown = true;
         this.updateCursor();
-      }
+      } else return;
+      e.preventDefault();
     };
-    document.addEventListener("keydown", this._spaceHandler);
-    document.addEventListener("keyup", this._spaceHandler);
+    document.addEventListener("keydown", this._keyHandler);
+    this._keyUpHandler = (e) => {
+      if (e.key !== " " || !this.isOpen) return;
+      this._spaceDown = false;
+      this.updateCursor();
+    };
+    document.addEventListener("keyup", this._keyUpHandler);
 
     this._resizeHandler = () => {
-      if (this.isOpen) {
-        this.resizeCanvas();
-        this.redraw();
-      }
+      if (!this.isOpen) return;
+      this.resizeCanvas();
+      this.redraw();
     };
     window.addEventListener("resize", this._resizeHandler);
   }
@@ -1174,9 +1090,19 @@ class Talkoboard {
     this.renderRecentColors();
   }
 
+  setSize(n) {
+    this.size = Math.max(1, Math.min(30, Math.round(n) || 1));
+    if (this.sizeInput) this.sizeInput.value = String(this.size);
+    if (this.sizeLabel) this.sizeLabel.textContent = this.size + " px";
+    for (const p of this.sizePresetEls || [])
+      p.el.classList.toggle("active", p.n === this.size);
+    this.updateSizeDot();
+    this.updateCursor();
+  }
+
   updateSizeDot() {
     if (!this.sizeDot) return;
-    const d = Math.max(4, Math.min(22, this.size + 3));
+    const d = Math.max(4, Math.min(20, this.size + 2));
     this.sizeDot.style.width = d + "px";
     this.sizeDot.style.height = d + "px";
     this.sizeDot.style.background = this.eraser
@@ -1993,7 +1919,8 @@ class Talkoboard {
     this.closeChat();
     this.closeModCard();
 
-    this.toggleColorPanel(false);
+    clearTimeout(this._settleTimer);
+    this.closePops();
     this.deactivateEyedropper();
     this.modal.classList.remove("show");
     this.socket.emit("board close");
@@ -2090,23 +2017,20 @@ class Talkoboard {
     this.zoomLabel.textContent = this.formatZoom();
   }
 
-  adjustZoom(delta, e) {
-    const oldZoom = this.zoom;
-    this.zoom = Math.min(
-      this.MAX_ZOOM,
-      Math.max(this.MIN_ZOOM, this.zoom * Math.pow(1.32, delta / 0.15)),
-    );
-
-    if (e) {
-      const rect = this.canvas.getBoundingClientRect();
-      const mx = (e.clientX || rect.width / 2) - rect.left;
-      const my = (e.clientY || rect.height / 2) - rect.top;
-      this.panX = mx - (mx - this.panX) * (this.zoom / oldZoom);
-      this.panY = my - (my - this.panY) * (this.zoom / oldZoom);
-    }
-
+  zoomAt(nz, ax, ay) {
+    nz = Math.min(this.MAX_ZOOM, Math.max(this.MIN_ZOOM, nz));
+    this.panX = ax - (ax - this.panX) * (nz / this.zoom);
+    this.panY = ay - (ay - this.panY) * (nz / this.zoom);
+    this.zoom = nz;
     this.updateZoomLabel();
-    this.scheduleRedraw();
+  }
+
+  adjustZoom(delta, e) {
+    const rect = this.canvas.getBoundingClientRect();
+    const ax = e && e.clientX != null ? e.clientX - rect.left : this.displayWidth / 2;
+    const ay = e && e.clientY != null ? e.clientY - rect.top : this.displayHeight / 2;
+    this.zoomAt(this.zoom * Math.pow(1.32, delta / 0.15), ax, ay);
+    this.viewChanged();
   }
 
   resetView() {
@@ -2117,113 +2041,109 @@ class Talkoboard {
     this.redraw();
   }
 
-  fitToView() {
-    const all = [...this.strokes];
+  allStrokes() {
+    const all = this.strokes.slice();
     for (const [, s] of this.remoteActiveStrokes) all.push(s);
     if (this.currentStroke) all.push(this.currentStroke);
+    return all;
+  }
 
+  boundsOf(strokes) {
     let minX = Infinity,
       minY = Infinity,
       maxX = -Infinity,
       maxY = -Infinity;
-    for (const s of all) {
-      if (!s.points) continue;
+    for (const s of strokes) {
+      if (!s.points || !s.points.length) continue;
+      const bb = this.strokeBB(s);
       const r = (s.size || 1) / 2 + 2;
-      for (const p of s.points) {
-        if (p.x - r < minX) minX = p.x - r;
-        if (p.y - r < minY) minY = p.y - r;
-        if (p.x + r > maxX) maxX = p.x + r;
-        if (p.y + r > maxY) maxY = p.y + r;
-      }
+      minX = Math.min(minX, bb.minX - r);
+      minY = Math.min(minY, bb.minY - r);
+      maxX = Math.max(maxX, bb.maxX + r);
+      maxY = Math.max(maxY, bb.maxY + r);
     }
-    if (!isFinite(minX)) {
-      this.showHint("Nothing to fit yet");
-      return;
-    }
+    if (!isFinite(minX)) return null;
+    return {
+      minX,
+      minY,
+      maxX,
+      maxY,
+      w: Math.max(1e-9, maxX - minX),
+      h: Math.max(1e-9, maxY - minY),
+    };
+  }
 
+  fitToView() {
+    const bb = this.boundsOf(this.allStrokes());
+    if (!bb) return this.showHint("Nothing to fit yet");
     const pad = 60;
-    const bw = Math.max(1e-9, maxX - minX);
-    const bh = Math.max(1e-9, maxY - minY);
     const z = Math.min(
       this.MAX_ZOOM,
       Math.max(
         this.MIN_ZOOM,
-        Math.min(
-          (this.displayWidth - pad * 2) / bw,
-          (this.displayHeight - pad * 2) / bh,
-        ),
+        Math.min((this.displayWidth - pad * 2) / bb.w, (this.displayHeight - pad * 2) / bb.h),
       ),
     );
     this.zoom = z;
-    this.panX = this.displayWidth / 2 - ((minX + maxX) / 2) * z;
-    this.panY = this.displayHeight / 2 - ((minY + maxY) / 2) * z;
+    this.panX = this.displayWidth / 2 - ((bb.minX + bb.maxX) / 2) * z;
+    this.panY = this.displayHeight / 2 - ((bb.minY + bb.maxY) / 2) * z;
     this.updateZoomLabel();
     this.redraw();
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  exportBoard() {
-    const all = [...this.strokes];
-    for (const [, s] of this.remoteActiveStrokes) all.push(s);
-    if (this.currentStroke) all.push(this.currentStroke);
-
-    let minX = Infinity,
-      minY = Infinity,
-      maxX = -Infinity,
-      maxY = -Infinity;
-    for (const s of all) {
-      if (!s.points) continue;
-      const r = s.size / 2 + 2;
-      for (const p of s.points) {
-        if (p.x - r < minX) minX = p.x - r;
-        if (p.y - r < minY) minY = p.y - r;
-        if (p.x + r > maxX) maxX = p.x + r;
-        if (p.y + r > maxY) maxY = p.y + r;
-      }
+  // Runs fn with another view in place, then puts the real one back.
+  withView(v, fn) {
+    const keep = [this.panX, this.panY, this.zoom, this.displayWidth, this.displayHeight];
+    [this.panX, this.panY, this.zoom, this.displayWidth, this.displayHeight] = [
+      v.panX,
+      v.panY,
+      v.zoom,
+      v.w,
+      v.h,
+    ];
+    try {
+      fn();
+    } finally {
+      [this.panX, this.panY, this.zoom, this.displayWidth, this.displayHeight] = keep;
     }
-    if (!isFinite(minX)) {
-      this.showHint("Nothing to save yet");
-      return;
+  }
+
+  // "view" saves the screen as it is, at double resolution. "all" fits every
+  // stroke into one image, so one huge doodle far off in a corner shrinks
+  // everything else; that is why the view save is offered first.
+  exportBoard(mode) {
+    const all = this.allStrokes();
+    if (!all.length) return this.showHint("Nothing to save yet");
+    let v;
+    if (mode === "all") {
+      const bb = this.boundsOf(all);
+      const pad = 40;
+      const long = Math.max(bb.w, bb.h);
+      const zoom = Math.min((4096 - pad * 2) / long, Math.max(2, 1600 / long));
+      v = {
+        zoom,
+        panX: pad - bb.minX * zoom,
+        panY: pad - bb.minY * zoom,
+        w: Math.ceil(bb.w * zoom + pad * 2),
+        h: Math.ceil(bb.h * zoom + pad * 2),
+        dpr: 1,
+      };
+    } else {
+      v = {
+        zoom: this.zoom,
+        panX: this.panX,
+        panY: this.panY,
+        w: this.displayWidth,
+        h: this.displayHeight,
+        dpr: 2,
+      };
     }
-
-    const pad = 28;
-    const worldW = maxX - minX + pad * 2;
-    const worldH = maxY - minY + pad * 2;
-    const MAX_DIM = 4096;
-    const scale = Math.min(2, MAX_DIM / worldW, MAX_DIM / worldH);
-    const W = Math.max(1, Math.round(worldW * scale));
-    const H = Math.max(1, Math.round(worldH * scale));
-
-    const layer = document.createElement("canvas");
-    layer.width = W;
-    layer.height = H;
-    const lctx = layer.getContext("2d");
-    lctx.scale(scale, scale);
-    lctx.translate(pad - minX, pad - minY);
-    const prevRox = this._rox,
-      prevRoy = this._roy,
-      prevRs = this._rs;
-    this._rox = 0;
-    this._roy = 0;
-    this._rs = 1;
-    for (const s of this.strokes) this.renderStrokeSmooth(lctx, s);
-    for (const [, s] of this.remoteActiveStrokes) this.renderStrokeSmooth(lctx, s);
-    if (this.currentStroke) this.renderStrokeSmooth(lctx, this.currentStroke);
-    this._rox = prevRox;
-    this._roy = prevRoy;
-    this._rs = prevRs;
-
     const out = document.createElement("canvas");
-    out.width = W;
-    out.height = H;
-    const octx = out.getContext("2d");
-    octx.fillStyle = "#ffffff";
-    octx.fillRect(0, 0, W, H);
-    octx.drawImage(layer, 0, 0);
+    out.width = Math.max(1, Math.round(v.w * v.dpr));
+    out.height = Math.max(1, Math.round(v.h * v.dpr));
+    this.withView(v, () => this.paint(out.getContext("2d"), v.dpr, v.w, v.h, true));
 
-    const done = (url, revoke) => {
+    const finish = (url, revoke) => {
       const a = document.createElement("a");
       a.href = url;
       a.download = "talkoboard.png";
@@ -2231,32 +2151,58 @@ class Talkoboard {
       a.click();
       a.remove();
       if (revoke) setTimeout(() => URL.revokeObjectURL(url), 2000);
-      this.showHint("Saved board image");
+      this.showHint("Saved");
     };
-    if (out.toBlob) {
-      out.toBlob((blob) => {
-        if (blob) done(URL.createObjectURL(blob), true);
-        else done(out.toDataURL("image/png"), false);
-      }, "image/png");
-    } else {
-      done(out.toDataURL("image/png"), false);
-    }
+    if (out.toBlob)
+      out.toBlob(
+        (b) => (b ? finish(URL.createObjectURL(b), true) : finish(out.toDataURL("image/png"))),
+        "image/png",
+      );
+    else finish(out.toDataURL("image/png"));
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // ═══════════════════════════════════════════════════════════════════════════
+  // Dragging and zooming move the last painted frame with a CSS transform and
+  // paint properly once the gesture pauses, so the view keeps up however many
+  // strokes are on the board.
+  viewChanged() {
+    const p = this._painted;
+    if (!p) return this.scheduleRedraw();
+    const s = this.zoom / p.zoom;
+    if (s > 4 || s < 0.25) return this.redraw();
+    this.canvas.style.transform = `translate(${this.panX - p.panX * s}px, ${this.panY - p.panY * s}px) scale(${s})`;
+    this._viewTransformed = true;
+    clearTimeout(this._settleTimer);
+    this._settleTimer = setTimeout(() => this.redraw(), 80);
+    this._ensureCursorLoop();
+  }
 
   redraw() {
-    const ctx = this.ctx;
-    const dpr = this.dpr;
-    const w = this.displayWidth;
-    const h = this.displayHeight;
+    clearTimeout(this._settleTimer);
+    this.canvas.style.transform = "";
+    this._viewTransformed = false;
+    this._painted = { panX: this.panX, panY: this.panY, zoom: this.zoom };
+    this.paint(this.ctx, this.dpr, this.displayWidth, this.displayHeight, false);
+  }
 
+  // Dots every 1, 2 or 5 world units times a power of ten, whichever lands
+  // between 28 and 70 screen px, so the grid reads the same at any zoom.
+  paintGrid(ctx, w, h) {
+    const p = Math.pow(10, Math.floor(Math.log10(28 / this.zoom)));
+    const step = [1, 2, 5, 10].map((m) => m * p).find((s) => s * this.zoom >= 28);
+    const sp = step * this.zoom;
+    const ox = ((this.panX % sp) + sp) % sp;
+    const oy = ((this.panY % sp) + sp) % sp;
+    ctx.fillStyle = "#d5d7dc";
+    for (let x = ox; x < w; x += sp)
+      for (let y = oy; y < h; y += sp) ctx.fillRect(x - 1, y - 1, 2, 2);
+  }
+
+  paint(ctx, dpr, w, h, plain) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
-
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, w, h);
+    if (!plain) this.paintGrid(ctx, w, h);
 
     const centre = this.screenToWorld(w / 2, h / 2);
     this._rox = centre.x;
@@ -2265,63 +2211,42 @@ class Talkoboard {
     this._rs = this.zoom / S;
 
     ctx.save();
-    ctx.translate(
-      this.panX + this._rox * this.zoom,
-      this.panY + this._roy * this.zoom,
-    );
+    ctx.translate(this.panX + this._rox * this.zoom, this.panY + this._roy * this.zoom);
     ctx.scale(S, S);
 
     const view = this.viewWorldRect();
-
-    for (const stroke of this.strokes) {
+    for (const stroke of this.strokes) this.renderStrokeCulled(ctx, stroke, view);
+    for (const [, stroke] of this.remoteActiveStrokes)
       this.renderStrokeCulled(ctx, stroke, view);
+    if (this.currentStroke) this.renderStrokeCulled(ctx, this.currentStroke, view);
+
+    if (!plain) {
+      for (const c of this.claims) this.renderClaim(ctx, c);
+      if (this.preview) this.renderPreview(ctx);
     }
-
-    for (const [, stroke] of this.remoteActiveStrokes) {
-      this.renderStrokeCulled(ctx, stroke, view);
-    }
-
-    if (this.currentStroke) {
-      this.renderStrokeCulled(ctx, this.currentStroke, view);
-    }
-
-    for (const c of this.claims) this.renderClaim(ctx, c);
-
-    if (this.preview) {
-      if (this.preview.claim) {
-        this.renderClaim(ctx, {
-          owner: this.userId,
-          x: Math.min(this.preview.a.x, this.preview.b.x),
-          y: Math.min(this.preview.a.y, this.preview.b.y),
-          w: Math.abs(this.preview.b.x - this.preview.a.x),
-          h: Math.abs(this.preview.b.y - this.preview.a.y),
-        });
-        ctx.restore();
-        return;
-      }
-      this.renderStrokeSmooth(ctx, {
-        points: this.shapePoints(
-          this.preview.kind,
-          this.preview.a,
-          this.preview.b,
-        ),
-        color: this.color,
-        size: this.worldBrushSize(),
-        eraser: false,
-        gradient: this.gradient,
-        fill:
-          this.fillShapes &&
-          ["rect", "ellipse", "triangle"].includes(this.preview.kind),
-        sharp: this.preview.kind !== "ellipse",
-      });
-    }
-
     ctx.restore();
   }
 
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // ═══════════════════════════════════════════════════════════════════════════
+  renderPreview(ctx) {
+    const p = this.preview;
+    if (p.claim)
+      return this.renderClaim(ctx, {
+        owner: this.userId,
+        x: Math.min(p.a.x, p.b.x),
+        y: Math.min(p.a.y, p.b.y),
+        w: Math.abs(p.b.x - p.a.x),
+        h: Math.abs(p.b.y - p.a.y),
+      });
+    this.renderStrokeSmooth(ctx, {
+      points: this.shapePoints(p.kind, p.a, p.b),
+      color: this.color,
+      size: this.worldBrushSize(),
+      eraser: false,
+      gradient: this.gradient,
+      fill: this.fillShapes && ["rect", "ellipse", "triangle"].includes(p.kind),
+      sharp: p.kind !== "ellipse",
+    });
+  }
 
   viewWorldRect() {
     const a = this.screenToWorld(0, 0);
@@ -2864,6 +2789,7 @@ class Talkoboard {
 
   drawSegmentsIncremental(stroke, fromIndex) {
     if (!this.isOpen) return;
+    if (this._viewTransformed) return this.scheduleRedraw();
     const pts = stroke.points;
     if (fromIndex >= pts.length) return;
 
@@ -3058,7 +2984,7 @@ class Talkoboard {
     if (this.isPanning && this.panStart) {
       this.panX = this.panStart.px + (e.clientX - this.panStart.x);
       this.panY = this.panStart.py + (e.clientY - this.panStart.y);
-      this.scheduleRedraw();
+      this.viewChanged();
       return;
     }
 
@@ -3221,7 +3147,7 @@ class Talkoboard {
 
     this.remoteActiveStrokes.set(data.userId, stroke);
 
-    if (this.isOpen) {
+    if (this.isOpen && !this._viewTransformed) {
       const ctx = this.ctx;
       const dpr = this.dpr;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -3475,8 +3401,7 @@ class Talkoboard {
 
   _appendChat(node) {
     const log = this.chatLog;
-    const nearBottom =
-      log.scrollHeight - log.scrollTop - log.clientHeight < 48;
+    const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 48;
     this.chatNodes.push(node);
     log.appendChild(node);
     while (this.chatNodes.length > this.MAX_CHAT_MESSAGES) {
@@ -3486,38 +3411,86 @@ class Talkoboard {
     if (nearBottom) log.scrollTop = log.scrollHeight;
   }
 
+  avatarNode(data) {
+    const url =
+      typeof avatarSrc === "function" && data.avatar ? avatarSrc(data.avatar, 64) : null;
+    const el = document.createElement(url ? "img" : "span");
+    el.className = "tb-msg-avatar";
+    if (url) {
+      el.src = url;
+      el.alt = "";
+      el.onerror = () => (el.style.visibility = "hidden");
+    } else {
+      el.textContent = (data.username || "?").trim().charAt(0).toUpperCase();
+      el.style.background = this.nameColor(data.userId);
+    }
+    return el;
+  }
+
+  flairNode(role) {
+    if (role === "dev") {
+      const img = document.createElement("img");
+      img.className = "tb-flair-crown";
+      img.src = "images/icons/crown.gif";
+      img.alt = "Dev";
+      return img;
+    }
+    const level = { lead: 3, mod: 2, jr: 1 }[role];
+    if (!level) return null;
+    if (typeof createModBadge === "function") return createModBadge(level);
+    const b = document.createElement("span");
+    b.className = "mod-badge";
+    b.textContent = role === "lead" ? "LEADER" : role === "jr" ? "JR MOD" : "MOD";
+    return b;
+  }
+
+  addSystemChat(text) {
+    const msg = document.createElement("div");
+    msg.className = "tb-msg system";
+    msg.textContent = text;
+    this._appendChat(msg);
+  }
+
   addChatMessage(data) {
     if (!data || typeof data.text !== "string") return;
-    if (data.userId && data.username)
-      this.notePeerName(data.userId, data.username);
-
-    const isSelf = data.userId === this.userId;
-    const col = isSelf ? "#c25e00" : this.nameColor(data.userId);
+    if (data.userId && data.username) this.notePeerName(data.userId, data.username);
+    const mine = data.userId === this.userId;
 
     const msg = document.createElement("div");
-    msg.className = "tb-chat-msg" + (isSelf ? " tb-chat-self" : "");
+    msg.className = "tb-msg" + (mine ? " mine" : "");
+    msg.appendChild(this.avatarNode(data));
 
+    const body = document.createElement("div");
+    body.className = "tb-msg-body";
+    const head = document.createElement("div");
+    head.className = "tb-msg-head";
     const name = document.createElement("span");
-    name.className = "tb-chat-name";
+    name.className = "tb-msg-name";
     name.textContent = data.username || "User";
-    name.style.color = col;
-
-    const text = document.createElement("span");
-    text.className = "tb-chat-text";
-    text.textContent = " " + data.text;
-
-    msg.appendChild(name);
-    msg.appendChild(text);
+    name.style.color = mine ? "#c25e00" : this.nameColor(data.userId);
+    head.appendChild(name);
+    const flair = this.flairNode(data.role);
+    if (flair) head.appendChild(flair);
+    const time = document.createElement("span");
+    time.className = "tb-msg-time";
+    time.textContent = new Date(data.timestamp || Date.now()).toLocaleTimeString([], {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+    head.appendChild(time);
+    const text = document.createElement("div");
+    text.className = "tb-msg-text";
+    text.textContent = data.text;
+    body.appendChild(head);
+    body.appendChild(text);
+    msg.appendChild(body);
     this._appendChat(msg);
 
-    if (!this.chatOpen && data.userId !== this.userId) {
+    if (!this.chatOpen && !mine) {
       this.chatUnread++;
       this.updateChatBadge();
     }
   }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // ═══════════════════════════════════════════════════════════════════════════
 
   setupSocketListeners() {
     // ── Stroke lifecycle (v2) ────────────────────────────────────────
@@ -3688,10 +3661,10 @@ class Talkoboard {
       cancelAnimationFrame(this._redrawRaf);
       this._redrawRaf = null;
     }
+    clearTimeout(this._settleTimer);
     document.removeEventListener("keydown", this._escHandler);
-    document.removeEventListener("keydown", this._undoKeyHandler);
-    document.removeEventListener("keydown", this._spaceHandler);
-    document.removeEventListener("keyup", this._spaceHandler);
+    document.removeEventListener("keydown", this._keyHandler);
+    document.removeEventListener("keyup", this._keyUpHandler);
     window.removeEventListener("resize", this._resizeHandler);
     if (this.modal && this.modal.parentNode) {
       this.modal.parentNode.removeChild(this.modal);
