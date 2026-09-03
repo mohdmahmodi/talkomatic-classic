@@ -983,17 +983,66 @@ function judgeStaffKey(hash, role, label) {
   console.warn("[KEYWATCH]", detail);
 
   if (role !== "mod") return;
-  revokeSharedKey(hash, label, headline);
+  revokeSharedKey(
+    hash,
+    label,
+    headline,
+    "Revoked automatically: the key was in use by two separate accounts, " +
+      "on two different networks, at the same time.",
+  );
 }
 
-async function revokeSharedKey(hash, label, headline) {
-  try {
-    const ok = await roles.revokeModKey(hash, {
-      reason:
-        "Revoked automatically: the key was in use by two separate accounts, " +
-        "on two different networks, at the same time.",
-      by: "system",
+// Network families a key has used lately (see roles.networkReport). Two is
+// worth a warning, three asks a leader to look. Only with NET_AUTO_REVOKE on
+// does the third revoke a mod key by itself; dev keys never are, they live in
+// DEV_KEY_HASH.
+function keyNetworksChanged(hash, label, role, newIp) {
+  if (!newIp || roles.isMainDevHash(hash)) return null;
+  const r = roles.networkReport(hash);
+  if (r.level === "ok" || r.level === "mixed") return r.level;
+  const where = `${r.v4.length} different IPv4 networks in the last ${r.windowDays} days (${r.v4.join(", ")})`;
+  if (r.level !== "revoke" || role !== "mod") {
+    audit.recordKeyAlert({
+      role,
+      label,
+      kind: "networks",
+      detail:
+        `The ${role} key "${label}" has been used from ${where}.` +
+        (r.level === "review"
+          ? " Worth a look in Sessions: a phone on the move looks like this, a shared key does too."
+          : ""),
     });
+    return r.level;
+  }
+  const headline = `ALERT 👑 ${label} key on ${r.v4.length} networks`;
+  const detail = `${headline}. Used from ${where}. The key has been revoked.`;
+  audit.recordKeyAlert({ role, label, kind: "networks", detail });
+  audit.recordNotification({
+    kind: "abuse",
+    role,
+    label,
+    text: detail,
+    minLevel: 3,
+    card: {
+      target: label,
+      targetRole: role,
+      reason: "One key, too many networks",
+      lines: r.v4.map((n) => "seen on " + n),
+    },
+  });
+  console.warn("[KEYWATCH]", detail);
+  revokeSharedKey(
+    hash,
+    label,
+    headline,
+    `Revoked automatically: the key was used from ${r.v4.length} different networks within ${r.windowDays} days.`,
+  );
+  return "revoke";
+}
+
+async function revokeSharedKey(hash, label, headline, reason) {
+  try {
+    const ok = await roles.revokeModKey(hash, { reason, by: "system" });
     if (!ok) return;
     roles.modLog({
       label,
@@ -1023,6 +1072,34 @@ async function revokeSharedKey(hash, label, headline) {
   } catch (e) {
     console.error("auto-revoke of shared key failed:", e);
   }
+}
+
+function keyLevel(hash) {
+  const k = roles.modKeyByHash(hash) || roles.formerByHash(hash);
+  return k ? k.level || 1 : undefined;
+}
+
+function keyRemoved(hash) {
+  if (roles.modKeyByHash(hash)) return null;
+  const f = roles.formerByHash(hash);
+  return f
+    ? { at: f.removedAt || null, by: f.removedBy || null, reason: f.reason || null }
+    : { at: null, by: null, reason: null };
+}
+
+function keyNetworkView(hash, showIp) {
+  const r = roles.networkReport(hash);
+  return {
+    level: r.level,
+    v4Count: r.v4.length,
+    v6Count: r.v6.length,
+    v4: showIp ? r.v4 : undefined,
+    v6: showIp ? r.v6 : undefined,
+    windowDays: r.windowDays,
+    warnAt: r.warnAt,
+    reviewAt: r.reviewAt,
+    autoRevoke: r.autoRevoke,
+  };
 }
 
 function settleQueueItem(qkind, itemId) {
@@ -6862,7 +6939,8 @@ function registerSocketHandlers(opts) {
       "dev get sessions",
       safe(async () => {
         if (!requireStaff(socket)) return;
-        if (!requireModLevel(socket, 3)) return;
+        // Leaders and devs see every key; other mods see their own.
+        const leader = socket.isDev || (socket.modLevel || 1) >= 3;
         const byKey = new Map();
         for (const [, s] of io().sockets.sockets) {
           if (!s.isDev && !s.isMod) continue;
@@ -6882,8 +6960,10 @@ function registerSocketHandlers(opts) {
         }
         const showIp = !!socket.isMainDev;
         const mine = (g) =>
-          g.role !== "dev" ||
-          (!!socket.isDev && (showIp || !roles.isMainDevHash(g.hash)));
+          leader
+            ? g.role !== "dev" ||
+              (!!socket.isDev && (showIp || !roles.isMainDevHash(g.hash)))
+            : g.hash === socket.modKeyHash;
         const sessions = [...byKey.values()]
           .filter(mine)
           .map((g) => ({
@@ -6910,10 +6990,23 @@ function registerSocketHandlers(opts) {
                   count: x.count,
                 })),
             ipCount: (h.ips || []).length,
-            devices: h.devices || [],
+            devices: (h.devices || []).map((d) => ({
+              ...d,
+              ips: showIp ? d.ips : undefined,
+              ipCount: (d.ips || []).length,
+            })),
             entered: h.entered,
             enteredLast: h.enteredLast,
             profile: h.profile,
+            lastSeen: (h.ips || []).reduce((m, x) => Math.max(m, x.last || 0), 0),
+            level: h.role === "mod" ? keyLevel(h.hash) : undefined,
+            network: keyNetworkView(h.hash, showIp),
+            removed: h.role === "mod" ? keyRemoved(h.hash) : null,
+            // Full hash only where this viewer may remove the key.
+            actHash:
+              h.role === "mod" && roles.modKeyByHash(h.hash)
+                ? rosterHashFor(socket, { hash: h.hash, level: keyLevel(h.hash) })
+                : null,
           }));
         socket.emit("dev sessions", { sessions, history });
       }),
@@ -9428,6 +9521,7 @@ function purgeAllGhostUsers() {
 // ── Exports ─────────────────────────────────────────────────────────────────
 
 module.exports = {
+  keyNetworksChanged,
   loadRooms,
   saveRooms,
   loadBoard,

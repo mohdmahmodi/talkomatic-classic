@@ -8,6 +8,7 @@ const crypto = require("crypto");
 const { CONFIG } = require("./state");
 
 const { DATA_DIR } = require("./datadir");
+const ipban = require("./ipban");
 
 const MOD_KEYS_PATH = path.join(DATA_DIR, "mod-keys.json");
 const MODLOG_PATH = path.join(DATA_DIR, "modlog.txt");
@@ -471,9 +472,73 @@ function recordKeyUse(hash, label, role, ip, deviceId) {
   const rec = keyRecord(hash, label, role);
   const now = Date.now();
   const newIp = bump(rec.ips, ip, now);
-  if (deviceId) bump(rec.devices, deviceId, now);
+  if (deviceId) {
+    bump(rec.devices, deviceId, now);
+    const d = rec.devices[deviceId];
+    (d.ips = d.ips || {})[ip] = now;
+  }
   saveKeyActivitySoon();
   return { newIp };
+}
+
+const NET_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const NET_WARN_AT = 2;
+const NET_REVIEW_AT = 3;
+// History alone cannot tell a phone from a leak: carriers hand out a fresh
+// address from another block most days. So a busy history only warns and
+// asks for a look; the automatic revoke stays with the concurrent-use
+// watcher, which is the one case that proves two people. Flip this to make
+// three networks revoke on the spot anyway.
+const NET_AUTO_REVOKE = false;
+
+// Distinct network families a key has used lately: IPv4 by /16, IPv6 by
+// /32, coarse enough that one carrier's daily address shuffle stays one
+// family. An IPv4 and an IPv6 family together are just marked: that is one
+// connection speaking both.
+function netFamily(ip) {
+  const cidr = ipban.computeRangeCidr(ip, ip.includes(":") && !/^::ffff:/i.test(ip) ? 32 : 16);
+  return cidr || ip;
+}
+
+function networkReport(hash, now) {
+  const rec = keyActivity[hash];
+  const at = now || Date.now();
+  const v4 = new Set();
+  const v6 = new Set();
+  for (const [ip, m] of Object.entries(rec?.ips || {})) {
+    if (at - (m.last || 0) > NET_WINDOW_MS) continue;
+    const fam = netFamily(ip);
+    (fam.includes(":") ? v6 : v4).add(fam);
+  }
+  const level =
+    v4.size >= NET_REVIEW_AT
+      ? NET_AUTO_REVOKE
+        ? "revoke"
+        : "review"
+      : v4.size >= NET_WARN_AT
+        ? "warn"
+        : v4.size && v6.size
+          ? "mixed"
+          : "ok";
+  return {
+    v4: [...v4],
+    v6: [...v6],
+    level,
+    windowDays: NET_WINDOW_MS / 86400000,
+    warnAt: NET_WARN_AT,
+    reviewAt: NET_REVIEW_AT,
+    autoRevoke: NET_AUTO_REVOKE,
+  };
+}
+
+function formerByHash(hash) {
+  for (let i = formerMods.length - 1; i >= 0; i--)
+    if (formerMods[i].hash === hash) return formerMods[i];
+  return null;
+}
+
+function modKeyByHash(hash) {
+  return modKeys.find((k) => k.hash === hash) || null;
 }
 
 // The name, location and picture a key last signed in with, so the next
@@ -525,7 +590,13 @@ function getKeyActivity() {
       .map(([ip, m]) => ({ ip, first: m.first, last: m.last, count: m.count }))
       .sort((a, b) => (b.last || 0) - (a.last || 0)),
     devices: Object.entries(r.devices || {})
-      .map(([id, m]) => ({ id, first: m.first, last: m.last, count: m.count }))
+      .map(([id, m]) => ({
+        id,
+        first: m.first,
+        last: m.last,
+        count: m.count,
+        ips: Object.keys(m.ips || {}),
+      }))
       .sort((a, b) => (b.last || 0) - (a.last || 0)),
     entered: r.entered || 0,
     enteredLast: r.enteredLast || 0,
@@ -543,6 +614,9 @@ module.exports = {
   rememberProfile,
   getProfile,
   noteKeyEntered,
+  networkReport,
+  formerByHash,
+  modKeyByHash,
   loadModKeys,
   saveModKeys,
   loadDevKeys,

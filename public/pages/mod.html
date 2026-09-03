@@ -3299,6 +3299,178 @@
         flex-direction: column;
         gap: 0.3125rem;
       }
+      /* Key sessions: one row per key, details fold out underneath */
+      .keylegend {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+        gap: 0.5rem 1rem;
+        margin: 0.5rem 0 1rem;
+        font-size: 0.78rem;
+        color: var(--dim);
+      }
+      .keylegend > div {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .netpill {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.15rem 0.55rem;
+        border-radius: 999px;
+        border: 1px solid currentColor;
+        font-size: 0.7rem;
+        font-weight: bold;
+        white-space: nowrap;
+        flex: none;
+      }
+      .netpill.ok {
+        color: var(--green);
+      }
+      .netpill.mixed {
+        color: var(--cyan);
+      }
+      .netpill.warn {
+        color: var(--amber);
+      }
+      .netpill.bad {
+        color: var(--red);
+      }
+      .netpill.off {
+        color: var(--dim2);
+      }
+      .keylist {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        margin-bottom: 1.1rem;
+      }
+      .keyrow {
+        background: var(--tile);
+        border: 1px solid #2c2c2c;
+        border-radius: 0.5rem;
+        padding: 0.6rem 0.8rem;
+      }
+      .keyrow.removed {
+        opacity: 0.8;
+      }
+      .keyrow-head {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        flex-wrap: wrap;
+      }
+      .keyrow-head .avatar {
+        width: 2rem;
+        height: 2rem;
+        border-radius: 50%;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        color: #000;
+        flex: none;
+      }
+      .keyrow-name {
+        font-weight: bold;
+        font-size: 0.95rem;
+        display: flex;
+        align-items: center;
+        gap: 0.45rem;
+        flex-wrap: wrap;
+        min-width: 0;
+      }
+      .keyrow-name .as {
+        font-weight: normal;
+        color: var(--dim2);
+        font-size: 0.78rem;
+      }
+      .keyrow-right {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+      }
+      .dot {
+        width: 0.55rem;
+        height: 0.55rem;
+        border-radius: 50%;
+        background: #444;
+        display: inline-block;
+      }
+      .dot.on {
+        background: var(--green);
+        box-shadow: 0 0 6px var(--green);
+      }
+      .keyrow-facts {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.35rem 1.1rem;
+        margin-top: 0.5rem;
+        font-size: 0.76rem;
+        color: var(--dim);
+      }
+      .keyrow-facts b {
+        color: #fff;
+        font-weight: 600;
+      }
+      .keyrow-facts i {
+        color: var(--dim2);
+        margin-right: 0.3rem;
+      }
+      .keyrow-toggle {
+        background: none;
+        border: 0;
+        color: var(--orange);
+        cursor: pointer;
+        font: inherit;
+        font-size: 0.76rem;
+        padding: 0;
+        margin-left: auto;
+      }
+      .keyrow-details {
+        display: none;
+        margin-top: 0.55rem;
+        padding-top: 0.55rem;
+        border-top: 1px dashed #333;
+      }
+      .keyrow.open .keyrow-details {
+        display: block;
+      }
+      .keyrow-details h5 {
+        margin: 0.4rem 0 0.3rem;
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--dim2);
+      }
+      .keyrow-details .netrow {
+        background: #111;
+      }
+      .devchip {
+        display: inline-flex;
+        flex-direction: column;
+        gap: 0.1rem;
+        background: #111;
+        border-radius: 0.35rem;
+        padding: 0.35rem 0.55rem;
+        margin: 0 0.35rem 0.35rem 0;
+        font-size: 0.72rem;
+      }
+      .devchip .id {
+        font-family: "Courier New", monospace;
+        color: var(--amber);
+      }
+      .devchip .sub {
+        color: var(--dim2);
+      }
+      .keyrow-removed {
+        margin-top: 0.4rem;
+        font-size: 0.76rem;
+        color: var(--red);
+      }
       .netrow {
         display: flex;
         align-items: center;
@@ -3906,7 +4078,7 @@
             <i class="fas fa-user-shield"></i> Moderators
             <span class="ni-badge" id="modsBadge">0</span>
           </button>
-          <button class="nav-item" data-tab="sessions" data-lead>
+          <button class="nav-item" data-tab="sessions">
             <i class="fas fa-key"></i> Sessions
             <span class="ni-badge" id="sessionsBadge">0</span>
           </button>
@@ -4204,7 +4376,7 @@
           <div class="strip">
             <i class="fas fa-key lead" style="color: #01ffff"></i> Key sessions
             <span class="sub" id="sessionsSub">
-              Who is connected on which staff key
+              Who holds which staff key, and from where
             </span>
             <div class="ph-actions">
               <button id="sessionsRefresh" class="btn sm">
@@ -4212,27 +4384,26 @@
               </button>
             </div>
           </div>
-          <p class="note-box">
-            <i class="fas fa-circle-info"></i>
-            <span>
-              A key live on several different networks at once, or a brand-new
-              network in its history, may mean the key was shared or leaked.
-              Addresses on the same home connection (an IPv6 /64) are grouped
-              into one network line so a normal phone or router does not look
-              like twenty different addresses. New-IP and multi-IP alerts also
-              appear in Activity.
-            </span>
-          </p>
-          <div class="strip mini">
-            <i class="fas fa-plug lead" style="color: #57d9a3"></i> Connected
-            now
+          <div class="keylegend">
+            <div><span class="netpill ok">OK</span><span>All use comes from one network.</span></div>
+            <div><span class="netpill mixed">IPv4 + IPv6</span><span>One connection speaking both. Nothing to do.</span></div>
+            <div><span class="netpill warn">2 networks</span><span>Two IPv4 network families in 7 days. Keep an eye on it.</span></div>
+            <div><span class="netpill bad">3 networks</span><span>Three or more. Have a look: a phone on the move does this, a shared key does too. Two networks holding a key at the same moment still removes it automatically.</span></div>
           </div>
-          <div id="sessionsActive" class="grid3"></div>
           <div class="strip mini">
-            <i class="fas fa-clock-rotate-left lead ic-orange"></i> Key history
-            <span class="sub">Every network a key has connected from</span>
+            <i class="fas fa-plug lead" style="color: #57d9a3"></i> Connected now
           </div>
-          <div id="sessionsHistory" class="grid3"></div>
+          <div id="sessionsActive" class="keylist"></div>
+          <div class="strip mini">
+            <i class="fas fa-key lead ic-orange"></i> Active keys
+            <span class="sub">Every key that works today. Open a row for its networks and devices.</span>
+          </div>
+          <div id="sessionsHistory" class="keylist"></div>
+          <div class="strip mini">
+            <i class="fas fa-user-slash lead" style="color: #8d8d8d"></i> Removed keys
+            <span class="sub">Keys that no longer work, kept for the record</span>
+          </div>
+          <div id="sessionsRemoved" class="keylist"></div>
         </section>
 
         <!-- Announcements -->
@@ -4847,6 +5018,6 @@
     <script src="js/identity.js?v=1.0.2"></script>
     <script src="js/staff-ui.js?v=1.9.0"></script>
     <script src="js/desk.js?v=1.0.4"></script>
-    <script src="js/mod.js?v=4.15.0"></script>
+    <script src="js/mod.js?v=4.16.0"></script>
   </body>
 </html>

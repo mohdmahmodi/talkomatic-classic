@@ -496,6 +496,7 @@ io.use((socket, next) => {
         clientIp,
         socket.deviceId,
       ).newIp;
+      rooms.keyNetworksChanged(devMatch.hash, devMatch.label, "dev", socket.keyNewIp);
       console.log(
         `[DEV] Dev mode activated (${devMatch.label}) for IP:${clientIp}`,
       );
@@ -520,6 +521,20 @@ io.use((socket, next) => {
           clientIp,
           socket.deviceId,
         ).newIp;
+        if (
+          rooms.keyNetworksChanged(mk.hash, mk.label, "mod", socket.keyNewIp) ===
+          "revoke"
+        ) {
+          socket.isMod = false;
+          socket.modKeyHash = null;
+          socket.modLevel = 0;
+          socket.staffLabel = null;
+          socket.formerModNotice = {
+            label: mk.label,
+            reason: "The key was used from too many different networks.",
+            removedAt: Date.now(),
+          };
+        }
         console.log(`[MOD] Mod mode activated (${mk.label}) for IP:${clientIp}`);
       } else if (modKey) {
         // A stored key that no longer works: if it was revoked, remember the
