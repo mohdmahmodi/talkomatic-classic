@@ -851,15 +851,21 @@
     var body = el("div", "sb-row-body");
     var top = el("div", "sb-row-top");
     top.appendChild(kindChip(kindOf(p)));
-    top.appendChild(
-      button("sb-row-title", esc(titleOf(p)), function () {
-        openThread(p.id);
-      }),
-    );
+    var openIt = function () {
+      openThread(p.id);
+    };
+    if (p.title) top.appendChild(button("sb-row-title", esc(p.title), openIt));
     top.appendChild(statusPill(p));
     body.appendChild(top);
 
-    if (p.title && plain(p.text)) body.appendChild(el("p", "sb-row-snippet", plain(p.text)));
+    // Older posts have no title: the text itself is the headline, so it goes
+    // in full (clamped by CSS) rather than chopped into a fake title.
+    var text = plain(p.text);
+    if (text) {
+      var excerpt = el("p", p.title ? "sb-row-snippet" : "sb-row-text", text);
+      body.appendChild(excerpt);
+      if (text.length > 220) body.appendChild(button("sb-read-more", "Read more", openIt));
+    }
 
     var meta = el("div", "sb-row-meta");
     meta.appendChild(authorLine(p, "sm"));
@@ -947,10 +953,10 @@
     }
     post.appendChild(head);
 
-    post.appendChild(el("h2", "sb-post-title", titleOf(p)));
+    if (p.title) post.appendChild(el("h2", "sb-post-title", p.title));
     if (isEditing) post.appendChild(editorFor(p, null));
-    else if (p.title || plain(p.text).length > 70) {
-      var body = el("div", "sb-text");
+    else {
+      var body = el("div", "sb-text" + (p.title ? "" : " sb-text-lead"));
       body.innerHTML = renderRich(p.text);
       post.appendChild(body);
     }
