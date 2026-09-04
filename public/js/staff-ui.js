@@ -830,6 +830,12 @@
 
   function toast(message, opts) {
     const o = opts || {};
+    // notify.js owns the look site-wide; the code below is the fallback for
+    // a page that has not loaded it.
+    if (window.TkNotify) {
+      const n = window.TkNotify.show(o.type || "info", message, o);
+      return n ? n.element : null;
+    }
     const host = ensureHost(o.fullWidth);
     const type = o.type || "info";
     const body = String(message == null ? "" : message);

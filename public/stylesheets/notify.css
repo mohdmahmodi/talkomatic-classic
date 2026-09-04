@@ -1,0 +1,170 @@
+/* Site-wide notifications: ModernNotify restyled as a Talkomatic tile.
+   Icon disc on the left, title and message beside it, close top right, a
+   thin progress line along the bottom. The library injects its own sheet
+   after this one, so every rule here carries the extra `body` to win. */
+
+body .modern-notify-container {
+  z-index: 100002;
+  gap: 10px;
+  padding: 14px;
+}
+
+body .modern-notify {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 12px;
+  row-gap: 2px;
+  padding: 13px 14px 15px;
+  border: 1px solid #333333;
+  border-left: 1px solid #333333;
+  border-radius: 10px;
+  background: #1b1b1b;
+  color: #ffffff;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  font-family: var(--tk-font-main, talkoSS, Arial, sans-serif);
+  font-size: 13.5px;
+  line-height: 1.45;
+  transition:
+    opacity 0.22s ease,
+    transform 0.22s ease;
+}
+
+body .modern-notify.tk-clickable {
+  cursor: pointer;
+}
+
+body .modern-notify.tk-clickable:hover {
+  border-color: #616161;
+}
+
+body .modern-notify-header,
+body .modern-notify-icon-title {
+  display: contents;
+}
+
+body .modern-notify-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  width: 30px;
+  height: 30px;
+  margin: 0;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+body .modern-notify-title {
+  grid-column: 2;
+  grid-row: 1;
+  font-size: 14px;
+  font-weight: bold;
+  word-break: break-word;
+}
+
+body .modern-notify-group-count {
+  display: none;
+}
+
+body .modern-notify-close {
+  grid-column: 3;
+  grid-row: 1;
+  margin: -3px 0 0;
+  padding: 0 2px;
+  color: #8d8d8d;
+  font-size: 19px;
+  line-height: 1;
+  opacity: 1;
+}
+
+body .modern-notify-close:hover {
+  color: #ffffff;
+}
+
+body .modern-notify-content {
+  grid-column: 2;
+  grid-row: 2;
+  color: #d6d6d6;
+  word-break: break-word;
+}
+
+body .modern-notify.tk-untitled .modern-notify-title {
+  display: none;
+}
+
+body .modern-notify.tk-untitled .modern-notify-content {
+  grid-row: 1 / span 2;
+  align-self: center;
+  color: #ffffff;
+}
+
+body .modern-notify-actions {
+  grid-column: 2 / span 2;
+  grid-row: 3;
+  justify-content: flex-start;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+body .modern-notify-action-btn {
+  margin: 0;
+  padding: 6px 12px;
+  border: 1px solid #616161;
+  border-radius: 6px;
+  background: #000000;
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: bold;
+}
+
+body .modern-notify-action-btn:hover {
+  border-color: #ff9800;
+  background: #ff9800;
+  color: #1a1a1a;
+}
+
+body .modern-notify-progress-bar {
+  height: 3px;
+}
+
+/* One colour per type, carried by the icon disc, the title and the bar. */
+
+body .modern-notify-success {
+  --tk-tone: #57d9a3;
+  --tk-tone-soft: rgba(87, 217, 163, 0.15);
+}
+body .modern-notify-error {
+  --tk-tone: #ff5468;
+  --tk-tone-soft: rgba(255, 84, 104, 0.15);
+}
+body .modern-notify-warning {
+  --tk-tone: #ffb454;
+  --tk-tone-soft: rgba(255, 180, 84, 0.15);
+}
+body .modern-notify-info {
+  --tk-tone: #5aa9ff;
+  --tk-tone-soft: rgba(90, 169, 255, 0.15);
+}
+
+body .modern-notify .modern-notify-icon {
+  background: var(--tk-tone-soft);
+  color: var(--tk-tone);
+}
+body .modern-notify .modern-notify-title {
+  color: var(--tk-tone);
+}
+body .modern-notify .modern-notify-progress-bar {
+  background-color: var(--tk-tone);
+}
+
+@media (max-width: 480px) {
+  body .modern-notify-container {
+    padding: 10px;
+  }
+  body .modern-notify {
+    border-radius: 8px;
+  }
+}

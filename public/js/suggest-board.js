@@ -1408,7 +1408,7 @@
   // One quiet toast per batch of news, never repeated for the same batch, and
   // never while the board itself is open. Clicking it opens My posts.
   function maybeNotice(counts) {
-    if (!counts || !counts.items || !counts.items.length || isOpen || !window.StaffUI) return;
+    if (!counts || !counts.items || !counts.items.length || isOpen || !window.TkNotify) return;
     var key = counts.items
       .map(function (i) {
         return i.id + ":" + i.latest;
@@ -1418,15 +1418,12 @@
     lsSet(NOTICE_KEY, key);
     var lines = counts.items.slice(0, 2).map(describeUpdate);
     var extra = counts.items.length - 2;
-    var msg = lines.join(" ") + (extra > 0 ? " And " + extra + " more." : "") + " Click to open.";
-    var t = StaffUI.toast(msg, { type: "info", title: "News on your posts", timeout: 12000 });
-    if (!t) return;
-    t.classList.add("sb-toast");
-    t.addEventListener("click", function (e) {
-      if (e.target.closest(".tk-tx")) return;
-      var x = t.querySelector(".tk-tx");
-      if (x) x.click();
-      open("mine");
+    TkNotify.info(lines.join(" ") + (extra > 0 ? " And " + extra + " more." : ""), {
+      title: "News on your posts",
+      timeout: 12000,
+      onClick: function () {
+        open("mine");
+      },
     });
   }
 
