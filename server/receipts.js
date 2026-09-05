@@ -24,8 +24,9 @@ const TEXT_MIN = 3;
 
 // Community rules that end in a block with no warning first. Numbers follow
 // DEFAULT_COMMUNITY in rules.js: 2 age, 4 hate speech, 5 personal
-// information, 6 impersonating staff, 8 sexual content, 10 illegal.
-const NO_WARNING_RULES = new Set([2, 4, 5, 6, 8, 10]);
+// information, 6 impersonating staff, 8 sexual content, 10 illegal,
+// 15 getting around a block.
+const NO_WARNING_RULES = new Set([2, 4, 5, 6, 8, 10, 15]);
 
 const GRADES = ["corroborated", "reported", "unverifiable", "contradicted"];
 
@@ -121,6 +122,7 @@ function capture(o) {
   const targetSocket = o.targetSocket || null;
   const seen = targetSocket ? null : lastseen.get(userId);
   const deviceId =
+    o.deviceId ||
     (targetSocket && targetSocket.deviceId) ||
     (targetUser && targetUser.deviceId) ||
     (seen && seen.deviceId) ||

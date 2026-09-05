@@ -615,7 +615,7 @@ socket.on("disconnect", (reason) => {
 // up top); the shared connection overlay tells the user when an outage
 // outlives its grace period.
 socket.on("connect_error", (error) => {
-  if (error?.data?.banned) {
+  if (error?.data?.banned || error?.data?.ackRequired) {
     try {
       socket.io.opts.reconnection = false;
       socket.disconnect();
@@ -669,86 +669,194 @@ function showBanScreen(info) {
   banScreenShown = true;
 
   const permanent = !!info.permanent;
-  const timerHtml = permanent
-    ? '<div class="ban-perm"><i class="fas fa-ban"></i> Permanent ban</div>'
-    : '<div class="ban-timer"><div class="ban-timer-label">Time remaining</div>' +
-      '<div class="ban-timer-value" id="banCountdown">--:--:--</div></div>';
-  const foot =
-    '<div class="ban-foot">' +
-    '<p class="ban-note">' +
-    (permanent ? "" : "This page updates itself the moment your ban ends. ") +
-    "Every appeal is read by a person." +
-    "</p>" +
-    "</div>";
 
   const overlay = document.createElement("div");
   overlay.id = "banScreen";
   overlay.innerHTML =
-    '<div class="ban-card">' +
-    '<div class="ban-hd">' +
-    '<i class="fas fa-gavel ban-icon"></i>' +
-    "<h1>Access blocked</h1>" +
-    '<span class="ban-hd-sub">Talkomatic</span>' +
-    "</div>" +
-    '<div class="ban-body">' +
-    '<p class="ban-sub">' +
-    (permanent
-      ? "A moderator has permanently blocked your access to Talkomatic."
-      : "A moderator has temporarily blocked your access to Talkomatic.") +
-    "</p>" +
-    '<div class="ban-meta" id="banMeta"></div>' +
-    '<div class="ban-strip" id="banReason" style="display:none">' +
-    '<div class="lbl"><i class="fas fa-comment-dots"></i> Reason from staff</div>' +
-    '<div class="txt" id="banReasonText"></div>' +
-    "</div>" +
-    timerHtml +
-    '<div class="ban-appeal" id="banAppealWrap">' +
-    '<div class="ban-appeal-h"><i class="fas fa-scale-balanced"></i> Appeal this ban</div>' +
-    '<p class="ban-appeal-p">Think this was a mistake? Say what happened. A moderator reads it and can ask you questions here.</p>' +
-    '<textarea id="banAppealText" maxlength="1000" placeholder="Explain why this ban should be lifted..."></textarea>' +
+    '<div class="bs">' +
+    '<div class="bs-brand">Talkomatic</div>' +
+    '<div class="bs-state" id="banState"></div>' +
+    '<div class="bs-card" id="banWhy" hidden></div>' +
+    '<div class="bs-card" id="banFile" hidden></div>' +
+    '<details class="bs-appeal" id="banAppeal" hidden>' +
+    '<summary><i class="fas fa-scale-balanced"></i> <span id="banAppealTitle">Appeal this block</span></summary>' +
+    '<div id="banAppealWrap">' +
+    '<p class="ban-appeal-p">Think this was a mistake? Say what happened. A moderator who did not place the block reads it and can ask you questions here.</p>' +
+    '<textarea id="banAppealText" maxlength="1000" placeholder="What happened, in your own words"></textarea>' +
     '<div class="ban-appeal-row">' +
     '<button id="banAppealSend"><i class="fas fa-paper-plane"></i> Send appeal</button>' +
     '<span class="ban-appeal-msg" id="banAppealMsg"></span>' +
-    "</div>" +
-    "</div>" +
-    foot +
-    "</div>" +
+    "</div></div></details>" +
+    '<p class="bs-foot">Every appeal is read by a person, never by the moderator who placed the block.</p>' +
     "</div>";
   document.body.appendChild(overlay);
 
-  if (info.reason) {
-    const rc = document.getElementById("banReason");
-    const rt = document.getElementById("banReasonText");
-    if (rc && rt) {
-      rt.textContent = info.reason;
-      rc.style.display = "block";
+  const $ = (id) => document.getElementById(id);
+  const node = (tag, cls, value) => {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (value != null) n.textContent = value;
+    return n;
+  };
+  const fmtDate = (ts) => {
+    try {
+      return new Date(ts).toLocaleString([], {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } catch (_) {
+      return "";
     }
+  };
+
+  // The length as staff picked it, read back from how long it runs.
+  function lengthLabel(ms) {
+    const h = ms / 3600000;
+    if (h >= 27 * 24) return "1 month";
+    if (h >= 6.5 * 24) return "1 week";
+    if (h >= 2.5 * 24) return "3 days";
+    if (h >= 20) return "1 day";
+    if (h >= 5) return "6 hours";
+    if (h >= 0.9) return "1 hour";
+    return Math.max(1, Math.round(ms / 60000)) + " minutes";
   }
 
-  const meta = document.getElementById("banMeta");
-  if (meta) {
-    const addChip = (faClass, label, value) => {
-      const chip = document.createElement("span");
-      chip.className = "ban-chip";
-      const i = document.createElement("i");
-      i.className = faClass;
-      chip.appendChild(i);
-      chip.appendChild(document.createTextNode(" " + label + " "));
-      const b = document.createElement("b");
-      b.textContent = value;
-      chip.appendChild(b);
-      meta.appendChild(chip);
-    };
-    if (info.by) addChip("fas fa-user-shield", "Banned by", String(info.by));
-    if (info.bannedAt) {
+  const ACTION_LABEL = [
+    [/^kick\+ban/, "Kicked and banned from a room"],
+    [/^kick/, "Kicked from a room"],
+    [/^warn/, "Warned"],
+    [/^wipe buffer/, "Text wiped"],
+    [/^(ip block|id block|ban ip)\s*(\S+)?/, (m) => "Blocked" + (m[2] === "permanent" ? " permanently" : m[2] ? " for " + lengthLabelKey(m[2]) : "")],
+    [/^rename/, "Name reset"],
+    [/^reset location/, "Location reset"],
+    [/^show rules/, "Shown the rules"],
+    [/^unblock ip|^lift ban/, "Block lifted"],
+  ];
+  const LENGTH_KEY = { "1h": "1 hour", "6h": "6 hours", "24h": "1 day", "3d": "3 days", "7d": "1 week", "30d": "1 month" };
+  function lengthLabelKey(k) {
+    return LENGTH_KEY[k] || k;
+  }
+  function actionLabel(action) {
+    const a = String(action || "").toLowerCase();
+    for (const [re, label] of ACTION_LABEL) {
+      const m = re.exec(a);
+      if (m) return typeof label === "function" ? label(m) : label;
+    }
+    return action;
+  }
+
+  // The top of the page: what is happening, and for how long.
+  function paintState(d) {
+    const box = $("banState");
+    if (!box) return;
+    box.textContent = "";
+    box.classList.toggle("ok", !!d.lifted);
+    box.appendChild(
+      node("i", "bs-icon fas " + (d.lifted ? "fa-circle-check" : d.permanent ? "fa-ban" : "fa-hourglass-half")),
+    );
+    if (d.lifted) {
+      box.appendChild(node("h1", null, "You are no longer blocked"));
+      box.appendChild(
+        node("p", "bs-line", "Before you come back, read the rules. They are short, and they are the reason this happened."),
+      );
+      const row = node("div", "bs-actions");
+      const read = node("button", "bs-btn");
+      read.type = "button";
+      read.innerHTML = '<i class="fas fa-book-open"></i> Read the rules';
+      const back = node("button", "bs-btn primary");
+      back.type = "button";
+      back.disabled = true;
+      back.innerHTML = '<i class="fas fa-arrow-right"></i> I have read them, let me back in';
+      read.addEventListener("click", () => {
+        if (window.TalkomaticRules) window.TalkomaticRules.open();
+        const rules = document.querySelector(".tkm-overlay");
+        if (rules) rules.style.zIndex = "1000002";
+        back.disabled = false;
+      });
+      back.addEventListener("click", () => acknowledge(back));
+      row.appendChild(read);
+      row.appendChild(back);
+      box.appendChild(row);
+      return;
+    }
+    if (d.permanent) {
+      box.appendChild(node("h1", null, "You are blocked from Talkomatic"));
+      box.appendChild(node("p", "bs-line", "This block does not end on its own. An appeal is the way back."));
+      return;
+    }
+    const placed = d.bannedAt || Date.now();
+    box.appendChild(node("h1", null, "You are blocked for " + lengthLabel(d.expiry - placed)));
+    const clock = node("div", "bs-clock", "--:--:--");
+    clock.id = "banCountdown";
+    box.appendChild(clock);
+    box.appendChild(node("p", "bs-line", "Ends " + fmtDate(d.expiry) + ". This page opens up on its own when it does."));
+  }
+
+  function paintWhy(d) {
+    const box = $("banWhy");
+    if (!box) return;
+    box.textContent = "";
+    box.hidden = !d.banned;
+    if (!d.banned) return;
+    box.appendChild(node("span", "bs-k", "Why"));
+    box.appendChild(node("p", "bs-why-text", d.reason || "No reason was written down. You can ask in an appeal."));
+    const meta = [];
+    if (d.bannedAt) meta.push("Placed " + fmtDate(d.bannedAt));
+    if (d.by) meta.push("by " + d.by);
+    if (meta.length) box.appendChild(node("div", "bs-meta", meta.join(", ")));
+  }
+
+  // Everything staff have done to this person, told to the person.
+  function paintFile(d) {
+    const box = $("banFile");
+    if (!box) return;
+    box.textContent = "";
+    const rows = (d.file || []).slice();
+    box.hidden = !rows.length && !d.banned;
+    box.appendChild(node("span", "bs-k", "On your record"));
+    if (!rows.length) {
+      box.appendChild(node("p", "bs-none", "Nothing else. This block is the only thing on file."));
+      return;
+    }
+    rows.forEach((p) => {
+      const row = node("div", "bs-row");
       let when = "";
       try {
-        when = new Date(info.bannedAt).toLocaleDateString();
-      } catch (_) {
-        when = "";
-      }
-      if (when) addChip("fas fa-calendar-day", "Banned on", when);
-    }
+        when = new Date(p.at).toLocaleDateString([], { day: "numeric", month: "short" });
+      } catch (_) {}
+      row.appendChild(node("span", "bs-when", when));
+      row.appendChild(node("span", "bs-act", actionLabel(p.action)));
+      if (p.reason && !/^text before wipe/.test(p.reason)) row.appendChild(node("span", "bs-reason", p.reason));
+      if (p.quote) row.appendChild(node("span", "bs-quote", "You had typed: “" + p.quote + "”"));
+      box.appendChild(row);
+    });
+  }
+
+  function acknowledge(button) {
+    button.disabled = true;
+    fetch("/api/v1/ban-acknowledge", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ deviceId: deviceIdOf() }),
+    })
+      .then((r) => r.json().catch(() => ({})))
+      .then((r) => {
+        if (!r || !r.ok) {
+          button.disabled = false;
+          return;
+        }
+        try {
+          sessionStorage.setItem("tk_ban_lifted", "1");
+        } catch (_) {}
+        window.location.reload();
+      })
+      .catch(() => {
+        button.disabled = false;
+      });
   }
 
   const deviceIdOf = () =>
@@ -812,6 +920,10 @@ function showBanScreen(info) {
     const wrap = document.getElementById("banAppealWrap");
     if (!wrap) return;
     wrap.textContent = "";
+    const title = $("banAppealTitle");
+    if (title) title.textContent = heading || "Appeal";
+    const details = $("banAppeal");
+    if (details) details.open = true;
     const h = document.createElement("div");
     h.className = "ban-appeal-h";
     const hi = document.createElement("i");
@@ -839,13 +951,24 @@ function showBanScreen(info) {
     const d = appealState;
     wrap.textContent = "";
 
-    const h = document.createElement("div");
-    h.className = "ban-appeal-h";
-    const hi = document.createElement("i");
-    hi.className = "fas fa-scale-balanced";
-    h.appendChild(hi);
-    h.appendChild(document.createTextNode(" Your appeal"));
-    wrap.appendChild(h);
+    // The summary line says where the appeal stands before it is opened.
+    const title = $("banAppealTitle");
+    if (title) {
+      title.textContent = "Your appeal";
+      const status = document.createElement("span");
+      const kind =
+        d.status === "resolved"
+          ? d.resolution === "lifted"
+            ? "lifted"
+            : "declined"
+          : "open";
+      status.className = "bs-status " + kind;
+      status.textContent =
+        kind === "open" ? (d.awaitingReply ? "waiting on staff" : "open") : kind;
+      title.appendChild(status);
+    }
+    const details = $("banAppeal");
+    if (details) details.open = true;
 
     const p = document.createElement("p");
     p.className = "ban-appeal-p";
@@ -1164,48 +1287,62 @@ function showBanScreen(info) {
       });
   }
 
-  pollIntoChat(false);
+  // One state object drives the page. The socket error gets it on screen at
+  // once; ban-status fills in the rest and, later, says when it is over.
+  let countdownTimer = null;
+  let appealStarted = false;
 
-  if (!permanent && info.expiry) {
+  function apply(d) {
+    paintState(d);
+    paintWhy(d);
+    paintFile(d);
+    const ap = $("banAppeal");
+    if (ap) ap.hidden = !d.banned;
+    const foot = overlay.querySelector(".bs-foot");
+    if (foot) foot.hidden = !d.banned;
+    if (d.banned && !d.permanent && d.expiry) startCountdown(d.expiry);
+    if (d.banned && !appealStarted) {
+      appealStarted = true;
+      pollIntoChat(false);
+    }
+  }
+
+  function startCountdown(expiry) {
+    if (countdownTimer) clearInterval(countdownTimer);
     const tick = () => {
-      const el = document.getElementById("banCountdown");
+      const el = $("banCountdown");
       if (!el) return;
-      const remaining = info.expiry - Date.now();
+      const remaining = expiry - Date.now();
       if (remaining <= 0) {
         el.textContent = "00:00:00";
-        window.location.reload();
+        clearInterval(countdownTimer);
+        countdownTimer = null;
+        refresh();
         return;
       }
       el.textContent = formatBanRemaining(remaining);
     };
     tick();
-    setInterval(tick, 1000);
+    countdownTimer = setInterval(tick, 1000);
   }
 
-  let banLifted = false;
-  const checkLifted = () => {
-    if (banLifted || document.hidden) return;
+  function refresh() {
+    if (document.hidden) return;
     fetch("/api/v1/ban-status", { credentials: "same-origin", cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
-        if (banLifted || !d || typeof d.banned !== "boolean" || d.banned)
-          return;
-        banLifted = true;
-        try {
-          sessionStorage.setItem("tk_ban_lifted", "1");
-        } catch (_) {}
-        const sub = document.querySelector("#banScreen .ban-sub");
-        if (sub) {
-          sub.textContent =
-            "Good news - your ban has been lifted. Reloading...";
-          sub.style.color = "#57d9a3";
-        }
-        setTimeout(() => window.location.reload(), 1200);
+        if (!d || typeof d.banned !== "boolean") return;
+        apply(Object.assign({}, d, { lifted: !d.banned }));
       })
       .catch(() => {});
-  };
-  setInterval(checkLifted, 20000);
-  document.addEventListener("visibilitychange", checkLifted);
+  }
+
+  apply(
+    Object.assign({ banned: !!info.banned, lifted: !info.banned }, info),
+  );
+  refresh();
+  setInterval(refresh, 20000);
+  document.addEventListener("visibilitychange", refresh);
 }
 
 function formatBanRemaining(ms) {
@@ -2160,11 +2297,91 @@ function ensureDevPanelButton() {
   btn.innerHTML = currentUserIsDev
     ? '<i class="fas fa-screwdriver-wrench"></i> Admin Panel'
     : '<i class="fas fa-shield-halved"></i> Mod Panel';
-  btn.title = currentUserIsDev ? "Dev tools" : "Mod tools";
+  btn.title = currentUserIsDev
+    ? "Dev tools. Drag to move it out of the way."
+    : "Mod tools. Drag to move it out of the way.";
   btn.addEventListener("click", () =>
     currentUserIsDev ? openDevPanel() : openModLobbyPanel(),
   );
   document.body.appendChild(btn);
+  makeStaffButtonDraggable(btn);
+}
+
+// The panel button sits over the Desk's composer and over dialog buttons in
+// its corner, so it moves like the Desk pill: drag it anywhere, and it stays
+// there on this browser.
+const STAFF_BUTTON_KEY = "talkomatic_staffButton";
+
+function placeStaffButton(btn, x, y) {
+  const w = btn.offsetWidth || 120;
+  const h = btn.offsetHeight || 40;
+  const at = {
+    x: Math.max(6, Math.min(x, window.innerWidth - w - 6)),
+    y: Math.max(6, Math.min(y, window.innerHeight - h - 6)),
+  };
+  btn.style.left = at.x + "px";
+  btn.style.top = at.y + "px";
+  btn.style.right = "auto";
+  btn.style.bottom = "auto";
+  return at;
+}
+
+function makeStaffButtonDraggable(btn) {
+  let saved = null;
+  try {
+    saved = JSON.parse(localStorage.getItem(STAFF_BUTTON_KEY) || "null");
+  } catch (_) {}
+  if (saved && typeof saved.x === "number" && typeof saved.y === "number")
+    placeStaffButton(btn, saved.x, saved.y);
+
+  let drag = null;
+  btn.addEventListener("pointerdown", (e) => {
+    if (e.button != null && e.button !== 0) return;
+    const r = btn.getBoundingClientRect();
+    drag = {
+      dx: e.clientX - r.left,
+      dy: e.clientY - r.top,
+      sx: e.clientX,
+      sy: e.clientY,
+      moved: false,
+    };
+    try {
+      btn.setPointerCapture(e.pointerId);
+    } catch (_) {}
+  });
+  btn.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    if (
+      !drag.moved &&
+      Math.abs(e.clientX - drag.sx) < 4 &&
+      Math.abs(e.clientY - drag.sy) < 4
+    )
+      return;
+    drag.moved = true;
+    drag.at = placeStaffButton(btn, e.clientX - drag.dx, e.clientY - drag.dy);
+  });
+  // The button animates into place, so the spot to remember is the one we
+  // asked for, not wherever the animation had reached when the pointer lifted.
+  const done = () => {
+    if (!drag) return;
+    const { moved, at } = drag;
+    drag = null;
+    if (!moved || !at) return;
+    try {
+      localStorage.setItem(STAFF_BUTTON_KEY, JSON.stringify(at));
+    } catch (_) {}
+    btn.addEventListener("click", (e) => e.stopImmediatePropagation(), {
+      capture: true,
+      once: true,
+    });
+  };
+  btn.addEventListener("pointerup", done);
+  btn.addEventListener("pointercancel", done);
+  window.addEventListener("resize", () => {
+    if (!btn.style.left) return;
+    const r = btn.getBoundingClientRect();
+    placeStaffButton(btn, r.left, r.top);
+  });
 }
 
 function openDevPanel() {

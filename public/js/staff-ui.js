@@ -444,6 +444,7 @@
       const form = el("form", { class: "tk-form" });
       if (o.message) form.appendChild(el("p", { text: o.message }));
       const inputs = {};
+      const helps = {};
       fields.forEach((f) => {
         const wrap = el("div", { class: "tk-field" });
         if (f.type === "checkbox") {
@@ -490,9 +491,18 @@
         }
         inputs[f.name] = input;
         wrap.appendChild(input);
-        if (f.help)
-          wrap.appendChild(el("div", { class: "tk-help", text: f.help }));
+        if (f.help != null) {
+          helps[f.name] = el("div", { class: "tk-help", text: f.help });
+          wrap.appendChild(helps[f.name]);
+        }
         form.appendChild(wrap);
+      });
+      // A field can react to another: the rule picker sets the block length.
+      fields.forEach((f) => {
+        if (typeof f.onChange !== "function" || !inputs[f.name]) return;
+        const fire = () => f.onChange(inputs[f.name].value, inputs, helps);
+        inputs[f.name].addEventListener("change", fire);
+        if (inputs[f.name].value) fire();
       });
       const errEl = el("div", { class: "tk-err" });
       form.appendChild(errEl);
@@ -1350,6 +1360,97 @@
     return t ? rule + ". " + t : rule + ".";
   }
 
+  // ── Block lengths and the one dialog every block goes through ─────────────
+  // Same ladder as server/durations.js; change both.
+  const DURATIONS = [
+    { value: "1h", label: "1 hour" },
+    { value: "6h", label: "6 hours" },
+    { value: "24h", label: "1 day" },
+    { value: "3d", label: "3 days" },
+    { value: "7d", label: "1 week" },
+    { value: "30d", label: "1 month" },
+    { value: "permanent", label: "Permanent" },
+  ];
+
+  function durationOptions(allowPermanent) {
+    return DURATIONS.filter((d) => allowPermanent !== false || d.value !== "permanent");
+  }
+
+  function durationLabel(value) {
+    const d = DURATIONS.find((x) => x.value === value);
+    return d ? d.label : String(value || "");
+  }
+
+  function ruleValue(r, i) {
+    return "Rule " + (i + 1) + " - " + r.title;
+  }
+
+  // Rule first, then a length the rule suggests, then a note. The suggestion
+  // is a starting point: the moderator picks the length that fits.
+  // Resolves to { duration, reason, values } or null.
+  async function blockDialog(opts) {
+    const o = opts || {};
+    const rules = (await fetchCommunityRules(o.socket)) || [];
+    const byValue = new Map(rules.map((r, i) => [ruleValue(r, i), r]));
+    const options = durationOptions(o.allowPermanent);
+    const fallback = options.some((d) => d.value === o.duration) ? o.duration : "24h";
+    const fields = (o.extraFields || []).concat([
+      {
+        name: "rule",
+        label: "Which rule did they break?",
+        type: "select",
+        value: "",
+        required: true,
+        options: [{ value: "", label: "Pick the rule" }].concat(
+          rules.map((r, i) => ({ value: ruleValue(r, i), label: i + 1 + ". " + r.title })),
+        ),
+        onChange: (value, inputs, helps) => {
+          const r = byValue.get(value);
+          if (!r) return;
+          if (r.block && r.block !== "none" && options.some((d) => d.value === r.block))
+            inputs.duration.value = r.block;
+          if (helps.duration)
+            helps.duration.textContent = r.response
+              ? "Usual response: " + r.response
+              : r.block === "none"
+                ? "This rule does not usually end in a block."
+                : "";
+        },
+      },
+      {
+        name: "duration",
+        label: "How long",
+        type: "select",
+        value: fallback,
+        options,
+        help: "",
+      },
+      {
+        name: "note",
+        label: "Note (optional)",
+        type: "textarea",
+        maxLength: 500,
+        value: o.note || "",
+        placeholder: o.notePlaceholder || "What you saw, in a line. The person reads this on the ban screen.",
+      },
+    ]);
+    const res = await prompt({
+      title: o.title || "Block",
+      icon: '<i class="fas fa-ban"></i>',
+      subtitle: o.subtitle,
+      message: o.message,
+      fields,
+      danger: true,
+      confirmText: o.confirmText || "Place block",
+    });
+    if (!res) return null;
+    return {
+      duration: res.duration,
+      reason: ruleReason(res.rule, res.note),
+      values: res,
+    };
+  }
+
   // ── Write-ups for long blocks ─────────────────────────────────────────────
   const TRIED_OPTIONS = [
     { value: "", label: "Pick one" },
@@ -1513,7 +1614,7 @@
       const ctrl = modal({
         title: "Write up this block",
         icon: '<i class="fas fa-pen-to-square"></i>',
-        subtitle: "Required for 7-day and permanent blocks",
+        subtitle: "Required for blocks of a week or longer",
         locked: true,
         body: form,
         actions: [
@@ -1547,6 +1648,10 @@
     communityRules: fetchCommunityRules,
     communityRuleField,
     ruleReason,
+    DURATIONS,
+    durationOptions,
+    durationLabel,
+    blockDialog,
     writeup,
     writeupLines,
     triedLabel,

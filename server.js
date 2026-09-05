@@ -50,6 +50,8 @@ const appeals = require("./server/appeals");
 const ipban = require("./server/ipban");
 const devicetoken = require("./server/devicetoken");
 const ipredact = require("./server/ipredact");
+const identity = require("./server/identity");
+const audit = require("./server/audit");
 const communityThemes = require("./server/themes");
 
 // ── Global Error Handlers ───────────────────────────────────────────────────
@@ -459,6 +461,15 @@ io.use((socket, next) => {
         ),
         bannedAt: (block && typeof block === "object" && block.ts) || null,
       };
+      if (deviceId) identity.setAckDue(deviceId, true);
+      return next(err);
+    }
+    // The block is over, but this device sat on the ban screen: it reads the
+    // rules and accepts before it comes back. The lobby shows that page; the
+    // staff dashboard is not gated, since staff are never the ones blocked.
+    if (deviceId && !socket.handshake.auth.app && identity.ackDue(deviceId)) {
+      const err = new Error("Rules acknowledgement required");
+      err.data = { banned: false, ackRequired: true };
       return next(err);
     }
     // Opportunistically drop a stale exact entry so the map does not grow.
@@ -1032,6 +1043,7 @@ const BAN_SCREEN_PATHS = new Set([
   `${API}/ban-status`,
   `${API}/appeal`,
   `${API}/appeal/message`,
+  `${API}/ban-acknowledge`,
 ]);
 app.use("/api", (req, res, next) => {
   // originalUrl, not req.path: inside a mounted middleware the mount point is
@@ -1092,14 +1104,15 @@ app.post(`${API}/appeal`, (req, res) => {
     const deviceId = req.deviceId || legacyId;
     // Match a range ban too, so a range-banned user (whose exact address is not
     // itself a key) can still submit an appeal from the ban screen.
-    const active =
-      ipban.findActiveBlock(ip) ||
-      (deviceId ? ipban.findActiveIdBlock(deviceId) : null) ||
-      (legacyId && legacyId !== deviceId
-        ? ipban.findActiveIdBlock(legacyId)
-        : null);
+    const byDevice = deviceId ? ipban.findActiveIdBlock(deviceId) : null;
+    const byLegacy =
+      legacyId && legacyId !== deviceId ? ipban.findActiveIdBlock(legacyId) : null;
+    const active = ipban.findActiveBlock(ip) || byDevice || byLegacy;
     if (!active) return res.json({ ok: false, code: "not_banned" });
     const block = active.block;
+    // The appeal is filed under the id the block actually matched, so the
+    // history behind that block is the history staff see beside the appeal.
+    const appealDeviceId = active === byLegacy ? legacyId : deviceId;
 
     const message = sanitizeMessage(
       typeof req.body?.message === "string" ? req.body.message : "",
@@ -1113,12 +1126,13 @@ app.post(`${API}/appeal`, (req, res) => {
     // A ban screen reached with no session still has a device and an address,
     // and both usually lead back to a name.
     const name =
-      req.session?.username || rooms.knownName({ deviceId, userId, ip });
+      req.session?.username ||
+      rooms.knownName({ deviceId: appealDeviceId, userId, ip });
     const b = block && typeof block === "object" ? block : {};
 
     const result = appeals.submit({
       ip,
-      deviceId,
+      deviceId: appealDeviceId,
       userId,
       name,
       message,
@@ -1297,22 +1311,66 @@ app.post(`${API}/appeal/message`, (req, res) => {
 // Is the requester's IP still blocked? The ban screen polls this over HTTP
 // (which works while the socket is refused) so it can reload itself the moment
 // a ban is lifted, instead of stranding the user until they refresh by hand.
+// What staff have done to this person, told to the person. Staff read as the
+// team, addresses are masked, and their own words come back as they typed
+// them.
+const OWN_FILE_MS = 90 * 24 * 60 * 60 * 1000;
+
+function ownFile(req, deviceId) {
+  const who = { userId: req.session?.userId || null, deviceId };
+  return audit.actionsOn(who, Date.now() - OWN_FILE_MS, 10).map((p) => ({
+    action: p.action,
+    by: roles.publicStaffName(p.by, p.role),
+    at: p.at,
+    quote: p.quote,
+    reason: ipredact.redact(p.details),
+  }));
+}
+
 app.get(`${API}/ban-status`, (req, res) => {
   const ip = getClientIP(req);
+  const deviceId = req.deviceId || req.session?.did || null;
   // Range-aware: a range-banned user must keep reading banned:true here (matches
   // the socket gate), or the ban screen would think they were unbanned and
   // reload-loop. Mirrors the socket gate exactly, session identity included.
   const active =
     ipban.findActiveBlock(ip) ||
-    (req.session?.did ? ipban.findActiveIdBlock(req.session.did) : null);
+    (deviceId ? ipban.findActiveIdBlock(deviceId) : null);
   const block = active ? active.block : null;
-  const expiry = block && typeof block === "object" ? block.expiry : block;
+  const b = block && typeof block === "object" ? block : null;
+  const expiry = b ? b.expiry : block;
   const banned = !!active;
+  const reason = b ? ipredact.redact(b.reason || null) : null;
+  const rule = /^Rule (\d+)\b/.exec(reason || "");
   res.json({
     banned,
     permanent: banned && expiry >= Number.MAX_SAFE_INTEGER,
     expiry: banned ? expiry : 0,
+    reason,
+    rule: rule ? Number(rule[1]) : null,
+    by: banned ? roles.publicStaffName(b && b.by, b && b.byRole) : null,
+    bannedAt: (b && b.ts) || null,
+    file: deviceId ? ownFile(req, deviceId) : [],
+    ackRequired: !banned && !!deviceId && identity.ackDue(deviceId),
   });
+});
+
+// The person read the rules and is coming back. Clears the flag the socket
+// gate checks and leaves a line in the log beside the block.
+app.post(`${API}/ban-acknowledge`, (req, res) => {
+  const ip = getClientIP(req);
+  const deviceId = req.deviceId || req.session?.did || null;
+  if (!deviceId) return res.json({ ok: false, code: "no_device" });
+  if (ipban.findActiveBlock(ip) || ipban.findActiveIdBlock(deviceId))
+    return res.json({ ok: false, code: "still_blocked" });
+  identity.setAckDue(deviceId, false);
+  audit.recordRulesAccepted({
+    userId: req.session?.userId || null,
+    deviceId,
+    username: req.session?.username || null,
+    ip,
+  });
+  res.json({ ok: true });
 });
 
 // Emoji list, cached in memory for an hour

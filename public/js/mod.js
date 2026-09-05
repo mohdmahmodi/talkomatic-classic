@@ -429,7 +429,9 @@
           ? "changed name"
           : e.event === "forced-rename"
             ? "force-renamed by staff"
-            : "signed in";
+            : e.event === "accepted-rules"
+              ? "read the rules and came back after a block"
+              : "signed in";
       title.appendChild(document.createTextNode(" "));
       title.appendChild(span("act", evt));
     }
@@ -958,32 +960,15 @@
   }
   function openBanDurationMenu(b) {
     if (!window.StaffUI) return;
-    const durs = [
-      {
-        label: "1 hour",
-        value: "1h",
-        icon: '<i class="fas fa-clock"></i>',
-        desc: "Ends 1 hour from now",
-      },
-      {
-        label: "24 hours",
-        value: "24h",
-        icon: '<i class="fas fa-clock"></i>',
-        desc: "Ends 24 hours from now",
-      },
-      {
-        label: "7 days",
-        value: "7d",
-        icon: '<i class="fas fa-calendar-week"></i>',
-        desc: "Ends 7 days from now",
-      },
-      {
-        label: "Permanent",
-        value: "permanent",
-        icon: '<i class="fas fa-ban"></i>',
-        desc: "Never expires",
-      },
-    ];
+    const durs = StaffUI.DURATIONS.map((d) => ({
+      label: d.label,
+      value: d.value,
+      icon:
+        d.value === "permanent"
+          ? '<i class="fas fa-ban"></i>'
+          : '<i class="fas fa-clock"></i>',
+      desc: d.value === "permanent" ? "Never expires" : "Ends " + d.label + " from now",
+    }));
     StaffUI.menu({
       title: "Change ban duration",
       icon: '<i class="fas fa-hourglass-half"></i>',
@@ -2154,8 +2139,10 @@
     body.appendChild(
       helpBlock("What is expected of you", [
         [
+          "Act on what you can see. A report is a lead, not a verdict: the quote on the report card, the snapshot and the trail are proof, somebody's word is not. If you cannot see it, warn, write a note, and watch. The Desk's #playbook walks through the situations that come up.",
           "Pick the rule whenever you ban or block somebody. The dialog asks for it and the server will not place the block without it.",
-          "After a 7-day or permanent block, write it up: what they did, the rule, what was tried first, and why this length. The block is already in place while you write. If a write-up sits unwritten, your next long block waits until it is done, and after a day the leads are told.",
+          "After a block of a week or longer, write it up: what they did, the rule, what was tried first, and why this length. The block is already in place while you write. If a write-up sits unwritten, your next long block waits until it is done, and after a day the leads are told.",
+          "When you pick a rule in the block dialog, it suggests the usual length for a first offence. That is a starting point, not an order. Pick what fits and say why in the note.",
           "You cannot decide an appeal about a block you placed yourself. You can still talk in the thread.",
         ],
       ]),
@@ -3678,15 +3665,7 @@
   };
   const reportCat = (k) => REPORT_CATS[k] || REPORT_CATS.other;
   const durationLabel = (d) =>
-    d === "1h"
-      ? "1 hour"
-      : d === "24h"
-        ? "24 hours"
-        : d === "7d"
-          ? "7 days"
-          : d === "permanent"
-            ? "permanently"
-            : d;
+    window.StaffUI ? StaffUI.durationLabel(d) : String(d || "");
   function relTime(ts) {
     if (!ts) return "";
     const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
@@ -3700,120 +3679,38 @@
 
   // Every block names the rule it enforces. Returns the reason string the
   // server expects, or null when the person backed out.
-  async function ensureRule(reason, title) {
-    const note = String(reason || "").trim();
-    if (/^Rule \d+\b/.test(note)) return note;
-    if (!window.StaffUI) return null;
-    const field = await StaffUI.communityRuleField({ required: true });
-    if (!field) return null;
-    const res = await StaffUI.prompt({
-      title,
-      icon: '<i class="fas fa-ban"></i>',
-      message: "Which rule are they being blocked under?",
-      fields: [field],
-      danger: true,
-      confirmText: title,
-    });
-    if (!res) return null;
-    return StaffUI.ruleReason(res.rule, note);
-  }
-
-  async function banReported(r, duration) {
-    const go = (reason) =>
-      socket.emit("staff ip block", {
-        targetUserId: r.targetUserId,
-        duration,
-        reason: reason || "",
-      });
-    if (!window.StaffUI) return go("");
-    const fields = [];
-    const ruleField = await StaffUI.communityRuleField({ required: true });
-    if (ruleField) fields.push(ruleField);
-    fields.push({
-      name: "value",
-      label: "Reason (optional, saved to the ban list)",
-      type: "textarea",
-      placeholder: "e.g. Repeated harassment after warnings.",
-      maxLength: 500,
-    });
-    StaffUI.prompt({
-      title: "IP block " + (r.name || "user"),
-      icon: '<i class="fas fa-ban"></i>',
-      message:
-        "Block this user " +
-        durationLabel(duration) +
-        "? The block covers their device and the network their address sits on (IPv6 /64, IPv4 /24)" +
-        (r.online
-          ? ". They are disconnected immediately."
-          : ". They are offline; the block uses their last known address."),
-      fields,
-      danger: true,
-      confirmText: "Block " + durationLabel(duration),
-    }).then((res) => {
-      if (res != null) go(StaffUI.ruleReason(res.rule, res.value));
-    });
-  }
   function dismissReport(r) {
     socket.emit("staff dismiss report", { targetUserId: r.targetUserId });
     reportsList = reportsList.filter((x) => x.targetUserId !== r.targetUserId);
     renderReports();
   }
-  function openReportBanMenu(r) {
-    if (!window.StaffUI) return banReported(r, "24h");
-    const durs = [
-      { label: "1 hour", value: "1h", icon: '<i class="fas fa-clock"></i>' },
-      { label: "24 hours", value: "24h", icon: '<i class="fas fa-clock"></i>' },
-      {
-        label: "7 days",
-        value: "7d",
-        icon: '<i class="fas fa-calendar-week"></i>',
-      },
-    ];
-    if (viewerIsFullMod())
-      durs.push({
-        label: "Permanent",
-        value: "permanent",
-        icon: '<i class="fas fa-ban"></i>',
-      });
-    StaffUI.menu({
-      title: "IP block " + (r.name || "user"),
-      icon: '<i class="fas fa-ban"></i>',
+  async function openReportBanMenu(r) {
+    if (!window.StaffUI) return;
+    const res = await StaffUI.blockDialog({
+      title: "Block " + (r.name || "this user"),
       subtitle: r.online
-        ? "Pick a duration"
-        : "Offline; uses their last known address",
-      groups: [
-        {
-          items: durs.map((d) => ({
-            icon: d.icon,
-            label: d.label,
-            danger: true,
-            onClick: () => banReported(r, d.value),
-          })),
-        },
-      ],
+        ? "They are disconnected the moment it is placed"
+        : "Offline; the block uses their last known address",
+      message:
+        "The block covers their device and the network their address sits on (IPv6 /64, IPv4 /24). Pick the rule first; it suggests the usual length.",
+      allowPermanent: viewerIsFullMod(),
+    });
+    if (!res) return;
+    socket.emit("staff ip block", {
+      targetUserId: r.targetUserId,
+      duration: res.duration,
+      reason: res.reason,
     });
   }
 
-  function banDurationOptions() {
-    const durations = [
-      { value: "1h", label: "1 hour" },
-      { value: "24h", label: "24 hours" },
-      { value: "7d", label: "7 days" },
-    ];
-    if (viewerIsFullMod())
-      durations.push({ value: "permanent", label: "Permanent" });
-    return durations;
-  }
-
-  function openBanIpDialog() {
+  async function openBanIpDialog() {
     if (!window.StaffUI) return;
-    StaffUI.prompt({
+    const res = await StaffUI.blockDialog({
       title: "Ban an IP or range",
-      icon: '<i class="fas fa-ban"></i>',
       subtitle: "Blocks the address right away",
       message:
-        "Anyone currently connected behind this is disconnected on the spot, and new connections are refused until the ban ends. They see your message on the ban screen.",
-      fields: [
+        "Anyone currently connected behind this is disconnected on the spot, and new connections are refused until the ban ends. They see your note on the ban screen.",
+      extraFields: [
         {
           name: "ip",
           label: "Addresses and ranges",
@@ -3822,45 +3719,27 @@
           required: true,
           placeholder:
             "203.0.113.7\n151.57.212.0/24\n2601:c4:4200:4890::/64",
-          help: "One per line, or separated by commas, so a list can be pasted straight in. A plain address blocks the whole network it sits on (IPv6 /64, IPv4 /24). Anything written CIDR-style is used at the size you wrote, so /32 pins one exact IPv4 address. Everything on the list gets the same duration and message.",
-        },
-        {
-          name: "duration",
-          label: "Duration",
-          type: "select",
-          options: banDurationOptions(),
-          value: "24h",
-        },
-        {
-          name: "reason",
-          label: "Message shown to them (optional)",
-          type: "textarea",
-          maxLength: 500,
-          placeholder: "e.g. Ban evasion. Appeal from the ban screen.",
+          help: "One per line, or separated by commas, so a list can be pasted straight in. A plain address blocks the whole network it sits on (IPv6 /64, IPv4 /24). Anything written CIDR-style is used at the size you wrote, so /32 pins one exact IPv4 address. Everything on the list gets the same length and note.",
         },
       ],
-      confirmText: "Place block",
-    }).then(async (v) => {
-      if (!v || !v.ip || !v.ip.trim()) return;
-      const reason = await ensureRule(v.reason, "Place block");
-      if (!reason) return;
-      socket.emit("staff ban ip", {
-        ip: v.ip.trim(),
-        duration: v.duration || "24h",
-        reason,
-      });
+      allowPermanent: viewerIsFullMod(),
+    });
+    if (!res || !res.values.ip || !res.values.ip.trim()) return;
+    socket.emit("staff ban ip", {
+      ip: res.values.ip.trim(),
+      duration: res.duration,
+      reason: res.reason,
     });
   }
 
-  function openBanIdDialog() {
+  async function openBanIdDialog() {
     if (!window.StaffUI) return;
-    StaffUI.prompt({
+    const res = await StaffUI.blockDialog({
       title: "Ban an ID",
-      icon: '<i class="fas fa-fingerprint"></i>',
       subtitle: "Blocks a client id, whatever address it moves to",
       message:
         "Use this for someone who keeps coming back from new addresses. Paste the id shown on their report, appeal, or ban card. They are disconnected right away and see the normal ban screen.",
-      fields: [
+      extraFields: [
         {
           name: "id",
           label: "Client id or user id",
@@ -3868,31 +3747,16 @@
           required: true,
           placeholder: "e.g. 1d9a444c-b844-4a7b-b55c-04c6810fb7bd",
         },
-        {
-          name: "duration",
-          label: "Duration",
-          type: "select",
-          options: banDurationOptions(),
-          value: "7d",
-        },
-        {
-          name: "reason",
-          label: "Message shown to them (optional)",
-          type: "textarea",
-          maxLength: 500,
-          placeholder: "e.g. Ban evasion. Appeal from the ban screen.",
-        },
       ],
+      duration: "7d",
+      allowPermanent: viewerIsFullMod(),
       confirmText: "Ban ID",
-    }).then(async (v) => {
-      if (!v || !v.id || !v.id.trim()) return;
-      const reason = await ensureRule(v.reason, "Ban ID");
-      if (!reason) return;
-      socket.emit("staff ban ip", {
-        ip: v.id.trim(),
-        duration: v.duration || "7d",
-        reason,
-      });
+    });
+    if (!res || !res.values.id || !res.values.id.trim()) return;
+    socket.emit("staff ban ip", {
+      ip: res.values.id.trim(),
+      duration: res.duration,
+      reason: res.reason,
     });
   }
 
@@ -4598,6 +4462,37 @@
       cv.appendChild(reasonLine);
       contest.appendChild(cv);
       grid.appendChild(contest);
+
+      // Everything staff have on this person, so the appeal is decided on
+      // the file and not on memory. Nothing on file means exactly that.
+      const onFile = divc("ap-box onfile");
+      const fl = divc("lbl");
+      fl.appendChild(icon("fa-folder-open"));
+      fl.appendChild(document.createTextNode(" On file"));
+      onFile.appendChild(fl);
+      const fv = divc("val ap-file");
+      const file = a.file || { actions: [], reports: 0, names: [] };
+      if (file.names && file.names.length > 1)
+        fv.appendChild(span("ap-file-none", "Also known as " + file.names.slice(1).join(", ")));
+      if (file.evader) fv.appendChild(span("ap-file-none", "Flagged for getting around a block before."));
+      if (file.reports)
+        fv.appendChild(
+          span("ap-file-none", file.reports + (file.reports === 1 ? " report" : " reports") + " from other users on record"),
+        );
+      (file.actions || []).forEach((p) => {
+        const row = divc("ap-file-row");
+        const when = span("ap-file-when", relTime(p.at));
+        when.title = fmtTime(p.at);
+        row.appendChild(when);
+        row.appendChild(span("ap-file-act", p.action));
+        row.appendChild(span("ap-file-by", "by " + (p.by || "staff")));
+        if (p.quote) row.appendChild(span("ap-file-q", '"' + p.quote + '"'));
+        fv.appendChild(row);
+      });
+      if (!fv.childNodes.length)
+        fv.appendChild(span("ap-file-none", "Nothing on file for this person apart from this block."));
+      onFile.appendChild(fv);
+      grid.appendChild(onFile);
 
       const chatBox = divc("ap-box ap-open");
       const cl2 = divc("lbl");
@@ -6396,6 +6291,38 @@
         card.appendChild(input);
       };
 
+      if (rulesSection === "playbook") {
+        field("Situation", "title", 0, "What is happening, in the words a mod would use");
+        field("Do", "do", 3, "The usual way to handle it, first time round");
+        field("Proof you need", "proof", 2, "What has to be on screen or on file before acting");
+        field("Do not", "dont", 2, "The mistake this situation invites");
+        card.appendChild(
+          Object.assign(document.createElement("label"), {
+            className: "rl-lbl",
+            textContent: "Usual block length",
+          }),
+        );
+        const sel = document.createElement("select");
+        sel.className = "rl-field";
+        [{ value: "none", label: "No block" }]
+          .concat(window.StaffUI ? StaffUI.DURATIONS : [])
+          .forEach((o) => {
+            const opt = document.createElement("option");
+            opt.value = o.value;
+            opt.textContent = o.label;
+            if ((rule.length || "none") === o.value) opt.selected = true;
+            sel.appendChild(opt);
+          });
+        sel.addEventListener("change", () => {
+          rule.length = sel.value;
+          sel.classList.add("rl-dirty");
+          rulesMarkDirty();
+        });
+        card.appendChild(sel);
+        wrap.appendChild(card);
+        return;
+      }
+
       field("Rule", "title", 0, "One line, said plainly");
       field("What it means", "body", 3, "What somebody may and may not do");
       field(
@@ -6404,6 +6331,37 @@
         2,
         "The reason behind it, so it can be applied to cases nobody wrote down",
       );
+      if (rulesSection === "community") {
+        field(
+          "Usual response",
+          "response",
+          0,
+          "One line everyone can read: what usually happens the first time",
+        );
+        card.appendChild(
+          Object.assign(document.createElement("label"), {
+            className: "rl-lbl",
+            textContent: "Block the dialog starts from",
+          }),
+        );
+        const sel = document.createElement("select");
+        sel.className = "rl-field";
+        [{ value: "", label: "No suggestion" }, { value: "none", label: "Not usually a block" }]
+          .concat(window.StaffUI ? StaffUI.DURATIONS : [])
+          .forEach((o) => {
+            const opt = document.createElement("option");
+            opt.value = o.value;
+            opt.textContent = o.label;
+            if ((rule.block || "") === o.value) opt.selected = true;
+            sel.appendChild(opt);
+          });
+        sel.addEventListener("change", () => {
+          rule.block = sel.value;
+          sel.classList.add("rl-dirty");
+          rulesMarkDirty();
+        });
+        card.appendChild(sel);
+      }
 
       wrap.appendChild(card);
     });
@@ -6419,6 +6377,7 @@
     if (!d) return;
     rulesData.community = Array.isArray(d.community) ? d.community : [];
     rulesData.mod = Array.isArray(d.mod) ? d.mod : [];
+    rulesData.playbook = Array.isArray(d.playbook) ? d.playbook : [];
     loadRulesSection();
   });
 

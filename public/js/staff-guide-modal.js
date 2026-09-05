@@ -47,7 +47,6 @@
       ],
       notes: [
         "They cannot ban you from the site, and they cannot act on other staff.",
-        "Nobody on staff sees your IP address - the server handles addresses, people never read them.",
       ],
     },
     full: {
@@ -111,7 +110,6 @@
       ],
       handsUp: [],
       notes: [
-        "Even admins never see a raw IP address. Nobody on the site does.",
         "Admins answer for their actions like everyone else - every action they take is in the same permanent log.",
       ],
     },

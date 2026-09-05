@@ -123,6 +123,21 @@ function noteEvasion(id) {
   saveSoon();
 }
 
+// A device that has sat on the ban screen reads the rules before it comes
+// back. Set the moment a block turns it away, cleared when they accept.
+function setAckDue(id, on) {
+  if (!validId(id)) return;
+  const r = rec(id);
+  if (on) r.ackDue = true;
+  else delete r.ackDue;
+  saveSoon();
+}
+
+function ackDue(id) {
+  const r = store[id];
+  return !!(r && r.ackDue);
+}
+
 function allRecords() {
   return store;
 }
@@ -365,6 +380,8 @@ module.exports = {
   devicesMatching,
   devicesByKeys,
   noteEvasion,
+  setAckDue,
+  ackDue,
   allRecords,
   flushSync,
   MEMBER_DAYS,

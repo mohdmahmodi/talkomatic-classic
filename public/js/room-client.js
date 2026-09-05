@@ -4324,61 +4324,20 @@ function openUserStaffMenu(user) {
   });
 }
 
-function openIpBlockPicker(user) {
-  const durs = [
-    { icon: '<i class="fas fa-clock"></i>', label: "1 hour", value: "1h" },
-    { icon: '<i class="fas fa-clock"></i>', label: "24 hours", value: "24h" },
-    {
-      icon: '<i class="fas fa-calendar-days"></i>',
-      label: "7 days",
-      value: "7d",
-    },
-  ];
-  if (currentUserIsDev || (currentUserIsMod && currentUserModLevel >= 2))
-    durs.push({
-      icon: '<i class="fas fa-infinity"></i>',
-      label: "Permanent",
-      value: "permanent",
-    });
-  StaffUI.menu({
-    title: `IP block: ${user.username || "user"}`,
-    icon: '<i class="fas fa-ban"></i>',
-    subtitle: "Pick a duration",
-    groups: [
-      {
-        items: durs.map((d) => ({
-          icon: d.icon,
-          label: d.label,
-          danger: true,
-          onClick: async () => {
-            const fields = [];
-            const ruleField = await StaffUI.communityRuleField();
-            if (ruleField) fields.push(ruleField);
-            fields.push({
-              name: "reason",
-              label: "Message to show the blocked user (optional)",
-              type: "textarea",
-              placeholder: "e.g. Repeated harassment after warnings.",
-              maxLength: 500,
-            });
-            const res = await StaffUI.prompt({
-              title: "Block IP",
-              icon: '<i class="fas fa-ban"></i>',
-              message: `Block this user for ${d.label}? The block covers their device and the network their address sits on (IPv6 /64, IPv4 /24). They'll be disconnected immediately.`,
-              fields,
-              danger: true,
-              confirmText: "Block IP",
-            });
-            if (res != null)
-              socket.emit("staff ip block", {
-                targetUserId: user.id,
-                duration: d.value,
-                reason: StaffUI.ruleReason(res.rule, res.reason),
-              });
-          },
-        })),
-      },
-    ],
+async function openIpBlockPicker(user) {
+  const res = await StaffUI.blockDialog({
+    title: "Block " + (user.username || "this user"),
+    subtitle: "They are disconnected the moment it is placed",
+    message:
+      "The block covers their device and the network their address sits on (IPv6 /64, IPv4 /24). Pick the rule first; it suggests the usual length.",
+    allowPermanent:
+      currentUserIsDev || (currentUserIsMod && currentUserModLevel >= 2),
+  });
+  if (!res) return;
+  socket.emit("staff ip block", {
+    targetUserId: user.id,
+    duration: res.duration,
+    reason: res.reason,
   });
 }
 
@@ -5109,6 +5068,13 @@ socket.on("maintenance status", (data) => {
       },
     );
 });
+// A refused socket has nothing to show on a room page. The lobby carries the
+// ban screen and the rules step, so that is where a blocked person goes.
+socket.on("connect_error", (error) => {
+  if (error && error.data && (error.data.banned || error.data.ackRequired))
+    window.location.href = "/";
+});
+
 socket.on("staff action result", (data) => {
   if (!data) return;
   if (data.action === "room size" && data.size) currentRoomMaxSize = data.size;

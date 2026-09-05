@@ -124,12 +124,15 @@ function thrownOutBefore(store, older, newer) {
     });
 }
 
+// A shared address joins two devices on a matching name, or when the newer
+// one appeared right after the older one was kicked or blocked and never
+// came back. Two people in one house who simply take turns stay two people.
 function addressReason(store, a, b, ip) {
   const name = sameName(store, a, b);
   if (name) return `same name "${name}" on one address`;
   const [older, newer] = byAge(store, a, b);
-  if (tookOver(store, older, newer))
-    return "appeared within 30 minutes of the other device going quiet on the same address";
+  if (tookOver(store, older, newer) && thrownOutBefore(store, older, newer))
+    return "appeared within 30 minutes of a kick or block on the other device, same address";
   return null;
 }
 

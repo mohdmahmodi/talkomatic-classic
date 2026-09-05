@@ -64,6 +64,7 @@ const persons = require("./persons");
 const cases = require("./cases");
 const record = require("./record");
 const devicetoken = require("./devicetoken");
+const durations = require("./durations");
 const crypto = require("crypto");
 
 const gamePrevText = new Map();
@@ -1345,10 +1346,12 @@ function knownName({ deviceId, userId, ip }) {
   if (seen && seen.name) return seen.name;
   const person = persons.resolve(deviceId || userId || "");
   if (person.names[0]) return person.names[0];
-  const onAddress = ip
-    ? identity.devicesMatching((x) => x === ip, 5).find((d) => d.name)
-    : null;
-  return (onAddress && onAddress.name) || null;
+  // An address names somebody only when exactly one named device has used
+  // it. A shared address could name the wrong person, and no name is better.
+  const named = ip
+    ? identity.devicesMatching((x) => x === ip, 5).filter((d) => d.name)
+    : [];
+  return named.length === 1 ? named[0].name : null;
 }
 
 function otherNames({ deviceId, userId }, shown) {
@@ -1437,6 +1440,37 @@ function buildPerson(key, socket) {
         reason: audit.maskIps(e.reason),
         kind: ipban.isIdKey(e.ip) ? "id" : String(e.ip).includes("/") ? "range" : "ip",
       })),
+  };
+}
+
+function rulesSectionOf(value) {
+  return ["community", "mod", "playbook"].includes(value) ? value : "community";
+}
+
+// What staff have on file about the person appealing: the actions taken on
+// them and how many reports they have drawn. Nothing on file means nothing.
+const FILE_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
+
+function appealFile(a, view) {
+  const person = persons.resolve(a.deviceId || a.userId || "");
+  const who = {
+    userId: a.userId,
+    userIds: person.userIds,
+    deviceId: a.deviceId,
+    deviceIds: person.devices.map((d) => d.id),
+  };
+  return {
+    actions: audit.actionsOn(who, Date.now() - FILE_WINDOW_MS, 8).map((p) => ({
+      action: p.action,
+      by: roles.teamLabel(p.by, p.role, view),
+      at: p.at,
+      quote: view.ip ? p.quote : audit.maskIps(p.quote),
+    })),
+    reports: person.userIds
+      .concat(a.userId ? [a.userId] : [])
+      .reduce((n, uid) => n + reports.forTarget(uid).length, 0),
+    names: person.names.slice(0, 5),
+    evader: person.evader,
   };
 }
 
@@ -1577,7 +1611,9 @@ const NO_MORE_APPEALS =
 function buildAppealsList(view) {
   const showIp = !!(view && view.ip);
   return appeals.list().map((a) => {
-    const stillBlocked = ipban.findActiveBlock(a.ip) !== null;
+    const stillBlocked =
+      ipban.findActiveBlock(a.ip) !== null ||
+      (!!a.deviceId && ipban.findActiveIdBlock(a.deviceId) !== null);
     const ban = a.ban || {};
     const bar = appeals.barFor({
       ip: a.ip,
@@ -1618,6 +1654,7 @@ function buildAppealsList(view) {
       banExpiry: ban.expiry || 0,
       banAt: ban.ts || null,
       banWriteup: writeupOf(ban.auditId, view),
+      file: appealFile(a, view),
       locked: !!a.locked,
       lockedBy: showIp
         ? a.lockedBy || null
@@ -3826,7 +3863,7 @@ function registerSocketHandlers(opts) {
     socket.on(
       "rules get",
       safe(async () => {
-        socket.emit("rules data", rules.publicRules());
+        socket.emit("rules data", rules.publicRules({ staff: isStaffSocket(socket) }));
       }),
     );
 
@@ -3834,7 +3871,7 @@ function registerSocketHandlers(opts) {
       "dev set rules",
       safe(async (data) => {
         if (!requireDev(socket)) return;
-        const section = data?.section === "mod" ? "mod" : "community";
+        const section = rulesSectionOf(data?.section);
         const res = rules.setSection(
           section,
           data?.list,
@@ -3849,7 +3886,7 @@ function registerSocketHandlers(opts) {
             ),
           );
         logStaff(socket, "set rules", section, "-", `${res.count} rules`);
-        socket.emit("rules data", rules.publicRules());
+        socket.emit("rules data", rules.publicRules({ staff: isStaffSocket(socket) }));
         socket.emit("staff action result", {
           ok: true,
           action: `saved ${res.count} ${section} rule${res.count === 1 ? "" : "s"}`,
@@ -3861,11 +3898,11 @@ function registerSocketHandlers(opts) {
       "dev reset rules",
       safe(async (data) => {
         if (!requireDev(socket)) return;
-        const section = data?.section === "mod" ? "mod" : "community";
+        const section = rulesSectionOf(data?.section);
         const res = rules.resetSection(section, socket.staffLabel || "dev");
         if (!res.ok) return;
         logStaff(socket, "reset rules", section, "-", "restored defaults");
-        socket.emit("rules data", rules.publicRules());
+        socket.emit("rules data", rules.publicRules({ staff: isStaffSocket(socket) }));
         socket.emit("staff action result", {
           ok: true,
           action: `restored the default ${section} rules`,
@@ -5652,25 +5689,15 @@ function registerSocketHandlers(opts) {
               "You cannot act on this user.",
             ),
           );
-        const DURATIONS = {
-          "1h": 3600000,
-          "24h": 86400000,
-          "7d": 604800000,
-        };
-        let ms;
-        if (duration === "permanent") {
-          ms = Infinity;
-        } else if (DURATIONS[duration] !== undefined) {
-          ms = DURATIONS[duration];
-        } else {
+        const ms = durations.msFor(duration);
+        if (ms === undefined)
           return socket.emit(
             "error",
             createErrorResponse(
               ERROR_CODES.BAD_REQUEST,
-              "Invalid duration. Use 1h, 24h, 7d, or permanent.",
+              "Invalid duration. " + durations.USAGE,
             ),
           );
-        }
         const targetSocket = findSocketsByUserId(targetUserId)[0];
         const roomId = getUserCurrentRoom(targetUserId);
         const room = roomId ? state.rooms.get(roomId) : null;
@@ -5844,18 +5871,9 @@ function registerSocketHandlers(opts) {
           );
 
         const duration = data?.duration;
-        const DURATIONS = { "1h": 3600000, "24h": 86400000, "7d": 604800000 };
-        let ms;
-        if (duration === "permanent") {
-          ms = Infinity;
-        } else if (DURATIONS[duration] !== undefined) {
-          ms = DURATIONS[duration];
-        } else {
-          return fail(
-            ERROR_CODES.BAD_REQUEST,
-            "Invalid duration. Use 1h, 24h, 7d, or permanent.",
-          );
-        }
+        const ms = durations.msFor(duration);
+        if (ms === undefined)
+          return fail(ERROR_CODES.BAD_REQUEST, "Invalid duration. " + durations.USAGE);
         const expiry =
           ms === Infinity ? Number.MAX_SAFE_INTEGER : Date.now() + ms;
         const reason =
@@ -5997,6 +6015,7 @@ function registerSocketHandlers(opts) {
               action: `ban ip ${duration}`,
               targetUserId: singleUserId,
               targetName: single.name,
+              deviceId: single.did,
               reason,
             })
           : null;
@@ -7478,22 +7497,16 @@ function registerSocketHandlers(opts) {
               "No active block on that IP.",
             ),
           );
-        const DURATIONS = { "1h": 3600000, "24h": 86400000, "7d": 604800000 };
         const duration = data?.duration;
-        let expiry;
-        if (duration === "permanent") {
-          expiry = Number.MAX_SAFE_INTEGER;
-        } else if (DURATIONS[duration] !== undefined) {
-          expiry = Date.now() + DURATIONS[duration];
-        } else {
+        const expiry = durations.expiryFor(duration);
+        if (expiry === undefined)
           return socket.emit(
             "error",
             createErrorResponse(
               ERROR_CODES.BAD_REQUEST,
-              "Invalid duration. Use 1h, 24h, 7d, or permanent.",
+              "Invalid duration. " + durations.USAGE,
             ),
           );
-        }
         const rec =
           typeof existing === "object" && existing
             ? existing

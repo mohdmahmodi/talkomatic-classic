@@ -8,13 +8,14 @@ const fs = require("fs");
 const fsp = require("fs").promises;
 const { DATA_DIR } = require("./datadir");
 const audit = require("./audit");
+const durations = require("./durations");
 
 const STORE_PATH = path.join(DATA_DIR, "pending-writeups.json");
 const GRACE_MS = 10 * 60 * 1000;
 const ALERT_AFTER_MS = 24 * 60 * 60 * 1000;
 const SWEEP_MS = 10 * 60 * 1000;
 
-const NEEDS_WRITEUP = new Set(["7d", "permanent"]);
+const NEEDS_WRITEUP = durations.LONG;
 const TRIED = new Set(["warned-me", "warned-other", "kicked", "rules", "nothing"]);
 const MIN_CHARS = { did: 30, why: 20, length: 20 };
 const MIN_WORDS = 4;

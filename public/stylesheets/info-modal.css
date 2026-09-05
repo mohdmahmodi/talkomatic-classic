@@ -303,6 +303,15 @@
   font-style: italic;
 }
 
+.tkr-resp {
+  margin: 6px 0 0 29px;
+  padding-left: 10px;
+  border-left: 2px solid var(--tk-border);
+  color: var(--tk-text, #e6e6e6);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .tkr-lvl {
   flex: none;
   margin-left: auto;

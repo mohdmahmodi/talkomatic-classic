@@ -504,7 +504,6 @@ class TalkomaticPopupManager {
                                 <li><i class="fas fa-heart-pulse tk-lic"></i> New public health and status APIs power uptime monitoring, so problems get spotted before you feel them <span class="talkomatic-badge new">NEW</span></li>
                                 <li><i class="fas fa-signal tk-lic"></i> A live status page at <a href="https://status.talkomatic.co" target="_blank" rel="noopener noreferrer" style="color:#FF9800">status.talkomatic.co</a> shows whether Talkomatic and its services are up, in real time <span class="talkomatic-badge new">NEW</span></li>
                                 <li><i class="fas fa-broom tk-lic"></i> The whole repository was reorganized and documented, with a rewritten README and proper API docs for bot builders <span class="talkomatic-badge improved">IMPROVED</span></li>
-                                <li><i class="fas fa-user-secret tk-lic"></i> Your IP address stays private. Moderators and other users never see it <span class="talkomatic-badge privacy">PRIVACY</span></li>
                             </ul>
                         </div>
 

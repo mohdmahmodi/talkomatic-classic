@@ -21,6 +21,7 @@ function io() {
 
 const ipredact = require("./ipredact");
 const roles = require("./roles");
+const durations = require("./durations");
 
 const HIDDEN = "[ip hidden]";
 
@@ -231,6 +232,23 @@ function recordForcedRename({ userId, from, ip, by, byRole, room }) {
     by: by || null,
     byRole: byRole || null,
     room: room || null,
+  });
+}
+
+// Somebody who sat on the ban screen read the rules and came back. Logged so
+// the return is on record next to the block that sent them there.
+function recordRulesAccepted({ userId, deviceId, username, ip }) {
+  push({
+    ts: Date.now(),
+    type: "identity",
+    event: "accepted-rules",
+    userId: userId || null,
+    username: username || "A returning user",
+    deviceId: deviceId || null,
+    location: null,
+    prevUsername: null,
+    prevLocation: null,
+    ip: ip || null,
   });
 }
 
@@ -453,10 +471,15 @@ function recent(limit = 500, opts = {}) {
   return visible.map((e) => redactEntry(e, view));
 }
 
+const DURATION_SUFFIX = new RegExp(
+  "\\s+(" + durations.DURATIONS.map((d) => d.key).join("|") + ")\\b",
+  "gi",
+);
+
 function baseAction(action) {
   return String(action || "?")
     .replace(/\s*\([\s\S]*$/, "")
-    .replace(/\s+(1h|24h|7d|permanent)\b/gi, "")
+    .replace(DURATION_SUFFIX, "")
     .replace(/\s+L\d+\b/gi, "")
     .replace(/\s+\d+$/, "")
     .trim()
@@ -1336,7 +1359,14 @@ function actionsOn(who, since, limit = 10) {
     const e = entries[i];
     if ((e.ts || 0) < since) break;
     if (!landedOn(e, keys)) continue;
-    out.push({ action: e.action, by: e.label, role: e.role, at: e.ts });
+    out.push({
+      action: e.action,
+      by: e.label,
+      role: e.role,
+      at: e.ts,
+      quote: e.receipt && e.receipt.text ? e.receipt.text : null,
+      details: e.details || null,
+    });
   }
   return out;
 }
@@ -1640,6 +1670,7 @@ module.exports = {
   HISTORY_WINDOW_MS,
   recordIdentity,
   recordForcedRename,
+  recordRulesAccepted,
   recordKeyAlert,
   recordNotification,
   recordComment,

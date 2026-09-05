@@ -3397,6 +3397,41 @@
         font-weight: bold;
         color: var(--orange);
       }
+      .ap-file {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+      }
+      .ap-file-row {
+        display: flex;
+        gap: 0.5rem;
+        align-items: baseline;
+        flex-wrap: wrap;
+        font-size: 0.75rem;
+        line-height: 1.5;
+      }
+      .ap-file-when {
+        flex: none;
+        color: var(--dim2);
+        font-variant-numeric: tabular-nums;
+      }
+      .ap-file-act {
+        font-weight: bold;
+        color: var(--txt);
+      }
+      .ap-file-by {
+        color: var(--dim);
+      }
+      .ap-file-q {
+        flex-basis: 100%;
+        color: var(--dim);
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .ap-file-none {
+        color: var(--dim2);
+        font-size: 0.75rem;
+      }
       @media (max-width: 640px) {
         .mh-tabs {
           flex-wrap: wrap;
@@ -5003,6 +5038,7 @@
             <div class="seg" id="rulesSeg">
               <button class="active" data-sec="community">Community</button>
               <button data-sec="mod">Moderator</button>
+              <button data-sec="playbook">Playbook</button>
             </div>
             <div class="ph-actions">
               <button id="rulesAdd" class="btn sm">
@@ -5371,7 +5407,7 @@
               </ul>
               <div class="rc-sub cant">Even admins cannot</div>
               <ul>
-                <li>See a raw IP address anywhere on the site</li>
+                <li>Read a raw IP address; the site masks them everywhere</li>
                 <li>Act on another admin</li>
               </ul>
             </div>
@@ -5404,10 +5440,11 @@
             <div class="gcard">
               <h3><i class="fas fa-pen-to-square"></i> Rules and write-ups</h3>
               <p>
-                Pick the rule on every ban or block. After a 7-day or permanent
-                block, write up what they did, the rule, what was tried first,
-                and why this length. The block is already in place while you
-                write. Nobody decides an appeal about their own block.
+                Pick the rule on every ban or block; it suggests the usual
+                length, and you choose. After a block of a week or longer,
+                write up what they did, the rule, what was tried first, and why
+                this length. The block is already in place while you write.
+                Nobody decides an appeal about their own block.
               </p>
             </div>
             <div class="gcard">

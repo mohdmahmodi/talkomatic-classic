@@ -2527,187 +2527,274 @@ button:disabled {
 }
 
 /* ── Ban screen ──
-   Talkomatic's own language: flat page background, black cards, thin #333
-   lines, a cream section strip with a coloured icon, orange fills. Square
-   corners throughout, same as the dashboard. */
+   One column, centred: the wordmark, what is happening and for how long,
+   why, what is on record, and the appeal. Square corners, black cards on the
+   page background, thin #333 lines, orange for the one thing to press. */
 #banScreen {
   position: fixed;
   inset: 0;
   z-index: 1000001;
   background: var(--tk-bg);
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding: 20px 16px;
   overflow: auto;
+  padding: 28px 16px 40px;
   font-family: talkoSS, Arial, sans-serif;
 }
 
-#banScreen .ban-card {
-  max-width: 620px;
-  width: 100%;
-  background: #000;
-  border: 1px solid var(--tk-border);
-  border-radius: 0;
-  text-align: left;
-  overflow: hidden;
-  margin: auto;
+/* The rules open from the ban screen, so they sit above it. */
+body:has(#banScreen) .tkm-overlay {
+  z-index: 1000002;
 }
 
-#banScreen .ban-hd {
-  background: var(--tk-cream);
-  color: #000;
-  padding: 13px 16px;
-  display: flex;
-  align-items: center;
-  gap: 11px;
-}
-
-#banScreen .ban-icon {
-  font-size: 17px;
-  color: #c62828;
-}
-
-#banScreen h1 {
-  color: #000;
-  font-size: 16px;
-  margin: 0;
-  font-weight: bold;
-  letter-spacing: 0.2px;
-  flex: 1;
-}
-
-#banScreen .ban-hd-sub {
-  font-size: 12px;
-  color: #5f5346;
-  font-weight: bold;
-}
-
-#banScreen .ban-body {
-  padding: 16px;
+#banScreen .bs {
+  max-width: 560px;
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
   gap: 14px;
 }
 
-#banScreen .ban-sub {
-  color: #dcdcdc;
+#banScreen .bs-brand {
+  font-size: 28px;
+  font-weight: bold;
+  color: var(--tk-accent);
+  letter-spacing: 0.5px;
+  text-align: center;
+  margin-bottom: 6px;
+}
+
+#banScreen .bs-state {
+  background: #000;
+  border: 1px solid #333;
+  padding: 26px 20px 24px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+#banScreen .bs-icon {
+  font-size: 30px;
+  color: #ff5468;
+}
+
+#banScreen .bs-state.ok .bs-icon {
+  color: #57d9a3;
+}
+
+#banScreen .bs-state h1 {
+  margin: 0;
+  color: #fff;
+  font-size: 22px;
+  font-weight: bold;
+  line-height: 1.3;
+}
+
+#banScreen .bs-clock {
+  font-family: "Courier New", monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 40px;
+  font-weight: bold;
+  color: #fff;
+  letter-spacing: 1px;
+}
+
+#banScreen .bs-line {
+  margin: 0;
+  color: #c3c3c3;
   font-size: 14px;
   line-height: 1.6;
-  margin: 0;
+  max-width: 44ch;
 }
 
-#banScreen .ban-meta {
+#banScreen .bs-actions {
   display: flex;
+  gap: 10px;
   flex-wrap: wrap;
-  gap: 7px;
-  margin: 0;
+  justify-content: center;
+  margin-top: 6px;
 }
 
-#banScreen .ban-chip {
+#banScreen .bs-btn {
+  appearance: none;
+  background: var(--tk-tile);
+  border: 1px solid #333;
+  color: #fff;
+  padding: 11px 16px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+  border-radius: 0;
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  background: var(--tk-tile);
+  gap: 8px;
+}
+
+#banScreen .bs-btn:hover {
+  border-color: var(--tk-accent);
+}
+
+#banScreen .bs-btn.primary {
+  background: var(--tk-accent);
+  border-color: var(--tk-accent);
+  color: #000;
+}
+
+#banScreen .bs-btn.primary:hover {
+  background: var(--tk-accent-hover);
+}
+
+#banScreen .bs-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+#banScreen .bs-card {
+  background: #000;
   border: 1px solid #333;
-  border-radius: 0;
-  padding: 6px 10px;
-  font-size: 12.5px;
-  color: #c3c3c3;
+  padding: 14px 16px;
 }
 
-#banScreen .ban-chip i {
-  color: var(--tk-accent);
-  font-size: 11px;
-}
-
-#banScreen .ban-chip b {
-  color: #fff;
-  font-weight: bold;
-}
-
-/* Section strip, the same one the dashboard uses to open a block. */
-#banScreen .ban-strip {
-  background: var(--tk-tile);
-  border: 1px solid #333;
-  border-left: 3px solid var(--tk-accent);
-  border-radius: 0;
-  padding: 11px 13px;
-  margin: 0;
-  text-align: left;
-}
-
-#banScreen .ban-strip .lbl {
+#banScreen .bs-k {
+  display: block;
   color: var(--tk-accent);
   font-size: 10.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
   font-weight: bold;
-  margin-bottom: 5px;
-  display: flex;
-  align-items: center;
-  gap: 7px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  margin-bottom: 6px;
 }
 
-#banScreen .ban-strip .txt {
+#banScreen .bs-why-text {
+  margin: 0;
   color: #e6e6e6;
-  font-size: 14px;
-  line-height: 1.55;
+  font-size: 15px;
+  line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
-#banScreen .ban-timer {
-  background: var(--tk-tile);
-  border: 1px solid #333;
-  border-radius: 0;
-  padding: 13px;
+#banScreen .bs-meta {
+  margin-top: 8px;
+  color: #8d8d8d;
+  font-size: 12.5px;
+}
+
+#banScreen .bs-row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  padding: 8px 0;
+  border-top: 1px solid #262626;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+#banScreen .bs-row:first-of-type {
+  border-top: 0;
+  padding-top: 2px;
+}
+
+#banScreen .bs-when {
+  flex: none;
+  min-width: 4.5rem;
+  color: #8d8d8d;
+  font-variant-numeric: tabular-nums;
+}
+
+#banScreen .bs-act {
+  color: #fff;
+  font-weight: bold;
+}
+
+#banScreen .bs-reason {
+  color: #c3c3c3;
+}
+
+#banScreen .bs-quote {
+  flex-basis: 100%;
+  color: #8d8d8d;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+#banScreen .bs-none {
   margin: 0;
+  color: #8d8d8d;
+  font-size: 13px;
+}
+
+#banScreen .bs-appeal {
+  background: #000;
+  border: 1px solid #333;
+}
+
+#banScreen .bs-appeal > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 14px 16px;
+  color: #fff;
+  font-size: 15px;
+  font-weight: bold;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
 }
 
-#banScreen .ban-timer-label {
+#banScreen .bs-appeal > summary::-webkit-details-marker {
+  display: none;
+}
+
+#banScreen .bs-appeal > summary i {
+  color: var(--tk-accent);
+}
+
+#banScreen .bs-appeal > summary::after {
+  content: "+";
+  margin-left: auto;
   color: #8d8d8d;
-  font-size: 10.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
-}
-
-#banScreen .ban-timer-value {
-  color: #fff;
-  font-size: 26px;
   font-weight: bold;
-  font-variant-numeric: tabular-nums;
-  font-family: "Courier New", monospace;
 }
 
-#banScreen .ban-perm {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  background: var(--tk-tile);
-  border: 1px solid #333;
-  border-left: 3px solid #ff5468;
+#banScreen .bs-appeal[open] > summary::after {
+  content: "\2013";
+}
+
+#banScreen .bs-status {
+  margin-left: 4px;
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: #8d8d8d;
+  border: 1px solid currentColor;
+  padding: 1px 6px;
+}
+
+#banScreen .bs-status.open {
+  color: #ffb454;
+}
+
+#banScreen .bs-status.lifted {
+  color: #57d9a3;
+}
+
+#banScreen .bs-status.declined {
   color: #ff5468;
-  font-weight: bold;
-  font-size: 13px;
-  padding: 11px 13px;
-  border-radius: 0;
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
-  margin: 0;
 }
 
-/* The appeal panel is its own card, the way the dashboard and the suggestion
-   board stack sections. */
-#banScreen .ban-appeal {
-  background: #0d0d0d;
-  border: 1px solid #333;
-  padding: 0;
-  text-align: left;
+#banScreen #banAppealWrap {
+  padding: 0 16px 16px;
+}
+
+#banScreen .bs-foot {
+  margin: 0;
+  color: #8d8d8d;
+  font-size: 12px;
+  line-height: 1.6;
+  text-align: center;
 }
 
 #banScreen .ban-appeal-h {
@@ -3051,29 +3138,22 @@ button:disabled {
   text-align: left;
 }
 
-#banScreen .ban-foot {
-  padding-top: 2px;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 10px;
-}
-
-#banScreen .ban-note {
-  color: #8d8d8d;
-  font-size: 12px;
-  margin: 0;
-  line-height: 1.55;
-}
-
 @media (max-width: 520px) {
   #banScreen {
-    padding: 0;
+    padding: 18px 12px 32px;
   }
 
-  #banScreen .ban-card {
-    border: none;
-    min-height: 100%;
+  #banScreen .bs-state {
+    padding: 20px 14px 18px;
+  }
+
+  #banScreen .bs-clock {
+    font-size: 32px;
+  }
+
+  #banScreen .bs-actions .bs-btn {
+    width: 100%;
+    justify-content: center;
   }
 
   #banScreen .ac-m {

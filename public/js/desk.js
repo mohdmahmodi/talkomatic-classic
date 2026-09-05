@@ -296,6 +296,14 @@
       icon: "fa-circle-question",
       open: () => openHelp(),
     },
+    {
+      key: "$playbook",
+      name: "playbook",
+      alt: ["what to do"],
+      desc: "What to do in each situation, and what counts as proof",
+      icon: "fa-book",
+      open: () => openPlaybook(),
+    },
   ];
   const virtualChannel = (nm) => {
     const low = String(nm || "").toLowerCase();
@@ -1682,6 +1690,14 @@
     help.addEventListener("click", openHelp);
     rail.appendChild(help);
 
+    const play = el("button", "dk-chan" + (mode === "playbook" ? " on" : ""));
+    play.type = "button";
+    play.appendChild(icon("fa-book"));
+    play.appendChild(el("span", "dk-chan-name", "Playbook"));
+    play.title = "What to do in each situation. Write #playbook to send anybody here.";
+    play.addEventListener("click", openPlaybook);
+    rail.appendChild(play);
+
     rail.appendChild(
       el(
         "div",
@@ -1724,6 +1740,7 @@
     if (mode === "team") return renderTeam();
     if (mode === "appeal") return renderAppeal();
     if (mode === "help") return renderHelp();
+    if (mode === "playbook") return renderPlaybook();
     const main = els.main;
     main.textContent = "";
 
@@ -2233,33 +2250,6 @@
     return b;
   }
 
-  function pickDuration(title, then) {
-    const durs = [
-      { label: "1 hour", value: "1h" },
-      { label: "24 hours", value: "24h" },
-      { label: "7 days", value: "7d" },
-      { label: "Permanent", value: "permanent" },
-    ];
-    if (!window.StaffUI || !window.StaffUI.menu) return then("24h");
-    let ctrl;
-    ctrl = StaffUI.menu({
-      title,
-      icon: '<i class="fas fa-ban"></i>',
-      groups: [
-        {
-          title: "How long",
-          items: durs.map((d) => ({
-            icon: '<i class="fas fa-clock"></i>',
-            label: d.label,
-            danger: d.value === "permanent",
-            onClick: () => then(d.value),
-          })),
-        },
-      ],
-    });
-    return ctrl;
-  }
-
   function queueActions(kind, c, m) {
     const bar = el("div", "dk-q-acts");
     const add = (label, fa, cls, fn) => {
@@ -2293,17 +2283,19 @@
         socket.emit("staff kick", { targetUserId: c.targetUserId, ban: false }),
       );
       if (isFullMod())
-        add("Block", "fa-ban", "danger", () =>
-          pickDuration("Block " + (c.target || "this user"), async (duration) => {
-            const reason = await askRule("Block for " + duration);
-            if (reason)
-              socket.emit("staff ip block", {
-                targetUserId: c.targetUserId,
-                duration,
-                reason,
-              });
-          }),
-        );
+        add("Block", "fa-ban", "danger", async () => {
+          const res = await StaffUI.blockDialog({
+            title: "Block " + (c.target || "this user"),
+            message: "Pick the rule first; it suggests the usual length.",
+            socket,
+          });
+          if (res)
+            socket.emit("staff ip block", {
+              targetUserId: c.targetUserId,
+              duration: res.duration,
+              reason: res.reason,
+            });
+        });
       if (isFullMod())
         add("Discard", "fa-xmark", "", () =>
           socket.emit("staff dismiss report", {
@@ -2513,7 +2505,9 @@
             ? "renamed from " + (e.prevUsername || "?")
             : e.event === "forced-rename"
               ? "was renamed by staff"
-              : "signed in",
+              : e.event === "accepted-rules"
+                ? "read the rules and came back after a block"
+                : "signed in",
         ),
       );
       if (e.location) line.appendChild(el("span", "dk-act-room", "from " + e.location));
@@ -4065,6 +4059,7 @@
       body.scrollHeight - body.scrollTop - body.clientHeight < 80;
     body.textContent = "";
     body.appendChild(appealBanHead(a));
+    body.appendChild(appealFileBlock(a));
     appealThread(body, a);
     if (atBottom)
       requestAnimationFrame(() => {
@@ -4163,6 +4158,7 @@
     }
 
     body.appendChild(appealBanHead(a));
+    body.appendChild(appealFileBlock(a));
     appealThread(body, a);
     main.appendChild(body);
     requestAnimationFrame(() => {
@@ -4392,6 +4388,137 @@
   }
 
   // ── How this works ────────────────────────────────────────────────────────
+  // ── The playbook: what to do, what counts as proof, what not to do ───────
+  let playbook = null;
+
+  function openPlaybook() {
+    mode = "playbook";
+    if (els.panel) els.panel.classList.remove("rail-open", "side-open");
+    if (!playbook) {
+      const done = (d) => {
+        socket.off("rules data", done);
+        playbook = Array.isArray(d && d.playbook) ? d.playbook : [];
+        if (mode === "playbook") renderAll();
+      };
+      socket.on("rules data", done);
+      socket.emit("rules get");
+    }
+    renderAll();
+  }
+
+  function lengthLabel(v) {
+    if (!v || v === "none") return "no block";
+    return window.StaffUI ? StaffUI.durationLabel(v) : v;
+  }
+
+  function playCard(p) {
+    const sec = el("section", "dk-play");
+    const head = el("div", "dk-play-h");
+    head.appendChild(el("span", "dk-play-t", p.title));
+    const heavy = ["7d", "30d", "permanent"].includes(p.length);
+    const none = !p.length || p.length === "none";
+    const len = el(
+      "span",
+      "dk-play-len" + (heavy ? " heavy" : none ? " none" : ""),
+      lengthLabel(p.length),
+    );
+    len.title = "The usual block length, when a block is the answer at all";
+    head.appendChild(len);
+    sec.appendChild(head);
+    const row = (k, v, cls) => {
+      if (!v) return;
+      const r = el("div", "dk-play-row");
+      r.appendChild(el("span", "dk-play-k" + (cls ? " " + cls : ""), k));
+      const val = el("span", "dk-play-v");
+      inlineInto(val, v);
+      r.appendChild(val);
+      sec.appendChild(r);
+    };
+    row("Do", p.do);
+    row("Proof", p.proof);
+    row("Do not", p.dont, "dont");
+    return sec;
+  }
+
+  function renderPlaybook() {
+    const main = els.main;
+    if (!main) return;
+    main.textContent = "";
+    if (els.headSub) els.headSub.textContent = "#playbook";
+    main.appendChild(viewBar("What to do, and what counts as proof", "#playbook"));
+
+    const body = el("div", "dk-msgs dk-help");
+    const hero = el("div", "dk-help-hero dk-play-hero");
+    hero.appendChild(icon("fa-book"));
+    const ht = el("div", "dk-help-hero-t");
+    ht.appendChild(el("span", "dk-help-hero-h", "The usual way, not the only way"));
+    const hp = el("span", "dk-help-hero-p");
+    inlineInto(
+      hp,
+      "One rule sits under all of it: act on what you can see. A report is a lead, not a verdict. If you think the right call is different from what is written here, make it and say why in the reason. Nothing on this page is meant word for word.",
+    );
+    ht.appendChild(hp);
+    hero.appendChild(ht);
+    body.appendChild(hero);
+
+    const search = el("input", "dk-play-search");
+    search.type = "search";
+    search.placeholder = "Find a situation";
+    body.appendChild(search);
+
+    const list = el("div", "dk-play-list");
+    if (!playbook) list.appendChild(el("div", "dk-empty", "Looking..."));
+    else if (!playbook.length)
+      list.appendChild(
+        el("div", "dk-empty", "Nothing written yet. Admins fill this in on the dashboard's Rules tab."),
+      );
+    else playbook.forEach((p) => list.appendChild(playCard(p)));
+    body.appendChild(list);
+    search.addEventListener("input", () => {
+      const q = search.value.trim().toLowerCase();
+      for (const c of list.children)
+        c.hidden = !!q && !c.textContent.toLowerCase().includes(q);
+    });
+    main.appendChild(body);
+  }
+
+  // Everything staff have on the person appealing, next to the appeal, so
+  // the decision is made on the file. Nothing on file means exactly that.
+  function appealFileBlock(a) {
+    const f = a.file || { actions: [], reports: 0, names: [] };
+    const box = el("div", "dk-ap-file");
+    box.appendChild(el("span", "dk-q-fl", "On file"));
+    const rows = [];
+    if (f.names && f.names.length > 1)
+      rows.push(el("div", "dk-ap-file-n", "Also known as " + f.names.slice(1).join(", ")));
+    if (f.evader)
+      rows.push(el("div", "dk-ap-file-n", "Flagged for getting around a block before."));
+    if (f.reports)
+      rows.push(
+        el(
+          "div",
+          "dk-ap-file-n",
+          f.reports + (f.reports === 1 ? " report" : " reports") + " from other users on record",
+        ),
+      );
+    (f.actions || []).forEach((p) => {
+      const r = el("div", "dk-ap-file-r");
+      const w = el("span", "dk-ap-file-w", clockTime(p.at));
+      w.title = new Date(p.at).toLocaleString();
+      r.appendChild(w);
+      r.appendChild(el("span", "dk-ap-file-a", p.action));
+      r.appendChild(el("span", "dk-ap-file-b", "by " + (p.by || "staff")));
+      if (p.quote) r.appendChild(el("span", "dk-ap-file-q", '"' + p.quote + '"'));
+      rows.push(r);
+    });
+    if (!rows.length)
+      rows.push(
+        el("div", "dk-ap-file-n", "Nothing on file for this person apart from this block."),
+      );
+    rows.forEach((r) => box.appendChild(r));
+    return box;
+  }
+
   function openHelp() {
     mode = "help";
     if (els.panel) els.panel.classList.remove("rail-open", "side-open");
@@ -4427,6 +4554,7 @@
         ["#leads", "Applications, promotions, the team. Mod leaders and devs."],
         ["#admins", "Keys, promotions, abuse flags. Admins only."],
         ["#guide", "This page. Point anybody at it by writing its name."],
+        ["#playbook", "What to do in each situation, what counts as proof, and what not to do. Written for the moment you are unsure."],
       ],
     },
     {
@@ -4664,7 +4792,7 @@
     },
     {
       name: "ipban",
-      usage: "/ipban <ip, client id or name> [1h|24h|7d|permanent] [reason]",
+      usage: "/ipban <ip, client id or name> [1h|6h|24h|3d|7d|30d|permanent] [note]",
       what: "Place an IP block (full mods)",
     },
     {
@@ -4691,7 +4819,8 @@
     { name: "find", usage: "/find <text>", what: "Search staff chat" },
     { name: "help", usage: "/help", what: "Show this list" },
   ];
-  const DURATIONS = ["1h", "24h", "7d", "permanent"];
+  const durationKeys = () =>
+    window.StaffUI ? StaffUI.DURATIONS.map((d) => d.value) : [];
   let lastCommandAt = 0;
 
   function splitTarget(rest) {
@@ -4831,24 +4960,29 @@
       }
       case "ipban": {
         const { target: d0, rest: r0 } = splitTarget(after);
-        const duration = DURATIONS.includes(d0.toLowerCase())
-          ? d0.toLowerCase()
-          : "24h";
-        const reason = await ensureRule(
-          DURATIONS.includes(d0.toLowerCase()) ? r0 : after,
-          "Block for " + duration,
-        );
-        if (!reason) return;
-        if (looksLikeIp(target) || looksLikeClientId(target)) {
-          socket.emit("staff ban ip", { ip: target, duration, reason });
-          return;
-        }
-        const u = await targetUser(target);
-        if (u)
+        const given = durationKeys().includes(d0.toLowerCase());
+        const byAddress = looksLikeIp(target) || looksLikeClientId(target);
+        const u = byAddress ? null : await targetUser(target);
+        if (!byAddress && !u) return;
+        const res = await StaffUI.blockDialog({
+          title: "Block " + (byAddress ? target : u.username || "this user"),
+          message: "Pick the rule first; it suggests the usual length.",
+          duration: given ? d0.toLowerCase() : undefined,
+          note: given ? r0 : after,
+          socket,
+        });
+        if (!res) return;
+        if (byAddress)
+          socket.emit("staff ban ip", {
+            ip: target,
+            duration: res.duration,
+            reason: res.reason,
+          });
+        else
           socket.emit("staff ip block", {
             targetUserId: u.id,
-            duration,
-            reason,
+            duration: res.duration,
+            reason: res.reason,
           });
         return;
       }
@@ -6035,6 +6169,29 @@
 .dk-help-hero-t{display:flex;flex-direction:column;gap:3px;min-width:0;}
 .dk-help-hero-h{font-size:15px;font-weight:bold;color: #ff9800;}
 .dk-help-hero-p{font-size:12.5px;color: #c3c3c3;line-height:1.6;}
+.dk-help-hero.dk-play-hero{border-left:1px solid #2a2a2a;}
+.dk-play-search{width:100%;box-sizing:border-box;background: #141414;border:1px solid #333;color: #fff;padding:8px 10px;font:inherit;font-size:13px;}
+.dk-play-search:focus{outline:none;border-color: #ff9800;}
+.dk-play-list{display:flex;flex-direction:column;gap:10px;}
+.dk-play{background: #1b1b1b;border:1px solid #2a2a2a;padding:12px 14px;}
+.dk-play[hidden]{display:none;}
+.dk-play-h{display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:6px;}
+.dk-play-t{font-size:14px;font-weight:bold;color: #fff;}
+.dk-play-len{flex:none;font-size:10.5px;font-weight:bold;letter-spacing:.4px;text-transform:uppercase;color: #8d8d8d;border:1px solid currentColor;padding:1px 6px;}
+.dk-play-len.heavy{color: #ff5468;}
+.dk-play-len.none{color: #57d9a3;}
+.dk-play-row{display:flex;gap:10px;padding:6px 0;border-top:1px solid #262626;font-size:12.5px;line-height:1.6;}
+.dk-play-k{flex:none;width:4.5rem;font-weight:bold;color: #ff9800;}
+.dk-play-k.dont{color: #ff5468;}
+.dk-play-v{color: #d0d0d0;min-width:0;}
+.dk-ap-file{margin:8px 0 10px;padding:8px 10px;background: #1b1b1b;border:1px solid #2a2a2a;display:flex;flex-direction:column;gap:4px;}
+.dk-ap-file-n{font-size:12px;color: #8d8d8d;}
+.dk-ap-file-r{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;font-size:12px;line-height:1.5;}
+.dk-ap-file-w{color: #8d8d8d;flex:none;}
+.dk-ap-file-a{color: #fff;font-weight:bold;}
+.dk-ap-file-b{color: #9a9a9a;}
+.dk-ap-file-q{flex-basis:100%;color: #c8c8c8;white-space:pre-wrap;word-break:break-word;}
+@media (max-width:760px){.dk-play-row{flex-direction:column;gap:2px;}.dk-play-k{width:auto;}}
 .dk-help-s{background: #1b1b1b;border:1px solid #2a2a2a;border-left:3px solid #616161;padding:12px 15px 14px;}
 .dk-help-sh{display:flex;align-items:center;gap:9px;margin-bottom:8px;}
 .dk-help-si{flex:none;width:26px;height:26px;display:flex;align-items:center;justify-content:center;

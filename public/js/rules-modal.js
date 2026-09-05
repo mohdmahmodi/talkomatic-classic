@@ -142,6 +142,8 @@
 
       if (r.body) card.appendChild(el("p", "tkr-body", r.body));
       if (r.why) card.appendChild(el("p", "tkr-why", "Why: " + r.why));
+      if (r.response)
+        card.appendChild(el("p", "tkr-resp", "Usual response: " + r.response));
       wrap.appendChild(card);
     });
     bodyEl.appendChild(wrap);
