@@ -1291,6 +1291,15 @@ function oweWriteup(socket, entry, target, duration) {
   tellWriteupDue(socket.modKeyHash, writeupPayload(entry));
 }
 
+// The network a device was last seen on, as the range key a block would use.
+function lastNetworkOf(rec) {
+  if (!rec || !rec.ips) return null;
+  let best = null;
+  for (const ip of Object.keys(rec.ips))
+    if (!best || rec.ips[ip] > rec.ips[best]) best = ip;
+  return best ? ipban.computeRangeCidr(best) || best : null;
+}
+
 // Every block names the rule it enforces. A long one placed by a moderator
 // also owes a write-up, and an overdue write-up holds their next long block.
 function blockGate(socket, duration, reason) {
@@ -5949,6 +5958,19 @@ function registerSocketHandlers(opts) {
             range,
             name: (idRec && idRec.name) || null,
           });
+          // A device block also covers the network the device was last seen
+          // on, the same way an in-room block does. A fresh browser profile
+          // on the same connection is otherwise a brand-new device.
+          const net = did ? lastNetworkOf(idRec) : null;
+          if (net && !seen.has(net)) {
+            seen.add(net);
+            targets.push({
+              key: net,
+              did,
+              range: ipban.isRangeKey(net),
+              name: (idRec && idRec.name) || null,
+            });
+          }
         }
 
         if (!targets.length)
@@ -5967,6 +5989,7 @@ function registerSocketHandlers(opts) {
             byRole: socket.isDev ? "dev" : "mod",
             ts: Date.now(),
             reason,
+            did: t.did || null,
           });
           banhistory.record({
             ip: t.key,
@@ -7449,24 +7472,49 @@ function registerSocketHandlers(opts) {
           (prev && typeof prev === "object" && prev.label) || null;
         const removed = state.blockedIPs.delete(ip);
         state.botBlacklist.delete(ip);
+        // A device and the network it was blocked with go together. Lifting
+        // one and leaving the other is how somebody ends up unbanned and
+        // still blocked at the same time.
+        const did = ipban.isIdKey(ip)
+          ? ip.slice(3)
+          : (prev && typeof prev === "object" && prev.did) || null;
+        const companions = did ? ipban.removeBlocksForDevice(did) : [];
         blocklist.saveSoon();
         evasion.invalidate();
+        const byRole = socket.isDev ? "dev" : "mod";
         if (removed)
           banhistory.record({
             ip,
             name: blockedName,
             action: "unban",
             by: socket.staffLabel || null,
-            byRole: socket.isDev ? "dev" : "mod",
+            byRole,
+          });
+        for (const key of companions)
+          banhistory.record({
+            ip: key,
+            name: blockedName,
+            action: "unban",
+            by: socket.staffLabel || null,
+            byRole,
+            reason: "lifted together with " + ip,
           });
         broadcastBlockList();
         broadcastBanHistory();
-        const reviewer = `${socket.isDev ? "dev" : "mod"}:${socket.staffLabel || ""}`;
-        const resolved = ipban.isIdKey(ip)
+        const reviewer = `${byRole}:${socket.staffLabel || ""}`;
+        let resolved = ipban.isIdKey(ip)
           ? appeals.resolveOpenForDevice(ip.slice(3), "lifted", reviewer)
           : appeals.resolveOpenForIp(ip, "lifted", reviewer);
+        if (did && !ipban.isIdKey(ip))
+          resolved += appeals.resolveOpenForDevice(did, "lifted", reviewer);
         if (resolved) broadcastAppealsList();
-        logStaff(socket, "unblock ip", blockedName || ip, "-");
+        logStaff(
+          socket,
+          "unblock ip",
+          blockedName || ip,
+          "-",
+          companions.length ? "also lifted " + companions.join(", ") : undefined,
+        );
         socket.emit("staff action result", {
           action: "unblock ip",
           ok: true,
