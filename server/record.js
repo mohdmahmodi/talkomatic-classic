@@ -184,10 +184,10 @@ function coldFlag(decisions, team) {
     detail:
       "Out of " +
       heavy.length +
-      " heavy punishments with a receipt, these had no earlier step by anyone, no report, nothing caught by the filters, and no rule that skips the warning." +
+      " heavy punishments with a snapshot, these had no earlier step by anyone, no report, nothing caught by the filters, and no rule that skips the warning." +
       versus(rate, team, "coldPct"),
     innocent:
-      "Some things do not deserve a warning, and a moderator arriving mid-raid will not stop to issue one. Read what the receipt says they typed.",
+      "Some things do not deserve a warning, and a moderator arriving mid-raid will not stop to issue one. Read what the snapshot says they typed.",
     evidence: cold.slice(-12).map((d) => evidence(d)),
   };
 }
@@ -225,7 +225,7 @@ function followedFlag(decisions) {
     detail:
       "The moderator entered each of those rooms within two minutes after " +
       worst.name +
-      " did. Join times are recorded on the receipt, so this is measured, not guessed.",
+      " did. Join times are recorded on the snapshot, so this is measured, not guessed.",
     innocent:
       "Somebody who moves rooms to escape a moderator dealing with them produces this. Check whether the first room already had a case.",
     evidence: worst.rows
@@ -540,6 +540,8 @@ function build(label, role, opts = {}, view = {}) {
 const GUIDE = {
   purpose:
     "A complete moderator record from Talkomatic. Read the cases first: each one is one person, one sitting, every staff member involved, with the evidence captured at the moment of each action.",
+  words:
+    "A receipt in this file is called a snapshot on screen. The grade keys read as: corroborated = backed up, reported = reported by users, unverifiable = nothing captured, contradicted = nothing behind it, none = no snapshot.",
   grades: {
     corroborated: "The text the person had typed, or their history, supports the action.",
     reported: "Ordinary users had reported or disliked them shortly before.",

@@ -1327,6 +1327,35 @@ function writeupOf(auditId, view) {
 
 const WRITEUP_AMEND_MS = 24 * 60 * 60 * 1000;
 
+// ── Naming somebody who arrived without a name ──────────────────────────────
+
+// The best name on file for a person who reached us without one: the block
+// they are serving, their device record, their last connection, then any
+// name their other devices have used.
+function knownName({ deviceId, userId, ip }) {
+  const hit =
+    (deviceId && ipban.findActiveIdBlock(deviceId)) ||
+    (ip && ipban.findActiveBlock(ip)) ||
+    null;
+  const block = hit && hit.block;
+  if (block && typeof block === "object" && block.label) return block.label;
+  const rec = deviceId ? identity.getRecord(deviceId) : null;
+  if (rec && rec.name) return rec.name;
+  const seen = userId ? lastseen.get(userId) : null;
+  if (seen && seen.name) return seen.name;
+  const person = persons.resolve(deviceId || userId || "");
+  if (person.names[0]) return person.names[0];
+  const onAddress = ip
+    ? identity.devicesMatching((x) => x === ip, 5).find((d) => d.name)
+    : null;
+  return (onAddress && onAddress.name) || null;
+}
+
+function otherNames({ deviceId, userId }, shown) {
+  const person = persons.resolve(deviceId || userId || "");
+  return person.names.filter((n) => n !== shown).slice(0, 5);
+}
+
 // ── One person, everything staff know about them ────────────────────────────
 
 function buildPerson(key, socket) {
@@ -1512,7 +1541,10 @@ function buildReportsList(view) {
       targetUserId: s.targetKey,
       targetDeviceId,
       ip: showIp ? targetIp : undefined,
-      name: name || "(unknown user)",
+      name:
+        name ||
+        knownName({ deviceId: targetDeviceId, userId: s.targetKey, ip: targetIp }) ||
+        "(unknown user)",
       location,
       total: s.total,
       distinct: s.distinct,
@@ -1552,9 +1584,11 @@ function buildAppealsList(view) {
       deviceId: a.deviceId,
       userId: a.userId,
     });
+    const shownName = a.name || knownName(a);
     return {
       id: a.id,
-      name: a.name || null,
+      name: shownName,
+      knownAs: otherNames(a, shownName),
       userId: a.userId || null,
       deviceId: a.deviceId || null,
       ip: showIp ? a.ip : undefined,
@@ -10073,6 +10107,7 @@ function purgeAllGhostUsers() {
 
 module.exports = {
   keyNetworksChanged,
+  knownName,
   loadRooms,
   saveRooms,
   loadBoard,

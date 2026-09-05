@@ -3252,6 +3252,156 @@
       .kv .v .writeup {
         margin-top: 0;
       }
+
+      /* ── Record tabs, the snapshot paragraph, the help page ── */
+      .mh-tabs {
+        position: sticky;
+        top: 0;
+        z-index: 4;
+        display: flex;
+        gap: 0.25rem;
+        margin: 0 -1.125rem;
+        padding: 0.5rem 1.125rem 0;
+        background: #202020;
+        border-bottom: 1px solid var(--line-soft);
+      }
+      .mh-tab {
+        appearance: none;
+        background: transparent;
+        border: 0;
+        border-bottom: 2px solid transparent;
+        color: var(--dim);
+        padding: 0.4375rem 0.75rem;
+        font-size: 0.8125rem;
+        font-family: inherit;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: baseline;
+        gap: 0.375rem;
+      }
+      .mh-tab:hover {
+        color: var(--txt);
+      }
+      .mh-tab.on {
+        color: var(--orange);
+        border-bottom-color: var(--orange);
+        font-weight: bold;
+      }
+      .mh-tabn {
+        font-size: 0.6875rem;
+        font-weight: normal;
+        color: var(--dim2);
+        font-variant-numeric: tabular-nums;
+      }
+      .mh-tab.on .mh-tabn {
+        color: var(--orange);
+      }
+      .mh-tabbed {
+        display: flex;
+        flex-direction: column;
+        gap: 1.125rem;
+      }
+      .mh-pane {
+        display: flex;
+        flex-direction: column;
+        gap: 1.125rem;
+      }
+      .mh-pane[hidden] {
+        display: none;
+      }
+      .mh-pane .mh-filters {
+        top: 2.5rem;
+      }
+      .mh-snaptext {
+        display: block;
+        font-size: 0.8125rem;
+        color: var(--txt);
+        line-height: 1.6;
+      }
+      .mh-snapbar {
+        display: flex;
+        height: 0.5rem;
+        background: var(--tile);
+        overflow: hidden;
+      }
+      .mh-snapseg.g-corroborated {
+        background: var(--green);
+      }
+      .mh-snapseg.g-reported {
+        background: var(--blue);
+      }
+      .mh-snapseg.g-unverifiable {
+        background: var(--dim2);
+      }
+      .mh-snapseg.g-contradicted {
+        background: var(--amber);
+      }
+      .mh-snaplegend {
+        display: flex;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+        font-size: 0.7188rem;
+        color: var(--dim);
+      }
+      .mh-snapkey::before {
+        content: "";
+        display: inline-block;
+        width: 0.5rem;
+        height: 0.5rem;
+        margin-right: 0.375rem;
+        background: var(--dim2);
+      }
+      .mh-snapkey.g-corroborated::before {
+        background: var(--green);
+      }
+      .mh-snapkey.g-reported::before {
+        background: var(--blue);
+      }
+      .mh-snapkey.g-contradicted::before {
+        background: var(--amber);
+      }
+      .rh-wrap {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+      .rh-title {
+        display: block;
+        font-size: 0.6875rem;
+        font-weight: bold;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+        color: var(--orange);
+        margin-bottom: 0.375rem;
+      }
+      .rh-p {
+        display: block;
+        font-size: 0.8125rem;
+        color: var(--txt);
+        line-height: 1.6;
+      }
+      .rh-p + .rh-p {
+        margin-top: 0.5rem;
+      }
+      .rh-list {
+        margin: 0;
+        padding-left: 1.125rem;
+        font-size: 0.8125rem;
+        color: var(--txt);
+        line-height: 1.6;
+      }
+      .rh-list li + li {
+        margin-top: 0.25rem;
+      }
+      .rh-term {
+        font-weight: bold;
+        color: var(--orange);
+      }
+      @media (max-width: 640px) {
+        .mh-tabs {
+          flex-wrap: wrap;
+        }
+      }
       @media (max-width: 640px) {
         .mc-fact {
           flex-direction: column;
@@ -5224,6 +5374,51 @@
                 <li>See a raw IP address anywhere on the site</li>
                 <li>Act on another admin</li>
               </ul>
+            </div>
+          </div>
+
+          <div class="strip mini">
+            <i class="fas fa-clock-rotate-left lead ic-orange"></i> Your record
+          </div>
+          <div class="guide-grid">
+            <div class="gcard">
+              <h3><i class="fas fa-camera"></i> Snapshots</h3>
+              <p>
+                Every action on a person now saves what was on screen at that
+                moment: what they had typed, whether other users had reported
+                them, what staff had already done, and who arrived first. A
+                good call looks like a good call instead of looking like a
+                number. Actions from before snapshots are shown but never
+                graded.
+              </p>
+            </div>
+            <div class="gcard">
+              <h3><i class="fas fa-folder-open"></i> Cases</h3>
+              <p>
+                One person, one sitting, everyone involved, with how it ended:
+                they went quiet, they left, they came back, they were banned,
+                or the block was overturned on appeal. Your record shows your
+                cases, and you can add a note to any of them.
+              </p>
+            </div>
+            <div class="gcard">
+              <h3><i class="fas fa-pen-to-square"></i> Rules and write-ups</h3>
+              <p>
+                Pick the rule on every ban or block. After a 7-day or permanent
+                block, write up what they did, the rule, what was tried first,
+                and why this length. The block is already in place while you
+                write. Nobody decides an appeal about their own block.
+              </p>
+            </div>
+            <div class="gcard">
+              <h3><i class="fas fa-circle-question"></i> Read the whole thing</h3>
+              <p>
+                What changed, why, what every word on the record means, what
+                went away, and what it is not. Five minutes, written for you.
+              </p>
+              <button type="button" class="btn sm" id="guideRecordHelp">
+                <i class="fas fa-circle-question"></i> How records work
+              </button>
             </div>
           </div>
 

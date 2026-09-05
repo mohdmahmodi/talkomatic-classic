@@ -1109,8 +1109,11 @@ app.post(`${API}/appeal`, (req, res) => {
 
     // Identity comes from the session the banned browser still carries, so a
     // moderator can trace the appealing user's activity by their userId.
-    const name = req.session?.username || null;
     const userId = req.session?.userId || null;
+    // A ban screen reached with no session still has a device and an address,
+    // and both usually lead back to a name.
+    const name =
+      req.session?.username || rooms.knownName({ deviceId, userId, ip });
     const b = block && typeof block === "object" ? block : {};
 
     const result = appeals.submit({

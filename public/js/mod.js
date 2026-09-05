@@ -245,12 +245,24 @@
     }
     return s;
   }
+  // One set of plain words for the snapshot grades, used on the record, the
+  // activity cards and the help page alike.
   const GRADE_LABEL = {
-    corroborated: "corroborated by what they typed or their history",
-    reported: "reported or disliked by other users shortly before",
-    unverifiable: "nothing captured confirms or contradicts it",
-    contradicted: "heavy punishment with nothing on record to support it",
-    none: "before receipts",
+    corroborated: "backed up",
+    reported: "reported by users",
+    unverifiable: "nothing captured",
+    contradicted: "nothing behind it",
+    none: "no snapshot",
+  };
+  const GRADE_HELP = {
+    corroborated:
+      "What they had typed, their history, or an earlier step by staff supports this action.",
+    reported: "Other users had reported or disliked them shortly before.",
+    unverifiable:
+      "Nothing was captured that confirms or contradicts it. In live typing the line may already have been gone.",
+    contradicted:
+      "A heavy punishment with an empty or clean box, no reports, no earlier step by anyone, and no reason written.",
+    none: "From before snapshots existed. Never counted in anything.",
   };
   function gradeLabel(grade) {
     return GRADE_LABEL[grade] || GRADE_LABEL.none;
@@ -464,7 +476,7 @@
         const r = e.receipt;
         if (r.text && !/text before wipe/.test(e.details || ""))
           addKv(body, "They had typed", r.text, "quote");
-        addKv(body, "Evidence", gradeLabel(r.grade), "grade-" + r.grade);
+        addKv(body, "Snapshot", gradeLabel(r.grade), "grade-" + r.grade);
         if (r.reports && r.reports.hour)
           addKv(body, "Reports", r.reports.hour + " in the hour before", "dimv");
         if (r.dislikes) addKv(body, "Dislikes", String(r.dislikes), "dimv");
@@ -1752,6 +1764,7 @@
       caseFilter: o.caseFilter || "all",
       caseOffset: o.caseOffset || 0,
       mineOnly: !!(o.keepHost && recordCtx && recordCtx.mineOnly),
+      tab: o.keepHost && recordCtx ? recordCtx.tab : null,
       host: o.keepHost && recordCtx ? recordCtx.host : null,
     };
     socket.emit("staff get mod history", {
@@ -1873,11 +1886,10 @@
   }
 
   function gradeTag(grade) {
-    const g = grade || "none";
-    return span(
-      "mh-grade g-" + g,
-      g === "none" ? "before receipts" : g,
-    );
+    const g = GRADE_LABEL[grade] ? grade : "none";
+    const t = span("mh-grade g-" + g, GRADE_LABEL[g]);
+    t.title = GRADE_HELP[g];
+    return t;
   }
 
   function recordHeader(h, isDev, ctx) {
@@ -1913,66 +1925,264 @@
     return head;
   }
 
-  function qualityStrip(h) {
+  // The numbers mods like to see, unchanged in meaning: work on people is the
+  // headline, everything else is context.
+  function numbersRow(h, isDev) {
+    const row = divc("mh-sum");
+    if (!isDev) {
+      const lead = statTile(
+        h.onUsers || 0,
+        "actions on people",
+        "Warnings, kicks, wipes, bans, renames: anything that landed on a person. Promotion looks at this number.",
+      );
+      lead.classList.add("lead");
+      row.appendChild(lead);
+    }
+    row.appendChild(
+      statTile(h.casesTotal || 0, "cases", "One person, one sitting, everyone involved"),
+    );
+    row.appendChild(
+      statTile(h.distinctTargets || 0, "people", "Different people they acted on"),
+    );
+    row.appendChild(
+      statTile(
+        (h.useful || 0) - (h.onUsers || 0),
+        "rooms, queues, notes",
+        "Real work where nobody was moderated: room tidying, review queues, notes",
+      ),
+    );
+    row.appendChild(
+      statTile(
+        h.first ? spanLabel(h.first, h.last) : "-",
+        "active for",
+        h.first ? "First action " + fmtTime(h.first) : null,
+      ),
+    );
+    row.appendChild(
+      statTile(
+        h.last ? relTime(h.last) : "never",
+        "last action",
+        h.last ? fmtTime(h.last) : null,
+      ),
+    );
+    return row;
+  }
+
+  // One paragraph in plain words, then the same thing as a strip of colour.
+  function snapshotLine(h) {
     const q = h.quality;
     if (!q) return null;
+    const box = divc("mh-sect mh-snap");
+    box.appendChild(sectionHead("What the snapshots say", "last 30 days"));
+    if (!q.total) {
+      box.appendChild(
+        span(
+          "mh-qnote",
+          "No snapshots yet. A snapshot of what was on screen is saved with every action on a person from now on, so this fills in as they work.",
+        ),
+      );
+      return box;
+    }
+    const c = q.counts;
     const team = h.team || {};
-    const sect = divc("mh-sect");
-    sect.appendChild(
-      sectionHead(
-        "How the evidence reads",
-        q.total
-          ? "last 30 days, " + q.total + " decisions with a receipt"
-          : "no decisions with a receipt in the last 30 days",
-      ),
+    const n = (x, one, many) => x + " " + (x === 1 ? one : many);
+    const parts = [
+      n(c.corroborated + c.reported, "action", "actions") +
+        " out of " +
+        q.total +
+        " had something behind " +
+        (c.corroborated + c.reported === 1 ? "it" : "them") +
+        ": what the person had typed, their history, or reports from other users.",
+    ];
+    if (c.unverifiable)
+      parts.push(n(c.unverifiable, "could", "could") + " not be checked either way.");
+    parts.push(
+      c.contradicted
+        ? n(c.contradicted, "heavy punishment", "heavy punishments") + " had nothing behind it at all."
+        : "No heavy punishment stood on its own.",
     );
-    const grid = divc("mh-quality");
-    const share = (n) => (q.total ? Math.round((n / q.total) * 100) + "%" : "0");
-    const teamLine = (key, suffix) =>
-      team.enough && team[key] != null
-        ? "team " + team[key] + (suffix == null ? "%" : suffix)
-        : "not enough peers to compare";
-    const tile = (n, label, teamText, warn) => {
-      const t = divc("mh-qt" + (warn ? " warn" : ""));
-      t.appendChild(span("mh-qn", n));
-      t.appendChild(span("mh-ql", label));
-      t.appendChild(span("mh-qteam", teamText));
-      return t;
-    };
-    grid.appendChild(
-      tile(share(q.counts.corroborated), "corroborated", teamLine("corroboratedPct")),
+    if (q.overturned)
+      parts.push(
+        n(q.overturned, "punishment was", "punishments were") + " overturned by somebody else.",
+      );
+    parts.push(
+      team.enough
+        ? "Across the team at this rank, about " +
+            team.contradictedPct +
+            "% of actions have nothing behind them."
+        : "Not enough people at this rank yet to compare with.",
     );
-    grid.appendChild(
-      tile(
-        share(q.counts.reported + q.counts.unverifiable),
-        "reported or unverifiable",
-        "not held against anyone",
-      ),
-    );
-    grid.appendChild(
-      tile(
-        share(q.counts.contradicted),
-        "contradicted",
-        teamLine("contradictedPct"),
-        team.enough && q.contradictedPct > team.contradictedPct,
-      ),
-    );
-    grid.appendChild(
-      tile(
-        String(q.overturned),
-        "overturned",
-        teamLine("overturned", ""),
-        team.enough && q.overturned > team.overturned,
-      ),
-    );
-    sect.appendChild(grid);
-    sect.appendChild(
+    box.appendChild(span("mh-snaptext", parts.join(" ")));
+
+    const bar = divc("mh-snapbar");
+    const legend = divc("mh-snaplegend");
+    ["corroborated", "reported", "unverifiable", "contradicted"].forEach((k) => {
+      if (!c[k]) return;
+      const seg = divc("mh-snapseg g-" + k);
+      seg.style.width = Math.round((c[k] / q.total) * 100) + "%";
+      seg.title = c[k] + " " + GRADE_LABEL[k];
+      bar.appendChild(seg);
+      const l = span("mh-snapkey g-" + k, c[k] + " " + GRADE_LABEL[k]);
+      l.title = GRADE_HELP[k];
+      legend.appendChild(l);
+    });
+    box.appendChild(bar);
+    box.appendChild(legend);
+    box.appendChild(
       span(
         "mh-qnote",
-        "Grades describe what was captured at the moment of each action, never the moderator. Actions from before receipts are not counted.",
+        "This is about what was captured at the moment, never about the moderator. Actions from before snapshots existed are not counted.",
       ),
     );
+    return box;
+  }
+
+  // Overview, Cases, Actions, People. The chosen tab is remembered.
+  function recordTabs(tabs, ctx) {
+    let current = ctx.tab;
+    try {
+      current = current || localStorage.getItem("talkomatic_recordTab") || "overview";
+    } catch (_) {
+      current = current || "overview";
+    }
+    if (!tabs.some((t) => t.key === current)) current = tabs[0].key;
+    const wrap = divc("mh-tabbed");
+    const bar = divc("mh-tabs");
+    const show = (key) => {
+      ctx.tab = key;
+      try {
+        localStorage.setItem("talkomatic_recordTab", key);
+      } catch (_) {}
+      tabs.forEach((t) => {
+        t.pane.hidden = t.key !== key;
+        t.button.classList.toggle("on", t.key === key);
+      });
+    };
+    tabs.forEach((t) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "mh-tab";
+      b.appendChild(document.createTextNode(t.label));
+      if (t.count != null) b.appendChild(span("mh-tabn", String(t.count)));
+      b.addEventListener("click", () => show(t.key));
+      t.button = b;
+      bar.appendChild(b);
+    });
+    wrap.appendChild(bar);
+    tabs.forEach((t) => wrap.appendChild(t.pane));
+    show(current);
+    return wrap;
+  }
+
+  // ── How this works: the record explained for the people it is about ─────
+  function helpBlock(title, lines) {
+    const sect = divc("rh-sect");
+    sect.appendChild(span("rh-title", title));
+    lines.forEach((l) => {
+      if (Array.isArray(l)) {
+        const ul = document.createElement("ul");
+        ul.className = "rh-list";
+        l.forEach((item) => {
+          const li = document.createElement("li");
+          if (Array.isArray(item)) {
+            li.appendChild(span("rh-term", item[0]));
+            li.appendChild(document.createTextNode(" " + item[1]));
+          } else li.textContent = item;
+          ul.appendChild(li);
+        });
+        sect.appendChild(ul);
+      } else sect.appendChild(span("rh-p", l));
+    });
     return sect;
+  }
+
+  function openRecordHelp() {
+    if (!window.StaffUI) return;
+    const body = divc("rh-wrap");
+    body.appendChild(
+      helpBlock("What changed", [
+        "Your record used to be a list of actions and a total. It now also keeps a snapshot of what was on screen when you acted on somebody: what they had typed, whether other users had reported them, what staff had already done to them, and who arrived in the room first.",
+        "Nothing about how you moderate has to change. The point is that a good call now looks like a good call, instead of looking like a number.",
+      ]),
+    );
+    body.appendChild(
+      helpBlock("Why", [
+        "A total cannot tell a careful mod from a fast one. Two people can both have 400 actions, and one of them warned first, read the room and was right every time. The old record could not show that. This one can, because the evidence travels with each action.",
+        "It works in your favour just as much as it works against anyone. If you ban somebody on sight because they typed a slur, the snapshot shows the slur.",
+      ]),
+    );
+    body.appendChild(
+      helpBlock("The tabs", [
+        [
+          ["Overview", "the numbers you know, one plain sentence about the snapshots, and anything worth a look."],
+          ["Cases", "one person, one sitting, everyone involved. Click a case to see the snapshot behind each step."],
+          ["Actions", "everything you did, newest first, with counts by type at the top. Same as before, with the snapshot text on each row."],
+          ["People", "who you acted on, including other names the same person has used."],
+        ],
+      ]),
+    );
+    body.appendChild(
+      helpBlock("The words on a snapshot", [
+        [
+          [GRADE_LABEL.corroborated + ":", GRADE_HELP.corroborated],
+          [GRADE_LABEL.reported + ":", GRADE_HELP.reported],
+          [GRADE_LABEL.unverifiable + ":", GRADE_HELP.unverifiable + " This is not held against you."],
+          [GRADE_LABEL.contradicted + ":", GRADE_HELP.contradicted + " A few of these happen to everyone. A pattern is worth a conversation."],
+          [GRADE_LABEL.none + ":", GRADE_HELP.none],
+        ],
+      ]),
+    );
+    body.appendChild(
+      helpBlock("How a case ends", [
+        [
+          ["went quiet:", "they stayed online for half an hour and nobody had to act again. A warning that worked."],
+          ["left:", "they were gone within half an hour."],
+          ["came back:", "they rejoined after being kicked, the number of times shown."],
+          ["banned:", "the last step was a ban or a block."],
+          ["evaded the ban:", "the evasion watch caught them coming back afterwards."],
+          ["acted on again:", "somebody had to act on the same person within a day."],
+          ["appeal open, declined, overturned:", "what happened to the appeal. Overturned means somebody else lifted the block."],
+        ],
+      ]),
+    );
+    body.appendChild(
+      helpBlock("Things worth a look", [
+        "These are prompts, not verdicts. Each one says what tripped it, shows the rows it was built from, and says what an innocent explanation would look like. Leaders and admins read them; nothing happens automatically.",
+        "You can see every flag on your own record. If one is wrong, open the case and add a note saying why. Whoever reviews it reads your note next to the evidence.",
+      ]),
+    );
+    body.appendChild(
+      helpBlock("What is expected of you", [
+        [
+          "Pick the rule whenever you ban or block somebody. The dialog asks for it and the server will not place the block without it.",
+          "After a 7-day or permanent block, write it up: what they did, the rule, what was tried first, and why this length. The block is already in place while you write. If a write-up sits unwritten, your next long block waits until it is done, and after a day the leads are told.",
+          "You cannot decide an appeal about a block you placed yourself. You can still talk in the thread.",
+        ],
+      ]),
+    );
+    body.appendChild(
+      helpBlock("What went away", [
+        [
+          "Appeal replies no longer count as \"hits\" on a person. The abuse alert once fired on a mod for answering an appeal ten times.",
+          "The old \"no warning first\" flag only knew about your own history with a person. The new one knows what every staff member did, what the person had typed, and which rules skip the warning.",
+          "\"Not yet classified\" is gone. Appeal chats, bot kills and suggestion work now sit in proper buckets.",
+          "Nothing from before snapshots is graded. Old actions are shown, never scored.",
+        ],
+      ]),
+    );
+    body.appendChild(
+      helpBlock("What it is not", [
+        "It is not a score and there is no leaderboard for it. Actions on people is still the promotion number, exactly as before. Snapshots and cases exist so that number can be trusted.",
+      ]),
+    );
+    StaffUI.modal({
+      title: "How records work",
+      icon: '<i class="fas fa-circle-question"></i>',
+      subtitle: "Snapshots, cases, write-ups, and what the words mean",
+      wide: true,
+      body,
+      actions: [{ label: "Got it", kind: "primary", onClick: () => {} }],
+    });
   }
 
   const OUTCOME_LABEL = {
@@ -2084,7 +2294,7 @@
     head.appendChild(gradeTag(s.grade));
     row.appendChild(head);
     if (s.receipt) row.appendChild(receiptFacts(s.receipt));
-    else row.appendChild(span("mc-none", "No receipt. This action predates receipts."));
+    else row.appendChild(span("mc-none", "No snapshot. This action is from before snapshots existed."));
     if (s.justify && s.justify.at) row.appendChild(writeupNode(s.justify));
     else if (s.justify && s.justify.required)
       row.appendChild(span("mc-missing", "Write-up required and not written yet."));
@@ -2273,7 +2483,7 @@
     sect.appendChild(
       span(
         "mh-qnote",
-        "One case is one person, one sitting, every staff member involved. Click a case for the full receipt behind each step.",
+        "One case is one person, one sitting, every staff member involved. Click a case to see the snapshot behind each step.",
       ),
     );
     const filters = divc("mh-cfilters");
@@ -2585,49 +2795,6 @@
       body: wrap,
       actions: [{ label: "Close", kind: "primary", onClick: () => {} }],
     });
-  }
-
-  // ── The headline figures ────────────────────────────────────────────────
-  function recordSummary(h, isDev) {
-    const sum = divc("mh-sum");
-    if (!isDev) {
-      const lead = statTile(
-        h.onUsers || 0,
-        "actions on users",
-        "Kicks, warnings, buffer wipes, bans, forced renames - anything that landed on a person",
-      );
-      lead.classList.add("lead");
-      sum.appendChild(lead);
-    }
-    sum.appendChild(
-      statTile(
-        (h.useful || 0) - (h.onUsers || 0),
-        "rooms, queues, notes",
-        "Real work, but nobody was moderated: room tidying, review queues, notes and settings",
-      ),
-    );
-    sum.appendChild(
-      statTile(
-        h.passive || 0,
-        "passive",
-        "Spectating and signing in. Logged, never counted as work.",
-      ),
-    );
-    sum.appendChild(
-      statTile(
-        h.first ? spanLabel(h.first, h.last) : "-",
-        "active for",
-        h.first ? "First action " + fmtTime(h.first) : null,
-      ),
-    );
-    sum.appendChild(
-      statTile(
-        h.last ? relTime(h.last) : "never",
-        "last action",
-        h.last ? fmtTime(h.last) : null,
-      ),
-    );
-    return sum;
   }
 
   // ── Worth a look ────────────────────────────────────────────────────────
@@ -3015,26 +3182,28 @@
 
     wrap.appendChild(recordHeader(h, isDev, ctx));
 
-    const quality = qualityStrip(h);
-    if (quality) wrap.appendChild(quality);
-
+    const overview = divc("mh-pane");
+    overview.appendChild(numbersRow(h, isDev));
     const flags = recordFlags(h);
-    if (flags) wrap.appendChild(flags);
-
+    if (flags) overview.appendChild(flags);
+    const snap = snapshotLine(h);
+    if (snap) overview.appendChild(snap);
     const promo = h.selfView ? null : recordPromotion(h, ctx.modLevel);
-    if (promo) wrap.appendChild(promo);
+    if (promo) overview.appendChild(promo);
 
     if (!h.total) {
-      wrap.appendChild(
+      overview.appendChild(
         span(
           "mh-none",
           "No recorded actions yet. Either they are new, or they have not used any staff powers.",
         ),
       );
+      wrap.appendChild(overview);
       return mountRecord(h, wrap, isDev, ctx);
     }
 
-    wrap.appendChild(casesSection(h));
+    const casesPane = divc("mh-pane");
+    casesPane.appendChild(casesSection(h));
 
     const gsect = divc("mh-groups");
     const gwrap = gsect;
@@ -3055,24 +3224,32 @@
       box.appendChild(chips);
       gwrap.appendChild(box);
     });
-    const log = divc("mh-log mh-loghead");
-    const logOpen = !!(ctx.group || ctx.targetUid || ctx.offset);
-    wrap.appendChild(
-      foldSection("Everything they did", "last " + h.windowDays + " days", log, logOpen),
+    const log = divc("mh-pane mh-log mh-loghead");
+    log.appendChild(sectionHead("What they spend their time on", "whole time as staff"));
+    log.appendChild(gsect);
+    log.appendChild(sectionHead("Everything they did", "last " + h.windowDays + " days"));
+
+    const peoplePane = divc("mh-pane");
+    peoplePane.appendChild(
+      sectionHead(
+        "Who they acted on",
+        h.distinctTargets === 1 ? "one person, ever" : h.distinctTargets + " different people",
+      ),
     );
+    peoplePane.appendChild(recordTargets(h) || span("mh-none", "Nobody yet."));
+
+    if (ctx.group || ctx.targetUid || ctx.offset) ctx.tab = "actions";
     wrap.appendChild(
-      foldSection("What they spend their time on", "whole time as staff", gsect, false),
+      recordTabs(
+        [
+          { key: "overview", label: "Overview", pane: overview },
+          { key: "cases", label: "Cases", count: h.casesTotal || 0, pane: casesPane },
+          { key: "actions", label: "Actions", count: h.total || 0, pane: log },
+          { key: "people", label: "People", count: h.distinctTargets || 0, pane: peoplePane },
+        ],
+        ctx,
+      ),
     );
-    const targets = recordTargets(h);
-    if (targets)
-      wrap.appendChild(
-        foldSection(
-          "Who they acted on",
-          h.distinctTargets === 1 ? "one person, ever" : h.distinctTargets + " different people",
-          targets,
-          false,
-        ),
-      );
 
     const filters = divc("mh-filters");
     const chip = (label, group) => {
@@ -3215,7 +3392,16 @@
       return;
     }
 
-    const actions = [];
+    const actions = [
+      {
+        label: "How this works",
+        kind: "ghost",
+        onClick: () => {
+          openRecordHelp();
+          return false;
+        },
+      },
+    ];
     if (h.canExport)
       actions.push({
         label: "Export JSON",
@@ -4342,14 +4528,18 @@
       head.appendChild(av);
       const idc = divc("ap-id");
       idc.appendChild(span("ap-kicker", "Appealing user"));
+      // No name on file at all: the client id still identifies them.
+      const shown =
+        a.name || (a.deviceId ? "Client " + a.deviceId.slice(0, 8) : "Unknown user");
       let nameNode;
       if (a.userId) {
-        nameNode = uref(a.name || "user", a.userId);
+        nameNode = uref(shown, a.userId);
         nameNode.classList.add("nm");
       } else {
-        nameNode = span("nm", a.name || "Unknown user");
+        nameNode = span("nm", shown);
       }
       idc.appendChild(nameNode);
+      (a.knownAs || []).forEach((n) => idc.appendChild(span("mc-aka", "aka " + n)));
       const meta = divc("ap-meta");
       const stb = span("rbadge " + sm.badge);
       stb.appendChild(icon(sm.icon));
@@ -5633,6 +5823,9 @@
       "dev get sessions",
     ].forEach((ev) => socket.emit(ev));
   }
+
+  const guideHelp = $("guideRecordHelp");
+  if (guideHelp) guideHelp.addEventListener("click", openRecordHelp);
 
   socket.on("connect", () => {
     socket.emit("staff get audit", { limit: 20000 });
