@@ -166,7 +166,10 @@ function check({ deviceId, ip, username }) {
   }
 
   if (!signal) return null;
-  if (deviceId) recentAlerts.set(deviceId, Date.now());
+  if (deviceId) {
+    recentAlerts.set(deviceId, Date.now());
+    identity.noteEvasion(deviceId);
+  }
   if (recentAlerts.size > 5000) recentAlerts.clear();
 
   const who = username ? `"${username}"` : "A new connection";

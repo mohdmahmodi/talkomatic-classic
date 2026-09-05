@@ -7,6 +7,8 @@ const fsp = require("fs").promises;
 
 const { DATA_DIR } = require("./datadir");
 
+const ipban = require("./ipban");
+
 const STORE_PATH = path.join(DATA_DIR, "identity.json");
 
 // Bar for "active member" (currently only gates mod applications): a month
@@ -77,6 +79,7 @@ function rec(id) {
       active: 0,
       acts: 0,
       ips: {},
+      nets: {},
       name: null,
       loc: null,
       note: null,
@@ -93,15 +96,35 @@ function addDay(r) {
   }
 }
 
+function count(map, key) {
+  map[key] = (map[key] || 0) + 1;
+  const keys = Object.keys(map);
+  if (keys.length <= MAX_IPS) return;
+  let min = keys[0];
+  for (const k of keys) if (map[k] < map[min]) min = k;
+  delete map[min];
+}
+
+// The exact address and the network it sits on are both kept. A phone that
+// rotates through IPv6 addresses inside one /64 would otherwise push every
+// earlier address out of the ring and lose the link to itself.
 function addIp(r, ip) {
   if (!ip) return;
-  r.ips[ip] = (r.ips[ip] || 0) + 1;
-  const keys = Object.keys(r.ips);
-  if (keys.length > MAX_IPS) {
-    let min = keys[0];
-    for (const k of keys) if (r.ips[k] < r.ips[min]) min = k;
-    delete r.ips[min];
-  }
+  count(r.ips, ip);
+  const net = ipban.computeRangeCidr(ip);
+  if (!net) return;
+  if (!r.nets) r.nets = {};
+  count(r.nets, net);
+}
+
+function noteEvasion(id) {
+  if (!validId(id)) return;
+  rec(id).evaderAt = Date.now();
+  saveSoon();
+}
+
+function allRecords() {
+  return store;
 }
 
 function touch(id, ip, name, loc) {
@@ -341,6 +364,8 @@ module.exports = {
   getRecord,
   devicesMatching,
   devicesByKeys,
+  noteEvasion,
+  allRecords,
   flushSync,
   MEMBER_DAYS,
   ACTIVE_SEC,

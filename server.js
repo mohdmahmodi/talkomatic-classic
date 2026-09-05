@@ -1127,6 +1127,7 @@ app.post(`${API}/appeal`, (req, res) => {
         expiry: b.expiry || 0,
         permanent: (b.expiry || 0) >= Number.MAX_SAFE_INTEGER,
         ts: b.ts || null,
+        auditId: b.auditId || null,
       },
     });
     if (!result.ok) return res.json(result);

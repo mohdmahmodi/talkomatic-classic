@@ -30,6 +30,17 @@ function maskIps(value) {
 
 const MASKED_FIELDS = ["target", "details", "text"];
 
+// A receipt carries the target's address and whatever they typed. The address
+// goes; the text is masked the same way details are.
+function redactReceipt(r) {
+  return {
+    ...r,
+    text: r.text != null ? maskIps(r.text) : r.text,
+    trail: (r.trail || []).map((t) => ({ ...t, text: maskIps(t.text) })),
+    target: r.target ? { ...r.target, ip: undefined } : r.target,
+  };
+}
+
 function isPrivilegedEntry(e) {
   if (!e) return false;
   if (e.devOnly) return true;
@@ -49,6 +60,8 @@ function redactEntry(entry, view) {
   delete copy.targetIp;
   for (const f of MASKED_FIELDS)
     if (copy[f] != null) copy[f] = maskIps(copy[f]);
+  if (copy.tgt) copy.tgt = { ...copy.tgt, ip: undefined };
+  if (copy.receipt) copy.receipt = redactReceipt(copy.receipt);
   if (copy.label)
     copy.label =
       copy.type === "comment"
@@ -144,9 +157,11 @@ function push(entry) {
   return entry;
 }
 
-function recordAction({ roleTag, label, action, target, room, ip, details }) {
+function recordAction({
+  roleTag, label, action, target, room, ip, details, tgt, receipt, justify,
+}) {
   const ts = Date.now();
-  push({
+  const entry = push({
     ts,
     type: "action",
     role: roleTag || "?",
@@ -156,6 +171,9 @@ function recordAction({ roleTag, label, action, target, room, ip, details }) {
     room: room || null,
     ip: ip || null,
     details: details || null,
+    ...(tgt ? { tgt } : {}),
+    ...(receipt ? { receipt } : {}),
+    ...(justify ? { justify } : {}),
   });
   const line =
     [
@@ -169,6 +187,7 @@ function recordAction({ roleTag, label, action, target, room, ip, details }) {
       .join(" | ")
       .trimEnd() + "\n";
   fsp.appendFile(MODLOG_PATH, line).catch(() => {});
+  return entry;
 }
 
 function recordIdentity({ userId, username, location, ip }) {
@@ -299,6 +318,41 @@ function recordComment({ entryId, role, label, text, ip }) {
   });
 }
 
+// A write-up is its own append-only entry that points at the block it
+// explains. Attaching it to the action entry in memory keeps every reader
+// simple: they look at entry.justify and never at the writeup rows.
+function attachWriteup(w) {
+  const target = entries.find((e) => e.id === w.refId);
+  if (!target) return null;
+  const j = target.justify || (target.justify = { required: true });
+  if (w.amend) {
+    j.addenda = (j.addenda || []).concat([{ text: w.text, at: w.ts }]);
+  } else {
+    j.fields = w.fields;
+    j.rule = w.rule;
+    j.at = w.ts;
+    j.by = w.label;
+  }
+  return target;
+}
+
+function recordWriteup({ entryId, role, label, fields, rule, text, amend }) {
+  if (!entryId) return null;
+  const w = push({
+    ts: Date.now(),
+    type: "writeup",
+    refId: entryId,
+    role: role || "mod",
+    label: label || role || "mod",
+    ...(amend ? { amend: true, text } : { fields, rule }),
+  });
+  return attachWriteup(w);
+}
+
+function getEntry(id) {
+  return entries.find((e) => e.id === id) || null;
+}
+
 const PACIFIC_FMT = (() => {
   try {
     return new Intl.DateTimeFormat("en-US", {
@@ -415,10 +469,10 @@ const ACTION_GROUPS = [
     label: "Acting on users",
     blurb: "Landed on a person. This is what moderating actually is.",
     actions: [
-      "kick", "kick+ban", "wipe buffer", "warn",
-      "ban", "ban ip", "ip block", "unblock ip",
+      "show rules", "kick", "kick+ban", "wipe buffer", "warn",
+      "ban", "ban ip", "ip block", "id block", "unblock ip",
       "rename", "reset location", "turn pfp off", "allow pfp",
-      "freeze", "unfreeze",
+      "freeze", "unfreeze", "silence", "unsilence", "kill bot",
     ],
   },
   {
@@ -429,9 +483,19 @@ const ACTION_GROUPS = [
       "dismiss report", "dismiss appeal", "lift ban",
       "approve mod application", "reject mod application", "review application",
       "approve suggestion", "decline suggestion",
-      "suggestion approved", "suggestion declined", "suggestion done",
+      "suggestion approved", "suggestion declined", "suggestion implemented",
+      "suggestion open",
       "delete board post", "delete board reply",
       "open applications", "close applications",
+    ],
+  },
+  {
+    key: "talking",
+    label: "Talking to users",
+    blurb: "Appeal conversations. Queue work, not enforcement.",
+    actions: [
+      "reply to appeal", "end appeal chat", "reopen appeal chat",
+      "reopen appeal",
     ],
   },
   {
@@ -464,6 +528,10 @@ const ACTION_GROUPS = [
       "megaphone", "set ticker", "maintenance on", "maintenance off",
       "set flags", "nuke all rooms", "clear blacklist",
       "review flag", "unreview flag",
+      "post announcement", "edit announcement", "delete announcement",
+      "set rules", "reset rules", "allow link domain", "remove link domain",
+      "merge person", "split person", "amend writeup",
+      "override own appeal", "export record",
     ],
   },
   {
@@ -536,8 +604,8 @@ const REQUIRES_REJOIN = new Set(["kick", "kick+ban"]);
 const INCIDENT_GAP_MS = 10 * 60 * 1000;
 const RAPID_GAP_MS = 5 * 1000;
 
-const HEAVY = new Set(["ban", "ban ip", "ip block", "kick+ban"]);
-const MILD = new Set(["warn", "kick", "wipe buffer"]);
+const HEAVY = new Set(["ban", "ban ip", "ip block", "id block", "kick+ban"]);
+const MILD = new Set(["show rules", "warn", "kick", "wipe buffer"]);
 const UNDO = new Map([
   ["ban", "lift ban"],
   ["ban ip", "unblock ip"],
@@ -627,16 +695,7 @@ function historyFor(label, role, opts = {}) {
       t.actions.set(base, (t.actions.get(base) || 0) + 1);
     }
 
-    acts.push({
-      ts,
-      base,
-      group,
-      action: e.action,
-      targetId: tgt ? tgt.id || tgt.name : null,
-      targetName: tgt ? tgt.name : null,
-      roomId: room ? room.id || room.name : null,
-      roomName: room ? room.name : null,
-    });
+    acts.push(actOf(e, base, group, tgt, room));
     if (acts.length > ACTS_CAP) acts.shift();
 
     if (ts >= cutoff) recent.push({ ...e, base, group });
@@ -727,23 +786,34 @@ function toDecisions(acts) {
       prev &&
       prev.targetId &&
       prev.targetId === a.targetId &&
+      prev.label === a.label &&
       sameDecision(prev.base, a.base, a.ts - prev.lastTs)
     ) {
       prev.parts.push(a.base);
       prev.lastTs = a.ts;
+      prev.ids.push(a.id);
+      if (!prev.receipt && a.receipt) prev.receipt = a.receipt;
+      if (!prev.justify && a.justify) prev.justify = a.justify;
       continue;
     }
     out.push({
+      id: a.id,
+      ids: [a.id],
       ts: a.ts,
       lastTs: a.ts,
       base: a.base,
       group: a.group,
       action: a.action,
+      label: a.label,
+      role: a.role,
       targetId: a.targetId,
       targetName: a.targetName,
       roomId: a.roomId,
       roomName: a.roomName,
       parts: [a.base],
+      receipt: a.receipt || null,
+      justify: a.justify || null,
+      tgt: a.tgt || null,
     });
   }
   return out;
@@ -792,6 +862,8 @@ const ev = (d, gap, note) => ({
   room: d.roomName || null,
   gap: gap == null ? null : relGap(gap),
   note: note || null,
+  quote: d.receipt && d.receipt.text ? maskIps(d.receipt.text) : null,
+  grade: d.receipt ? d.receipt.grade : null,
 });
 
 const levelFor = (score) =>
@@ -1117,35 +1189,6 @@ function buildFlags(acts, who) {
   }
 
   {
-    const seen = new Map();
-    const cold = [];
-    for (const d of decisions) {
-      if (!d.targetId) continue;
-      if (d.parts.some((p) => MILD.has(p))) seen.set(d.targetId, true);
-      if (d.parts.some((p) => HEAVY.has(p)) && !seen.get(d.targetId)) cold.push(d);
-      if (d.parts.some((p) => HEAVY.has(p))) seen.set(d.targetId, true);
-    }
-    const heavyTotal = decisions.filter((d) =>
-      d.parts.some((p) => HEAVY.has(p)),
-    ).length;
-    if (cold.length >= 3 && pct(cold.length, Math.max(1, heavyTotal)) >= 50)
-      add({
-        key: "noprocess",
-        score: Math.min(100, 25 + cold.length * 5),
-        title:
-          cold.length +
-          " bans or blocks with no warning or kick first",
-        detail:
-          "Out of " +
-          heavyTotal +
-          " heavy punishments, these went straight to the strongest tool available with nothing milder on record for that person.",
-        innocent:
-          "Some things do not deserve a warning, and a moderator arriving mid-raid will not stop to issue one. Read the reasons attached.",
-        evidence: cold.slice(-12).map((d) => ev(d)),
-      });
-  }
-
-  {
     const pending = new Map();
     const reversals = [];
     for (const d of decisions) {
@@ -1236,6 +1279,114 @@ function buildFlags(acts, who) {
 
   signals.sort((a, b) => b.score - a.score);
   return signals.map((s) => applyReview(s, who));
+}
+
+// ── Reading entries by person and by staff member ─────────────────────────
+
+function actOf(e, base, group, tgt, room) {
+  return {
+    id: e.id,
+    ts: e.ts || 0,
+    base,
+    group,
+    action: e.action,
+    label: e.label,
+    role: e.role,
+    targetId: tgt ? tgt.id || tgt.name : null,
+    targetName: tgt ? tgt.name : null,
+    roomId: room ? room.id || room.name : null,
+    roomName: room ? room.name : null,
+    receipt: e.receipt || null,
+    justify: e.justify || null,
+    tgt: e.tgt || null,
+  };
+}
+
+function toAct(e) {
+  return actOf(
+    e,
+    baseAction(e.action),
+    groupOf(e.action),
+    parseUserTag(e.target),
+    parseRoomTag(e.room),
+  );
+}
+
+function landedOn(e, who) {
+  if (e.type !== "action" || groupOf(e.action) !== "users") return false;
+  const t = e.tgt || {};
+  if (who.deviceIds && t.did && who.deviceIds.has(t.did)) return true;
+  const uid = t.uid || (parseUserTag(e.target) || {}).id;
+  return !!(uid && who.userIds.has(uid));
+}
+
+function personKeys(who) {
+  return {
+    userIds: new Set([who.userId, ...(who.userIds || [])].filter(Boolean)),
+    deviceIds: new Set([who.deviceId, ...(who.deviceIds || [])].filter(Boolean)),
+  };
+}
+
+// Everything staff have done to one person since a moment in time, newest
+// first. Any staff member, not just the one asking.
+function actionsOn(who, since, limit = 10) {
+  const keys = personKeys(who);
+  const out = [];
+  for (let i = entries.length - 1; i >= 0 && out.length < limit; i--) {
+    const e = entries[i];
+    if ((e.ts || 0) < since) break;
+    if (!landedOn(e, keys)) continue;
+    out.push({ action: e.action, by: e.label, role: e.role, at: e.ts });
+  }
+  return out;
+}
+
+function entriesOn(who) {
+  const keys = personKeys(who);
+  return entries.filter((e) => landedOn(e, keys));
+}
+
+function actsForLabel(label, role, since = 0) {
+  const out = [];
+  for (const e of entries) {
+    if (e.type !== "action" || e.label !== label) continue;
+    if (role && e.role && e.role !== role) continue;
+    if ((e.ts || 0) < since) continue;
+    out.push(toAct(e));
+  }
+  return out;
+}
+
+// What one staff member decided about people recently, combos folded. The
+// live detector reads this instead of keeping a counter of its own.
+function recentDecisionsFor(label, sinceMs) {
+  const acts = actsForLabel(label, null, Date.now() - sinceMs).filter(
+    (a) => a.group === "users",
+  );
+  return toDecisions(acts);
+}
+
+function userActionEntries() {
+  return entries.filter(
+    (e) => e.type === "action" && groupOf(e.action) === "users",
+  );
+}
+
+function entriesForLabel(label, role) {
+  return entries.filter(
+    (e) =>
+      e.type === "action" &&
+      e.label === label &&
+      (!role || !e.role || e.role === role),
+  );
+}
+
+function unbucketedActions() {
+  const seen = new Set();
+  for (const e of entries)
+    if (e.type === "action" && groupOf(e.action) === "other")
+      seen.add(baseAction(e.action));
+  return [...seen].sort();
 }
 
 // ── Public daily stats ────────────────────────────────────────────────────
@@ -1438,6 +1589,7 @@ function load() {
       })
       .filter(Boolean);
     seq = entries.reduce((m, e) => Math.max(m, e.id || 0), 0);
+    for (const e of entries) if (e.type === "writeup") attachWriteup(e);
     for (const e of entries) {
       if (e.type === "identity" && e.userId)
         lastIdentity.set(e.userId, {
@@ -1453,9 +1605,39 @@ function load() {
 
 load();
 loadFlagReviews();
+{
+  const loose = unbucketedActions();
+  if (loose.length)
+    console.warn("audit: actions with no bucket:", loose.join(", "));
+}
 
 module.exports = {
   recordAction,
+  recordWriteup,
+  getEntry,
+  actionsOn,
+  entriesOn,
+  actsForLabel,
+  toAct,
+  toDecisions,
+  toIncidents,
+  recentDecisionsFor,
+  unbucketedActions,
+  userActionEntries,
+  entriesForLabel,
+  redactReceipt,
+  applyReview,
+  levelFor,
+  relGap,
+  ev,
+  baseAction,
+  groupOf,
+  ACTION_GROUPS,
+  HEAVY,
+  MILD,
+  REQUIRES_REJOIN,
+  INCIDENT_GAP_MS,
+  HISTORY_WINDOW_MS,
   recordIdentity,
   recordForcedRename,
   recordKeyAlert,

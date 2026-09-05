@@ -16,6 +16,8 @@
   });
 
   if (window.TalkoDesk) window.TalkoDesk.init(socket);
+  // The rule picker in StaffUI reads the community rules over this socket.
+  window.socket = socket;
 
   const $ = (id) => document.getElementById(id);
   const loadingEl = $("loading");
@@ -243,6 +245,25 @@
     }
     return s;
   }
+  const GRADE_LABEL = {
+    corroborated: "corroborated by what they typed or their history",
+    reported: "reported or disliked by other users shortly before",
+    unverifiable: "nothing captured confirms or contradicts it",
+    contradicted: "heavy punishment with nothing on record to support it",
+    none: "before receipts",
+  };
+  function gradeLabel(grade) {
+    return GRADE_LABEL[grade] || GRADE_LABEL.none;
+  }
+
+  function writeupNode(j) {
+    const box = divc("writeup");
+    (window.StaffUI ? StaffUI.writeupLines(j) : []).forEach((line) =>
+      box.appendChild(span("wu-line", line)),
+    );
+    return box;
+  }
+
   function kvRow(k, v, vClass, uid) {
     if (v == null || v === "") return null;
     const row = divc("kv");
@@ -439,6 +460,26 @@
       addKv(body, "Staff", e.label, "dimv");
       addKv(body, "Staff IP", e.ip, "ip");
       addKv(body, "When", fmtTime(e.ts), "dimv");
+      if (e.receipt) {
+        const r = e.receipt;
+        if (r.text && !/text before wipe/.test(e.details || ""))
+          addKv(body, "They had typed", r.text, "quote");
+        addKv(body, "Evidence", gradeLabel(r.grade), "grade-" + r.grade);
+        if (r.reports && r.reports.hour)
+          addKv(body, "Reports", r.reports.hour + " in the hour before", "dimv");
+        if (r.dislikes) addKv(body, "Dislikes", String(r.dislikes), "dimv");
+        if (r.prior && r.prior.length)
+          addKv(
+            body,
+            "Before this",
+            r.prior.map((p) => p.action + " by " + p.by).join(", "),
+            "dimv",
+          );
+      }
+      if (e.justify && e.justify.at)
+        addKv(body, "Write-up", writeupNode(e.justify));
+      else if (e.justify && e.justify.required)
+        addKv(body, "Write-up", "not written yet", "warnv");
     } else if (e.type === "notification") {
       const tn = parseTarget(e.target);
       if (tn) {
@@ -1708,6 +1749,9 @@
       offset: o.offset || 0,
       group: o.group || null,
       targetUid: o.targetUid || null,
+      caseFilter: o.caseFilter || "all",
+      caseOffset: o.caseOffset || 0,
+      mineOnly: !!(o.keepHost && recordCtx && recordCtx.mineOnly),
       host: o.keepHost && recordCtx ? recordCtx.host : null,
     };
     socket.emit("staff get mod history", {
@@ -1717,6 +1761,8 @@
       limit: RECORD_PAGE,
       group: recordCtx.group,
       targetUid: recordCtx.targetUid,
+      caseFilter: recordCtx.caseFilter,
+      caseOffset: recordCtx.caseOffset,
     });
   }
 
@@ -1735,6 +1781,8 @@
           offset: 0,
           group: recordCtx.group,
           targetUid: recordCtx.targetUid,
+          caseFilter: recordCtx.caseFilter,
+          caseOffset: recordCtx.caseOffset,
           keepHost: true,
         },
         patch,
@@ -1762,6 +1810,7 @@
   const REC_GROUP = {
     users: { icon: "fa-user-shield", label: "Acting on users" },
     queues: { icon: "fa-inbox", label: "Clearing queues" },
+    talking: { icon: "fa-comments", label: "Talking to users" },
     rooms: { icon: "fa-door-open", label: "Looking after rooms" },
     records: { icon: "fa-note-sticky", label: "Record keeping" },
     admin: { icon: "fa-sliders", label: "Server and roles" },
@@ -1784,6 +1833,758 @@
     const close = body.lastIndexOf(")");
     if (open === -1 || close < open) return { name: body, id: null };
     return { name: body.slice(0, open), id: body.slice(open + 1, close) };
+  }
+
+  // ── The record: who, how it reads, the evidence, the cases ─────────────
+  function rankName(isDev, modLevel) {
+    if (isDev) return "Admin";
+    if (modLevel >= 3) return "Mod leader";
+    if (modLevel === 1) return "Junior moderator";
+    return "Moderator";
+  }
+
+  function sectionHead(title, sub) {
+    const head = divc("mh-lhead");
+    head.appendChild(span("mh-lt", title));
+    if (sub) head.appendChild(span("mh-ls", sub));
+    return head;
+  }
+
+  function foldSection(title, sub, body, open) {
+    const det = document.createElement("details");
+    det.className = "mh-fold";
+    det.open = !!open;
+    const sum = document.createElement("summary");
+    sum.appendChild(span("mh-lt", title));
+    if (sub) sum.appendChild(span("mh-ls", sub));
+    det.appendChild(sum);
+    det.appendChild(body);
+    return det;
+  }
+
+  function elapsedLabel(ms) {
+    const s = Math.max(0, Math.round(ms / 1000));
+    if (s < 60) return s + "s";
+    const m = Math.round(s / 60);
+    if (m < 60) return m + " min";
+    const h = Math.round(m / 60);
+    if (h < 48) return h + " h";
+    return Math.round(h / 24) + " days";
+  }
+
+  function gradeTag(grade) {
+    const g = grade || "none";
+    return span(
+      "mh-grade g-" + g,
+      g === "none" ? "before receipts" : g,
+    );
+  }
+
+  function recordHeader(h, isDev, ctx) {
+    const head = divc("mh-head");
+    const av = divc("mh-avatar");
+    av.textContent = initialOf(h.label);
+    head.appendChild(av);
+    const text = divc("mh-htext");
+    const name = divc("mh-hname");
+    name.appendChild(span("mh-hlabel", h.label || "Staff"));
+    name.appendChild(
+      span(
+        "mh-rank r-" + (isDev ? "dev" : "l" + (ctx.modLevel || 2)),
+        rankName(isDev, ctx.modLevel),
+      ),
+    );
+    text.appendChild(name);
+    if (h.summary) text.appendChild(span("mh-hsummary", h.summary));
+    const facts = divc("mh-hfacts");
+    if (h.first) {
+      const f = span(null, "First action " + relTime(h.first));
+      f.title = fmtTime(h.first);
+      facts.appendChild(f);
+    }
+    if (h.last) {
+      const l = span(null, "Last action " + relTime(h.last));
+      l.title = fmtTime(h.last);
+      facts.appendChild(l);
+    }
+    facts.appendChild(span(null, (h.total || 0) + " logged in total"));
+    text.appendChild(facts);
+    head.appendChild(text);
+    return head;
+  }
+
+  function qualityStrip(h) {
+    const q = h.quality;
+    if (!q) return null;
+    const team = h.team || {};
+    const sect = divc("mh-sect");
+    sect.appendChild(
+      sectionHead(
+        "How the evidence reads",
+        q.total
+          ? "last 30 days, " + q.total + " decisions with a receipt"
+          : "no decisions with a receipt in the last 30 days",
+      ),
+    );
+    const grid = divc("mh-quality");
+    const share = (n) => (q.total ? Math.round((n / q.total) * 100) + "%" : "0");
+    const teamLine = (key, suffix) =>
+      team.enough && team[key] != null
+        ? "team " + team[key] + (suffix == null ? "%" : suffix)
+        : "not enough peers to compare";
+    const tile = (n, label, teamText, warn) => {
+      const t = divc("mh-qt" + (warn ? " warn" : ""));
+      t.appendChild(span("mh-qn", n));
+      t.appendChild(span("mh-ql", label));
+      t.appendChild(span("mh-qteam", teamText));
+      return t;
+    };
+    grid.appendChild(
+      tile(share(q.counts.corroborated), "corroborated", teamLine("corroboratedPct")),
+    );
+    grid.appendChild(
+      tile(
+        share(q.counts.reported + q.counts.unverifiable),
+        "reported or unverifiable",
+        "not held against anyone",
+      ),
+    );
+    grid.appendChild(
+      tile(
+        share(q.counts.contradicted),
+        "contradicted",
+        teamLine("contradictedPct"),
+        team.enough && q.contradictedPct > team.contradictedPct,
+      ),
+    );
+    grid.appendChild(
+      tile(
+        String(q.overturned),
+        "overturned",
+        teamLine("overturned", ""),
+        team.enough && q.overturned > team.overturned,
+      ),
+    );
+    sect.appendChild(grid);
+    sect.appendChild(
+      span(
+        "mh-qnote",
+        "Grades describe what was captured at the moment of each action, never the moderator. Actions from before receipts are not counted.",
+      ),
+    );
+    return sect;
+  }
+
+  const OUTCOME_LABEL = {
+    quiet: "went quiet",
+    left: "left",
+    "came back": "came back",
+    banned: "banned",
+    evaded: "evaded the ban",
+    "re-actioned": "acted on again",
+    "appeal open": "appeal open",
+    upheld: "appeal declined",
+    overturned: "overturned",
+    lifted: "lifted by the issuer",
+    unknown: "no presence data",
+  };
+
+  function outcomeChip(o) {
+    const kind = (o && o.kind) || "unknown";
+    let text = OUTCOME_LABEL[kind] || kind;
+    if (kind === "came back") text += " x" + (o.n || 1);
+    if (o && o.by && ["overturned", "re-actioned", "upheld"].includes(kind))
+      text += " by " + o.by;
+    return span("mh-outcome o-" + kind.replace(/\s+/g, "-"), text);
+  }
+
+  function pref(name, key) {
+    const s = span("uref pref", name);
+    s.title = "Open this person";
+    s.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      openPerson(key);
+    });
+    return s;
+  }
+
+  function receiptFacts(r) {
+    const facts = divc("mc-facts");
+    const fact = (k, v) => {
+      if (v == null || v === "") return;
+      const f = divc("mc-fact");
+      f.appendChild(span("k", k));
+      f.appendChild(span("v", String(v)));
+      facts.appendChild(f);
+    };
+    fact(
+      "They had typed",
+      r.text
+        ? '"' + r.text + '"' + (r.textWiped ? " (they had already cleared it)" : "")
+        : r.origin === "offline"
+          ? "acted on from outside a room"
+          : "nothing, the box was empty",
+    );
+    if (r.trail && r.trail.length)
+      fact("Earlier lines", r.trail.map((t) => '"' + t.text + '"').join("   "));
+    if (r.reports && r.reports.hour)
+      fact(
+        "Reports in the hour before",
+        r.reports.hour +
+          (r.reports.reporters > 1 ? " from " + r.reports.reporters + " people" : ""),
+      );
+    if (r.dislikes) fact("Dislikes at the time", r.dislikes);
+    if (r.prior && r.prior.length)
+      fact(
+        "Before this",
+        r.prior.map((p) => p.action + " by " + p.by + ", " + relTime(p.at)).join("; "),
+      );
+    if (r.room)
+      fact(
+        "Room",
+        r.room.name +
+          ": " +
+          r.room.occupants +
+          " in, " +
+          r.room.staff +
+          " staff" +
+          (r.room.joins5m >= 5 ? ", " + r.room.joins5m + " joins in 5 min" : ""),
+      );
+    if (r.actor && r.actor.joinedAt && r.target && r.target.joinedAt)
+      fact(
+        "Who arrived first",
+        r.actor.joinedAt > r.target.joinedAt
+          ? "they did, " + elapsedLabel(r.actor.joinedAt - r.target.joinedAt) + " before the moderator"
+          : "the moderator, " + elapsedLabel(r.target.joinedAt - r.actor.joinedAt) + " before them",
+      );
+    if (r.reason && (r.reason.text || r.reason.rule))
+      fact("Reason given", r.reason.text || "Rule " + r.reason.rule);
+    const auto = [];
+    if (r.auto && r.auto.words) auto.push("filtered words");
+    if (r.auto && r.auto.links) auto.push("a link");
+    if (r.auto && r.auto.ip) auto.push("an address");
+    if (auto.length) fact("Filters found", auto.join(", "));
+    const person = [];
+    if (r.person && r.person.evader) person.push("flagged for ban evasion");
+    if (r.person && r.person.autoBlocked) person.push("auto-blocked");
+    if (r.person && r.person.bot) person.push("a bot");
+    if (r.person && r.person.bans) person.push(r.person.bans + " earlier bans on this network");
+    if (person.length) fact("Person", person.join(", "));
+    return facts;
+  }
+
+  function stepDetail(s) {
+    const row = divc("mc-sdetail");
+    const head = divc("mc-shead");
+    head.appendChild(span("mc-sact" + (s.heavy ? " heavy" : ""), s.action));
+    head.appendChild(span("mc-sby", "by " + s.by));
+    const t = span("mc-swhen", relTime(s.ts));
+    t.title = fmtTime(s.ts);
+    head.appendChild(t);
+    head.appendChild(gradeTag(s.grade));
+    row.appendChild(head);
+    if (s.receipt) row.appendChild(receiptFacts(s.receipt));
+    else row.appendChild(span("mc-none", "No receipt. This action predates receipts."));
+    if (s.justify && s.justify.at) row.appendChild(writeupNode(s.justify));
+    else if (s.justify && s.justify.required)
+      row.appendChild(span("mc-missing", "Write-up required and not written yet."));
+    return row;
+  }
+
+  function noteLine(k, note) {
+    const l = divc("mc-note");
+    l.appendChild(span("k", k + ", " + note.by + ", " + relTime(note.at)));
+    l.appendChild(span("v", note.text));
+    return l;
+  }
+
+  function paintCaseNotes(card, caseId, notes) {
+    const box = card.querySelector(".mc-notes");
+    if (!box) return;
+    box.innerHTML = "";
+    const n = notes || {};
+    if (n.mod) box.appendChild(noteLine("Their note", n.mod));
+    if (n.reviewer) box.appendChild(noteLine("Reviewer", n.reviewer));
+  }
+
+  async function addCaseNote(c, h) {
+    const mine = !!h.selfView;
+    const existing = (c.notes || {})[mine ? "mod" : "reviewer"];
+    const res = await StaffUI.prompt({
+      title: mine ? "Your note on this case" : "Reviewer note",
+      icon: '<i class="fas fa-pen"></i>',
+      message: mine
+        ? "Whoever reviews your record reads this beside the evidence. One note per case; writing again replaces it."
+        : "Shown to the moderator on their own record as well as to other reviewers.",
+      fields: [
+        {
+          name: "value",
+          label: "Note",
+          type: "textarea",
+          maxLength: 300,
+          value: existing ? existing.text : "",
+          placeholder: "What the evidence does not show.",
+        },
+      ],
+      confirmText: "Save note",
+    });
+    if (res == null) return;
+    socket.emit("staff case note", {
+      caseId: c.id,
+      label: h.label,
+      role: h.role || "mod",
+      text: res,
+    });
+  }
+
+  function caseDetail(c, h) {
+    const body = divc("mc-detail");
+    c.steps.forEach((s) => body.appendChild(stepDetail(s)));
+    const acts = divc("mc-actions");
+    const btn = (label, faIcon, fn) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "mh-fbtn";
+      b.appendChild(icon(faIcon));
+      b.appendChild(document.createTextNode(" " + label));
+      b.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        fn();
+      });
+      return b;
+    };
+    if (viewerIsFullMod())
+      acts.appendChild(btn("Open person", "fa-user", () => openPerson(c.personId)));
+    if (c.outcome && c.outcome.appealId)
+      acts.appendChild(btn("Open appeal", "fa-scale-balanced", () => openAppealChat(c.outcome.appealId)));
+    if (h.selfView || h.canReview)
+      acts.appendChild(btn("Note", "fa-pen", () => addCaseNote(c, h)));
+    body.appendChild(acts);
+    return body;
+  }
+
+  function caseCard(c, h) {
+    const card = divc("mc-case");
+    card.dataset.case = c.id;
+
+    const top = divc("mc-top");
+    const who = divc("mc-who");
+    who.appendChild(pref(c.names[0] || "?", c.personId));
+    c.names.slice(1).forEach((n) => who.appendChild(span("mc-aka", "aka " + n)));
+    top.appendChild(who);
+    const meta = divc("mc-meta");
+    c.rooms.forEach((r) => meta.appendChild(span("mc-room", r)));
+    if (c.endTs > c.startTs) meta.appendChild(span("mc-dur", elapsedLabel(c.endTs - c.startTs)));
+    const when = span("mc-when", relTime(c.startTs));
+    when.title = fmtTime(c.startTs);
+    meta.appendChild(when);
+    top.appendChild(meta);
+    card.appendChild(top);
+
+    const ladder = divc("mc-ladder");
+    c.steps.forEach((s, i) => {
+      if (i) ladder.appendChild(span("mc-then", "then"));
+      const other = s.by !== h.label;
+      ladder.appendChild(
+        span(
+          "mc-step" + (s.heavy ? " heavy" : "") + (other ? " other" : ""),
+          s.action + (other ? " (" + s.by + ")" : ""),
+        ),
+      );
+    });
+    ladder.appendChild(outcomeChip(c.outcome));
+    card.appendChild(ladder);
+
+    const shown =
+      c.steps.find((s) => s.receipt && s.receipt.text) || c.steps.find((s) => s.receipt);
+    if (shown) {
+      const line = divc("mc-quote");
+      line.appendChild(
+        span(
+          "mc-q",
+          shown.receipt.text
+            ? '"' + shown.receipt.text + '"'
+            : shown.receipt.origin === "offline"
+              ? "acted on from outside a room"
+              : "box empty, no reports",
+        ),
+      );
+      line.appendChild(gradeTag(shown.grade));
+      card.appendChild(line);
+    }
+    const wu = c.steps.find((s) => s.justify && s.justify.at);
+    if (wu) card.appendChild(span("mc-why", "Why: " + (wu.justify.fields.did || "")));
+    if (c.steps.some((s) => s.justify && s.justify.required && !s.justify.at))
+      card.appendChild(span("mc-missing", "No write-up yet"));
+
+    card.appendChild(divc("mc-notes"));
+    paintCaseNotes(card, c.id, c.notes);
+
+    const body = divc("mc-body");
+    body.hidden = true;
+    card.appendChild(body);
+    card.addEventListener("click", (ev) => {
+      if (ev.target.closest("button, textarea, .uref")) return;
+      if (body.hidden && !body.childNodes.length) body.appendChild(caseDetail(c, h));
+      body.hidden = !body.hidden;
+      card.classList.toggle("open", !body.hidden);
+    });
+    return card;
+  }
+
+  function pager(offset, limit, total, go) {
+    if (total <= limit) return null;
+    const pages = Math.max(1, Math.ceil(total / limit));
+    const page = Math.floor(offset / limit) + 1;
+    const box = divc("mh-pager");
+    const mk = (label, faIcon, atEnd, disabled, target) => {
+      const b = document.createElement("button");
+      b.className = "btn sm";
+      b.disabled = disabled;
+      if (!atEnd) b.appendChild(icon(faIcon));
+      b.appendChild(document.createTextNode(label));
+      if (atEnd) b.appendChild(icon(faIcon));
+      if (!disabled) b.addEventListener("click", () => go(Math.max(0, target)));
+      return b;
+    };
+    box.appendChild(mk(" Newer", "fa-chevron-left", false, offset === 0, offset - limit));
+    box.appendChild(
+      span(
+        null,
+        offset + 1 + "-" + Math.min(offset + limit, total) + " of " + total + "  (page " + page + " of " + pages + ")",
+      ),
+    );
+    box.appendChild(mk("Older ", "fa-chevron-right", true, offset + limit >= total, offset + limit));
+    return box;
+  }
+
+  function casesSection(h) {
+    const sect = divc("mh-sect mh-cases");
+    sect.appendChild(
+      sectionHead(
+        "Cases",
+        h.casesTotal
+          ? h.casesTotal +
+              " in total" +
+              (h.casesMatched !== h.casesTotal ? ", " + h.casesMatched + " matching" : "")
+          : "none yet",
+      ),
+    );
+    sect.appendChild(
+      span(
+        "mh-qnote",
+        "One case is one person, one sitting, every staff member involved. Click a case for the full receipt behind each step.",
+      ),
+    );
+    const filters = divc("mh-cfilters");
+    [
+      ["all", "All"],
+      ["heavy", "Heavy"],
+      ["contradicted", "Contradicted"],
+      ["contested", "Contested"],
+    ].forEach(([k, l]) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "mh-fchip" + ((h.caseFilter || "all") === k ? " on" : "");
+      b.textContent = l;
+      b.addEventListener("click", () => refineRecord({ caseFilter: k, caseOffset: 0 }));
+      filters.appendChild(b);
+    });
+    const mine = document.createElement("button");
+    mine.type = "button";
+    mine.className = "mh-fchip" + (recordCtx && recordCtx.mineOnly ? " on" : "");
+    mine.textContent = "Mine only";
+    mine.title = "Hide steps taken by other staff";
+    mine.addEventListener("click", () => {
+      recordCtx.mineOnly = !recordCtx.mineOnly;
+      mine.classList.toggle("on", recordCtx.mineOnly);
+      sect.classList.toggle("mine", recordCtx.mineOnly);
+    });
+    filters.appendChild(mine);
+    sect.appendChild(filters);
+    if (recordCtx && recordCtx.mineOnly) sect.classList.add("mine");
+
+    const list = divc("mc-list");
+    (h.cases || []).forEach((c) => list.appendChild(caseCard(c, h)));
+    if (!h.cases || !h.cases.length)
+      list.appendChild(
+        span(
+          "mh-none",
+          h.caseFilter && h.caseFilter !== "all"
+            ? "No cases match that filter."
+            : "No cases yet. Cases appear once they act on somebody.",
+        ),
+      );
+    sect.appendChild(list);
+    const pg = pager(h.caseOffset || 0, h.casePage || 25, h.casesMatched || 0, (o) =>
+      refineRecord({ caseOffset: o }),
+    );
+    if (pg) sect.appendChild(pg);
+    return sect;
+  }
+
+  // Consecutive spectates and the replies on one appeal fold into one row
+  // each, so the log reads as work rather than as noise.
+  function foldKind(e) {
+    const base = String(e.action || "").toLowerCase();
+    if (base.startsWith("spectate") || base.startsWith("unspectate")) return "spectate";
+    if (base === "reply to appeal") return "appeal";
+    return null;
+  }
+
+  function foldEntries(list) {
+    const out = [];
+    for (const e of list) {
+      const kind = foldKind(e);
+      const prev = out[out.length - 1];
+      if (
+        kind &&
+        prev &&
+        prev.fold &&
+        prev.fold.kind === kind &&
+        (kind !== "appeal" || prev.target === e.target)
+      ) {
+        prev.fold.items.push(e);
+        continue;
+      }
+      out.push(kind ? { ...e, fold: { kind, items: [e] } } : e);
+    }
+    return out;
+  }
+
+  function foldedRow(e) {
+    const items = e.fold.items;
+    const first = items[items.length - 1];
+    const last = items[0];
+    const det = document.createElement("details");
+    det.className = "mh-row mh-folded";
+    const sum = document.createElement("summary");
+    const ic = divc("ico g-" + (e.group || "other"));
+    ic.appendChild(icon(e.fold.kind === "appeal" ? "fa-comments" : "fa-eye"));
+    sum.appendChild(ic);
+    const main = divc("mh-main");
+    const top = divc("mh-top");
+    if (e.fold.kind === "appeal") {
+      const t = parseTarget(e.target);
+      top.appendChild(span("mh-act", items.length + " replies on " + (t ? t.name : "an") + " appeal"));
+    } else {
+      const rooms = new Set(items.map((x) => (parseRoomTag(x.room) || {}).name).filter(Boolean));
+      top.appendChild(
+        span(
+          "mh-act",
+          "watched " + rooms.size + (rooms.size === 1 ? " room" : " rooms") + " over " + elapsedLabel(last.ts - first.ts),
+        ),
+      );
+    }
+    const when = span("mh-when", relTime(last.ts));
+    when.title = fmtTime(first.ts) + " to " + fmtTime(last.ts);
+    top.appendChild(when);
+    main.appendChild(top);
+    sum.appendChild(main);
+    det.appendChild(sum);
+    const inner = divc("mh-list mh-inner");
+    items.forEach((x) => inner.appendChild(recordRow({ ...x, fold: null })));
+    det.appendChild(inner);
+    return det;
+  }
+
+  // ── One person, everything staff know ────────────────────────────────────
+  function openPerson(key) {
+    if (!key) return;
+    socket.emit("staff get person", { key: String(key) });
+  }
+
+  function personList(title, rows, empty) {
+    const sect = divc("mh-sect");
+    sect.appendChild(sectionHead(title, rows.length ? rows.length + "" : null));
+    const list = divc("mh-plist");
+    if (!rows.length) list.appendChild(span("mh-none", empty));
+    rows.forEach((r) => list.appendChild(r));
+    sect.appendChild(list);
+    return sect;
+  }
+
+  function plainRow(main, sub, when) {
+    const row = divc("mh-prow");
+    const text = divc("mh-ptext");
+    text.appendChild(span("mh-pmain", main));
+    if (sub) text.appendChild(span("mh-psub", sub));
+    row.appendChild(text);
+    if (when) {
+      const w = span("mh-when", relTime(when));
+      w.title = fmtTime(when);
+      row.appendChild(w);
+    }
+    return row;
+  }
+
+  async function pinPerson(p, a, b, together) {
+    const res = await StaffUI.prompt({
+      title: together ? "Same person" : "Not the same person",
+      icon: '<i class="fas fa-link"></i>',
+      message: together
+        ? "Join these two devices into one person. Their cases, reports and bans read as one history from now on."
+        : "Split these two devices. They stay apart whatever the addresses say.",
+      fields: [{ name: "value", label: "Why", type: "textarea", maxLength: 300, required: true }],
+      confirmText: together ? "Join them" : "Keep them apart",
+    });
+    if (res == null) return;
+    socket.emit("staff pin person", { key: p.key, a, b, together, reason: res });
+  }
+
+  function renderPerson(p) {
+    if (!window.StaffUI || !p) return;
+    const wrap = divc("mh-wrap");
+
+    const head = divc("mh-head");
+    const av = divc("mh-avatar");
+    av.textContent = initialOf(p.names[0] || "?");
+    head.appendChild(av);
+    const text = divc("mh-htext");
+    const name = divc("mh-hname");
+    name.appendChild(span("mh-hlabel", p.names[0] || "Unknown"));
+    if (p.blocked) name.appendChild(span("mh-rank r-blocked", "blocked"));
+    if (p.evader) name.appendChild(span("mh-rank r-evader", "flagged for evasion"));
+    text.appendChild(name);
+    if (p.names.length > 1)
+      text.appendChild(span("mh-hsummary", "Also known as " + p.names.slice(1).join(", ")));
+    const facts = divc("mh-hfacts");
+    facts.appendChild(
+      span(
+        null,
+        p.standalone
+          ? "No device record. Only what the log says about this id."
+          : p.devices.length + (p.devices.length === 1 ? " device" : " devices"),
+      ),
+    );
+    if (p.first) facts.appendChild(span(null, "First seen " + relTime(p.first)));
+    if (p.last) facts.appendChild(span(null, "Last seen " + relTime(p.last)));
+    text.appendChild(facts);
+    head.appendChild(text);
+    wrap.appendChild(head);
+
+    wrap.appendChild(
+      personList(
+        "Cases",
+        (p.cases || []).map((c) => caseCard(c, { label: null, selfView: false, canReview: false })),
+        "Nobody on staff has acted on this person.",
+      ),
+    );
+
+    if (p.devices.length) {
+      const rows = p.devices.map((d, i) => {
+        const row = plainRow(
+          (d.name || "no name") + "  " + d.id,
+          d.addresses + " addresses, " + d.networks + " networks" + (d.evader ? ", flagged for evasion" : ""),
+          d.last,
+        );
+        if (p.canPin && i > 0) {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.className = "mh-fbtn";
+          b.textContent = "Not the same person";
+          b.addEventListener("click", () => pinPerson(p, p.devices[0].id, d.id, false));
+          row.appendChild(b);
+        }
+        return row;
+      });
+      const edges = (p.edges || []).map((e) =>
+        plainRow("Joined: " + e.a + " and " + e.b, "Tier " + e.tier + ": " + e.why),
+      );
+      wrap.appendChild(personList("Devices, and why they are one person", rows.concat(edges), ""));
+    }
+
+    if (p.sameNetwork && p.sameNetwork.length)
+      wrap.appendChild(
+        personList(
+          "On the same network, not joined",
+          p.sameNetwork.map((n) => {
+            const row = plainRow((n.name || "no name") + "  " + n.id, n.net ? n.net : "shares a network with them", n.last);
+            if (p.canPin && p.devices.length) {
+              const b = document.createElement("button");
+              b.type = "button";
+              b.className = "mh-fbtn";
+              b.textContent = "Same person";
+              b.addEventListener("click", () => pinPerson(p, p.devices[0].id, n.id, true));
+              row.appendChild(b);
+            }
+            return row;
+          }),
+          "",
+        ),
+      );
+
+    wrap.appendChild(
+      foldSection(
+        "Reports about them",
+        (p.reports || []).length + "",
+        (() => {
+          const list = divc("mh-plist");
+          (p.reports || []).forEach((r) =>
+            list.appendChild(
+              plainRow(
+                (r.category || "report") + " by " + (r.by || "somebody") + (r.reason ? ": " + r.reason : ""),
+                r.text ? '"' + r.text + '"' + (r.wiped ? " (wiped just before the report)" : "") : null,
+                r.at,
+              ),
+            ),
+          );
+          if (!(p.reports || []).length) list.appendChild(span("mh-none", "No reports."));
+          return list;
+        })(),
+      ),
+    );
+
+    wrap.appendChild(
+      foldSection(
+        "Appeals",
+        (p.appeals || []).length + "",
+        (() => {
+          const list = divc("mh-plist");
+          (p.appeals || []).forEach((a) =>
+            list.appendChild(
+              plainRow(
+                (a.status === "resolved" ? a.resolution || "decided" : "open") + ", block by " + (a.banBy || "staff") + (a.banPermanent ? " (permanent)" : ""),
+                a.reviewedBy ? "decided by " + a.reviewedBy : null,
+                a.at,
+              ),
+            ),
+          );
+          if (!(p.appeals || []).length) list.appendChild(span("mh-none", "No appeals."));
+          return list;
+        })(),
+      ),
+    );
+
+    wrap.appendChild(
+      foldSection(
+        "Bans and unbans",
+        (p.bans || []).length + "",
+        (() => {
+          const list = divc("mh-plist");
+          (p.bans || []).forEach((b) =>
+            list.appendChild(
+              plainRow(
+                b.action + (b.duration ? " " + b.duration : "") + " by " + (b.by || "staff") + " (" + b.kind + ")",
+                b.reason || null,
+                b.at,
+              ),
+            ),
+          );
+          if (!(p.bans || []).length) list.appendChild(span("mh-none", "Never banned."));
+          return list;
+        })(),
+      ),
+    );
+
+    StaffUI.modal({
+      title: p.names[0] || "Person",
+      icon: '<i class="fas fa-user"></i>',
+      subtitle: p.standalone ? "one id" : p.devices.length + " devices, " + (p.cases || []).length + " cases",
+      xwide: true,
+      body: wrap,
+      actions: [{ label: "Close", kind: "primary", onClick: () => {} }],
+    });
   }
 
   // ── The headline figures ────────────────────────────────────────────────
@@ -1854,7 +2655,9 @@
       mid.appendChild(top);
       if (e.room) mid.appendChild(span("mh-evroom", e.room));
       if (e.note) mid.appendChild(span("mh-evnote", e.note));
+      if (e.quote) mid.appendChild(span("mh-quote", '"' + e.quote + '"'));
       row.appendChild(mid);
+      if (e.grade) row.appendChild(gradeTag(e.grade));
       if (e.gap) row.appendChild(span("mh-evgap", e.gap));
       wrap.appendChild(row);
     });
@@ -2063,45 +2866,41 @@
 
   // ── Who they acted on ───────────────────────────────────────────────────
   function recordTargets(h) {
-    const targets = h.targets || [];
-    if (!targets.length) return null;
-    const box = divc("mh-sect");
-    const head = divc("mh-lhead");
-    head.appendChild(span("mh-lt", "Who they acted on"));
-    head.appendChild(
-      span(
-        "mh-ls",
-        h.distinctTargets === 1
-          ? "one person, ever"
-          : h.distinctTargets + " different people",
-      ),
-    );
-    box.appendChild(head);
-
+    const people = h.people || h.targets || [];
+    if (!people.length) return null;
     const list = divc("mh-tlist");
-    const top = targets[0].n || 1;
-    targets.forEach((t) => {
+    people.forEach((t) => {
       const key = t.uid || t.name;
       const row = divc(
         "mh-trow" + (recordCtx && recordCtx.targetUid === key ? " on" : ""),
       );
       row.title = "Show only what they did to " + t.name;
-      const n = span("mh-tn", String(t.n));
-      row.appendChild(n);
+      row.appendChild(span("mh-tn", String(t.n)));
       const who = divc("mh-twho");
-      who.appendChild(span("mh-tname", t.name));
+      const name = divc("mh-tname");
+      name.appendChild(span(null, t.name));
+      (t.aka || []).forEach((n) => name.appendChild(span("mc-aka", "aka " + n)));
+      who.appendChild(name);
       who.appendChild(
         span(
           "mh-tacts",
-          t.actions.map((a) => a.n + " " + a.action).join("  ·  "),
+          t.actions.map((a) => a.n + " " + a.action).join("  ·  ") +
+            (t.devices > 1 ? "  ·  " + t.devices + " devices" : ""),
         ),
       );
       row.appendChild(who);
-      const barWrap = divc("mh-tbar");
-      const fill = divc("mh-tfill");
-      fill.style.width = Math.max(4, Math.round((t.n / top) * 100)) + "%";
-      barWrap.appendChild(fill);
-      row.appendChild(barWrap);
+      if (viewerIsFullMod()) {
+        const open = document.createElement("button");
+        open.type = "button";
+        open.className = "mh-fbtn";
+        open.textContent = "Person";
+        open.title = "Everything staff know about this person";
+        open.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          openPerson(t.personId || key);
+        });
+        row.appendChild(open);
+      }
       row.addEventListener("click", () =>
         refineRecord({
           targetUid: recordCtx && recordCtx.targetUid === key ? null : key,
@@ -2110,12 +2909,12 @@
       );
       list.appendChild(row);
     });
-    box.appendChild(list);
-    return box;
+    return list;
   }
 
   // ── One line of the log ─────────────────────────────────────────────────
   function recordRow(e) {
+    if (e.fold && e.fold.items.length > 1) return foldedRow(e);
     const row = divc("mh-row");
     const g = REC_GROUP[e.group] || REC_GROUP.other;
     const ic = divc("ico g-" + (e.group || "other"));
@@ -2156,6 +2955,16 @@
     if (meta.childNodes.length) main.appendChild(meta);
 
     if (e.details) main.appendChild(span("mh-det", e.details));
+    if (e.receipt) {
+      const line = divc("mh-receipt");
+      if (e.receipt.text && !/text before wipe/.test(e.details || ""))
+        line.appendChild(span("mh-quote", '"' + e.receipt.text + '"'));
+      line.appendChild(gradeTag(e.receipt.grade));
+      main.appendChild(line);
+    }
+    if (e.justify && e.justify.at) main.appendChild(writeupNode(e.justify));
+    else if (e.justify && e.justify.required)
+      main.appendChild(span("mc-missing", "No write-up yet"));
     row.appendChild(main);
     return row;
   }
@@ -2204,12 +3013,15 @@
     const isDev = h.role === "dev";
     const wrap = divc("mh-wrap");
 
-    wrap.appendChild(recordSummary(h, isDev));
+    wrap.appendChild(recordHeader(h, isDev, ctx));
+
+    const quality = qualityStrip(h);
+    if (quality) wrap.appendChild(quality);
 
     const flags = recordFlags(h);
     if (flags) wrap.appendChild(flags);
 
-    const promo = recordPromotion(h, ctx.modLevel);
+    const promo = h.selfView ? null : recordPromotion(h, ctx.modLevel);
     if (promo) wrap.appendChild(promo);
 
     if (!h.total) {
@@ -2222,12 +3034,10 @@
       return mountRecord(h, wrap, isDev, ctx);
     }
 
-    const gsect = divc("mh-sect");
-    const ghead = divc("mh-lhead");
-    ghead.appendChild(span("mh-lt", "What they spend their time on"));
-    ghead.appendChild(span("mh-ls", "whole time as staff"));
-    gsect.appendChild(ghead);
-    const gwrap = divc("mh-groups");
+    wrap.appendChild(casesSection(h));
+
+    const gsect = divc("mh-groups");
+    const gwrap = gsect;
     (h.groups || []).forEach((g) => {
       const box = divc("mh-group g-" + g.key);
       const head = divc("mh-ghead");
@@ -2245,16 +3055,24 @@
       box.appendChild(chips);
       gwrap.appendChild(box);
     });
-    gsect.appendChild(gwrap);
-    wrap.appendChild(gsect);
-
+    const log = divc("mh-log mh-loghead");
+    const logOpen = !!(ctx.group || ctx.targetUid || ctx.offset);
+    wrap.appendChild(
+      foldSection("Everything they did", "last " + h.windowDays + " days", log, logOpen),
+    );
+    wrap.appendChild(
+      foldSection("What they spend their time on", "whole time as staff", gsect, false),
+    );
     const targets = recordTargets(h);
-    if (targets) wrap.appendChild(targets);
-
-    const listHead = divc("mh-lhead mh-loghead");
-    listHead.appendChild(span("mh-lt", "What they did"));
-    listHead.appendChild(span("mh-ls", "last " + h.windowDays + " days"));
-    wrap.appendChild(listHead);
+    if (targets)
+      wrap.appendChild(
+        foldSection(
+          "Who they acted on",
+          h.distinctTargets === 1 ? "one person, ever" : h.distinctTargets + " different people",
+          targets,
+          false,
+        ),
+      );
 
     const filters = divc("mh-filters");
     const chip = (label, group) => {
@@ -2280,11 +3098,11 @@
       clear.addEventListener("click", () => refineRecord({ targetUid: null }));
       filters.appendChild(clear);
     }
-    wrap.appendChild(filters);
+    log.appendChild(filters);
 
     const list = divc("mh-list");
     let lastDay = null;
-    (h.entries || []).forEach((e) => {
+    foldEntries(h.entries || []).forEach((e) => {
       const k = dayKey(e.ts);
       if (k !== lastDay) {
         lastDay = k;
@@ -2301,7 +3119,7 @@
             : "Nothing in the last " + h.windowDays + " days.",
         ),
       );
-    wrap.appendChild(list);
+    log.appendChild(list);
 
     const shown = h.windowMatched != null ? h.windowMatched : h.windowTotal;
     if (shown > h.limit) {
@@ -2349,10 +3167,10 @@
           h.offset + h.limit,
         ),
       );
-      wrap.appendChild(pager);
+      log.appendChild(pager);
     }
     if (h.total > h.windowTotal)
-      wrap.appendChild(
+      log.appendChild(
         span(
           "mh-note",
           "The list covers the last " +
@@ -2397,13 +3215,24 @@
       return;
     }
 
+    const actions = [];
+    if (h.canExport)
+      actions.push({
+        label: "Export JSON",
+        kind: "ghost",
+        onClick: () => {
+          socket.emit("staff export record", { label: h.label, role: h.role || "mod" });
+          return false;
+        },
+      });
+    actions.push({ label: "Close", kind: "primary", onClick: () => {} });
     StaffUI.modal({
-      title: (h.label || "Staff") + "'s record",
+      title: h.selfView ? "Your record" : (h.label || "Staff") + "'s record",
       icon: '<i class="fas fa-clock-rotate-left"></i>',
       subtitle,
       xwide: true,
       body: wrap,
-      actions: [{ label: "Close", kind: "primary", onClick: () => {} }],
+      actions,
       onClose: () => {
         recordCtx = null;
       },
@@ -2683,6 +3512,26 @@
     return Math.floor(h / 24) + "d ago";
   }
 
+  // Every block names the rule it enforces. Returns the reason string the
+  // server expects, or null when the person backed out.
+  async function ensureRule(reason, title) {
+    const note = String(reason || "").trim();
+    if (/^Rule \d+\b/.test(note)) return note;
+    if (!window.StaffUI) return null;
+    const field = await StaffUI.communityRuleField({ required: true });
+    if (!field) return null;
+    const res = await StaffUI.prompt({
+      title,
+      icon: '<i class="fas fa-ban"></i>',
+      message: "Which rule are they being blocked under?",
+      fields: [field],
+      danger: true,
+      confirmText: title,
+    });
+    if (!res) return null;
+    return StaffUI.ruleReason(res.rule, note);
+  }
+
   async function banReported(r, duration) {
     const go = (reason) =>
       socket.emit("staff ip block", {
@@ -2692,7 +3541,7 @@
       });
     if (!window.StaffUI) return go("");
     const fields = [];
-    const ruleField = await StaffUI.communityRuleField();
+    const ruleField = await StaffUI.communityRuleField({ required: true });
     if (ruleField) fields.push(ruleField);
     fields.push({
       name: "value",
@@ -2805,12 +3654,14 @@
         },
       ],
       confirmText: "Place block",
-    }).then((v) => {
+    }).then(async (v) => {
       if (!v || !v.ip || !v.ip.trim()) return;
+      const reason = await ensureRule(v.reason, "Place block");
+      if (!reason) return;
       socket.emit("staff ban ip", {
         ip: v.ip.trim(),
         duration: v.duration || "24h",
-        reason: (v.reason || "").trim(),
+        reason,
       });
     });
   }
@@ -2847,12 +3698,14 @@
         },
       ],
       confirmText: "Ban ID",
-    }).then((v) => {
+    }).then(async (v) => {
       if (!v || !v.id || !v.id.trim()) return;
+      const reason = await ensureRule(v.reason, "Ban ID");
+      if (!reason) return;
       socket.emit("staff ban ip", {
         ip: v.id.trim(),
         duration: v.duration || "7d",
-        reason: (v.reason || "").trim(),
+        reason,
       });
     });
   }
@@ -3064,7 +3917,7 @@
       if (r.online)
         foot.appendChild(
           mkBtn("Kick", "fa-door-open", false, () =>
-            socket.emit("staff kick", { targetUserId: r.targetUserId }),
+            socket.emit("staff kick", { targetUserId: r.targetUserId, ban: false }),
           ),
         );
       if (viewerIsFullMod()) {
@@ -4802,7 +5655,9 @@
     }
     dayStart = weekDays[dayIndex];
     updateDayLabel();
-    entries = Array.isArray(data && data.entries) ? data.entries : [];
+    entries = (Array.isArray(data && data.entries) ? data.entries : []).filter(
+      (e) => e.type !== "writeup",
+    );
     commentsByRef.clear();
     for (const e of entries)
       if (e.type === "comment" && e.refId) {
@@ -4846,9 +5701,25 @@
       if (card) appendComment(card, e);
       return;
     }
+    if (e.type === "writeup" && e.refId) {
+      attachWriteup(e);
+      return;
+    }
     pendingNew.push(e);
     scheduleFlush();
   });
+
+  // A write-up arrives as its own entry pointing at the block it explains.
+  // The block's card gets the text; the write-up row itself is never shown.
+  function attachWriteup(w) {
+    const block = entries.find((x) => x.id === w.refId);
+    if (!block) return;
+    const j = block.justify || (block.justify = { required: true });
+    if (w.amend) j.addenda = (j.addenda || []).concat([{ text: w.text, at: w.ts }]);
+    else Object.assign(j, { fields: w.fields, rule: w.rule, at: w.ts, by: w.label });
+    const card = listEl.querySelector('.entry[data-id="' + block.id + '"]');
+    if (card) card.replaceWith(buildCard(block));
+  }
 
   socket.on("audit removed", (d) => {
     if (d && Array.isArray(d.ids)) dropEntries(d.ids);
@@ -4903,6 +5774,37 @@
   });
 
   socket.on("staff mod history", (h) => renderModHistory(h));
+
+  socket.on("staff record export", (d) => {
+    if (!d || !d.record) return;
+    const name =
+      "record-" +
+      String(d.label || "staff").replace(/[^a-z0-9]+/gi, "-").toLowerCase() +
+      "-" +
+      new Date().toISOString().slice(0, 10) +
+      ".json";
+    const blob = new Blob([JSON.stringify(d.record, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    if (window.StaffUI)
+      StaffUI.toast("Saved as " + name, { type: "success", title: "Record exported" });
+  });
+
+  socket.on("staff case note", (d) => {
+    if (!d || !recordCtx) return;
+    const card = document.querySelector('.mc-case[data-case="' + d.caseId + '"]');
+    if (card) paintCaseNotes(card, d.caseId, d.notes);
+  });
+
+  socket.on("staff person", (p) => renderPerson(p));
 
   socket.on("dev sessions", (data) => {
     sessionData = data || { sessions: [], history: [] };

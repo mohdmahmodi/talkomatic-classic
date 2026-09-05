@@ -4100,16 +4100,29 @@ function openUserStaffMenu(user) {
     danger: true,
     desc: "Remove and ban from this room",
     onClick: async () => {
-      if (
-        await StaffUI.confirm({
-          title: "Kick + ban",
-          message: `Kick and room-ban ${name}?`,
-          danger: true,
-          confirmText: "Kick + ban",
-        })
-      ) {
-        socket.emit("staff kick", { targetUserId: user.id, ban: true });
-      }
+      const fields = [];
+      const ruleField = await StaffUI.communityRuleField({ required: true });
+      if (ruleField) fields.push(ruleField);
+      fields.push({
+        name: "note",
+        label: "Note (optional)",
+        type: "textarea",
+        maxLength: 500,
+      });
+      const res = await StaffUI.prompt({
+        title: "Kick + ban",
+        icon: '<i class="fas fa-user-slash"></i>',
+        message: `Kick and room-ban ${name}? The rule you pick is saved with the action.`,
+        fields,
+        danger: true,
+        confirmText: "Kick + ban",
+      });
+      if (res != null)
+        socket.emit("staff kick", {
+          targetUserId: user.id,
+          ban: true,
+          reason: StaffUI.ruleReason(res.rule, res.note),
+        });
     },
   });
 

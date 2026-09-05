@@ -2758,6 +2758,512 @@
         color: var(--purple);
         background: rgba(192, 139, 255, 0.12);
       }
+      .mh-row .ico.g-talking {
+        color: var(--blue);
+        background: rgba(90, 169, 255, 0.12);
+      }
+
+      /* ── Record v3: header, evidence, cases ── */
+      .mh-head {
+        display: flex;
+        gap: 0.875rem;
+        align-items: flex-start;
+      }
+      .mh-avatar {
+        flex: none;
+        width: 3rem;
+        height: 3rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--tile);
+        border: 1px solid var(--line-soft);
+        color: var(--orange);
+        font-size: 1.25rem;
+        font-weight: bold;
+      }
+      .mh-htext {
+        flex: 1;
+        min-width: 0;
+      }
+      .mh-hname {
+        display: flex;
+        align-items: baseline;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+      }
+      .mh-hlabel {
+        font-size: 1.0625rem;
+        font-weight: bold;
+        color: var(--txt);
+        word-break: break-word;
+      }
+      .mh-rank {
+        font-size: 0.625rem;
+        font-weight: bold;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+        padding: 0.0625rem 0.375rem;
+        border: 1px solid currentColor;
+        color: var(--dim2);
+      }
+      .mh-rank.r-l1 {
+        color: var(--purple);
+      }
+      .mh-rank.r-l2 {
+        color: var(--blue);
+      }
+      .mh-rank.r-l3 {
+        color: #4ade80;
+      }
+      .mh-rank.r-dev,
+      .mh-rank.r-blocked {
+        color: var(--red);
+      }
+      .mh-rank.r-evader {
+        color: var(--amber);
+      }
+      .mh-hsummary {
+        display: block;
+        margin-top: 0.25rem;
+        font-size: 0.8438rem;
+        color: var(--txt);
+        line-height: 1.5;
+      }
+      .mh-hfacts {
+        display: flex;
+        gap: 0.875rem;
+        flex-wrap: wrap;
+        margin-top: 0.25rem;
+        font-size: 0.7188rem;
+        color: var(--dim2);
+      }
+      .mh-quality {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+        gap: 0.5rem;
+      }
+      .mh-qt {
+        background: var(--tile);
+        border: 1px solid transparent;
+        padding: 0.625rem 0.75rem;
+      }
+      .mh-qt.warn {
+        border-color: rgba(255, 180, 84, 0.5);
+      }
+      .mh-qn {
+        display: block;
+        font-size: 1.25rem;
+        font-weight: bold;
+        color: var(--txt);
+        font-variant-numeric: tabular-nums;
+      }
+      .mh-qt.warn .mh-qn {
+        color: var(--amber);
+      }
+      .mh-ql {
+        display: block;
+        font-size: 0.6875rem;
+        color: var(--dim2);
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+      }
+      .mh-qteam {
+        display: block;
+        margin-top: 0.25rem;
+        font-size: 0.7188rem;
+        color: var(--dim);
+      }
+      .mh-qnote {
+        display: block;
+        font-size: 0.7188rem;
+        color: var(--dim2);
+        line-height: 1.5;
+      }
+      .mh-fold {
+        border-top: 1px solid var(--line-soft);
+        padding-top: 0.5rem;
+      }
+      .mh-fold > summary {
+        display: flex;
+        align-items: baseline;
+        gap: 0.625rem;
+        cursor: pointer;
+        list-style: none;
+        padding: 0.25rem 0;
+      }
+      .mh-fold > summary::-webkit-details-marker {
+        display: none;
+      }
+      .mh-fold > summary::before {
+        content: "+";
+        color: var(--dim2);
+        font-weight: bold;
+        width: 0.75rem;
+      }
+      .mh-fold[open] > summary::before {
+        content: "\2013";
+      }
+      .mh-fold > summary:hover .mh-lt {
+        color: var(--orange);
+      }
+      .mh-fold > *:not(summary) {
+        margin-top: 0.625rem;
+      }
+      .mh-cfilters {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.375rem;
+      }
+      .mc-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+      .mc-case {
+        background: var(--card);
+        border: 1px solid var(--line-soft);
+        padding: 0.625rem 0.75rem;
+        cursor: pointer;
+      }
+      .mc-case:hover,
+      .mc-case.open {
+        border-color: var(--dim2);
+      }
+      .mc-top {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+      }
+      .mc-who {
+        display: flex;
+        align-items: baseline;
+        gap: 0.375rem;
+        flex-wrap: wrap;
+        font-weight: bold;
+        color: var(--txt);
+      }
+      .mc-aka {
+        font-size: 0.6875rem;
+        font-weight: normal;
+        color: var(--dim2);
+        background: var(--tile);
+        padding: 0.0625rem 0.375rem;
+      }
+      .mc-meta {
+        display: flex;
+        align-items: baseline;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        font-size: 0.7188rem;
+        color: var(--dim2);
+      }
+      .mc-room::before {
+        content: "in ";
+      }
+      .mc-when {
+        font-variant-numeric: tabular-nums;
+      }
+      .mc-ladder {
+        display: flex;
+        align-items: center;
+        gap: 0.375rem;
+        flex-wrap: wrap;
+        margin-top: 0.5rem;
+      }
+      .mc-then {
+        font-size: 0.6875rem;
+        color: var(--dim2);
+      }
+      .mc-step {
+        font-size: 0.75rem;
+        color: var(--txt);
+        background: var(--tile);
+        padding: 0.1875rem 0.5rem;
+      }
+      .mc-step.heavy {
+        color: var(--red);
+        border: 1px solid rgba(255, 84, 104, 0.4);
+      }
+      .mc-step.other {
+        color: var(--dim);
+        border: 1px dashed var(--line-soft);
+        background: transparent;
+      }
+      .mh-cases.mine .mc-step.other,
+      .mh-cases.mine .mc-step.other + .mc-then {
+        display: none;
+      }
+      .mh-outcome {
+        margin-left: auto;
+        font-size: 0.6875rem;
+        font-weight: bold;
+        letter-spacing: 0.4px;
+        text-transform: uppercase;
+        color: var(--dim2);
+        border: 1px solid currentColor;
+        padding: 0.0625rem 0.375rem;
+      }
+      .mh-outcome.o-overturned,
+      .mh-outcome.o-evaded {
+        color: var(--red);
+      }
+      .mh-outcome.o-appeal-open,
+      .mh-outcome.o-re-actioned,
+      .mh-outcome.o-came-back {
+        color: var(--amber);
+      }
+      .mh-outcome.o-quiet,
+      .mh-outcome.o-upheld {
+        color: var(--green);
+      }
+      .mc-quote,
+      .mh-receipt {
+        display: flex;
+        align-items: baseline;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        margin-top: 0.5rem;
+      }
+      .mc-q,
+      .mh-quote {
+        font-size: 0.7813rem;
+        color: var(--txt);
+        line-height: 1.5;
+        word-break: break-word;
+        white-space: pre-wrap;
+      }
+      .mh-grade {
+        flex: none;
+        font-size: 0.625rem;
+        font-weight: bold;
+        letter-spacing: 0.4px;
+        text-transform: uppercase;
+        padding: 0.0625rem 0.375rem;
+        border: 1px solid currentColor;
+        color: var(--dim2);
+      }
+      .mh-grade.g-corroborated {
+        color: var(--green);
+      }
+      .mh-grade.g-reported {
+        color: var(--blue);
+      }
+      .mh-grade.g-contradicted {
+        color: var(--amber);
+      }
+      .mh-grade.g-none {
+        border-style: dashed;
+      }
+      .mc-why {
+        display: block;
+        margin-top: 0.375rem;
+        font-size: 0.75rem;
+        color: var(--dim);
+        line-height: 1.5;
+        word-break: break-word;
+      }
+      .mc-missing {
+        display: inline-block;
+        margin-top: 0.375rem;
+        font-size: 0.6875rem;
+        font-weight: bold;
+        color: var(--red);
+      }
+      .mc-notes:empty {
+        display: none;
+      }
+      .mc-note {
+        margin-top: 0.5rem;
+        padding: 0.375rem 0.5rem;
+        background: var(--tile);
+        font-size: 0.75rem;
+        line-height: 1.5;
+      }
+      .mc-note .k {
+        display: block;
+        font-size: 0.6563rem;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        color: var(--dim2);
+      }
+      .mc-note .v {
+        color: var(--txt);
+        word-break: break-word;
+      }
+      .mc-body {
+        margin-top: 0.625rem;
+        border-top: 1px solid var(--line-soft);
+        padding-top: 0.5rem;
+        cursor: default;
+      }
+      .mc-detail {
+        display: flex;
+        flex-direction: column;
+        gap: 0.625rem;
+      }
+      .mc-sdetail {
+        background: var(--tile);
+        padding: 0.5rem 0.625rem;
+      }
+      .mc-shead {
+        display: flex;
+        align-items: baseline;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        font-size: 0.7813rem;
+      }
+      .mc-sact {
+        font-weight: bold;
+        color: var(--txt);
+      }
+      .mc-sact.heavy {
+        color: var(--red);
+      }
+      .mc-sby,
+      .mc-swhen {
+        color: var(--dim2);
+      }
+      .mc-facts {
+        display: flex;
+        flex-direction: column;
+        gap: 0.1875rem;
+        margin-top: 0.375rem;
+      }
+      .mc-fact {
+        display: flex;
+        gap: 0.5rem;
+        font-size: 0.75rem;
+        line-height: 1.5;
+      }
+      .mc-fact .k {
+        flex: none;
+        width: 10rem;
+        color: var(--dim2);
+      }
+      .mc-fact .v {
+        color: var(--txt);
+        word-break: break-word;
+        white-space: pre-wrap;
+      }
+      .mc-none {
+        display: block;
+        margin-top: 0.375rem;
+        font-size: 0.75rem;
+        color: var(--dim2);
+      }
+      .mc-actions {
+        display: flex;
+        gap: 0.375rem;
+        flex-wrap: wrap;
+      }
+      .writeup {
+        margin-top: 0.5rem;
+        padding: 0.5rem 0.625rem;
+        background: var(--card);
+        border: 1px solid var(--line-soft);
+      }
+      .mc-sdetail .writeup {
+        background: var(--bg);
+      }
+      .wu-line {
+        display: block;
+        font-size: 0.75rem;
+        color: var(--txt);
+        line-height: 1.5;
+        word-break: break-word;
+      }
+      .wu-line + .wu-line {
+        margin-top: 0.125rem;
+      }
+      .mh-folded {
+        display: block;
+        padding: 0;
+      }
+      .mh-folded > summary {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.625rem;
+        padding: 0.5625rem 0.6875rem;
+        cursor: pointer;
+        list-style: none;
+      }
+      .mh-folded > summary::-webkit-details-marker {
+        display: none;
+      }
+      .mh-inner {
+        padding: 0 0.6875rem 0.5625rem 2.5rem;
+      }
+      .mh-inner .mh-row {
+        background: var(--tile);
+      }
+      .mh-plist {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+      }
+      .mh-prow {
+        display: flex;
+        align-items: center;
+        gap: 0.625rem;
+        background: var(--tile);
+        padding: 0.4375rem 0.6875rem;
+        font-size: 0.75rem;
+      }
+      .mh-ptext {
+        flex: 1;
+        min-width: 0;
+      }
+      .mh-pmain {
+        display: block;
+        color: var(--txt);
+        word-break: break-word;
+      }
+      .mh-psub {
+        display: block;
+        color: var(--dim2);
+        word-break: break-word;
+        white-space: pre-wrap;
+      }
+      .mh-tname .mc-aka {
+        margin-left: 0.375rem;
+      }
+      .uref.pref {
+        cursor: pointer;
+      }
+      .kv .v.quote {
+        color: var(--txt);
+        white-space: pre-wrap;
+      }
+      .kv .v.warnv {
+        color: var(--red);
+      }
+      .kv .v[class*="grade-"] {
+        color: var(--dim);
+      }
+      .kv .v.grade-corroborated {
+        color: var(--green);
+      }
+      .kv .v.grade-contradicted {
+        color: var(--amber);
+      }
+      .kv .v .writeup {
+        margin-top: 0;
+      }
+      @media (max-width: 640px) {
+        .mc-fact {
+          flex-direction: column;
+          gap: 0;
+        }
+        .mc-fact .k {
+          width: auto;
+        }
+        .mh-outcome {
+          margin-left: 0;
+        }
+      }
       .mh-row .ico.g-passive,
       .mh-row .ico.g-other {
         color: var(--dim2);

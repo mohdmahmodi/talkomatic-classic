@@ -57,6 +57,13 @@ const gamesFloor = require("./games");
 const gamesSocket = require("./games/socket");
 const staffchat = require("./staffchat");
 const bots = require("./bots");
+const buffertrail = require("./buffertrail");
+const receipts = require("./receipts");
+const writeups = require("./writeups");
+const persons = require("./persons");
+const cases = require("./cases");
+const record = require("./record");
+const devicetoken = require("./devicetoken");
 const crypto = require("crypto");
 
 const gamePrevText = new Map();
@@ -96,41 +103,15 @@ function armLinkSweep(socket, userId) {
   linkSweepTimers.set(userId, t);
 }
 
-// What a user's chat box said just before they wiped it. Reports fall back to
-// this, so clearing the box between the bad line and the report button no
-// longer produces "their chat box was blank". Server-side on purpose: a
-// reporter can never forge the quote.
-const recentWipes = new Map();
-const WIPE_KEEP_MS = 5 * 60 * 1000;
+// Joins in the last few minutes, so a receipt can say whether a room was
+// being raided when the action was taken.
+const JOINS_KEEP_MS = 5 * 60 * 1000;
 
-function noteBufferShrink(userId, oldText, newText) {
-  const oldTrim = (oldText || "").trim();
-  if (oldTrim.length < 3) return;
-  const shrank =
-    (newText || "").trim().length === 0 ||
-    (newText || "").length < oldText.length / 2;
-  if (!shrank) return;
+function noteJoin(room) {
   const now = Date.now();
-  const arr = recentWipes.get(userId) || [];
-  const last = arr[arr.length - 1];
-  if (last && last.text === oldText) last.at = now;
-  else {
-    arr.push({ text: oldText.slice(0, 300), at: now });
-    if (arr.length > 3) arr.shift();
-  }
-  recentWipes.set(userId, arr);
-}
-
-function lastWipedText(userId) {
-  const arr = recentWipes.get(userId);
-  if (!arr) return null;
-  const cutoff = Date.now() - WIPE_KEEP_MS;
-  while (arr.length && arr[0].at < cutoff) arr.shift();
-  if (!arr.length) {
-    recentWipes.delete(userId);
-    return null;
-  }
-  return arr[arr.length - 1];
+  const list = (room.recentJoins || []).filter((t) => now - t <= JOINS_KEEP_MS);
+  list.push(now);
+  room.recentJoins = list;
 }
 
 const BAN_REF_SECRET = crypto.randomBytes(32);
@@ -1181,24 +1162,16 @@ function canViewModRecord(socket, label, role) {
   return lvl != null && lvl < 3;
 }
 
+// Own record: everything, flags included. A moderator who cannot see what is
+// said about them cannot answer it, and the notes are their answer.
 function emitModHistory(socket, label, role, opts, selfView) {
-  const h = audit.historyFor(label, role, opts);
-  if (socket.isMainDev)
-    return socket.emit("staff mod history", { ...h, canReview: true });
-  const view = { ip: false, names: !!socket.isDev };
-  // Own record: the actions and counts, but never the abuse flags. Those
-  // exist to catch farming and misuse, and telling someone they tripped one
-  // defeats the point.
-  if (selfView)
-    return socket.emit("staff mod history", {
-      ...h,
-      canReview: false,
-      flags: [],
-      entries: (h.entries || []).map((e) => audit.redactEntry(e, view)),
-    });
+  const view = roles.viewFor(socket);
+  const h = record.build(label, role, opts, view);
   socket.emit("staff mod history", {
     ...h,
-    canReview: true,
+    selfView: !!selfView,
+    canReview: !selfView,
+    canExport: !!socket.isDev,
     flags: (h.flags || []).map((f) =>
       f.reviewed
         ? {
@@ -1210,11 +1183,15 @@ function emitModHistory(socket, label, role, opts, selfView) {
           }
         : f,
     ),
-    entries: (h.entries || []).map((e) => audit.redactEntry(e, view)),
+    entries: socket.isMainDev
+      ? h.entries
+      : (h.entries || []).map((e) => audit.redactEntry(e, view)),
   });
 }
 
-function logStaff(socket, action, target, room, details) {
+// extra: { receipt, justify } from the handler. The receipt is captured before
+// the action changes anything and travels with the entry from here on.
+function logStaff(socket, action, target, room, details, extra) {
   const roleTag = socket?.isDev ? "dev" : "mod";
   const label = socket?.staffLabel || roleTag;
   let targetStr = null;
@@ -1228,7 +1205,16 @@ function logStaff(socket, action, target, room, details) {
   if (typeof room === "string") roomTag = room === "-" ? null : room;
   else if (room && typeof room === "object")
     roomTag = `room:${room.name || "?"}(${room.id || "?"})`;
-  audit.recordAction({
+  const receipt = (extra && extra.receipt) || null;
+  const tgt = receipt
+    ? {
+        uid: receipt.target.uid,
+        did: receipt.target.did,
+        ip: receipt.target.ip,
+        net: receipt.target.net,
+      }
+    : null;
+  const entry = audit.recordAction({
     roleTag,
     label,
     action,
@@ -1236,6 +1222,9 @@ function logStaff(socket, action, target, room, details) {
     room: roomTag,
     ip: socket?.clientIp || null,
     details: details || null,
+    tgt,
+    receipt,
+    justify: (extra && extra.justify) || null,
   });
   try {
     staffchat.noteStaffAction(label, action, targetStr, roomTag, roleTag);
@@ -1246,11 +1235,191 @@ function logStaff(socket, action, target, room, details) {
       label,
       role: roleTag,
       level: socket.modLevel || 1,
-      action,
-      target: targetStr,
       room: roomTag,
       ip: socket.clientIp || null,
     });
+  return entry;
+}
+
+// ── Write-ups for long blocks ───────────────────────────────────────────────
+
+function targetNameOf(entry) {
+  const r = entry.receipt;
+  if (r && r.target && r.target.name) return r.target.name;
+  const m = /^user:(.*)\(/.exec(entry.target || "");
+  return m ? m[1] : entry.target || null;
+}
+
+function writeupPayload(entry) {
+  const r = entry.receipt;
+  return {
+    entryId: entry.id,
+    at: entry.ts,
+    action: entry.action,
+    target: targetNameOf(entry),
+    rule: r ? r.reason.rule : receipts.parseReason(entry.details).rule,
+    quote: r ? receipts.quote(r) : null,
+  };
+}
+
+function tellWriteupDue(hash, payload) {
+  if (!hash || !payload) return;
+  for (const [, s] of io().sockets.sockets)
+    if (s.connected && s.modKeyHash === hash) s.emit("staff writeup due", payload);
+}
+
+function pendingWriteups(hash) {
+  const out = [];
+  for (const d of writeups.listFor(hash)) {
+    const entry = audit.getEntry(d.entryId);
+    if (entry) out.push(writeupPayload(entry));
+    else writeups.settle(hash, d.entryId);
+  }
+  return out;
+}
+
+function oweWriteup(socket, entry, target, duration) {
+  writeups.owe(socket.modKeyHash, {
+    entryId: entry.id,
+    at: entry.ts,
+    label: socket.staffLabel || "mod",
+    level: socket.modLevel || 1,
+    target,
+    duration,
+  });
+  tellWriteupDue(socket.modKeyHash, writeupPayload(entry));
+}
+
+// Every block names the rule it enforces. A long one placed by a moderator
+// also owes a write-up, and an overdue write-up holds their next long block.
+function blockGate(socket, duration, reason) {
+  if (!receipts.parseReason(reason).rule)
+    return { code: ERROR_CODES.BAD_REQUEST, message: "Pick the rule they broke." };
+  if (!writeups.requiredFor(socket, duration)) return null;
+  const owed = pendingWriteups(socket.modKeyHash).filter(
+    (p) => writeups.overdue(socket.modKeyHash).some((d) => d.entryId === p.entryId),
+  );
+  if (!owed.length) return null;
+  tellWriteupDue(socket.modKeyHash, owed[0]);
+  return {
+    code: ERROR_CODES.FORBIDDEN,
+    message: "Write up your last block first.",
+  };
+}
+
+function justifyFor(socket, duration) {
+  return writeups.requiredFor(socket, duration) ? { required: true } : null;
+}
+
+function stampBlocks(keys, auditId) {
+  for (const k of keys) {
+    const b = k ? state.blockedIPs.get(k) : null;
+    if (b && typeof b === "object") b.auditId = auditId;
+  }
+}
+
+function writeupOf(auditId, view) {
+  const entry = auditId ? audit.getEntry(auditId) : null;
+  const j = entry && entry.justify;
+  if (!j || !j.at) return null;
+  return { ...j, by: roles.teamLabel(j.by, "mod", view) };
+}
+
+const WRITEUP_AMEND_MS = 24 * 60 * 60 * 1000;
+
+// ── One person, everything staff know about them ────────────────────────────
+
+function buildPerson(key, socket) {
+  const view = roles.viewFor(socket);
+  const fullIds = socket.isDev || (socket.modLevel || 1) >= 3;
+  const shortId = (id) => (fullIds ? id : String(id).slice(0, 8));
+  const { person, cases: list } = cases.casesForPerson(key);
+  const uids = person.userIds.length ? person.userIds : [person.id];
+  const deviceIds = new Set(person.devices.map((d) => d.id));
+  const blockKeys = new Set([
+    ...person.ips,
+    ...person.nets,
+    ...person.devices.map((d) => ipban.idKey(d.id)),
+  ]);
+  return {
+    key,
+    id: person.id,
+    standalone: !!person.standalone,
+    names: person.names,
+    blocked: person.blocked,
+    evader: person.evader,
+    first: person.first,
+    last: person.last,
+    canPin: fullIds,
+    devices: person.devices.map((d) => ({
+      id: shortId(d.id),
+      userId: d.userId,
+      name: d.name,
+      first: d.first,
+      last: d.last,
+      evader: !!d.evaderAt,
+      addresses: d.ips.length,
+      networks: d.nets.length,
+    })),
+    edges: person.edges.map((e) => ({ ...e, a: shortId(e.a), b: shortId(e.b) })),
+    pins: {
+      together: persons.pinsFor(person).together.map((p) => p.map(shortId)),
+      apart: persons.pinsFor(person).apart.map((p) => p.map(shortId)),
+    },
+    sameNetwork: persons.sameNetwork(person).map((n) => ({
+      id: shortId(n.id),
+      name: n.name,
+      last: n.last,
+      net: view.ip ? n.net : undefined,
+    })),
+    cases: list.map((c) => record.redactCase(c, view)),
+    reports: uids
+      .flatMap((uid) => reports.forTarget(uid))
+      .sort((a, b) => b.at - a.at)
+      .slice(0, 50)
+      .map((r) => ({
+        at: r.at,
+        by: r.byName,
+        category: r.category,
+        reason: audit.maskIps(r.reason),
+        text: view.ip ? r.targetText : audit.maskIps(r.targetText),
+        wiped: !!r.targetTextWiped,
+      })),
+    appeals: appeals
+      .list()
+      .filter((a) => uids.includes(a.userId) || deviceIds.has(a.deviceId))
+      .map((a) => ({
+        id: a.id,
+        at: a.at,
+        status: a.status,
+        resolution: a.resolution || null,
+        reviewedBy: roles.teamReviewer(a.reviewedBy, view),
+        banBy: roles.enforcedLabel((a.ban && a.ban.by) || null, a.ban && a.ban.byRole, view),
+        banPermanent: !!(a.ban && a.ban.permanent),
+      })),
+    bans: banhistory
+      .recent(1000)
+      .filter((e) => blockKeys.has(e.ip))
+      .map((e) => ({
+        at: e.at,
+        action: e.action,
+        by: roles.enforcedLabel(e.by, e.byRole, view),
+        duration: e.duration || null,
+        reason: audit.maskIps(e.reason),
+        kind: ipban.isIdKey(e.ip) ? "id" : String(e.ip).includes("/") ? "range" : "ip",
+      })),
+  };
+}
+
+function historyOpts(data) {
+  return {
+    offset: data?.offset,
+    limit: data?.limit,
+    group: typeof data?.group === "string" ? data.group : null,
+    targetUid: typeof data?.targetUid === "string" ? data.targetUid : null,
+    caseFilter: typeof data?.caseFilter === "string" ? data.caseFilter : null,
+    caseOffset: data?.caseOffset,
+  };
 }
 
 function staffRoleOf(socket) {
@@ -1414,6 +1583,7 @@ function buildAppealsList(view) {
       banPermanent: !!ban.permanent,
       banExpiry: ban.expiry || 0,
       banAt: ban.ts || null,
+      banWriteup: writeupOf(ban.auditId, view),
       locked: !!a.locked,
       lockedBy: showIp
         ? a.lockedBy || null
@@ -2783,7 +2953,7 @@ async function processPendingChatUpdates(userId, socket) {
     }
 
     msg = sanitizeMessage(msg);
-    noteBufferShrink(userId, state.getBuffer(userId, socket.roomId), msg);
+    buffertrail.noteChange(userId, state.getBuffer(userId, socket.roomId), msg);
     state.setBuffer(userId, socket.roomId, msg);
 
     if (linkfilter.containsLink(msg)) armLinkSweep(socket, userId);
@@ -3054,6 +3224,7 @@ function joinRoom(socket, roomId, userId) {
       id: userId,
       username,
       location,
+      joinedAt: Date.now(),
       isDev: !!socket.isDev,
       isMainDev: !!socket.isMainDev,
       isMod: !!socket.isMod,
@@ -3073,6 +3244,8 @@ function joinRoom(socket, roomId, userId) {
 
     room.lastActiveTime = Date.now();
     socket.roomId = roomId;
+    socket.roomJoinedAt = Date.now();
+    noteJoin(room);
     applySilence(userId);
 
     if (socket.handshake?.sessionID && !socket.isModLog && !isStaff) {
@@ -5326,6 +5499,24 @@ function registerSocketHandlers(opts) {
         const targetUser = room.users.find((u) => u.id === targetUserId);
         const canBan = socket.isDev || socket.isMod;
         const ban = canBan && data.ban !== false;
+        const reason =
+          sanitizeMessage(
+            typeof data?.reason === "string" ? data.reason : "",
+          ).slice(0, 500) || null;
+        if (ban && !receipts.parseReason(reason).rule)
+          return socket.emit(
+            "error",
+            createErrorResponse(ERROR_CODES.BAD_REQUEST, "Pick the rule they broke."),
+          );
+        const receipt = receipts.capture({
+          socket,
+          action: ban ? "kick+ban" : "kick",
+          targetUserId,
+          targetUser,
+          targetSocket: findSocketByUserId(targetUserId, roomId),
+          room,
+          reason,
+        });
         if (ban) {
           roomBan(room, targetUserId);
           await banBotOwner(room, targetUserId, roomId);
@@ -5345,7 +5536,14 @@ function registerSocketHandlers(opts) {
           updateRoomSoloTracking(roomId);
           updateLobby();
         }
-        logStaff(socket, ban ? "kick+ban" : "kick", targetUser, room);
+        logStaff(
+          socket,
+          ban ? "kick+ban" : "kick",
+          targetUser,
+          room,
+          reason || undefined,
+          { receipt },
+        );
         socket.emit("staff action result", {
           action: "kick",
           ok: true,
@@ -5377,8 +5575,16 @@ function registerSocketHandlers(opts) {
               "That person is not in a room right now.",
             ),
           );
+        const receipt = receipts.capture({
+          socket,
+          action: "show rules",
+          targetUserId,
+          targetUser,
+          targetSocket: target,
+          room,
+        });
         target.emit("rules show", {});
-        logStaff(socket, "show rules", targetUser, room);
+        logStaff(socket, "show rules", targetUser, room, undefined, { receipt });
         socket.emit("staff action result", {
           action: "show rules",
           ok: true,
@@ -5473,6 +5679,19 @@ function registerSocketHandlers(opts) {
           sanitizeMessage(
             typeof data?.reason === "string" ? data.reason : "",
           ).slice(0, 500) || null;
+        const gate = blockGate(socket, duration, reason);
+        if (gate)
+          return socket.emit("error", createErrorResponse(gate.code, gate.message));
+        const receipt = receipts.capture({
+          socket,
+          action: `ip block ${duration}`,
+          targetUserId,
+          targetName: blockedName,
+          targetUser,
+          targetSocket,
+          room,
+          reason,
+        });
 
         const cidr = ip ? ipban.computeRangeCidr(ip) : null;
         const blockKey = cidr || ip || null;
@@ -5539,7 +5758,7 @@ function registerSocketHandlers(opts) {
             s.disconnect(true);
           } catch (_) {}
         }
-        logStaff(
+        const entry = logStaff(
           socket,
           ip
             ? `ip block ${duration}${cidr ? " (range)" : ""}`
@@ -5547,7 +5766,11 @@ function registerSocketHandlers(opts) {
           targetUser || { id: targetUserId, name: blockedName },
           room || "-",
           reason || undefined,
+          { receipt, justify: justifyFor(socket, duration) },
         );
+        stampBlocks([blockKey, blockedDid ? ipban.idKey(blockedDid) : null], entry.id);
+        blocklist.saveSoon();
+        if (entry.justify) oweWriteup(socket, entry, blockedName, duration);
         socket.emit("staff action result", {
           action: "ip block",
           ok: true,
@@ -5605,6 +5828,8 @@ function registerSocketHandlers(opts) {
           sanitizeMessage(
             typeof data?.reason === "string" ? data.reason : "",
           ).slice(0, 500) || null;
+        const gate = blockGate(socket, duration, reason);
+        if (gate) return fail(gate.code, gate.message);
 
         const targets = [];
         const skipped = [];
@@ -5730,20 +5955,38 @@ function registerSocketHandlers(opts) {
           } catch (_) {}
         }
         const rangeCount = targets.filter((t) => t.range).length;
-        logStaff(
+        const single = targets.length === 1 ? targets[0] : null;
+        const singleUserId = single && single.did ? devicetoken.userIdFor(single.did) : null;
+        const receipt = singleUserId
+          ? receipts.capture({
+              socket,
+              action: `ban ip ${duration}`,
+              targetUserId: singleUserId,
+              targetName: single.name,
+              reason,
+            })
+          : null;
+        const entry = logStaff(
           socket,
-          targets.length === 1
+          single
             ? `ban ip ${duration}${rangeCount ? " (range)" : ""}`
             : `ban ip ${duration} (${targets.length} entries, ${rangeCount} ranges)`,
-          targets.length === 1
-            ? targets[0].name || targets[0].key
-            : targets
-                .map((t) => t.name || t.key)
-                .join(", ")
-                .slice(0, 400),
+          singleUserId
+            ? { id: singleUserId, name: single.name || single.key }
+            : single
+              ? single.name || single.key
+              : targets
+                  .map((t) => t.name || t.key)
+                  .join(", ")
+                  .slice(0, 400),
           "-",
           reason || undefined,
+          { receipt, justify: justifyFor(socket, duration) },
         );
+        stampBlocks(targets.map((t) => t.key), entry.id);
+        blocklist.saveSoon();
+        if (entry.justify)
+          oweWriteup(socket, entry, single ? single.name || single.key : `${targets.length} entries`, duration);
         socket.emit("staff action result", {
           action: "ban ip",
           ok: true,
@@ -5840,6 +6083,15 @@ function registerSocketHandlers(opts) {
             ),
           );
         const targetUser = room.users.find((u) => u.id === targetUserId);
+        // Snapshot first, then wipe: the whole point is knowing what went.
+        const receipt = receipts.capture({
+          socket,
+          action: "wipe buffer",
+          targetUserId,
+          targetUser,
+          targetSocket: findSocketByUserId(targetUserId, roomId),
+          room,
+        });
         state.setBuffer(targetUserId, roomId, "");
         if (state.batchProcessingTimers.has(targetUserId)) {
           clearTimeout(state.batchProcessingTimers.get(targetUserId));
@@ -5860,11 +6112,21 @@ function registerSocketHandlers(opts) {
         }
         for (const s of findSocketsByUserId(targetUserId))
           s.emit("buffer wiped", {});
-        logStaff(socket, "wipe buffer", targetUser, room);
+        const before = receipt.text
+          ? (receipt.textWiped
+              ? "text before wipe (they had already cleared it): "
+              : "text before wipe: ") +
+            '"' +
+            receipt.text +
+            '"'
+          : "text before wipe: (box was empty)";
+        logStaff(socket, "wipe buffer", targetUser, room, before, { receipt });
         socket.emit("staff action result", {
           action: "wipe buffer",
           ok: true,
           targetUserId,
+          text: receipt.text || null,
+          textWiped: receipt.textWiped,
         });
       }),
     );
@@ -5905,12 +6167,22 @@ function registerSocketHandlers(opts) {
         const roomId = getUserCurrentRoom(targetUserId);
         const room = roomId ? state.rooms.get(roomId) : null;
         const targetUser = room?.users.find((u) => u.id === targetUserId);
+        const receipt = receipts.capture({
+          socket,
+          action: "warn",
+          targetUserId,
+          targetUser,
+          targetSocket: targets[0],
+          room,
+          reason: message,
+        });
         logStaff(
           socket,
           "warn",
           targetUser || { id: targetUserId },
           room || "-",
           message,
+          { receipt },
         );
         socket.emit("staff action result", {
           action: "warn",
@@ -6002,6 +6274,14 @@ function registerSocketHandlers(opts) {
             ),
           );
         const oldName = targetUser.username;
+        const receipt = receipts.capture({
+          socket,
+          action: "rename",
+          targetUserId,
+          targetUser,
+          targetSocket: findSocketByUserId(targetUserId, roomId),
+          room,
+        });
         targetUser.username = "Anonymous";
         const targetSocket = findSocketByUserId(targetUserId, roomId);
         if (targetSocket?.handshake?.session) {
@@ -6032,6 +6312,8 @@ function registerSocketHandlers(opts) {
           `rename (was ${oldName})`,
           { id: targetUserId, username: "Anonymous" },
           room,
+          undefined,
+          { receipt },
         );
         audit.recordForcedRename({
           userId: targetUserId,
@@ -6083,6 +6365,14 @@ function registerSocketHandlers(opts) {
             ),
           );
         const oldLocation = targetUser.location;
+        const receipt = receipts.capture({
+          socket,
+          action: "reset location",
+          targetUserId,
+          targetUser,
+          targetSocket: findSocketByUserId(targetUserId, roomId),
+          room,
+        });
         targetUser.location = "On The Web";
         const targetSocket = findSocketByUserId(targetUserId, roomId);
         if (targetSocket?.handshake?.session) {
@@ -6113,6 +6403,8 @@ function registerSocketHandlers(opts) {
           `reset location (was ${oldLocation})`,
           targetUser,
           room,
+          undefined,
+          { receipt },
         );
         socket.emit("staff action result", {
           action: "reset location",
@@ -6179,6 +6471,17 @@ function registerSocketHandlers(opts) {
           blocked ? "turn pfp off" : "allow pfp",
           targetUser || { id: targetUserId },
           room || "-",
+          undefined,
+          {
+            receipt: receipts.capture({
+              socket,
+              action: blocked ? "turn pfp off" : "allow pfp",
+              targetUserId,
+              targetUser,
+              targetSocket,
+              room,
+            }),
+          },
         );
         socket.emit("staff action result", {
           action: blocked ? "turn pfp off" : "allow pfp",
@@ -6579,6 +6882,17 @@ function registerSocketHandlers(opts) {
           frozen ? "freeze" : "unfreeze",
           targetUser || { id: targetUserId },
           room || "-",
+          undefined,
+          {
+            receipt: receipts.capture({
+              socket,
+              action: frozen ? "freeze" : "unfreeze",
+              targetUserId,
+              targetUser,
+              targetSocket: targets[0],
+              room,
+            }),
+          },
         );
         socket.emit("staff action result", {
           action: "freeze",
@@ -6640,6 +6954,17 @@ function registerSocketHandlers(opts) {
           on ? "silence" : "unsilence",
           targetUser || { id: targetUserId },
           room || "-",
+          undefined,
+          {
+            receipt: receipts.capture({
+              socket,
+              action: on ? "silence" : "unsilence",
+              targetUserId,
+              targetUser,
+              targetSocket: findSocketByUserId(targetUserId, roomId),
+              room,
+            }),
+          },
         );
         socket.emit("staff action result", {
           action: on ? "silence" : "unsilence",
@@ -7518,19 +7843,7 @@ function registerSocketHandlers(opts) {
           if (!requireModLevel(socket, 3)) return;
           if (!canViewModRecord(socket, label, role)) return;
         }
-        emitModHistory(
-          socket,
-          label,
-          role,
-          {
-            offset: data?.offset,
-            limit: data?.limit,
-            group: typeof data?.group === "string" ? data.group : null,
-            targetUid:
-              typeof data?.targetUid === "string" ? data.targetUid : null,
-          },
-          selfView,
-        );
+        emitModHistory(socket, label, role, historyOpts(data), selfView);
       }),
     );
 
@@ -7563,12 +7876,150 @@ function registerSocketHandlers(opts) {
             key + " on " + label + (data?.note ? ": " + data.note : ""),
           );
         }
-        emitModHistory(socket, label, role, {
-          offset: data?.offset,
-          limit: data?.limit,
-          group: typeof data?.group === "string" ? data.group : null,
-          targetUid:
-            typeof data?.targetUid === "string" ? data.targetUid : null,
+        emitModHistory(socket, label, role, historyOpts(data));
+      }),
+    );
+
+    // ── Write-ups owed for long blocks ──────────────────────────────────────
+    socket.on(
+      "staff writeups pending",
+      safe(async () => {
+        if (!socket.isMod || socket.isDev) return;
+        socket.emit("staff writeups pending", pendingWriteups(socket.modKeyHash));
+      }),
+    );
+
+    socket.on(
+      "staff writeup",
+      safe(async (data) => {
+        if (!requireStaff(socket)) return;
+        const id = Number(data?.entryId);
+        const entry = audit.getEntry(id);
+        const reply = (ok, extra) =>
+          socket.emit("staff writeup result", { ok, entryId: id, ...extra });
+        if (!entry || entry.label !== socket.staffLabel || !entry.justify)
+          return reply(false, { error: "No block of yours needs that write-up." });
+        if (data?.amend) {
+          const text = sanitizeMessage(
+            typeof data.text === "string" ? data.text : "",
+          )
+            .trim()
+            .slice(0, 400);
+          if (!entry.justify.at) return reply(false, { error: "Write it up first." });
+          if (Date.now() - entry.justify.at > WRITEUP_AMEND_MS)
+            return reply(false, { error: "A write-up can be added to for a day." });
+          if (text.length < 10) return reply(false, { error: "Write a sentence." });
+          audit.recordWriteup({
+            entryId: id,
+            role: "mod",
+            label: socket.staffLabel,
+            amend: true,
+            text,
+          });
+          logStaff(socket, "amend writeup", targetNameOf(entry), "-", text.slice(0, 120));
+        } else {
+          if (entry.justify.at) return reply(false, { error: "Already written up." });
+          const v = writeups.validate(data);
+          if (!v.ok) return reply(false, { error: v.error });
+          audit.recordWriteup({
+            entryId: id,
+            role: socket.isDev ? "dev" : "mod",
+            label: socket.staffLabel,
+            fields: v.fields,
+            rule: v.fields.rule,
+          });
+          writeups.settle(socket.modKeyHash, id);
+        }
+        broadcastBlockList();
+        broadcastAppealsList();
+        reply(true);
+      }),
+    );
+
+    // ── Notes on a case: the moderator's answer, or the reviewer's finding ──
+    socket.on(
+      "staff case note",
+      safe(async (data) => {
+        if (!requireStaff(socket)) return;
+        const caseId = Number(data?.caseId);
+        const label = typeof data?.label === "string" ? data.label : "";
+        const role = data?.role === "dev" ? "dev" : "mod";
+        const me = String(socket.staffLabel || "");
+        const own = !!label && label.toLowerCase() === me.toLowerCase();
+        const c = cases.caseById(caseId);
+        if (!c) return;
+        if (own) {
+          if (!c.steps.some((s) => s.by === me)) return;
+        } else {
+          if (!requireModLevel(socket, 3)) return;
+          if (!canViewModRecord(socket, label, role)) return;
+        }
+        cases.setNote(caseId, own ? "mod" : "reviewer", me || role, data?.text);
+        socket.emit("staff case note", {
+          caseId,
+          notes: record.redactCase(cases.caseById(caseId), roles.viewFor(socket)).notes,
+        });
+      }),
+    );
+
+    // ── One person across every name and device ────────────────────────────
+    socket.on(
+      "staff get person",
+      safe(async (data) => {
+        if (!requireModLevel(socket, 2)) return;
+        const key = typeof data?.key === "string" ? data.key.slice(0, 200) : "";
+        if (!key) return;
+        socket.emit("staff person", buildPerson(key, socket));
+      }),
+    );
+
+    socket.on(
+      "staff pin person",
+      safe(async (data) => {
+        if (!requireModLevel(socket, 3)) return;
+        const a = String(data?.a || "").toLowerCase();
+        const b = String(data?.b || "").toLowerCase();
+        const together = data?.together !== false;
+        const reason = sanitizeMessage(
+          typeof data?.reason === "string" ? data.reason : "",
+        )
+          .trim()
+          .slice(0, 300);
+        if (reason.length < 5)
+          return socket.emit(
+            "error",
+            createErrorResponse(ERROR_CODES.BAD_REQUEST, "Say why, in a few words."),
+          );
+        if (!persons.pin(a, b, together))
+          return socket.emit(
+            "error",
+            createErrorResponse(ERROR_CODES.BAD_REQUEST, "Those are not two client ids."),
+          );
+        logStaff(
+          socket,
+          together ? "merge person" : "split person",
+          null,
+          "-",
+          `${a.slice(0, 8)} and ${b.slice(0, 8)}: ${reason}`,
+        );
+        const key = typeof data?.key === "string" ? data.key.slice(0, 200) : a;
+        socket.emit("staff person", buildPerson(key, socket));
+      }),
+    );
+
+    // ── The whole record as one document, for admins to read elsewhere ─────
+    socket.on(
+      "staff export record",
+      safe(async (data) => {
+        if (!requireDev(socket)) return;
+        const label = typeof data?.label === "string" ? data.label : "";
+        const role = data?.role === "dev" ? "dev" : "mod";
+        if (!label || !canViewModRecord(socket, label, role)) return;
+        logStaff(socket, "export record", null, "-", label);
+        socket.emit("staff record export", {
+          label,
+          role,
+          record: record.exportRecord(label, role, roles.viewFor(socket)),
         });
       }),
     );
@@ -7819,7 +8270,21 @@ function registerSocketHandlers(opts) {
             "error",
             createErrorResponse(ERROR_CODES.BAD_REQUEST, "No such appeal."),
           );
+        // The person who placed the block does not decide the appeal about
+        // it. They can still talk in the thread.
+        const ownBlock =
+          !!a.ban && !!a.ban.by && a.ban.by === socket.staffLabel;
+        if (ownBlock && !socket.isMainDev)
+          return socket.emit(
+            "error",
+            createErrorResponse(
+              ERROR_CODES.FORBIDDEN,
+              "You placed this block. Somebody else decides the appeal; you can still reply in the thread.",
+            ),
+          );
         const reviewer = `${socket.isDev ? "dev" : "mod"}:${socket.staffLabel || ""}`;
+        if (ownBlock)
+          logStaff(socket, "override own appeal", a.name || a.ip, "-", decision);
         if (decision === "lift") {
           if (!requireDev(socket)) return;
           const removedKeys = ipban.removeBlocksForIp(a.ip);
@@ -8656,7 +9121,7 @@ function registerSocketHandlers(opts) {
         ).slice(0, 300);
         let targetTextWiped = false;
         if (targetText.trim().length < 3) {
-          const wiped = lastWipedText(targetUserId);
+          const wiped = buffertrail.lastSeen(targetUserId);
           if (wiped) {
             targetText = sanitizeMessage(wiped.text).slice(0, 300);
             targetTextWiped = true;
@@ -8994,12 +9459,25 @@ function registerSocketHandlers(opts) {
               targetName +
               ": offline with no known device)",
           });
+        const warnRoomId = getUserCurrentRoom(targetUserId);
+        const warnRoom = warnRoomId ? state.rooms.get(warnRoomId) : null;
+        const receipt = receipts.capture({
+          socket,
+          action: "warn",
+          targetUserId,
+          targetName,
+          targetUser: warnRoom?.users.find((u) => u.id === targetUserId),
+          targetSocket: online[0] || null,
+          room: warnRoom,
+          reason: message,
+        });
         logStaff(
           socket,
           "warn",
           { name: targetName, id: targetUserId },
-          "-",
+          warnRoom || "-",
           (delivered ? "delivered: " : "queued for next visit: ") + message,
+          { receipt },
         );
         socket.emit("staff action result", {
           ok: true,

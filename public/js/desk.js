@@ -1078,6 +1078,46 @@
         toast(d.by + " is on it - they saw your ping.");
     });
 
+    // Write-ups owed for long blocks. One modal at a time; the rest wait.
+    const writeupQueue = [];
+    const writeupSeen = new Set();
+    let writeupOpen = false;
+
+    function nextWriteup() {
+      if (writeupOpen || !writeupQueue.length || !window.StaffUI) return;
+      const info = writeupQueue.shift();
+      writeupOpen = true;
+      StaffUI.writeup(info, {
+        socket,
+        submit: (fields) =>
+          new Promise((resolve) => {
+            const done = (r) => {
+              if (!r || r.entryId !== info.entryId) return;
+              socket.off("staff writeup result", done);
+              resolve(r);
+            };
+            socket.on("staff writeup result", done);
+            socket.emit("staff writeup", { entryId: info.entryId, ...fields });
+          }),
+      }).then(() => {
+        writeupOpen = false;
+        writeupSeen.delete(info.entryId);
+        nextWriteup();
+      });
+    }
+
+    function queueWriteup(info) {
+      if (!info || !info.entryId || writeupSeen.has(info.entryId)) return;
+      writeupSeen.add(info.entryId);
+      writeupQueue.push(info);
+      nextWriteup();
+    }
+
+    socket.on("staff writeup due", queueWriteup);
+    socket.on("staff writeups pending", (list) => {
+      (Array.isArray(list) ? list : []).forEach(queueWriteup);
+    });
+
     socket.on("staff action result", (d) => {
       if (!d || !panelOpen) return;
       if (d.ok) toast(d.action + " done.");
@@ -1097,7 +1137,10 @@
 
     socket.on("staff revoked", () => teardown());
 
-    socket.on("connect", () => socket.emit("desk hello"));
+    socket.on("connect", () => {
+      socket.emit("desk hello");
+      socket.emit("staff writeups pending");
+    });
     socket.on("disconnect", () => {
       if (els.panel) els.panel.classList.add("dk-offline");
     });
@@ -1108,7 +1151,10 @@
       if (els.panel) els.panel.classList.remove("dk-offline");
     });
 
-    if (socket.connected) socket.emit("desk hello");
+    if (socket.connected) {
+      socket.emit("desk hello");
+      socket.emit("staff writeups pending");
+    }
   }
 
   function teardown() {
@@ -2244,26 +2290,19 @@
         ),
       );
       add("Kick", "fa-door-open", "", () =>
-        socket.emit("staff kick", { targetUserId: c.targetUserId }),
+        socket.emit("staff kick", { targetUserId: c.targetUserId, ban: false }),
       );
       if (isFullMod())
         add("Block", "fa-ban", "danger", () =>
-          pickDuration("Block " + (c.target || "this user"), (duration) =>
-            ask(
-              {
-                title: "Block for " + duration,
-                label: "Reason (optional, saved to the ban list)",
-                max: 500,
-                icon: '<i class="fas fa-ban"></i>',
-              },
-              (reason) =>
-                socket.emit("staff ip block", {
-                  targetUserId: c.targetUserId,
-                  duration,
-                  reason: String(reason || "").trim(),
-                }),
-            ),
-          ),
+          pickDuration("Block " + (c.target || "this user"), async (duration) => {
+            const reason = await askRule("Block for " + duration);
+            if (reason)
+              socket.emit("staff ip block", {
+                targetUserId: c.targetUserId,
+                duration,
+                reason,
+              });
+          }),
         );
       if (isFullMod())
         add("Discard", "fa-xmark", "", () =>
@@ -2481,6 +2520,11 @@
     } else if (e.type === "comment") {
       line.appendChild(el("span", "dk-act-who", e.label || "?"));
       line.appendChild(el("span", "dk-act-verb", "commented"));
+    } else if (e.type === "writeup") {
+      line.appendChild(el("span", "dk-act-who", e.label || "?"));
+      line.appendChild(
+        el("span", "dk-act-verb", e.amend ? "added to a write-up" : "wrote up a block"),
+      );
     } else {
       line.appendChild(el("span", "dk-act-who", e.label || e.role || "Server"));
       line.appendChild(el("span", "dk-act-verb", e.kind || e.type || "notice"));
@@ -2489,6 +2533,14 @@
 
     const detail = e.details || e.text || e.detail || null;
     if (detail) mid.appendChild(el("div", "dk-act-detail", detail));
+    if (e.type === "writeup" && window.StaffUI)
+      mid.appendChild(
+        el("div", "dk-act-why", (e.amend ? [e.text] : StaffUI.writeupLines(e)).join("\n")),
+      );
+    if (e.type === "action" && e.receipt && e.receipt.text && !/text before wipe/.test(detail || ""))
+      mid.appendChild(el("div", "dk-act-quote", "They had typed: " + e.receipt.text));
+    if (e.type === "action" && e.justify && e.justify.at && window.StaffUI)
+      mid.appendChild(el("div", "dk-act-why", StaffUI.writeupLines(e.justify).join("\n")));
     r.appendChild(mid);
 
     const t = el("span", "dk-q-t", clockTime(m.ts));
@@ -2839,6 +2891,33 @@
       r.appendChild(acts);
     }
     return r;
+  }
+
+  // Every ban and block names the rule it enforces. Resolves to the reason
+  // string the server expects, or null when the person backed out.
+  async function askRule(title) {
+    if (!window.StaffUI) return null;
+    const field = await StaffUI.communityRuleField({ required: true, socket });
+    if (!field) return null;
+    const res = await StaffUI.prompt({
+      title,
+      icon: '<i class="fas fa-ban"></i>',
+      fields: [
+        field,
+        { name: "note", label: "Note (optional)", type: "textarea", maxLength: 500 },
+      ],
+      danger: true,
+      confirmText: title,
+    });
+    return res ? StaffUI.ruleReason(res.rule, res.note) : null;
+  }
+
+  async function ensureRule(reason, title) {
+    if (/^Rule \d+\b/.test(String(reason || "").trim())) return reason;
+    const picked = await askRule(title);
+    if (!picked) return null;
+    const note = String(reason || "").trim();
+    return note ? picked + " " + note : picked;
   }
 
   function row(m, prev) {
@@ -3691,9 +3770,11 @@
           acts.appendChild(kick);
           if (canBan) {
             const kb = btn("dk-minib danger", "Kick + ban", "fa-ban");
-            armTwice(kb, null, () =>
-              socket.emit("staff kick", { targetUserId: u.id, ban: true }),
-            );
+            kb.addEventListener("click", async () => {
+              const reason = await askRule("Kick + ban");
+              if (reason)
+                socket.emit("staff kick", { targetUserId: u.id, ban: true, reason });
+            });
             acts.appendChild(kb);
           }
           row.appendChild(acts);
@@ -4729,7 +4810,9 @@
       }
       case "ban": {
         const u = await targetUser(target);
-        if (u) socket.emit("staff kick", { targetUserId: u.id, ban: true });
+        if (!u) return;
+        const reason = await ensureRule(after, "Kick + ban");
+        if (reason) socket.emit("staff kick", { targetUserId: u.id, ban: true, reason });
         return;
       }
       case "wipe": {
@@ -4751,7 +4834,11 @@
         const duration = DURATIONS.includes(d0.toLowerCase())
           ? d0.toLowerCase()
           : "24h";
-        const reason = DURATIONS.includes(d0.toLowerCase()) ? r0 : after;
+        const reason = await ensureRule(
+          DURATIONS.includes(d0.toLowerCase()) ? r0 : after,
+          "Block for " + duration,
+        );
+        if (!reason) return;
         if (looksLikeIp(target) || looksLikeClientId(target)) {
           socket.emit("staff ban ip", { ip: target, duration, reason });
           return;
@@ -5505,6 +5592,8 @@
 .dk-act-target{color: #ffb74d;overflow-wrap:anywhere;}
 .dk-act-target.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px;}
 .dk-act-room{color: #7f7f7f;font-size:11.5px;}
+.dk-act-quote{margin-top:3px;color:#d0d0d0;font-size:11.5px;line-height:1.5;white-space:pre-wrap;word-break:break-word}
+.dk-act-why{margin-top:4px;padding:5px 8px;background:#161616;border:1px solid #333;color:#c8c8c8;font-size:11.5px;line-height:1.5;white-space:pre-wrap;word-break:break-word}
 .dk-act-detail{margin-top:2px;color: #9a9a9a;font-size:11.5px;line-height:1.5;
   overflow-wrap:anywhere;}
 .dk-ban .dk-act-ico{color: #e57373;}

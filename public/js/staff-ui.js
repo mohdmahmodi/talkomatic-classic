@@ -47,6 +47,10 @@
     border:1px solid #616161;border-radius:5px;padding:10px 12px;font-size:14px;font-family:inherit;
     outline:none;transition:border-color .12s;}
   .tk-textarea{min-height:84px;resize:vertical;line-height:1.5;}
+  .tk-writeup .tk-textarea{min-height:64px;}
+  .tk-wu-head{background:#1b1b1b;border:1px solid #333;padding:8px 10px;margin-bottom:12px;}
+  .tk-wu-what{font-weight:bold;color:#fff;font-size:13px;}
+  .tk-wu-quote{margin-top:4px;color:#d0d0d0;font-size:12px;line-height:1.5;white-space:pre-wrap;word-break:break-word;}
   .tk-input:focus,.tk-textarea:focus,.tk-select:focus{border-color:#ff9800;}
   .tk-help{font-size:11.5px;color:#8d8d8d;margin:6px 0 0;word-break:break-word;}
   .tk-checkbox-row{display:flex;align-items:center;gap:9px;cursor:pointer;
@@ -324,7 +328,7 @@
       htext.appendChild(el("div", { class: "tk-sub", text: o.subtitle }));
     head.appendChild(htext);
     const xBtn = el("button", { class: "tk-x", text: "×", title: "Close" });
-    head.appendChild(xBtn);
+    if (!o.locked) head.appendChild(xBtn);
     card.appendChild(head);
 
     const body = el("div", { class: "tk-body" });
@@ -366,12 +370,12 @@
     function onKey(e) {
       if (e.key === "Escape") {
         e.stopPropagation();
-        close();
+        if (!o.locked) close();
       }
     }
     xBtn.addEventListener("click", close);
     backdrop.addEventListener("click", (e) => {
-      if (e.target === backdrop && o.dismissable !== false) close();
+      if (e.target === backdrop && o.dismissable !== false && !o.locked) close();
     });
     document.addEventListener("keydown", onKey);
     backdrop.appendChild(card);
@@ -916,6 +920,19 @@
       return;
     }
 
+    if (A === "wipe buffer") {
+      toast(
+        d.text
+          ? (d.textWiped ? "They had already cleared it. It said: " : "It said: ") +
+              '"' +
+              d.text +
+              '"'
+          : "Their box was already empty.",
+        { type: "success", title: "Wiped" },
+      );
+      return;
+    }
+
     let title = null;
     let body = null;
     switch (A) {
@@ -1285,10 +1302,10 @@
   // ── Community-rule picker for report and block prompts ────────────────────
   let communityRules = null;
 
-  function fetchCommunityRules() {
+  function fetchCommunityRules(sock) {
     return new Promise((resolve) => {
       if (communityRules) return resolve(communityRules);
-      const s = window.socket;
+      const s = sock || window.socket;
       if (!s || !s.connected) return resolve(null);
       const timer = setTimeout(done, 1500);
       function done(d) {
@@ -1303,10 +1320,13 @@
     });
   }
 
-  async function communityRuleField() {
-    const list = await fetchCommunityRules();
+  async function communityRuleField(opts) {
+    const o = opts || {};
+    const list = await fetchCommunityRules(o.socket);
     if (!list || !list.length) return null;
-    const options = [{ value: "", label: "No specific rule" }];
+    const options = [
+      { value: "", label: o.required ? "Pick the rule" : "No specific rule" },
+    ];
     list.forEach((r, i) => {
       if (!r || !r.title) return;
       options.push({
@@ -1316,9 +1336,10 @@
     });
     return {
       name: "rule",
-      label: "Broke a rule? (optional)",
+      label: o.required ? "Which rule did they break?" : "Broke a rule? (optional)",
       type: "select",
       value: "",
+      required: !!o.required,
       options,
     };
   }
@@ -1327,6 +1348,187 @@
     const t = String(text || "").trim();
     if (!rule) return t;
     return t ? rule + ". " + t : rule + ".";
+  }
+
+  // ── Write-ups for long blocks ─────────────────────────────────────────────
+  const TRIED_OPTIONS = [
+    { value: "", label: "Pick one" },
+    { value: "warned-me", label: "I warned them first" },
+    { value: "warned-other", label: "Somebody else warned them" },
+    { value: "kicked", label: "They were kicked first" },
+    { value: "rules", label: "They were shown the rules" },
+    { value: "nothing", label: "Nothing. This needed a block straight away" },
+  ];
+
+  function triedLabel(v) {
+    const o = TRIED_OPTIONS.find((t) => t.value === v);
+    return o && o.value ? o.label : "Not said";
+  }
+
+  // The four answers as plain lines, for anywhere a write-up is shown.
+  function writeupLines(j) {
+    if (!j) return [];
+    const f = j.fields || j;
+    const lines = [
+      "What they did: " + (f.did || ""),
+      "Rule " + (j.rule || f.rule || "?"),
+      "Tried first: " + triedLabel(f.tried) + (f.why ? ". " + f.why : ""),
+      "Why this length: " + (f.length || ""),
+    ];
+    (j.addenda || []).forEach((a) =>
+      lines.push("Added " + new Date(a.at).toLocaleString() + ": " + a.text),
+    );
+    return lines;
+  }
+
+  // The write-up owed after a 7-day or permanent block. Locked: it stays until
+  // the server accepts it. The draft survives a reload.
+  async function writeup(info, opts) {
+    const o = opts || {};
+    const rules = (await fetchCommunityRules(o.socket)) || [];
+    const draftKey = "talkomatic_writeup_" + info.entryId;
+    let draft = {};
+    try {
+      draft = JSON.parse(localStorage.getItem(draftKey) || "{}") || {};
+    } catch (_) {}
+
+    return new Promise((resolve) => {
+      const form = el("form", { class: "tk-form tk-writeup" });
+      const head = el("div", { class: "tk-wu-head" });
+      head.appendChild(
+        el("div", {
+          class: "tk-wu-what",
+          text: (info.action || "block") + " on " + (info.target || "somebody"),
+        }),
+      );
+      if (info.quote)
+        head.appendChild(
+          el("div", { class: "tk-wu-quote", text: "They had typed: " + info.quote }),
+        );
+      form.appendChild(head);
+      form.appendChild(
+        el("p", {
+          text: "The block is already in place. Write up why it deserved this, so whoever handles the appeal or reads your record can see what you saw.",
+        }),
+      );
+
+      const inputs = {};
+      const field = (name, label, node, help) => {
+        const wrap = el("div", { class: "tk-field" });
+        wrap.appendChild(el("label", { class: "tk-label", text: label }));
+        wrap.appendChild(node);
+        if (help) wrap.appendChild(el("div", { class: "tk-help", text: help }));
+        inputs[name] = node;
+        form.appendChild(wrap);
+      };
+      const area = (value, placeholder, rows) => {
+        const t = el("textarea", { class: "tk-textarea", placeholder, rows: rows || 3, maxlength: 600 });
+        if (value) t.value = value;
+        return t;
+      };
+      const select = (options, value) => {
+        const s = el("select", { class: "tk-select" });
+        options.forEach((opt) => {
+          const node = el("option", { value: opt.value, text: opt.label });
+          if (String(value) === String(opt.value)) node.selected = true;
+          s.appendChild(node);
+        });
+        return s;
+      };
+
+      field(
+        "did",
+        "What did they do?",
+        area(draft.did, "Quote it or describe it. At least a sentence."),
+      );
+      field(
+        "rule",
+        "Which rule?",
+        select(
+          [{ value: "", label: "Pick the rule" }].concat(
+            rules.map((r, i) => ({ value: String(i + 1), label: i + 1 + ". " + r.title })),
+          ),
+          draft.rule || (info.rule ? String(info.rule) : ""),
+        ),
+      );
+      field("tried", "What was tried first?", select(TRIED_OPTIONS, draft.tried || ""));
+      field(
+        "why",
+        "Why was a milder step not enough?",
+        area(draft.why, "Required when nothing was tried first.", 2),
+      );
+      field(
+        "length",
+        "Why this length?",
+        area(draft.length, "What makes it a week, or for good, rather than a day.", 2),
+      );
+      const err = el("div", { class: "tk-err" });
+      form.appendChild(err);
+
+      const values = () => ({
+        did: inputs.did.value,
+        rule: inputs.rule.value,
+        tried: inputs.tried.value,
+        why: inputs.why.value,
+        length: inputs.length.value,
+      });
+      const saveDraft = () => {
+        try {
+          localStorage.setItem(draftKey, JSON.stringify(values()));
+        } catch (_) {}
+      };
+      form.addEventListener("input", saveDraft);
+      form.addEventListener("change", saveDraft);
+
+      const fail = (msg) => {
+        err.textContent = msg;
+        err.style.display = "block";
+      };
+      let busy = false;
+      const submit = async () => {
+        if (busy) return;
+        const v = values();
+        if (v.did.trim().length < 30) return fail("Say what they did, in at least a sentence.");
+        if (!v.rule) return fail("Pick the rule they broke.");
+        if (!v.tried) return fail("Say what was tried first.");
+        if (v.tried === "nothing" && v.why.trim().length < 20)
+          return fail("Explain why a milder step would not have worked.");
+        if (v.length.trim().length < 20) return fail("Say why this length.");
+        busy = true;
+        err.style.display = "none";
+        const res = await o.submit(v);
+        busy = false;
+        if (!res || !res.ok) return fail((res && res.error) || "The server did not accept it.");
+        try {
+          localStorage.removeItem(draftKey);
+        } catch (_) {}
+        ctrl.close();
+        resolve(v);
+      };
+      form.addEventListener("submit", (e) => {
+        e.preventDefault();
+        submit();
+      });
+
+      const ctrl = modal({
+        title: "Write up this block",
+        icon: '<i class="fas fa-pen-to-square"></i>',
+        subtitle: "Required for 7-day and permanent blocks",
+        locked: true,
+        body: form,
+        actions: [
+          {
+            label: "Save write-up",
+            kind: "primary",
+            onClick: () => {
+              submit();
+              return false;
+            },
+          },
+        ],
+      });
+      setTimeout(() => inputs.did.focus(), 50);
+    });
   }
 
   window.StaffUI = {
@@ -1342,7 +1544,11 @@
     actionToast,
     copy,
     help,
+    communityRules: fetchCommunityRules,
     communityRuleField,
     ruleReason,
+    writeup,
+    writeupLines,
+    triedLabel,
   };
 })();
