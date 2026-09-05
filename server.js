@@ -1323,6 +1323,7 @@ function ownFile(req, deviceId) {
     by: roles.publicStaffName(p.by, p.role),
     at: p.at,
     quote: p.quote,
+    opened: p.opened || null,
     reason: ipredact.redact(p.details),
   }));
 }

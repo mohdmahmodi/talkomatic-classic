@@ -1408,6 +1408,13 @@
         font-style: italic;
         font-family: inherit;
       }
+      .rc-typed.opened {
+        margin-top: -0.375rem;
+        border-left-color: var(--dim2);
+      }
+      .rc-typed.opened .lbl {
+        color: var(--dim);
+      }
 
       /* ── Appeals (shared by suggestions renderer) ── */
       .appealcard {
@@ -4843,6 +4850,13 @@
               Appeals submitted from the ban screen
             </span>
             <div class="ph-actions">
+              <div class="seg" id="appealsSeg">
+                <button class="active" data-s="active">
+                  Active<span class="n"></span>
+                </button>
+                <button data-s="approved">Approved<span class="n"></span></button>
+                <button data-s="declined">Declined<span class="n"></span></button>
+              </div>
               <button id="appealsRefresh" class="btn sm">
                 <i class="fas fa-arrows-rotate"></i> Refresh
               </button>
@@ -4854,8 +4868,9 @@
               Each card is one banned user asking to be unbanned. It shows the
               ban they are contesting (who placed it and why) next to their
               message. Click their name to trace their activity. Lift the ban to
-              unblock them and accept the appeal, or dismiss it to keep the ban.
-              Lifting a ban is admin-only.
+              unblock them and accept the appeal, or decline it to keep the ban.
+              Lifting a ban is admin-only. An appeal about a ban that ran out or
+              was removed closes on its own and moves to Approved.
             </span>
           </p>
           <div id="appealsList" class="grid2"></div>
@@ -5665,7 +5680,7 @@
     <script src="js/modernnotify.min.js?v=1.1.0"></script>
     <script src="js/notify.js?v=1.0.0"></script>
     <script src="js/staff-ui.js?v=1.10.0"></script>
-    <script src="js/desk.js?v=1.0.5"></script>
-    <script src="js/mod.js?v=4.21.0"></script>
+    <script src="js/desk.js?v=1.0.6"></script>
+    <script src="js/mod.js?v=4.22.0"></script>
   </body>
 </html>

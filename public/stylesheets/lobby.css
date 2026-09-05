@@ -2425,7 +2425,9 @@ button:disabled {
   font-family: inherit;
   cursor: pointer;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
-  transition: all 0.2s ease;
+  transition: background 0.2s, color 0.2s;
+  touch-action: none;
+  user-select: none;
 }
 
 #devPanelButton:hover {

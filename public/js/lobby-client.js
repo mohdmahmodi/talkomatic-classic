@@ -830,7 +830,18 @@ function showBanScreen(info) {
       row.appendChild(node("span", "bs-when", when));
       row.appendChild(node("span", "bs-act", actionLabel(p.action)));
       if (p.reason && !/^text before wipe/.test(p.reason)) row.appendChild(node("span", "bs-reason", p.reason));
-      if (p.quote) row.appendChild(node("span", "bs-quote", "You had typed: “" + p.quote + "”"));
+      if (p.quote)
+        row.appendChild(
+          node(
+            "span",
+            "bs-quote",
+            (p.opened ? "When they acted you had typed: “" : "You had typed: “") + p.quote + "”",
+          ),
+        );
+      if (p.opened && p.opened.text && p.opened.text !== p.quote)
+        row.appendChild(
+          node("span", "bs-quote", "When they opened the dialog: “" + p.opened.text + "”"),
+        );
       box.appendChild(row);
     });
   }
@@ -976,7 +987,9 @@ function showBanScreen(info) {
       d.status === "resolved"
         ? d.resolution === "lifted"
           ? "This appeal was accepted."
-          : "This appeal was declined."
+          : d.resolution === "ended"
+            ? "Your ban ended, so this appeal is closed."
+            : "This appeal was declined."
         : d.locked
           ? "Staff ended this chat. Your appeal is still being reviewed."
           : "A staff member will read this and may ask you questions. Answer here.";
@@ -2360,8 +2373,6 @@ function makeStaffButtonDraggable(btn) {
     drag.moved = true;
     drag.at = placeStaffButton(btn, e.clientX - drag.dx, e.clientY - drag.dy);
   });
-  // The button animates into place, so the spot to remember is the one we
-  // asked for, not wherever the animation had reached when the pointer lifted.
   const done = () => {
     if (!drag) return;
     const { moved, at } = drag;

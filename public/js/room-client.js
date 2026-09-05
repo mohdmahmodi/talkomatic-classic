@@ -3904,6 +3904,7 @@ function makeStaffConcealedMarker(user) {
 
 async function openReportPrompt(user) {
   const name = user.username || "user";
+  socket.emit("user report begin", { targetUserId: user.id });
   const cats = [
     { value: "spam", label: "Spam or flooding" },
     { value: "harassment", label: "Harassment or bullying" },
@@ -4081,6 +4082,7 @@ function openUserStaffMenu(user) {
     danger: true,
     desc: "Remove from this room (no ban)",
     onClick: async () => {
+      socket.emit("staff action begin", { targetUserId: user.id });
       if (
         await StaffUI.confirm({
           title: "Kick",
@@ -4100,6 +4102,7 @@ function openUserStaffMenu(user) {
     danger: true,
     desc: "Remove and ban from this room",
     onClick: async () => {
+      socket.emit("staff action begin", { targetUserId: user.id });
       const fields = [];
       const ruleField = await StaffUI.communityRuleField({ required: true });
       if (ruleField) fields.push(ruleField);
@@ -4141,6 +4144,7 @@ function openUserStaffMenu(user) {
     label: "Warn...",
     desc: "Send a private warning",
     onClick: async () => {
+      socket.emit("staff action begin", { targetUserId: user.id });
       const r = await StaffUI.prompt({
         title: `Warn ${name}`,
         icon: '<i class="fas fa-bullhorn"></i>',
@@ -4325,6 +4329,7 @@ function openUserStaffMenu(user) {
 }
 
 async function openIpBlockPicker(user) {
+  socket.emit("staff action begin", { targetUserId: user.id });
   const res = await StaffUI.blockDialog({
     title: "Block " + (user.username || "this user"),
     subtitle: "They are disconnected the moment it is placed",

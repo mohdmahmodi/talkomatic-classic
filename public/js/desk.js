@@ -2187,6 +2187,16 @@
             "quote",
           ),
         );
+      if (c.openedQuote && c.openedQuote !== c.quote)
+        b.appendChild(
+          qField(
+            c.openedQuoteWiped
+              ? "When the report form was opened it read (already cleared)"
+              : "When the report form was opened it read",
+            c.openedQuote,
+            "quote",
+          ),
+        );
       return b;
     }
 
@@ -4143,7 +4153,11 @@
         el(
           "span",
           "dk-chip ghost",
-          a.resolution === "lifted" ? "BAN LIFTED" : "DECLINED",
+          a.resolution === "lifted"
+            ? "BAN LIFTED"
+            : a.resolution === "ended"
+              ? "BAN ENDED"
+              : "DECLINED",
         ),
       );
     else if (a.stillBlocked)
@@ -4172,12 +4186,14 @@
           "dk-readonly",
           a.resolution === "lifted"
             ? "Ban lifted" + (a.reviewedBy ? " by " + a.reviewedBy : "") + "."
-            : "Appeal declined" +
-              (a.reviewedBy ? " by " + a.reviewedBy : "") +
-              ". The ban stays in place.",
+            : a.resolution === "ended"
+              ? "The ban ended before a decision, so this appeal closed on its own."
+              : "Appeal declined" +
+                (a.reviewedBy ? " by " + a.reviewedBy : "") +
+                ". The ban stays in place.",
         ),
       );
-      if (a.resolution !== "lifted" && isFullMod()) {
+      if (a.resolution === "dismissed" && isFullMod()) {
         const acts = el("div", "dk-ap-acts");
         const re = btn("dk-minib", "Reopen this appeal", "fa-rotate-left");
         re.title = "Put it back on the board and give them their reply box back";
@@ -4508,7 +4524,14 @@
       r.appendChild(w);
       r.appendChild(el("span", "dk-ap-file-a", p.action));
       r.appendChild(el("span", "dk-ap-file-b", "by " + (p.by || "staff")));
-      if (p.quote) r.appendChild(el("span", "dk-ap-file-q", '"' + p.quote + '"'));
+      if (p.quote)
+        r.appendChild(
+          el("span", "dk-ap-file-q", (p.opened ? "when sent: " : "") + '"' + p.quote + '"'),
+        );
+      if (p.opened && p.opened.text && p.opened.text !== p.quote)
+        r.appendChild(
+          el("span", "dk-ap-file-q", 'when the dialog opened: "' + p.opened.text + '"'),
+        );
       rows.push(r);
     });
     if (!rows.length)

@@ -96,6 +96,9 @@ function add({
   targetRole,
   targetText,
   targetTextWiped,
+  openedText,
+  openedTextWiped,
+  openedAt,
 }) {
   if (!targetKey) return { total: 0, distinct: 0 };
   const now = Date.now();
@@ -117,6 +120,9 @@ function add({
     targetRole: targetRole || null,
     targetText: targetText || null,
     targetTextWiped: !!targetTextWiped,
+    openedText: openedText || null,
+    openedTextWiped: !!openedTextWiped,
+    openedAt: openedAt || null,
   });
   if (arr.length > MAX_PER_TARGET) arr.splice(0, arr.length - MAX_PER_TARGET);
   prune(now);

@@ -55,6 +55,13 @@ link-whitelist.json.tmp
 last-seen.json
 last-seen.json.tmp
 former-mods.json
+device-secret.json
+persons.json
+persons.json.tmp
+case-notes.json
+case-notes.json.tmp
+pending-writeups.json
+pending-writeups.json.tmp
 service.json
 service.json.tmp
 controls.html

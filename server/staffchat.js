@@ -532,6 +532,8 @@ function sanitizeCard(qkind, c) {
     reason: cut(c.reason, 300),
     quote: cut(c.quote, 300),
     quoteWiped: c.quoteWiped ? true : null,
+    openedQuote: cut(c.openedQuote, 300),
+    openedQuoteWiped: c.openedQuoteWiped ? true : null,
     location: cut(c.location, 60),
     reports: Number(c.reports) || null,
     itemId: Number.isFinite(Number(c.itemId)) ? Number(c.itemId) : null,

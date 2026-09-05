@@ -247,6 +247,7 @@ function reopen(id, byLabel, note) {
   if (!a) return { ok: false, code: "no_appeal" };
   if (a.status !== "resolved") return { ok: false, code: "not_closed" };
   if (a.resolution === "lifted") return { ok: false, code: "already_lifted" };
+  if (a.resolution === "ended") return { ok: false, code: "ended" };
   a.status = "open";
   a.resolution = null;
   a.reviewedBy = null;
@@ -382,6 +383,22 @@ function resolve(id, resolution, reviewedBy, note) {
   return a;
 }
 
+// The ban ran out or was removed while the appeal sat open. Nobody decided
+// anything, so no reviewer is written down.
+function closeEnded(a) {
+  if (!a || a.status !== "open") return false;
+  a.status = "resolved";
+  a.resolution = "ended";
+  a.reviewedBy = null;
+  a.reviewedAt = Date.now();
+  a.locked = false;
+  a.lockedBy = null;
+  a.lockedAt = null;
+  systemNote(a, "Your ban has ended, so this appeal is closed.");
+  saveSoon();
+  return true;
+}
+
 function resolveOpenForIp(ip, resolution, reviewedBy) {
   let n = 0;
   const now = Date.now();
@@ -456,6 +473,7 @@ module.exports = {
   systemNote,
   setLocked,
   resolve,
+  closeEnded,
   resolveOpenForIp,
   resolveOpenForDevice,
   remove,

@@ -144,6 +144,7 @@ function appealOutcome(heavy) {
   if (!a) return null;
   const issuer = heavy.find((s) => s.ids.includes(a.ban.auditId)).by;
   if (a.status !== "resolved") return { kind: "appeal open", appealId: a.id };
+  if (a.resolution === "ended") return null;
   const by = labelOf(a.reviewedBy);
   const own = by === issuer;
   if (a.resolution === "lifted")

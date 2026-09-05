@@ -112,6 +112,40 @@ function gradeOf(r, action, now) {
   return "unverifiable";
 }
 
+// What the box says right now, or what it said just before a wipe.
+function boxNow(userId, roomId) {
+  let text = roomId ? state.getBuffer(userId, roomId).trim() : "";
+  let wiped = false;
+  if (text.length < TEXT_MIN) {
+    const last = buffertrail.lastSeen(userId);
+    text = last ? last.text : "";
+    wiped = !!last;
+  }
+  return { text: text.slice(0, buffertrail.MAX_CHARS), wiped };
+}
+
+// The box as it was when the dialog opened, before anything was typed into
+// it. Kept on the acting socket until the action lands, so a box cleared
+// between opening the dialog and pressing send is still on the receipt.
+const OPENED_TTL_MS = 10 * 60 * 1000;
+
+function noteOpened(socket, targetUserId, room) {
+  if (!socket || !targetUserId) return null;
+  const box = boxNow(targetUserId, room ? room.id : null);
+  const entry = { text: box.text || null, wiped: box.wiped, at: Date.now() };
+  if (!socket._opened) socket._opened = new Map();
+  socket._opened.set(targetUserId, entry);
+  return entry;
+}
+
+function takeOpened(socket, targetUserId) {
+  if (!socket || !socket._opened) return null;
+  const e = socket._opened.get(targetUserId);
+  socket._opened.delete(targetUserId);
+  if (!e || Date.now() - e.at > OPENED_TTL_MS) return null;
+  return e;
+}
+
 // Everything the handler already has in hand goes in; the receipt comes out.
 // Call it BEFORE the action changes anything, or a wipe records an empty box.
 function capture(o) {
@@ -130,14 +164,10 @@ function capture(o) {
   const ip = (targetSocket && targetSocket.clientIp) || (seen && seen.ip) || null;
   const net = ip ? ipban.computeRangeCidr(ip) : null;
 
-  let text = room ? state.getBuffer(userId, room.id).trim() : "";
-  let textWiped = false;
-  if (text.length < TEXT_MIN) {
-    const last = buffertrail.lastSeen(userId);
-    text = last ? last.text : "";
-    textWiped = !!last;
-  }
-  text = text.slice(0, buffertrail.MAX_CHARS);
+  const box = boxNow(userId, room ? room.id : null);
+  const text = box.text;
+  const textWiped = box.wiped;
+  const opened = takeOpened(o.socket, userId);
   const trail = buffertrail
     .recent(userId)
     .filter((t) => t.text !== text)
@@ -150,6 +180,7 @@ function capture(o) {
     origin: room ? "room" : "offline",
     text: text || null,
     textWiped,
+    opened,
     trail,
     target: {
       did: deviceId,
@@ -192,4 +223,12 @@ function quote(receipt) {
   return receipt.origin === "offline" ? "(acted on from outside a room)" : "(box was empty)";
 }
 
-module.exports = { capture, parseReason, quote, NO_WARNING_RULES, GRADES };
+module.exports = {
+  capture,
+  noteOpened,
+  takeOpened,
+  parseReason,
+  quote,
+  NO_WARNING_RULES,
+  GRADES,
+};

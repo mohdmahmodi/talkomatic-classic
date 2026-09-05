@@ -1363,11 +1363,6 @@ function knownName({ deviceId, userId, ip }) {
   return named.length === 1 ? named[0].name : null;
 }
 
-function otherNames({ deviceId, userId }, shown) {
-  const person = persons.resolve(deviceId || userId || "");
-  return person.names.filter((n) => n !== shown).slice(0, 5);
-}
-
 // ── One person, everything staff know about them ────────────────────────────
 
 function buildPerson(key, socket) {
@@ -1460,8 +1455,8 @@ function rulesSectionOf(value) {
 // them and how many reports they have drawn. Nothing on file means nothing.
 const FILE_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
 
-function appealFile(a, view) {
-  const person = persons.resolve(a.deviceId || a.userId || "");
+function appealFile(a, view, person) {
+  if (!person) person = persons.resolve(a.deviceId || a.userId || "");
   const who = {
     userId: a.userId,
     userIds: person.userIds,
@@ -1474,6 +1469,12 @@ function appealFile(a, view) {
       by: roles.teamLabel(p.by, p.role, view),
       at: p.at,
       quote: view.ip ? p.quote : audit.maskIps(p.quote),
+      opened: p.opened
+        ? {
+            text: view.ip ? p.opened.text : audit.maskIps(p.opened.text),
+            at: p.opened.at,
+          }
+        : null,
     })),
     reports: person.userIds
       .concat(a.userId ? [a.userId] : [])
@@ -1609,6 +1610,11 @@ function buildReportsList(view) {
             ? r.targetText || null
             : audit.maskIps(r.targetText || null),
           targetTextWiped: !!r.targetTextWiped,
+          openedText: showIp
+            ? r.openedText || null
+            : audit.maskIps(r.openedText || null),
+          openedTextWiped: !!r.openedTextWiped,
+          openedAt: r.openedAt || null,
         })),
     };
   });
@@ -1617,12 +1623,46 @@ function buildReportsList(view) {
 const NO_MORE_APPEALS =
   "You will not be able to file another appeal. This decision is final.";
 
+function appealStillBlocked(a) {
+  return (
+    ipban.findActiveBlock(a.ip) !== null ||
+    (!!a.deviceId && ipban.findActiveIdBlock(a.deviceId) !== null)
+  );
+}
+
+// An open appeal about a ban that is gone, whether it ran out or somebody
+// removed it, has nothing left to decide. It closes on its own so the list
+// only holds live ones.
+function sweepEndedAppeals() {
+  let n = 0;
+  for (const a of appeals.list()) {
+    if (a.status !== "open" || appealStillBlocked(a)) continue;
+    if (!appeals.closeEnded(a)) continue;
+    settleQueueItem("appeal", a.id);
+    n++;
+  }
+  return n;
+}
+
+const appealSweep = setInterval(() => {
+  try {
+    if (sweepEndedAppeals()) broadcastAppealsList();
+  } catch (_) {}
+}, 60 * 1000);
+if (appealSweep.unref) appealSweep.unref();
+
 function buildAppealsList(view) {
+  sweepEndedAppeals();
+  return appeals.list().map((a) => appealRow(a, view));
+}
+
+// One appeal as staff see it. The person lookup is done once here and
+// shared with the file, which is what makes opening a single appeal cheap.
+function appealRow(a, view) {
   const showIp = !!(view && view.ip);
-  return appeals.list().map((a) => {
-    const stillBlocked =
-      ipban.findActiveBlock(a.ip) !== null ||
-      (!!a.deviceId && ipban.findActiveIdBlock(a.deviceId) !== null);
+  {
+    const stillBlocked = appealStillBlocked(a);
+    const person = persons.resolve(a.deviceId || a.userId || "");
     const ban = a.ban || {};
     const bar = appeals.barFor({
       ip: a.ip,
@@ -1633,7 +1673,7 @@ function buildAppealsList(view) {
     return {
       id: a.id,
       name: shownName,
-      knownAs: otherNames(a, shownName),
+      knownAs: person.names.filter((n) => n !== shownName).slice(0, 5),
       userId: a.userId || null,
       deviceId: a.deviceId || null,
       ip: showIp ? a.ip : undefined,
@@ -1663,7 +1703,7 @@ function buildAppealsList(view) {
       banExpiry: ban.expiry || 0,
       banAt: ban.ts || null,
       banWriteup: writeupOf(ban.auditId, view),
-      file: appealFile(a, view),
+      file: appealFile(a, view, person),
       locked: !!a.locked,
       lockedBy: showIp
         ? a.lockedBy || null
@@ -1701,7 +1741,7 @@ function buildAppealsList(view) {
         (a.messages || []).length > 0 &&
         a.messages[a.messages.length - 1].from === "user",
     };
-  });
+  }
 }
 
 function broadcastAppealsList() {
@@ -1856,10 +1896,7 @@ function broadcastAppeal(id) {
   for (const [, s] of io().sockets.sockets) {
     if (!s.connected || s.deskAppealId !== id) continue;
     if (!(s.isDev || (s.isMod && (s.modLevel || 1) >= 2))) continue;
-    s.emit(
-      "staff appeal",
-      buildAppealsList(roles.viewFor(s)).find((x) => x.id === id),
-    );
+    s.emit("staff appeal", appealRow(a, roles.viewFor(s)));
   }
 }
 
@@ -5636,6 +5673,33 @@ function registerSocketHandlers(opts) {
       }),
     );
 
+    // ── The box as it was when a dialog opened ───────────────────────────
+    // Fired when staff open a kick, block, or warn dialog, and when a user
+    // opens the report form. The action that follows carries both boxes:
+    // this one and the one at the moment they pressed send.
+    socket.on(
+      "staff action begin",
+      safe(async (data) => {
+        if (!isStaffSocket(socket)) return;
+        const targetUserId = data?.targetUserId;
+        if (!targetUserId || typeof targetUserId !== "string") return;
+        const roomId = getUserCurrentRoom(targetUserId);
+        const room = roomId ? state.rooms.get(roomId) : null;
+        receipts.noteOpened(socket, targetUserId, room);
+      }),
+    );
+
+    socket.on(
+      "user report begin",
+      safe(async (data) => {
+        const targetUserId = data?.targetUserId;
+        if (!targetUserId || typeof targetUserId !== "string") return;
+        const room = socket.roomId ? state.rooms.get(socket.roomId) : null;
+        if (!room || !room.users.some((u) => u.id === targetUserId)) return;
+        receipts.noteOpened(socket, targetUserId, room);
+      }),
+    );
+
     // ── Put the rules in front of one person ─────────────────────────────
     socket.on(
       "staff show rules",
@@ -8217,10 +8281,8 @@ function registerSocketHandlers(opts) {
         const id = Number(data?.id) || null;
         socket.deskAppealId = id;
         if (!id) return;
-        const row = buildAppealsList(roles.viewFor(socket)).find(
-          (x) => x.id === id,
-        );
-        if (row) socket.emit("staff appeal", row);
+        const a = appeals.get(id);
+        if (a) socket.emit("staff appeal", appealRow(a, roles.viewFor(socket)));
       }),
     );
 
@@ -8303,7 +8365,9 @@ function registerSocketHandlers(opts) {
               ERROR_CODES.BAD_REQUEST,
               r.code === "already_lifted"
                 ? "That ban was lifted, so there is nothing left to appeal."
-                : r.code === "not_closed"
+                : r.code === "ended"
+                  ? "That ban has ended, so there is nothing left to appeal."
+                  : r.code === "not_closed"
                   ? "That appeal is already open."
                   : "No such appeal.",
             ),
@@ -9222,6 +9286,11 @@ function registerSocketHandlers(opts) {
             targetTextWiped = true;
           }
         }
+        const opened = receipts.takeOpened(socket, targetUserId);
+        const openedText =
+          opened && opened.text
+            ? sanitizeMessage(opened.text).slice(0, 300)
+            : null;
         const reporter = socket.handshake.session?.username || "A user";
         const catLabel = REPORT_CATEGORIES[category];
         const roleOf = (s) =>
@@ -9249,6 +9318,9 @@ function registerSocketHandlers(opts) {
           targetRole,
           targetText,
           targetTextWiped,
+          openedText,
+          openedTextWiped: !!(opened && opened.wiped),
+          openedAt: opened ? opened.at : null,
         });
         const targetIsStaff = !!targetRole;
         const text =
@@ -9259,6 +9331,9 @@ function registerSocketHandlers(opts) {
             ? targetTextWiped
               ? ` Their chat box read (wiped just before the report): "${targetText}"`
               : ` Their chat box read: "${targetText}"`
+            : "") +
+          (openedText && openedText !== targetText
+            ? ` When the report form was opened it read: "${openedText}"`
             : "");
         audit.recordNotification({
           kind: "report",
@@ -9287,6 +9362,8 @@ function registerSocketHandlers(opts) {
             reason: reason || null,
             quote: targetText || null,
             quoteWiped: targetTextWiped || undefined,
+            openedQuote: openedText || null,
+            openedQuoteWiped: !!(opened && opened.wiped) || undefined,
             reports: tally.distinct || null,
             roomId: room ? room.id : null,
             roomName: room ? room.name : null,

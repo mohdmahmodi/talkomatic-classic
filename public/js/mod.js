@@ -2215,13 +2215,23 @@
       facts.appendChild(f);
     };
     fact(
-      "They had typed",
+      r.opened ? "Box when the action was sent" : "They had typed",
       r.text
         ? '"' + r.text + '"' + (r.textWiped ? " (they had already cleared it)" : "")
         : r.origin === "offline"
           ? "acted on from outside a room"
           : "nothing, the box was empty",
     );
+    if (r.opened)
+      fact(
+        "Box when the dialog was opened",
+        r.opened.text
+          ? r.opened.text === r.text
+            ? "the same line"
+            : '"' + r.opened.text + '"' +
+              (r.opened.wiped ? " (they had already cleared it)" : "")
+          : "nothing, the box was empty",
+      );
     if (r.trail && r.trail.length)
       fact("Earlier lines", r.trail.map((t) => '"' + t.text + '"').join("   "));
     if (r.reports && r.reports.hour)
@@ -3686,6 +3696,7 @@
   }
   async function openReportBanMenu(r) {
     if (!window.StaffUI) return;
+    socket.emit("staff action begin", { targetUserId: r.targetUserId });
     const res = await StaffUI.blockDialog({
       title: "Block " + (r.name || "this user"),
       subtitle: r.online
@@ -3763,6 +3774,7 @@
   async function warnReported(r) {
     if (!window.StaffUI)
       return socket.emit("staff warn user", { targetUserId: r.targetUserId });
+    socket.emit("staff action begin", { targetUserId: r.targetUserId });
     const msg = await StaffUI.prompt({
       title: "Warn " + (r.name || "user"),
       icon: '<i class="fas fa-triangle-exclamation"></i>',
@@ -3916,6 +3928,27 @@
       typedBox.appendChild(typedTxt);
       card.appendChild(typedBox);
 
+      const openEntry = (r.reasons || []).find(
+        (x) => x.openedText && x.openedText.trim(),
+      );
+      if (openEntry && openEntry.openedText !== typedSnap) {
+        const openBox = divc("rc-typed opened");
+        const openLbl = divc("lbl");
+        openLbl.appendChild(icon("fa-keyboard"));
+        openLbl.appendChild(
+          document.createTextNode(
+            openEntry.openedTextWiped
+              ? " Their chat box when the report form was opened (already cleared)"
+              : " Their chat box when the report form was opened",
+          ),
+        );
+        openBox.appendChild(openLbl);
+        const openTxt = divc("txt");
+        openTxt.textContent = openEntry.openedText;
+        openBox.appendChild(openTxt);
+        card.appendChild(openBox);
+      }
+
       const reasons = r.reasons || [];
       const logHead = document.createElement("div");
       logHead.className = "report-log-head";
@@ -4020,9 +4053,32 @@
     if (a.status === "resolved") {
       if (a.resolution === "lifted")
         return { badge: "on", icon: "fa-unlock", label: "BAN LIFTED" };
-      return { badge: "off", icon: "fa-circle-xmark", label: "DISMISSED" };
+      if (a.resolution === "ended")
+        return { badge: "on", icon: "fa-clock", label: "BAN ENDED" };
+      return { badge: "off", icon: "fa-circle-xmark", label: "DECLINED" };
     }
     return { badge: "warm", icon: "fa-scale-balanced", label: "OPEN" };
+  }
+  // Active is what still needs a decision. Approved holds bans that were
+  // lifted or ran out on their own; declined holds the ones staff refused.
+  let appealsFilter = "active";
+  function appealBucket(a) {
+    if (a.status !== "resolved") return "active";
+    return a.resolution === "lifted" || a.resolution === "ended"
+      ? "approved"
+      : "declined";
+  }
+  function appealDecisionLine(a) {
+    if (a.status !== "resolved") return "";
+    if (a.resolution === "lifted")
+      return "Ban lifted" + (a.reviewedBy ? " by " + cleanReviewer(a.reviewedBy) : "") + ".";
+    if (a.resolution === "ended")
+      return "The ban ended before a decision, so this appeal closed on its own.";
+    return (
+      "Appeal declined" +
+      (a.reviewedBy ? " by " + cleanReviewer(a.reviewedBy) : "") +
+      ". The ban stays in place."
+    );
   }
   function untilLabel(ts) {
     const ms = (ts || 0) - Date.now();
@@ -4185,17 +4241,8 @@
     appealChat.input = null;
 
     if (a.status !== "open") {
-      foot.appendChild(
-        span(
-          "apm-closed",
-          a.resolution === "lifted"
-            ? "Ban lifted" + (a.reviewedBy ? " by " + cleanReviewer(a.reviewedBy) : "") + "."
-            : "Appeal declined" +
-                (a.reviewedBy ? " by " + cleanReviewer(a.reviewedBy) : "") +
-                ". The ban stays in place.",
-        ),
-      );
-      if (a.resolution !== "lifted" && viewerIsFullMod()) {
+      foot.appendChild(span("apm-closed", appealDecisionLine(a)));
+      if (a.resolution === "dismissed" && viewerIsFullMod()) {
         const acts = divc("apm-acts");
         const re = document.createElement("button");
         re.className = "btn sm";
@@ -4358,28 +4405,47 @@
     const wrap = $("appealsList");
     if (!wrap) return;
     wrap.textContent = "";
-    const open = appealsList.filter((a) => a.status === "open");
+    const counts = { active: 0, approved: 0, declined: 0 };
+    appealsList.forEach((a) => counts[appealBucket(a)]++);
     const badge = $("appealsBadge");
-    if (badge) badge.textContent = String(open.length);
+    if (badge) badge.textContent = String(counts.active);
+    document.querySelectorAll("#appealsSeg button").forEach((b) => {
+      const k = b.dataset.s;
+      const n = b.querySelector(".n");
+      if (n) n.textContent = counts[k] ? " " + counts[k] : "";
+      b.classList.toggle("active", k === appealsFilter);
+    });
     const sub = $("appealsSub");
     if (sub)
-      sub.textContent = open.length
-        ? open.length +
-          " open appeal" +
-          (open.length === 1 ? "" : "s") +
-          (appealsList.length > open.length
-            ? "  ·  " + appealsList.length + " total"
-            : "")
+      sub.textContent = counts.active
+        ? counts.active +
+          " active appeal" +
+          (counts.active === 1 ? "" : "s") +
+          " waiting on a decision"
         : appealsList.length
-          ? "No open appeals  ·  " + appealsList.length + " resolved"
+          ? "Nothing waiting  ·  " +
+            counts.approved +
+            " approved, " +
+            counts.declined +
+            " declined"
           : "No appeals yet";
-    if (!appealsList.length) {
-      wrap.appendChild(emptyBox("fa-scale-balanced", "No ban appeals yet."));
+    const shown = appealsList.filter((a) => appealBucket(a) === appealsFilter);
+    if (!shown.length) {
+      wrap.appendChild(
+        emptyBox(
+          "fa-scale-balanced",
+          appealsFilter === "active"
+            ? "No active appeals. Everything has been decided."
+            : appealsFilter === "approved"
+              ? "No approved appeals yet."
+              : "No declined appeals yet.",
+        ),
+      );
       return;
     }
     const isDev = me && me.role === "dev";
 
-    appealsList.forEach((a) => {
+    shown.forEach((a) => {
       const sm = appealStatusMeta(a);
       const card = divc(
         "appealcard" + (a.status === "resolved" ? " resolved" : ""),
@@ -4486,7 +4552,14 @@
         row.appendChild(when);
         row.appendChild(span("ap-file-act", p.action));
         row.appendChild(span("ap-file-by", "by " + (p.by || "staff")));
-        if (p.quote) row.appendChild(span("ap-file-q", '"' + p.quote + '"'));
+        if (p.quote)
+          row.appendChild(
+            span("ap-file-q", (p.opened ? "when sent: " : "") + '"' + p.quote + '"'),
+          );
+        if (p.opened && p.opened.text && p.opened.text !== p.quote)
+          row.appendChild(
+            span("ap-file-q", 'when the dialog opened: "' + p.opened.text + '"'),
+          );
         fv.appendChild(row);
       });
       if (!fv.childNodes.length)
@@ -4532,7 +4605,11 @@
         info.appendChild(
           span(
             null,
-            (a.resolution === "lifted" ? "Ban lifted" : "Dismissed") +
+            (a.resolution === "lifted"
+              ? "Ban lifted"
+              : a.resolution === "ended"
+                ? "Ban ended, closed on its own"
+                : "Declined") +
               (a.reviewedBy ? " by " + cleanReviewer(a.reviewedBy) : "") +
               (a.reviewedAt ? " · " + relTime(a.reviewedAt) : ""),
           ),
@@ -6115,6 +6192,12 @@
     $("suggestionsRefresh").addEventListener("click", () =>
       socket.emit("staff get suggestions"),
     );
+  document.querySelectorAll("#appealsSeg button").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      appealsFilter = btn.dataset.s || "active";
+      renderAppeals();
+    });
+  });
   document.querySelectorAll("#appsSeg button").forEach((btn) => {
     btn.addEventListener("click", () => {
       document

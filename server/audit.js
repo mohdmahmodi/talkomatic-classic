@@ -38,6 +38,7 @@ function redactReceipt(r) {
     ...r,
     text: r.text != null ? maskIps(r.text) : r.text,
     trail: (r.trail || []).map((t) => ({ ...t, text: maskIps(t.text) })),
+    opened: r.opened ? { ...r.opened, text: maskIps(r.opened.text) } : r.opened,
     target: r.target ? { ...r.target, ip: undefined } : r.target,
   };
 }
@@ -1365,6 +1366,10 @@ function actionsOn(who, since, limit = 10) {
       role: e.role,
       at: e.ts,
       quote: e.receipt && e.receipt.text ? e.receipt.text : null,
+      opened:
+        e.receipt && e.receipt.opened && e.receipt.opened.text
+          ? { text: e.receipt.opened.text, at: e.receipt.opened.at }
+          : null,
       details: e.details || null,
     });
   }
