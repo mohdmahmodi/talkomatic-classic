@@ -122,8 +122,6 @@ function placeAutoBlock({ deviceId, ip, username, signal }) {
 function check({ deviceId, ip, username }) {
   if (!deviceId && !ip) return null;
   if (!state.blockedIPs.size) return null;
-  const last = deviceId ? recentAlerts.get(deviceId) : 0;
-  if (last && Date.now() - last < ALERT_COOLDOWN_MS) return null;
 
   const snap = snapshot();
   let signal = null;
@@ -166,6 +164,17 @@ function check({ deviceId, ip, username }) {
   }
 
   if (!signal) return null;
+  if (
+    signal.kind === "history" &&
+    deviceId &&
+    (signal.seenCount || 0) >= AUTO_BLOCK_MIN_SEEN
+  )
+    signal.autoBlocked = placeAutoBlock({ deviceId, ip, username, signal });
+  // The cooldown quiets repeat alerts about one device. It never holds back a
+  // block, so a weak match seen earlier cannot shield a strong one now.
+  const last = deviceId ? recentAlerts.get(deviceId) : 0;
+  if (!signal.autoBlocked && last && Date.now() - last < ALERT_COOLDOWN_MS)
+    return null;
   if (deviceId) {
     recentAlerts.set(deviceId, Date.now());
     identity.noteEvasion(deviceId);
@@ -200,12 +209,6 @@ function check({ deviceId, ip, username }) {
   if (signal.blocks && signal.blocks.length)
     for (const b of signal.blocks) lines.push("Block: " + b);
 
-  if (
-    signal.kind === "history" &&
-    deviceId &&
-    (signal.seenCount || 0) >= AUTO_BLOCK_MIN_SEEN
-  )
-    signal.autoBlocked = placeAutoBlock({ deviceId, ip, username, signal });
   if (signal.autoBlocked)
     lines.push(
       "Auto-block placed: " +

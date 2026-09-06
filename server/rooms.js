@@ -5807,6 +5807,7 @@ function registerSocketHandlers(opts) {
         let ip = targetSocket?.clientIp || null;
         let blockedName = null;
         let blockedDid = targetSocket?.deviceId || null;
+        const legacyDid = targetSocket?.legacyDeviceId || null;
         if (ip) {
           blockedName =
             targetUser?.username ||
@@ -5883,6 +5884,7 @@ function registerSocketHandlers(opts) {
         };
         if (blockKey) placeBlock(blockKey, { ...blockEntry });
         if (blockedDid) placeBlock(ipban.idKey(blockedDid), { ...blockEntry });
+        if (legacyDid) placeBlock(ipban.idKey(legacyDid), { ...blockEntry });
         blocklist.saveSoon();
         evasion.invalidate();
         banhistory.record({
@@ -5905,12 +5907,14 @@ function registerSocketHandlers(opts) {
             ),
           );
         else if (ip) affected.push(...findSocketsByIp(ip));
-        if (blockedDid) {
-          for (const s of io().sockets.sockets.values()) {
-            if (s.deviceId === blockedDid && !affected.includes(s))
+        const blockedIds = new Set([blockedDid, legacyDid].filter(Boolean));
+        if (blockedIds.size)
+          for (const s of io().sockets.sockets.values())
+            if (
+              (blockedIds.has(s.deviceId) || blockedIds.has(s.legacyDeviceId)) &&
+              !affected.includes(s)
+            )
               affected.push(s);
-          }
-        }
         for (const s of affected) {
           try {
             const uid = s.handshake?.session?.userId;
@@ -5931,7 +5935,14 @@ function registerSocketHandlers(opts) {
           reason || undefined,
           { receipt, justify: justifyFor(socket, duration) },
         );
-        stampBlocks([blockKey, blockedDid ? ipban.idKey(blockedDid) : null], entry.id);
+        stampBlocks(
+          [
+            blockKey,
+            blockedDid ? ipban.idKey(blockedDid) : null,
+            legacyDid ? ipban.idKey(legacyDid) : null,
+          ],
+          entry.id,
+        );
         blocklist.saveSoon();
         if (entry.justify) oweWriteup(socket, entry, blockedName, duration);
         socket.emit("staff action result", {
