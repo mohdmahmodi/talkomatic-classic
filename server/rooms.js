@@ -774,6 +774,31 @@ function isStaffSocket(socket) {
   return !!(socket && (socket.isDev || socket.isMod));
 }
 
+// A staff board goes to everyone watching it, plus `also` when the socket that
+// acted is not one of them. A view is two booleans, so the list is built once
+// per distinct view rather than once per recipient.
+function sendBoard(event, build, watches, also) {
+  if (!io()) return;
+  const built = new Map();
+  const listFor = (socket) => {
+    const view = roles.viewFor(socket);
+    const key = (view.ip ? "1" : "0") + (view.names ? "1" : "0");
+    if (!built.has(key)) built.set(key, build(view));
+    return built.get(key);
+  };
+  let sentToAlso = false;
+  for (const [, s] of io().sockets.sockets)
+    if (watches(s)) {
+      s.emit(event, listFor(s));
+      sentToAlso = sentToAlso || s === also;
+    }
+  if (also && also.connected && !sentToAlso) also.emit(event, listFor(also));
+}
+
+const watchesBoard = (s) => s.isModLog && (s.isDev || s.isMod);
+const watchesFullBoard = (s) =>
+  s.isModLog && (s.isDev || (s.isMod && (s.modLevel || 1) >= 2));
+
 function findSocketsByUserId(userId) {
   const result = [];
   if (!io() || !userId) return result;
@@ -1547,10 +1572,30 @@ function resolveOfflineTarget(targetUserId) {
   };
 }
 
+// findSocketsByUserId and getUserCurrentRoom for every user at once, so a
+// board of reports does not walk the connections and rooms once per row.
+function presenceByUser() {
+  const sockets = new Map();
+  if (io())
+    for (const [, s] of io().sockets.sockets) {
+      const id = s.handshake?.session?.userId;
+      if (!id) continue;
+      const arr = sockets.get(id);
+      if (arr) arr.push(s);
+      else sockets.set(id, [s]);
+    }
+  const seatedIn = new Map();
+  for (const [, room] of state.rooms)
+    for (const u of room.users || [])
+      if (!seatedIn.has(u.id)) seatedIn.set(u.id, { room, user: u });
+  return { sockets, seatedIn };
+}
+
 function buildReportsList(view) {
   const showIp = !!(view && view.ip);
+  const live = presenceByUser();
   return reports.summary().map((s) => {
-    const targets = findSocketsByUserId(s.targetKey);
+    const targets = live.sockets.get(s.targetKey) || [];
     const online = targets.length > 0;
     let name = s.name;
     let roomName = null;
@@ -1559,9 +1604,9 @@ function buildReportsList(view) {
     let targetDeviceId = lk.deviceId || null;
     let targetIp = lk.ip || null;
     if (online) {
-      const rid = getUserCurrentRoom(s.targetKey);
-      const room = rid ? state.rooms.get(rid) : null;
-      const u = room?.users.find((x) => x.id === s.targetKey);
+      const seat = live.seatedIn.get(s.targetKey) || null;
+      const room = seat ? seat.room : null;
+      const u = seat ? seat.user : null;
       name =
         (u && u.username) || targets[0].handshake?.session?.username || name;
       roomName = room?.name || null;
@@ -1656,18 +1701,6 @@ function buildAppealsList(view) {
   return appeals.list().map((a) => appealRow(a, view));
 }
 
-// A view is two booleans, so a board that goes out to every staff socket only
-// ever has a couple of distinct shapes. Building it once per shape instead of
-// once per socket is what keeps a decision from stalling the whole server.
-function appealsListMemo() {
-  const memo = new Map();
-  return (view) => {
-    const key = (view && view.ip ? "1" : "0") + (view && view.names ? "1" : "0");
-    if (!memo.has(key)) memo.set(key, buildAppealsList(view));
-    return memo.get(key);
-  };
-}
-
 // One appeal as staff see it. The person lookup is done once here and
 // shared with the file, which is what makes opening a single appeal cheap.
 function appealRow(a, view) {
@@ -1757,14 +1790,7 @@ function appealRow(a, view) {
 }
 
 function broadcastAppealsList(also) {
-  if (!io()) return;
-  const listFor = appealsListMemo();
-  for (const [, s] of io().sockets.sockets)
-    if (s.isModLog && (s.isDev || (s.isMod && (s.modLevel || 1) >= 2)))
-      s.emit("staff appeals", listFor(roles.viewFor(s)));
-  // The acting socket is not always on the board, so it is told separately.
-  if (also && also.connected && !also.isModLog)
-    also.emit("staff appeals", listFor(roles.viewFor(also)));
+  sendBoard("staff appeals", buildAppealsList, watchesFullBoard, also);
 }
 
 function buildSuggestionsList(view) {
@@ -1782,11 +1808,8 @@ function buildSuggestionsList(view) {
   }));
 }
 
-function broadcastSuggestionsList() {
-  if (!io()) return;
-  for (const [, s] of io().sockets.sockets)
-    if (s.isModLog && (s.isDev || (s.isMod && (s.modLevel || 1) >= 2)))
-      s.emit("staff suggestions", buildSuggestionsList(roles.viewFor(s)));
+function broadcastSuggestionsList(also) {
+  sendBoard("staff suggestions", buildSuggestionsList, watchesFullBoard, also);
 }
 
 // ── Community suggestion board ──────────────────────────────────────────────
@@ -1990,31 +2013,21 @@ function broadcastApplicationsState() {
     s.emit("applications state", { open: !!applications.isOpen() });
 }
 
-function broadcastReportsList() {
-  if (!io()) return;
-  for (const [, s] of io().sockets.sockets)
-    if (s.isModLog && (s.isDev || s.isMod))
-      s.emit("staff reports", buildReportsList(roles.viewFor(s)));
+function broadcastReportsList(also) {
+  sendBoard("staff reports", buildReportsList, watchesBoard, also);
 }
 
 function clearReportAfterAction(socket, targetUserId) {
   if (!targetUserId || !reports.clear(targetUserId)) return;
-  broadcastReportsList();
-  socket.emit("staff reports", buildReportsList(roles.viewFor(socket)));
+  broadcastReportsList(socket);
 }
 
-function broadcastBlockList() {
-  if (!io()) return;
-  for (const [, s] of io().sockets.sockets)
-    if (s.isModLog && (s.isDev || (s.isMod && (s.modLevel || 1) >= 2)))
-      s.emit("dev blocks", buildBlockList(roles.viewFor(s)));
+function broadcastBlockList(also) {
+  sendBoard("dev blocks", buildBlockList, watchesFullBoard, also);
 }
 
-function broadcastBanHistory() {
-  if (!io()) return;
-  for (const [, s] of io().sockets.sockets)
-    if (s.isModLog && (s.isDev || (s.isMod && (s.modLevel || 1) >= 2)))
-      s.emit("staff ban history", buildBanHistory(roles.viewFor(s)));
+function broadcastBanHistory(also) {
+  sendBoard("staff ban history", buildBanHistory, watchesFullBoard, also);
   try {
     staffchat.pushBans();
   } catch (_) {}
@@ -8243,14 +8256,13 @@ function registerSocketHandlers(opts) {
           .summary()
           .find((s) => s.targetKey === targetUserId);
         reports.clear(targetUserId);
-        broadcastReportsList();
         logStaff(
           socket,
           "dismiss report",
           { name: before?.name || "?", id: targetUserId },
           "-",
         );
-        socket.emit("staff reports", buildReportsList(roles.viewFor(socket)));
+        broadcastReportsList(socket);
       }),
     );
 
@@ -8270,8 +8282,7 @@ function registerSocketHandlers(opts) {
                 (m.card.ids || []).includes(targetUserId)),
           );
         } catch (_) {}
-        broadcastReportsList();
-        socket.emit("staff reports", buildReportsList(roles.viewFor(socket)));
+        broadcastReportsList(socket);
         socket.emit("staff action result", {
           action: "delete report",
           ok: had,
@@ -8615,9 +8626,8 @@ function registerSocketHandlers(opts) {
           { name: s.name || "?", id: s.userId || s.deviceId || "-" },
           "-",
         );
-        broadcastSuggestionsList();
+        broadcastSuggestionsList(socket);
         settleQueueItem("suggestion", id);
-        socket.emit("staff suggestions", buildSuggestionsList(roles.viewFor(socket)));
       }),
     );
 

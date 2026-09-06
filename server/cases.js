@@ -67,10 +67,22 @@ function notesFor(caseId) {
 
 // ── Building cases ──────────────────────────────────────────────────────────
 
+let actIndex = null;
+let actIndexRev = -1;
+
+// Opening a record, paging its cases and exporting it all want the same index.
+function indexActs() {
+  const rev = audit.revisionOf();
+  if (actIndex && actIndexRev === rev) return actIndex;
+  actIndex = buildActIndex();
+  actIndexRev = rev;
+  return actIndex;
+}
+
 // Every action that landed on a person, indexed by user id and device id, so
 // a record with three hundred targets does not scan the log three hundred
 // times.
-function indexActs() {
+function buildActIndex() {
   const byUid = new Map();
   const byDid = new Map();
   const put = (map, key, act) => {
@@ -140,7 +152,7 @@ function mildBefore(steps, i) {
 
 function appealOutcome(heavy) {
   const ids = new Set(heavy.flatMap((s) => s.ids));
-  const a = appeals.list().find((x) => x.ban && ids.has(x.ban.auditId));
+  const a = appeals.forBanAudit(ids);
   if (!a) return null;
   const issuer = heavy.find((s) => s.ids.includes(a.ban.auditId)).by;
   if (a.status !== "resolved") return { kind: "appeal open", appealId: a.id };

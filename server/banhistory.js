@@ -15,6 +15,15 @@ let events = [];
 let seq = 0;
 let saveTimer = null;
 
+// Bans per address, so the block list does not walk the log once per row.
+let banCounts = null;
+
+function trim() {
+  if (events.length <= MAX) return;
+  events = events.slice(-MAX);
+  banCounts = null;
+}
+
 function load() {
   try {
     const arr = JSON.parse(fs.readFileSync(STORE_PATH, "utf8"));
@@ -25,6 +34,7 @@ function load() {
       console.error("Error loading ban-history.json:", err);
     events = [];
   }
+  banCounts = null;
 }
 
 function saveSoon() {
@@ -32,7 +42,7 @@ function saveSoon() {
   saveTimer = setTimeout(async () => {
     saveTimer = null;
     try {
-      if (events.length > MAX) events = events.slice(-MAX);
+      trim();
       const tmp = STORE_PATH + ".tmp";
       await fsp.writeFile(tmp, JSON.stringify(events), "utf8");
       await fsp.rename(tmp, STORE_PATH);
@@ -44,7 +54,7 @@ function saveSoon() {
 
 function flushSync() {
   try {
-    if (events.length > MAX) events = events.slice(-MAX);
+    trim();
     const tmp = STORE_PATH + ".tmp";
     fs.writeFileSync(tmp, JSON.stringify(events), "utf8");
     fs.renameSync(tmp, STORE_PATH);
@@ -54,7 +64,7 @@ function flushSync() {
 }
 
 function record({ ip, name, action, by, byRole, at, reason, duration }) {
-  events.push({
+  const e = {
     id: ++seq,
     ip: ip || null,
     name: name || null,
@@ -64,16 +74,23 @@ function record({ ip, name, action, by, byRole, at, reason, duration }) {
     at: at || Date.now(),
     reason: reason || null,
     duration: duration || null,
-  });
-  if (events.length > MAX) events = events.slice(-MAX);
+  };
+  events.push(e);
+  if (banCounts && e.action === "ban" && e.ip)
+    banCounts.set(e.ip, (banCounts.get(e.ip) || 0) + 1);
+  trim();
   saveSoon();
 }
 
 function countBans(ip) {
   if (!ip) return 0;
-  let n = 0;
-  for (const e of events) if (e.ip === ip && e.action === "ban") n++;
-  return n;
+  if (!banCounts) {
+    banCounts = new Map();
+    for (const e of events)
+      if (e.action === "ban" && e.ip)
+        banCounts.set(e.ip, (banCounts.get(e.ip) || 0) + 1);
+  }
+  return banCounts.get(ip) || 0;
 }
 
 function recent(limit) {

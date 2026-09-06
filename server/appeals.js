@@ -451,6 +451,40 @@ function remove(id) {
   return { ok: true, appeal: a };
 }
 
+// ── Appeals by the block they are about ─────────────────────────────────────
+// An appeal snapshots the ban it is about when it is filed and never rewrites
+// it, so the index only goes stale when the list itself changes. Each entry
+// keeps its rank in list() order, which is what decides ties below.
+let banIndex = null;
+let banIndexFrom = null;
+let banIndexSize = -1;
+
+function banIndexFor() {
+  if (banIndex && banIndexFrom === appeals && banIndexSize === appeals.length)
+    return banIndex;
+  banIndex = new Map();
+  list().forEach((a, rank) => {
+    const id = a.ban && a.ban.auditId;
+    if (!id) return;
+    const seen = banIndex.get(id);
+    if (!seen || rank < seen.rank) banIndex.set(id, { appeal: a, rank });
+  });
+  banIndexFrom = appeals;
+  banIndexSize = appeals.length;
+  return banIndex;
+}
+
+// The appeal about any of these audit entries that list() would reach first.
+function forBanAudit(auditIds) {
+  const idx = banIndexFor();
+  let best = null;
+  for (const id of auditIds) {
+    const hit = idx.get(id);
+    if (hit && (!best || hit.rank < best.rank)) best = hit;
+  }
+  return best ? best.appeal : null;
+}
+
 function openCount() {
   return appeals.reduce((n, a) => n + (a.status === "open" ? 1 : 0), 0);
 }
@@ -478,6 +512,7 @@ module.exports = {
   resolveOpenForDevice,
   remove,
   openForIp,
+  forBanAudit,
   openCount,
   list,
   flushSync,

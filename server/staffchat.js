@@ -703,14 +703,19 @@ function unreadFor(socket) {
 }
 
 // ── The team ────────────────────────────────────────────────────────────────
-function rosterFor(socket) {
+function lastActive() {
+  try {
+    return ctx.audit.lastActiveByLabel();
+  } catch (_) {
+    return new Map();
+  }
+}
+
+// `lastBy` is the same for every recipient, so a broadcast passes one in.
+function rosterFor(socket, lastBy) {
   const live = buildPresence(socket).staff;
   const online = new Map(live.map((s) => [s.role + ":" + s.label, s]));
-
-  let lastBy = new Map();
-  try {
-    lastBy = ctx.audit.lastActiveByLabel();
-  } catch (_) {}
+  if (!lastBy) lastBy = lastActive();
 
   const out = [...live];
   try {
@@ -750,9 +755,10 @@ function rosterFor(socket) {
 
 function rosterDirty() {
   if (!io()) return;
+  const lastBy = lastActive();
   for (const [, s] of io().sockets.sockets)
     if (s.connected && s.deskHello && isStaff(s))
-      s.emit("desk roster", { staff: rosterFor(s) });
+      s.emit("desk roster", { staff: rosterFor(s, lastBy) });
 }
 
 // ── Presence ────────────────────────────────────────────────────────────────
@@ -1028,9 +1034,18 @@ function dropActivity(ids) {
 
 function pushBans() {
   if (!io() || !ctx || !ctx.banHistory) return;
+  // Only the newest row goes out, but it comes from a whole rebuilt list, and
+  // there are only ever a couple of distinct views of that.
+  const byView = new Map();
   for (const [, s] of io().sockets.sockets) {
     if (!s.connected || !isStaff(s) || !canRead(s, "bans")) continue;
-    const list = ctx.banHistory(ctx.roles.viewFor(s));
+    const view = ctx.roles.viewFor(s);
+    const key = (view.ip ? "1" : "0") + (view.names ? "1" : "0");
+    let list = byView.get(key);
+    if (!list) {
+      list = ctx.banHistory(view);
+      byView.set(key, list);
+    }
     if (!list.length) continue;
     s.emit("desk message", { key: "bans", msg: banRow(list[0]) });
   }

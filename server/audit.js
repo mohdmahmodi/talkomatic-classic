@@ -15,12 +15,14 @@ let entries = [];
 let seq = 0;
 const lastIdentity = new Map();
 
-// Entries looked up by id, and by the person they landed on. Without these
-// every "what has staff done to this person" question walked the whole log,
-// which is what made the appeals board slow once the log grew.
+// Entries by id, and by the person they landed on.
 const byId = new Map();
 const onUid = new Map();
 const onDid = new Map();
+
+// Bumped on every change, so callers can tell whether a derived copy is stale.
+let revision = 0;
+const revisionOf = () => revision;
 
 function io() {
   return state.io;
@@ -126,6 +128,7 @@ function remove(ids) {
   });
   if (!gone.length) return [];
   reindex();
+  revision++;
   enqueueWrite(async () => {
     const tmp = AUDIT_PATH + ".tmp";
     await fsp.writeFile(
@@ -163,6 +166,7 @@ function push(entry) {
   entry.id = ++seq;
   entries.push(entry);
   indexEntry(entry);
+  revision++;
   persist(entry);
   broadcast(entry);
   return entry;
@@ -486,7 +490,11 @@ const DURATION_SUFFIX = new RegExp(
   "gi",
 );
 
-function baseAction(action) {
+// Action names come from a fixed vocabulary, so the strip is worth caching.
+const baseCache = new Map();
+const BASE_CACHE_CAP = 5000;
+
+function baseActionRaw(action) {
   return String(action || "?")
     .replace(/\s*\([\s\S]*$/, "")
     .replace(DURATION_SUFFIX, "")
@@ -494,6 +502,16 @@ function baseAction(action) {
     .replace(/\s+\d+$/, "")
     .trim()
     .toLowerCase();
+}
+
+function baseAction(action) {
+  const raw = String(action || "?");
+  const hit = baseCache.get(raw);
+  if (hit !== undefined) return hit;
+  const out = baseActionRaw(raw);
+  if (baseCache.size >= BASE_CACHE_CAP) baseCache.clear();
+  baseCache.set(raw, out);
+  return out;
 }
 
 const ACTION_GROUPS = [
@@ -1353,23 +1371,21 @@ function personKeys(who) {
 }
 
 // ── Target index ────────────────────────────────────────────────────────────
-// An entry lands on the person named by its target device or user id.
-// That test used to run over the whole log per question; now it runs once,
-// when the entry arrives.
 
-function bucket(map, key, e) {
+function addTo(map, key, e) {
   if (!key) return;
   const arr = map.get(key);
   if (arr) arr.push(e);
   else map.set(key, [e]);
 }
 
+// An entry lands on the person named by its target device or user id.
 function indexEntry(e) {
   if (e.id) byId.set(e.id, e);
   if (e.type !== "action" || groupOf(e.action) !== "users") return;
   const t = e.tgt || {};
-  bucket(onUid, t.uid || (parseUserTag(e.target) || {}).id || null, e);
-  bucket(onDid, t.did || null, e);
+  addTo(onUid, t.uid || (parseUserTag(e.target) || {}).id || null, e);
+  addTo(onDid, t.did || null, e);
 }
 
 function reindex() {
@@ -1379,7 +1395,7 @@ function reindex() {
   for (const e of entries) indexEntry(e);
 }
 
-// Every indexed entry for one person, newest first, stopping at `since`.
+// Everything on one person, newest first, back as far as `since`.
 function hitsOn(who, since) {
   const keys = personKeys(who);
   const seen = new Set();
@@ -1670,6 +1686,7 @@ function load() {
       .filter(Boolean);
     seq = entries.reduce((m, e) => Math.max(m, e.id || 0), 0);
     reindex();
+    revision++;
     for (const e of entries) if (e.type === "writeup") attachWriteup(e);
     for (const e of entries) {
       if (e.type === "identity" && e.userId)
@@ -1694,6 +1711,7 @@ loadFlagReviews();
 }
 
 module.exports = {
+  revisionOf,
   recordAction,
   recordWriteup,
   getEntry,
