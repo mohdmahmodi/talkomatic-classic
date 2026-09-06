@@ -393,6 +393,32 @@ state.io = io;
 
 io.use(sharedsession(sessionMiddleware, { autoSave: true }));
 
+const LEGACY_DEVICE_ID = /^[a-f0-9-]{8,64}$/i;
+
+function legacyDeviceId(raw) {
+  return typeof raw === "string" && LEGACY_DEVICE_ID.test(raw)
+    ? raw.toLowerCase()
+    : null;
+}
+
+// Who is asking over HTTP: their address, the signed device id, and the
+// client-supplied id that blocks placed before signing existed still key on.
+function requester(req) {
+  const raw =
+    typeof req.query?.deviceId === "string"
+      ? req.query.deviceId
+      : typeof req.body?.deviceId === "string"
+        ? req.body.deviceId
+        : req.session?.did || "";
+  const legacyId = legacyDeviceId(raw);
+  const deviceId = req.deviceId || legacyId;
+  return {
+    ip: getClientIP(req),
+    deviceId,
+    legacyId: legacyId !== deviceId ? legacyId : null,
+  };
+}
+
 // Socket.IO security middleware: IP blocks, dev key validation, antibot,
 // connection caps, and per-socket event rate limiting
 io.use((socket, next) => {
@@ -411,11 +437,7 @@ io.use((socket, next) => {
     const signedId = devicetoken.idFromCookieHeader(
       socket.handshake.headers.cookie,
     );
-    const rawDeviceId = socket.handshake.auth.deviceId;
-    const legacyId =
-      typeof rawDeviceId === "string" && /^[a-f0-9-]{8,64}$/i.test(rawDeviceId)
-        ? rawDeviceId.toLowerCase()
-        : null;
+    const legacyId = legacyDeviceId(socket.handshake.auth.deviceId);
     const deviceId = signedId || legacyId;
     if (deviceId) {
       socket.deviceId = deviceId;
@@ -430,14 +452,11 @@ io.use((socket, next) => {
       } catch (_) {}
     }
 
-    // Blocked if the address is banned, it falls inside a banned range, or
-    // either of the device ids carries a block.
-    const activeBlock =
-      ipban.findActiveBlock(clientIp) ||
-      (deviceId ? ipban.findActiveIdBlock(deviceId) : null) ||
-      (socket.legacyDeviceId
-        ? ipban.findActiveIdBlock(socket.legacyDeviceId)
-        : null);
+    const activeBlock = ipban.findActiveBlockFor({
+      ip: clientIp,
+      deviceId,
+      legacyId: socket.legacyDeviceId || null,
+    });
     if (activeBlock) {
       const block = activeBlock.block;
       const expiry = block && typeof block === "object" ? block.expiry : block;
@@ -1093,26 +1112,14 @@ app.get(`${API}/me`, (req, res) => {
 // appeal per IP, so the inbox cannot be flooded.
 app.post(`${API}/appeal`, (req, res) => {
   try {
-    const ip = getClientIP(req);
-    const rawDevice =
-      typeof req.body?.deviceId === "string"
-        ? req.body.deviceId
-        : req.session?.did || "";
-    const legacyId = /^[a-f0-9-]{8,64}$/i.test(rawDevice)
-      ? rawDevice.toLowerCase()
-      : null;
-    const deviceId = req.deviceId || legacyId;
-    // Match a range ban too, so a range-banned user (whose exact address is not
-    // itself a key) can still submit an appeal from the ban screen.
-    const byDevice = deviceId ? ipban.findActiveIdBlock(deviceId) : null;
-    const byLegacy =
-      legacyId && legacyId !== deviceId ? ipban.findActiveIdBlock(legacyId) : null;
-    const active = ipban.findActiveBlock(ip) || byDevice || byLegacy;
+    const who = requester(req);
+    const { ip } = who;
+    const active = ipban.findActiveBlockFor(who);
     if (!active) return res.json({ ok: false, code: "not_banned" });
     const block = active.block;
-    // The appeal is filed under the id the block actually matched, so the
-    // history behind that block is the history staff see beside the appeal.
-    const appealDeviceId = active === byLegacy ? legacyId : deviceId;
+    // Filed under the id the block matched, so the history behind that block
+    // is the history staff see beside the appeal.
+    const appealDeviceId = active.deviceId;
 
     const message = sanitizeMessage(
       typeof req.body?.message === "string" ? req.body.message : "",
@@ -1165,26 +1172,12 @@ app.post(`${API}/appeal`, (req, res) => {
 // socket to push to it. Never exposes anything about the moderator beyond the
 // label they already sign their messages with.
 function appealForBrowser(req) {
-  const ip = getClientIP(req);
-  const rawDevice =
-    typeof req.query?.deviceId === "string"
-      ? req.query.deviceId
-      : typeof req.body?.deviceId === "string"
-        ? req.body.deviceId
-        : req.session?.did || "";
-  const legacyId = /^[a-f0-9-]{8,64}$/i.test(rawDevice)
-    ? rawDevice.toLowerCase()
-    : null;
-  const deviceId = req.deviceId || legacyId;
+  const who = requester(req);
+  const { ip, deviceId } = who;
   // Which ban they are serving right now. The appeal shown is the one about
   // THIS ban: an old one from a ban they already served is history and must
   // not stand in the way of appealing the ban they are actually under.
-  const active =
-    ipban.findActiveBlock(ip) ||
-    (deviceId ? ipban.findActiveIdBlock(deviceId) : null) ||
-    (legacyId && legacyId !== deviceId
-      ? ipban.findActiveIdBlock(legacyId)
-      : null);
+  const active = ipban.findActiveBlockFor(who);
   const b = active && typeof active.block === "object" ? active.block : null;
   const banKey = active
     ? appeals.banKeyOf({
@@ -1329,14 +1322,9 @@ function ownFile(req, deviceId) {
 }
 
 app.get(`${API}/ban-status`, (req, res) => {
-  const ip = getClientIP(req);
-  const deviceId = req.deviceId || req.session?.did || null;
-  // Range-aware: a range-banned user must keep reading banned:true here (matches
-  // the socket gate), or the ban screen would think they were unbanned and
-  // reload-loop. Mirrors the socket gate exactly, session identity included.
-  const active =
-    ipban.findActiveBlock(ip) ||
-    (deviceId ? ipban.findActiveIdBlock(deviceId) : null);
+  const who = requester(req);
+  const { deviceId } = who;
+  const active = ipban.findActiveBlockFor(who);
   const block = active ? active.block : null;
   const b = block && typeof block === "object" ? block : null;
   const expiry = b ? b.expiry : block;
@@ -1359,10 +1347,10 @@ app.get(`${API}/ban-status`, (req, res) => {
 // The person read the rules and is coming back. Clears the flag the socket
 // gate checks and leaves a line in the log beside the block.
 app.post(`${API}/ban-acknowledge`, (req, res) => {
-  const ip = getClientIP(req);
-  const deviceId = req.deviceId || req.session?.did || null;
+  const who = requester(req);
+  const { ip, deviceId } = who;
   if (!deviceId) return res.json({ ok: false, code: "no_device" });
-  if (ipban.findActiveBlock(ip) || ipban.findActiveIdBlock(deviceId))
+  if (ipban.findActiveBlockFor(who))
     return res.json({ ok: false, code: "still_blocked" });
   identity.setAckDue(deviceId, false);
   audit.recordRulesAccepted({

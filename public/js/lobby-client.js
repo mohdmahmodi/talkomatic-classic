@@ -768,12 +768,13 @@ function showBanScreen(info) {
       read.innerHTML = '<i class="fas fa-book-open"></i> Read the rules';
       const back = node("button", "bs-btn primary");
       back.type = "button";
-      back.disabled = true;
+      back.disabled = !rulesRead;
       back.innerHTML = '<i class="fas fa-arrow-right"></i> I have read them, let me back in';
       read.addEventListener("click", () => {
         if (window.TalkomaticRules) window.TalkomaticRules.open();
         const rules = document.querySelector(".tkm-overlay");
         if (rules) rules.style.zIndex = "1000002";
+        rulesRead = true;
         back.disabled = false;
       });
       back.addEventListener("click", () => acknowledge(back));
@@ -1304,6 +1305,7 @@ function showBanScreen(info) {
   // once; ban-status fills in the rest and, later, says when it is over.
   let countdownTimer = null;
   let appealStarted = false;
+  let rulesRead = false;
 
   function apply(d) {
     paintState(d);
@@ -1341,7 +1343,8 @@ function showBanScreen(info) {
 
   function refresh() {
     if (document.hidden) return;
-    fetch("/api/v1/ban-status", { credentials: "same-origin", cache: "no-store" })
+    const q = deviceIdOf() ? "?deviceId=" + encodeURIComponent(deviceIdOf()) : "";
+    fetch("/api/v1/ban-status" + q, { credentials: "same-origin", cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (!d || typeof d.banned !== "boolean") return;

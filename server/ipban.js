@@ -156,6 +156,17 @@ function findActiveIdBlock(id) {
   return null;
 }
 
+// The block a requester is serving under any id they carry, and which id hit.
+function findActiveBlockFor({ ip, deviceId, legacyId }) {
+  const byIp = findActiveBlock(ip);
+  if (byIp) return { ...byIp, deviceId: deviceId || null };
+  for (const id of [deviceId, legacyId]) {
+    const hit = id ? findActiveIdBlock(id) : null;
+    if (hit) return { ...hit, deviceId: id };
+  }
+  return null;
+}
+
 function removeBlocksForDevice(id) {
   const removed = [];
   if (!id) return removed;
@@ -256,6 +267,7 @@ module.exports = {
   isActiveBlock,
   isPermanentBlock,
   findActiveIdBlock,
+  findActiveBlockFor,
   removeBlocksForDevice,
   computeRangeCidr,
   autoRangeCidr,
