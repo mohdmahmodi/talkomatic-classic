@@ -7,6 +7,7 @@ const crypto = require("crypto");
 const util = require("util");
 const WordFilter = require("../public/js/word-filter.js");
 const nameguard = require("./nameguard");
+const cloudflare = require("./cloudflare");
 
 // ── Config ──────────────────────────────────────────────────────────────────
 
@@ -215,9 +216,34 @@ const state = {
 
 // ── Utility Functions ───────────────────────────────────────────────────────
 
+function deliveringHop(req) {
+  const realIP = req.headers["x-real-ip"];
+  if (realIP) return realIP;
+  const forwarded = req.headers["x-forwarded-for"];
+  if (forwarded) return forwarded.split(",").pop().trim();
+  return req.socket?.remoteAddress || req.connection?.remoteAddress;
+}
+
+const CLOUDFLARE_STRICT = process.env.CLOUDFLARE_STRICT === "1";
+let lastUnverifiedWarn = 0;
+
+function noteUnverifiedCf(req) {
+  const now = Date.now();
+  if (now - lastUnverifiedWarn < 60000) return;
+  lastUnverifiedWarn = now;
+  console.warn(
+    `cf-connecting-ip from a non-Cloudflare hop (${deliveringHop(req)}); ` +
+      (CLOUDFLARE_STRICT ? "ignored" : "trusted, CLOUDFLARE_STRICT is off"),
+  );
+}
+
 function getClientIP(req) {
   const cfIP = req.headers["cf-connecting-ip"];
-  if (cfIP) return cfIP;
+  if (cfIP) {
+    if (cloudflare.isEdge(deliveringHop(req))) return cfIP;
+    noteUnverifiedCf(req);
+    if (!CLOUDFLARE_STRICT) return cfIP;
+  }
   const realIP = req.headers["x-real-ip"];
   if (realIP) return realIP;
   const forwarded = req.headers["x-forwarded-for"];
