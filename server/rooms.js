@@ -1656,6 +1656,18 @@ function buildAppealsList(view) {
   return appeals.list().map((a) => appealRow(a, view));
 }
 
+// A view is two booleans, so a board that goes out to every staff socket only
+// ever has a couple of distinct shapes. Building it once per shape instead of
+// once per socket is what keeps a decision from stalling the whole server.
+function appealsListMemo() {
+  const memo = new Map();
+  return (view) => {
+    const key = (view && view.ip ? "1" : "0") + (view && view.names ? "1" : "0");
+    if (!memo.has(key)) memo.set(key, buildAppealsList(view));
+    return memo.get(key);
+  };
+}
+
 // One appeal as staff see it. The person lookup is done once here and
 // shared with the file, which is what makes opening a single appeal cheap.
 function appealRow(a, view) {
@@ -1744,11 +1756,15 @@ function appealRow(a, view) {
   }
 }
 
-function broadcastAppealsList() {
+function broadcastAppealsList(also) {
   if (!io()) return;
+  const listFor = appealsListMemo();
   for (const [, s] of io().sockets.sockets)
     if (s.isModLog && (s.isDev || (s.isMod && (s.modLevel || 1) >= 2)))
-      s.emit("staff appeals", buildAppealsList(roles.viewFor(s)));
+      s.emit("staff appeals", listFor(roles.viewFor(s)));
+  // The acting socket is not always on the board, so it is told separately.
+  if (also && also.connected && !also.isModLog)
+    also.emit("staff appeals", listFor(roles.viewFor(also)));
 }
 
 function buildSuggestionsList(view) {
@@ -8491,10 +8507,9 @@ function registerSocketHandlers(opts) {
             note || undefined,
           );
         }
-        broadcastAppealsList();
+        broadcastAppealsList(socket);
         broadcastAppeal(id);
         settleQueueItem("appeal", id);
-        socket.emit("staff appeals", buildAppealsList(roles.viewFor(socket)));
       }),
     );
 
@@ -8510,8 +8525,7 @@ function registerSocketHandlers(opts) {
           typeof data?.name === "string" ? data.name : "-",
           "-",
         );
-        broadcastAppealsList();
-        socket.emit("staff appeals", buildAppealsList(roles.viewFor(socket)));
+        broadcastAppealsList(socket);
       }),
     );
 
@@ -8527,8 +8541,7 @@ function registerSocketHandlers(opts) {
             createErrorResponse(ERROR_CODES.BAD_REQUEST, "No such appeal."),
           );
         settleQueueItem("appeal", id);
-        broadcastAppealsList();
-        socket.emit("staff appeals", buildAppealsList(roles.viewFor(socket)));
+        broadcastAppealsList(socket);
       }),
     );
 

@@ -15,6 +15,13 @@ let entries = [];
 let seq = 0;
 const lastIdentity = new Map();
 
+// Entries looked up by id, and by the person they landed on. Without these
+// every "what has staff done to this person" question walked the whole log,
+// which is what made the appeals board slow once the log grew.
+const byId = new Map();
+const onUid = new Map();
+const onDid = new Map();
+
 function io() {
   return state.io;
 }
@@ -118,6 +125,7 @@ function remove(ids) {
     return false;
   });
   if (!gone.length) return [];
+  reindex();
   enqueueWrite(async () => {
     const tmp = AUDIT_PATH + ".tmp";
     await fsp.writeFile(
@@ -154,6 +162,7 @@ function persist(entry) {
 function push(entry) {
   entry.id = ++seq;
   entries.push(entry);
+  indexEntry(entry);
   persist(entry);
   broadcast(entry);
   return entry;
@@ -369,7 +378,7 @@ function recordWriteup({ entryId, role, label, fields, rule, text, amend }) {
 }
 
 function getEntry(id) {
-  return entries.find((e) => e.id === id) || null;
+  return byId.get(id) || null;
 }
 
 const PACIFIC_FMT = (() => {
@@ -1336,14 +1345,6 @@ function toAct(e) {
   );
 }
 
-function landedOn(e, who) {
-  if (e.type !== "action" || groupOf(e.action) !== "users") return false;
-  const t = e.tgt || {};
-  if (who.deviceIds && t.did && who.deviceIds.has(t.did)) return true;
-  const uid = t.uid || (parseUserTag(e.target) || {}).id;
-  return !!(uid && who.userIds.has(uid));
-}
-
 function personKeys(who) {
   return {
     userIds: new Set([who.userId, ...(who.userIds || [])].filter(Boolean)),
@@ -1351,15 +1352,60 @@ function personKeys(who) {
   };
 }
 
+// ── Target index ────────────────────────────────────────────────────────────
+// An entry lands on the person named by its target device or user id.
+// That test used to run over the whole log per question; now it runs once,
+// when the entry arrives.
+
+function bucket(map, key, e) {
+  if (!key) return;
+  const arr = map.get(key);
+  if (arr) arr.push(e);
+  else map.set(key, [e]);
+}
+
+function indexEntry(e) {
+  if (e.id) byId.set(e.id, e);
+  if (e.type !== "action" || groupOf(e.action) !== "users") return;
+  const t = e.tgt || {};
+  bucket(onUid, t.uid || (parseUserTag(e.target) || {}).id || null, e);
+  bucket(onDid, t.did || null, e);
+}
+
+function reindex() {
+  byId.clear();
+  onUid.clear();
+  onDid.clear();
+  for (const e of entries) indexEntry(e);
+}
+
+// Every indexed entry for one person, newest first, stopping at `since`.
+function hitsOn(who, since) {
+  const keys = personKeys(who);
+  const seen = new Set();
+  const out = [];
+  const take = (arr) => {
+    if (!arr) return;
+    for (let i = arr.length - 1; i >= 0; i--) {
+      const e = arr[i];
+      if ((e.ts || 0) < since) break;
+      if (seen.has(e)) continue;
+      seen.add(e);
+      out.push(e);
+    }
+  };
+  for (const did of keys.deviceIds) take(onDid.get(did));
+  for (const uid of keys.userIds) take(onUid.get(uid));
+  out.sort((a, b) => (b.ts || 0) - (a.ts || 0) || (b.id || 0) - (a.id || 0));
+  return out;
+}
+
 // Everything staff have done to one person since a moment in time, newest
 // first. Any staff member, not just the one asking.
 function actionsOn(who, since, limit = 10) {
-  const keys = personKeys(who);
   const out = [];
-  for (let i = entries.length - 1; i >= 0 && out.length < limit; i--) {
-    const e = entries[i];
-    if ((e.ts || 0) < since) break;
-    if (!landedOn(e, keys)) continue;
+  for (const e of hitsOn(who, since)) {
+    if (out.length >= limit) break;
     out.push({
       action: e.action,
       by: e.label,
@@ -1377,8 +1423,7 @@ function actionsOn(who, since, limit = 10) {
 }
 
 function entriesOn(who) {
-  const keys = personKeys(who);
-  return entries.filter((e) => landedOn(e, keys));
+  return hitsOn(who, 0).sort((a, b) => (a.id || 0) - (b.id || 0));
 }
 
 function actsForLabel(label, role, since = 0) {
@@ -1624,6 +1669,7 @@ function load() {
       })
       .filter(Boolean);
     seq = entries.reduce((m, e) => Math.max(m, e.id || 0), 0);
+    reindex();
     for (const e of entries) if (e.type === "writeup") attachWriteup(e);
     for (const e of entries) {
       if (e.type === "identity" && e.userId)
@@ -1635,6 +1681,7 @@ function load() {
   } catch (err) {
     if (err.code !== "ENOENT") console.error("audit load failed:", err);
     entries = [];
+    reindex();
   }
 }
 
