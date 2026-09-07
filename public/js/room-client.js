@@ -2947,7 +2947,10 @@ function getAvailableViewportHeight() {
 function adjustLayout() {
   injectStyles();
   const container = document.querySelector(".chat-container");
-  const rows = document.querySelectorAll(".chat-row");
+  const hidingBots = document.body.classList.contains("tk-hide-bots");
+  const rows = [...document.querySelectorAll(".chat-row")].filter(
+    (row) => !(hidingBots && row.classList.contains("bot-user")),
+  );
   if (!container || rows.length === 0) return;
 
   const activeEl = document.activeElement;
@@ -2982,6 +2985,7 @@ function adjustLayout() {
     let cols = Math.floor((cw + GAP) / (target + GAP));
     cols = Math.max(2, Math.min(maxCols, cols, rows.length));
     const gridRows = Math.ceil(rows.length / cols);
+    cols = Math.ceil(rows.length / gridRows);
     const availH = container.clientHeight - vpad;
     const idealH = Math.floor((availH - (gridRows - 1) * GAP) / gridRows);
     const cellH = Math.max(120, idealH);
@@ -3776,6 +3780,7 @@ window.addEventListener("load", () => {
         localStorage.setItem("tkHideBots", off ? "0" : "1");
       } catch (e) {}
       paintHideBots();
+      adjustLayout();
     });
   }
 
