@@ -1985,13 +1985,9 @@ function createRoomElement(room) {
           : lvl === 1
             ? "mod-lobby-badge mod-lobby-badge-jr"
             : "mod-lobby-badge";
-      mb.textContent = lvl >= 3 ? "LEADER" : lvl === 1 ? "JR MOD" : "MOD";
-      mb.title =
-        lvl >= 3
-          ? "Mod Leader (L3)"
-          : lvl === 1
-            ? "Junior Moderator (L1)"
-            : "Moderator (L2)";
+      const rank = StaffUI.rank(lvl);
+      mb.textContent = rank.chip;
+      mb.title = rank.title;
       userDiv.appendChild(mb);
     }
 

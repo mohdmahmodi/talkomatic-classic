@@ -65,7 +65,7 @@
 
   function badgeFor(role) {
     if (role === "dev") {
-      const b = el("span", { class: "gm-staff gm-staff-dev", title: "Talkomatic admin" });
+      const b = el("span", { class: "gm-staff gm-staff-dev", title: StaffUI.rank("dev").title });
       const crown = el("img", { alt: "" });
       crown.src = "images/icons/crown.gif";
       crown.onerror = () => crown.remove();
@@ -73,12 +73,14 @@
       b.appendChild(document.createTextNode("ADMIN"));
       return b;
     }
-    if (role === "lead")
-      return el("span", { class: "gm-staff gm-staff-lead", title: "Mod Leader (L3)", text: "LEADER" });
-    if (role === "mod")
-      return el("span", { class: "gm-staff gm-staff-mod", title: "Moderator (L2)", text: "MOD" });
-    if (role === "jr")
-      return el("span", { class: "gm-staff gm-staff-jr", title: "Junior Moderator (L1)", text: "JR MOD" });
+    if (role === "lead" || role === "mod" || role === "jr") {
+      const rank = StaffUI.rank(role);
+      return el("span", {
+        class: "gm-staff gm-staff-" + role,
+        title: rank.title,
+        text: rank.chip,
+      });
+    }
     return null;
   }
 

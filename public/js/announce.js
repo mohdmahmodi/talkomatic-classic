@@ -360,6 +360,17 @@
     window.scrollTo(0, lockedScrollY);
   }
 
+  var OPEN_DELAY_MS = 60000;
+  var pendingOpen = null;
+
+  function openWhenSettled() {
+    if (pendingOpen || isOpen) return;
+    pendingOpen = setTimeout(function () {
+      pendingOpen = null;
+      if (current && current.id > seenId() && !isOpen) open();
+    }, OPEN_DELAY_MS);
+  }
+
   function open() {
     if (!current) return;
     build();
@@ -398,7 +409,7 @@
       else render();
       return;
     }
-    if (current.id > seenId()) open();
+    if (current.id > seenId()) openWhenSettled();
   });
 
   socket.on("announcement result", function (d) {

@@ -125,7 +125,7 @@
     <script src="js/theme-engine.js?v=2.4.1"></script>
     <link rel="stylesheet" href="stylesheets/theme-editor.css?v=1.1.0" />
     <link rel="stylesheet" href="stylesheets/suggest-board.css?v=2.0.2" />
-    <link rel="stylesheet" href="stylesheets/info-modal.css?v=1.0.0" />
+    <link rel="stylesheet" href="stylesheets/info-modal.css?v=1.1.0" />
     <link rel="stylesheet" href="stylesheets/site-stats.css?v=1.1.0" />
     <link rel="stylesheet" href="stylesheets/mod-apply.css?v=1.2.1" />
     <link rel="stylesheet" href="stylesheets/announce.css?v=1.0.0" />
@@ -1065,7 +1065,8 @@
               />
               <h4>Semi-Private Room</h4>
               <p>
-                Visible in the room list but requires creator approval to join.
+                Visible in the room list, but you set a 6-digit code and only
+                people who have it can get in.
               </p>
             </div>
             <div class="type-item">
@@ -1075,6 +1076,10 @@
                 class="info-icon"
               />
               <h4>Private Room</h4>
+              <p>
+                Hidden from the room list. The only way in is the invite link
+                from inside the room.
+              </p>
             </div>
           </div>
         </div>
@@ -1104,6 +1109,25 @@
                 Rooms start as side-by-side columns. There is a button in the
                 top right of the room to stack them one above the other instead
                 - it only changes your own screen, and phones always stack.
+              </p>
+            </div>
+          </div>
+        </div>
+        <div class="modal-section">
+          <h3>Bots</h3>
+          <div class="layout-info">
+            <div class="layout-item">
+              <img
+                src="images/icons/public.svg"
+                alt="Bots Icon"
+                class="info-icon"
+              />
+              <h4>Allow bots to join</h4>
+              <p>
+                Anyone can build a bot in the Bot Creator and send it into a
+                public room. Turn this off and your room stays people only. A
+                bot takes a spot like anyone else, and bigger rooms allow more
+                of them.
               </p>
             </div>
           </div>
@@ -1140,22 +1164,22 @@
     <script nonce="<%= nonce %>" src="js/notify.js?v=1.0.0"></script>
     <script nonce="<%= nonce %>" src="js/lobby.js?v=2.1.0"></script>
     <script nonce="<%= nonce %>" src="/socket.io/socket.io.js?v=1.0.1"></script>
-    <script nonce="<%= nonce %>" src="js/staff-ui.js?v=1.10.0"></script>
-    <script nonce="<%= nonce %>" src="js/desk.js?v=1.0.6"></script>
+    <script nonce="<%= nonce %>" src="js/staff-ui.js?v=1.11.0"></script>
+    <script nonce="<%= nonce %>" src="js/desk.js?v=1.1.0"></script>
     <script nonce="<%= nonce %>" src="js/identity.js?v=1.0.1"></script>
     <script
       nonce="<%= nonce %>"
       src="js/connection-overlay.js?v=1.2.0"
     ></script>
-    <script nonce="<%= nonce %>" src="js/lobby-client.js?v=2.26.0"></script>
+    <script nonce="<%= nonce %>" src="js/lobby-client.js?v=2.27.0"></script>
     <script nonce="<%= nonce %>" src="js/mod-apply.js?v=1.2.1"></script>
-    <script nonce="<%= nonce %>" src="js/suggest-board.js?v=2.0.3"></script>
+    <script nonce="<%= nonce %>" src="js/suggest-board.js?v=2.1.0"></script>
     <script nonce="<%= nonce %>" src="js/site-stats.js?v=1.1.0"></script>
     <script nonce="<%= nonce %>" src="js/rules-modal.js?v=1.4.0"></script>
     <script nonce="<%= nonce %>" src="js/staff-guide-modal.js?v=1.1.0"></script>
-    <script nonce="<%= nonce %>" src="js/announce.js?v=1.0.2"></script>
+    <script nonce="<%= nonce %>" src="js/announce.js?v=1.2.0"></script>
     <script nonce="<%= nonce %>" src="js/theme-editor.js?v=3.2.0"></script>
     <!-- POPUP SYSTEM: Add this script tag to enable update popups -->
-    <script nonce="<%= nonce %>" src="js/popup.js?v=3.0.3"></script>
+    <script nonce="<%= nonce %>" src="js/popup.js?v=4.0.0"></script>
   </body>
 </html>

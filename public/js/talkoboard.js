@@ -1992,17 +1992,16 @@ class Talkoboard {
   }
 
   undo() {
-    if (this.undoStack.length === 0) return;
-    const id = this.undoStack.pop();
-    const idx = this.strokes.findIndex((s) => s.id === id);
-    if (idx === -1) {
-      this.updateUndoRedoButtons();
-      return;
+    while (this.undoStack.length > 0) {
+      const id = this.undoStack.pop();
+      const idx = this.strokes.findIndex((s) => s.id === id);
+      if (idx === -1) continue;
+      const [stroke] = this.strokes.splice(idx, 1);
+      this.redoStack.push(stroke);
+      this.socket.emit("board stroke remove", { id });
+      this.redraw();
+      break;
     }
-    const [stroke] = this.strokes.splice(idx, 1);
-    this.redoStack.push(stroke);
-    this.socket.emit("board stroke remove", { id });
-    this.redraw();
     this.updateUndoRedoButtons();
   }
 
@@ -3467,7 +3466,15 @@ class Talkoboard {
       }
     }
 
+    this.reconcileHistory();
     if (this.isOpen) this.redraw();
+  }
+
+  reconcileHistory() {
+    const live = new Set(this.strokes.map((s) => s.id));
+    this.undoStack = this.undoStack.filter((id) => live.has(id));
+    this.redoStack = this.redoStack.filter((s) => !live.has(s.id));
+    this.updateUndoRedoButtons();
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -3666,9 +3673,11 @@ class Talkoboard {
     const level = { lead: 3, mod: 2, jr: 1 }[role];
     if (!level) return null;
     if (typeof createModBadge === "function") return createModBadge(level);
+    const rank = StaffUI.rank(role);
     const b = document.createElement("span");
     b.className = "mod-badge";
-    b.textContent = role === "lead" ? "LEADER" : role === "jr" ? "JR MOD" : "MOD";
+    b.textContent = rank.chip;
+    b.title = rank.title;
     return b;
   }
 

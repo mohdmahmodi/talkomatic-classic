@@ -1249,6 +1249,27 @@
     },
   ];
 
+  const RANK_BY_ROLE = {
+    dev: { level: 4, chip: "ADMIN", title: "Talkomatic Admin", name: "Admin" },
+    lead: { level: 3, chip: "LEADER", title: "Mod Leader (L3)", name: "Mod leader" },
+    leader: { level: 3, chip: "LEADER", title: "Mod Leader (L3)", name: "Mod leader" },
+    mod: { level: 2, chip: "MOD", title: "Moderator (L2)", name: "Moderator" },
+    full: { level: 2, chip: "MOD", title: "Moderator (L2)", name: "Moderator" },
+    jr: { level: 1, chip: "JR MOD", title: "Junior Moderator (L1)", name: "Junior moderator" },
+  };
+
+  function rank(roleOrLevel) {
+    if (typeof roleOrLevel === "number")
+      return roleOrLevel >= 4
+        ? RANK_BY_ROLE.dev
+        : roleOrLevel >= 3
+          ? RANK_BY_ROLE.lead
+          : roleOrLevel === 1
+            ? RANK_BY_ROLE.jr
+            : RANK_BY_ROLE.mod;
+    return RANK_BY_ROLE[roleOrLevel] || RANK_BY_ROLE.mod;
+  }
+
   function help(role) {
     const RANKS = {
       jr: { n: 1, chip: "jr", label: "All staff", icon: "fa-shield-halved" },
@@ -1633,6 +1654,7 @@
   }
 
   window.StaffUI = {
+    rank,
     escape,
     el,
     modal,

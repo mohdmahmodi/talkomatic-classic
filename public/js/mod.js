@@ -296,19 +296,17 @@
     if (row) parent.appendChild(row);
   }
 
-  const ROLE_CHIP = {
-    dev: ["dev", "ADMIN"],
-    lead: ["l3", "LEADER"],
-    mod: ["l2", "MOD"],
-    jr: ["l1", "JR MOD"],
-  };
+  const ROLE_CHIP = { dev: "dev", lead: "l3", mod: "l2", jr: "l1" };
   function whoWithRole(name, role, uid) {
     const wrap = span("whorole");
     wrap.appendChild(uid ? uref(String(name), uid) : span(null, String(name)));
-    const chip = ROLE_CHIP[role];
-    if (chip) {
+    const cls = ROLE_CHIP[role];
+    if (cls) {
+      const r = StaffUI.rank(role);
+      const chip = span("chip " + cls, r.chip);
+      chip.title = r.title;
       wrap.appendChild(document.createTextNode(" "));
-      wrap.appendChild(span("chip " + chip[0], chip[1]));
+      wrap.appendChild(chip);
     }
     return wrap;
   }
@@ -1514,11 +1512,17 @@
     return m.online || (m.lastSeen && Date.now() - m.lastSeen < 7 * 86400000);
   }
   const RANKS = {
-    dev: { chip: "chip dev", name: "ADMIN", color: "var(--red)" },
-    l3: { chip: "chip l3", name: "LEADER", color: "var(--lead)" },
-    l2: { chip: "chip l2", name: "MOD L2", color: "var(--blue)" },
-    l1: { chip: "chip l1", name: "MOD L1", color: "var(--purple)" },
+    dev: { chip: "chip dev", level: 4, color: "var(--red)" },
+    l3: { chip: "chip l3", level: 3, color: "var(--lead)" },
+    l2: { chip: "chip l2", level: 2, color: "var(--blue)" },
+    l1: { chip: "chip l1", level: 1, color: "var(--purple)" },
   };
+  function rankTag(rank) {
+    const r = StaffUI.rank(rank.level);
+    const tag = span(rank.chip, r.chip);
+    tag.title = r.title;
+    return tag;
+  }
   const rankForLevel = (level) =>
     (level || 1) >= 3 ? "l3" : (level || 1) >= 2 ? "l2" : "l1";
   function buildStaffRoster() {
@@ -1568,7 +1572,7 @@
     top.appendChild(av);
     const title = divc("mc-title");
     title.appendChild(span("nm", m.label || "staff"));
-    title.appendChild(span(rank.chip, rank.name));
+    title.appendChild(rankTag(rank));
     top.appendChild(title);
     const active = isActiveStaff(m);
     const dot = span(
@@ -1835,10 +1839,7 @@
 
   // ── The record: who, how it reads, the evidence, the cases ─────────────
   function rankName(isDev, modLevel) {
-    if (isDev) return "Admin";
-    if (modLevel >= 3) return "Mod leader";
-    if (modLevel === 1) return "Junior moderator";
-    return "Moderator";
+    return StaffUI.rank(isDev ? 4 : modLevel).name;
   }
 
   function sectionHead(title, sub) {
@@ -3357,13 +3358,7 @@
   }
 
   function mountRecord(h, wrap, isDev, ctx) {
-    const rank = isDev
-      ? "Admin"
-      : ctx.modLevel >= 3
-        ? "Mod leader"
-        : ctx.modLevel === 1
-          ? "Junior moderator"
-          : "Moderator";
+    const rank = rankName(isDev, ctx.modLevel);
     const subtitle = isDev
       ? rank + "  ·  " + h.total + " actions logged"
       : rank +
@@ -5432,7 +5427,7 @@
     top.appendChild(av);
     const title = divc("mc-title");
     title.appendChild(span("nm", h.label || "?"));
-    title.appendChild(span(rank.chip, rank.name));
+    title.appendChild(rankTag(rank));
     top.appendChild(title);
     const dot = span("live-dot " + (online ? "on" : "off"));
     dot.appendChild(document.createTextNode(online ? "Online now" : "Offline"));

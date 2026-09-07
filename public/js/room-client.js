@@ -498,6 +498,7 @@ let emoteAutocomplete = null;
 let autocompleteActive = false;
 let selectedEmoteIndex = -1;
 let filteredEmotes = [];
+const emoteThumbs = new Map();
 let currentEmotePrefix = "";
 let currentEmoteInfo = null;
 let useOverlayEmotes = false;
@@ -976,13 +977,7 @@ function showAutocomplete(prefix) {
     item.className =
       "emote-autocomplete-item" + (i === selectedEmoteIndex ? " selected" : "");
 
-    const img = document.createElement("img");
-    img.referrerPolicy = "no-referrer";
-    img.src = EMOTE_IMAGE_PLACEHOLDER;
-    img.dataset.src = emoteList[match.code];
-    img.alt = `:${match.code}:`;
-    img.decoding = "async";
-    dropOnError(img);
+    const img = emoteThumb(match.code);
 
     const span = document.createElement("span");
     span.innerHTML = match.html;
@@ -1017,11 +1012,33 @@ function showAutocomplete(prefix) {
   requestAnimationFrame(loadVisibleImages);
 }
 
+function emoteThumb(code) {
+  let img = emoteThumbs.get(code);
+  if (img) return img;
+  img = document.createElement("img");
+  img.referrerPolicy = "no-referrer";
+  img.src = EMOTE_IMAGE_PLACEHOLDER;
+  img.dataset.src = emoteList[code];
+  img.alt = `:${code}:`;
+  img.decoding = "async";
+  img.addEventListener(
+    "error",
+    () => {
+      emoteThumbs.delete(code);
+      img.remove();
+    },
+    { once: true },
+  );
+  emoteThumbs.set(code, img);
+  return img;
+}
+
 function hideAutocomplete() {
   if (emoteAutocomplete) emoteAutocomplete.style.display = "none";
   autocompleteActive = false;
   selectedEmoteIndex = -1;
   currentEmotePrefix = "";
+  emoteThumbs.clear();
 }
 
 function handleEmoteNavigation(e) {
@@ -3897,13 +3914,9 @@ function createModBadge(level) {
       : lvl === 1
         ? "mod-badge mod-badge-jr"
         : "mod-badge";
-  badge.textContent = lvl === 3 ? "LEADER" : lvl === 1 ? "JR MOD" : "MOD";
-  badge.title =
-    lvl === 3
-      ? "Mod Leader (L3)"
-      : lvl === 1
-        ? "Junior Moderator (L1)"
-        : "Moderator (L2)";
+  const rank = StaffUI.rank(lvl);
+  badge.textContent = rank.chip;
+  badge.title = rank.title;
   badge.dataset.level = String(lvl);
   return badge;
 }
@@ -4926,14 +4939,12 @@ function renderSpectate(data, noteText) {
     });
     acts.appendChild(desk);
   }
-  if (!isStaff()) {
-    const join = document.createElement("button");
-    join.type = "button";
-    join.className = "sb-btn";
-    join.innerHTML = '<i class="fas fa-right-to-bracket"></i> Join room';
-    join.addEventListener("click", () => socket.emit("spectate join"));
-    acts.appendChild(join);
-  }
+  const join = document.createElement("button");
+  join.type = "button";
+  join.className = "sb-btn";
+  join.innerHTML = '<i class="fas fa-right-to-bracket"></i> Join room';
+  join.addEventListener("click", () => socket.emit("spectate join"));
+  acts.appendChild(join);
   const leave = document.createElement("button");
   leave.type = "button";
   leave.className = "sb-btn sb-leave";
@@ -4960,6 +4971,16 @@ socket.on("spectate join result", (data) => {
   if (reason === "gone") {
     showInfoModal(message, () => {
       window.location.href = "/index.html";
+    });
+    return;
+  }
+  if (reason === "full" && isStaff()) {
+    showModal("Room is full", message + " Do you still want to join?", {
+      confirmText: "Join anyway",
+      cancelText: "Keep spectating",
+      callback: (confirmed) => {
+        if (confirmed) socket.emit("spectate join", { force: true });
+      },
     });
     return;
   }

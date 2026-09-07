@@ -208,18 +208,20 @@
       crown.alt = "";
       b.appendChild(crown);
       b.appendChild(document.createTextNode("ADMIN"));
-      b.title = "Talkomatic admin";
+      b.title = StaffUI.rank("dev").title;
       return b;
     }
-    if (role === "mod") {
-      var m = el("span", "mod-lobby-badge", "MOD");
-      m.title = "Moderator";
+    if (role === "lead" || role === "mod" || role === "jr") {
+      var rank = StaffUI.rank(role);
+      var cls =
+        role === "lead"
+          ? "mod-lobby-badge mod-lobby-badge-lead"
+          : role === "jr"
+            ? "mod-lobby-badge mod-lobby-badge-jr"
+            : "mod-lobby-badge";
+      var m = el("span", cls, rank.chip);
+      m.title = rank.title;
       return m;
-    }
-    if (role === "jr") {
-      var j = el("span", "mod-lobby-badge mod-lobby-badge-jr", "JR MOD");
-      j.title = "Junior moderator";
-      return j;
     }
     return null;
   }

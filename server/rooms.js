@@ -1816,7 +1816,12 @@ function broadcastSuggestionsList(also) {
 function boardRole(socket) {
   if (socket.isMainDev) return "user";
   if (socket.isDev) return "dev";
-  if (socket.isMod) return (socket.modLevel || 1) >= 2 ? "mod" : "jr";
+  if (socket.isMod)
+    return (socket.modLevel || 1) >= 3
+      ? "lead"
+      : (socket.modLevel || 1) >= 2
+        ? "mod"
+        : "jr";
   return "user";
 }
 
@@ -6978,7 +6983,7 @@ function registerSocketHandlers(opts) {
     // A spectator asks to take a real slot in the room they are watching.
     socket.on(
       "spectate join",
-      safe(async () => {
+      safe(async (data) => {
         if (!socket.spectating) return;
         const roomId = socket.spectating;
         const userId = socket.handshake.session?.userId;
@@ -6988,15 +6993,19 @@ function registerSocketHandlers(opts) {
         if (!room) return fail("gone");
         if (!userId || isGuestName(socket.handshake.session?.username))
           return fail("name");
-        if (room.bannedUserIds?.has(userId) || roomBansSocket(room, socket))
-          return fail("banned");
-        if (state.maintenance) return fail("maintenance");
-        if (room.locked) return fail("locked");
+        const staff = isStaffSocket(socket);
+        if (!staff) {
+          if (room.bannedUserIds?.has(userId) || roomBansSocket(room, socket))
+            return fail("banned");
+          if (state.maintenance) return fail("maintenance");
+          if (room.locked) return fail("locked");
+        }
         const others = (room.users || []).filter(
           (u) => u.id !== userId && !(u.isDev && u.isVanished),
         ).length;
-        if (others >= roomCapacity(room)) return fail("full");
-        const cur = getOwnCurrentRoom(userId);
+        if (others >= roomCapacity(room) && !(staff && data?.force))
+          return fail("full");
+        const cur = staff ? null : getOwnCurrentRoom(userId);
         if (cur && cur !== roomId) return fail("elsewhere");
 
         socket.spectating = null;

@@ -467,3 +467,98 @@
     margin-left: 0;
   }
 }
+
+/* ── What's new card ── */
+
+.tku-overlay .tkm-modal {
+  max-width: 560px;
+}
+
+.tku-sec-title {
+  color: var(--primary, var(--tk-accent));
+  font-size: 12px;
+  font-weight: bold;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin: 18px 0 8px;
+}
+
+.tku-sec-title:first-child {
+  margin-top: 2px;
+}
+
+.tku-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tku-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 11px 12px;
+  border: 1px solid var(--tk-border);
+  border-radius: 8px;
+  background: var(--tk-tile);
+}
+
+.tku-ico {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  background: var(--tk-tile-hover);
+  color: var(--primary, var(--tk-accent));
+  font-size: 13px;
+}
+
+.tku-item-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.tku-item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tku-item-title {
+  color: var(--tk-text);
+  font-size: 14px;
+  font-weight: bold;
+}
+
+.tku-tag {
+  font-size: 9.5px;
+  font-weight: bold;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--tk-accent);
+  color: #1a1a1a;
+}
+
+.tku-item-text {
+  color: var(--tk-muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+  margin: 3px 0 0;
+}
+
+@media (max-width: 520px) {
+  .tku-item {
+    padding: 10px;
+  }
+  .tku-ico {
+    width: 26px;
+    height: 26px;
+    font-size: 12px;
+  }
+}

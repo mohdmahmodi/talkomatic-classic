@@ -98,8 +98,13 @@
           : (a.level || 1) >= 2
             ? "l2"
             : "l1";
-  const rankName = (r) =>
-    r === "dev" ? "ADMIN" : r === "l3" ? "LEADER" : r === "l2" ? "MOD L2" : "MOD L1";
+  const RANK_LEVEL = { dev: 4, l3: 3, l2: 2, l1: 1 };
+  const rankName = (r) => StaffUI.rank(RANK_LEVEL[r] || 1).chip;
+  const rankChip = (r) => {
+    const chip = el("span", "dk-chip " + r, rankName(r));
+    chip.title = StaffUI.rank(RANK_LEVEL[r] || 1).title;
+    return chip;
+  };
 
   function initialOf(name) {
     const c = Array.from(String(name || "?").trim())[0];
@@ -3006,7 +3011,7 @@
       nameBtn.title = "Open " + m.author.label + "'s record";
       nameBtn.addEventListener("click", openRec);
       head.appendChild(nameBtn);
-      head.appendChild(el("span", "dk-chip " + rank, rankName(rank)));
+      head.appendChild(rankChip(rank));
       if (m.author.alias && m.author.alias !== m.author.label)
         head.appendChild(el("span", "dk-alias", 'as "' + m.author.alias + '"'));
       const t = el("span", "dk-mtime", clockTime(m.ts));
@@ -3737,10 +3742,10 @@
         const row = el("div", "dk-occ");
         const head = el("div", "dk-occ-h");
         head.appendChild(el("span", "dk-occ-n", u.username || "?"));
-        if (u.isDev) head.appendChild(el("span", "dk-chip dev", "ADMIN"));
+        if (u.isDev) head.appendChild(rankChip("dev"));
         else if (u.isMod) {
           const ur = rankOf({ role: "mod", level: u.modLevel });
-          head.appendChild(el("span", "dk-chip " + ur, rankName(ur)));
+          head.appendChild(rankChip(ur));
         }
         if (u.location) head.appendChild(el("span", "dk-occ-l", u.location));
         row.appendChild(head);
@@ -3874,7 +3879,7 @@
     const ht = el("div", "dk-rec-ht");
     ht.appendChild(el("span", "dk-rec-n", h.label || "Staff"));
     const r = rankOf({ role: h.role, level: h.level });
-    ht.appendChild(el("span", "dk-chip " + r, rankName(r)));
+    ht.appendChild(rankChip(r));
     head.appendChild(ht);
     const x = btn("dk-hbtn", null, "fa-xmark", "Close");
     x.addEventListener("click", closeRecord);
@@ -3996,7 +4001,7 @@
           });
           who.appendChild(nm);
           const r = rankOf({ role: m.role, level: m.level });
-          who.appendChild(el("span", "dk-chip " + r, rankName(r)));
+          who.appendChild(rankChip(r));
         } else {
           who.appendChild(el("span", "dk-ap-name plain", a.name || "Banned user"));
           who.appendChild(el("span", "dk-chip banned", "BANNED"));
@@ -5486,7 +5491,7 @@
       );
       node.appendChild(mid);
       const r = rankOf(p);
-      node.appendChild(el("span", "dk-chip " + r, rankName(r)));
+      node.appendChild(rankChip(r));
       node.appendChild(el("span", "dk-pick-dot " + (p.online ? "on" : "off")));
       const apply = () => applyToken(ta, start, end, "@" + p.label + " ");
       node.addEventListener("click", apply);
