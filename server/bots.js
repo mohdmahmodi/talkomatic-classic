@@ -222,10 +222,7 @@ function sharedBotsFor(actorKey) {
 }
 
 function activeBotOfActor(actorKey) {
-  for (const rt of active.values()) {
-    if (rt.ownerKey === actorKey) return rt;
-    if (isManager(rt.bot, actorKey)) return rt;
-  }
+  for (const rt of active.values()) if (rt.actorKey === actorKey) return rt;
   return null;
 }
 
@@ -1012,6 +1009,7 @@ function deploy(socket, bot, room, ownerKey) {
     name: bot.name,
     bot,
     ownerKey,
+    actorKey: ownerKeyOf(socket),
     ownerId,
     ownerName,
     roomId: room.id,
@@ -1498,12 +1496,19 @@ function register(socket, safe) {
         return fail(socket, "Talkomatic is in maintenance mode. Try again shortly.", "maintenance");
       if (active.size >= LIMITS.MAX_ACTIVE_TOTAL)
         return fail(socket, "Too many bots are running right now. Try again in a while.", "busy");
-      const already = activeBotOfActor(ownerKey) || activeBotOfOwner(homeKey);
-      if (already)
+      const mine = activeBotOfActor(ownerKey);
+      if (mine)
         return fail(
           socket,
-          `You already have "${already.name}" running. Stop it first.`,
+          `You already have "${mine.name}" running. Stop it first.`,
           "already_running",
+        );
+      const out = activeBotOfOwner(homeKey);
+      if (out)
+        return fail(
+          socket,
+          `"${out.name}" is already out in a room.`,
+          "bot_out",
         );
 
       let room = null;
@@ -2097,7 +2102,7 @@ function onOwnerJoined(socket, room) {
   const bot = rec?.bots.find((b) => b.id === pend.botId);
   if (!bot) return;
   if (room.allowBots === false) return;
-  if (activeBotOfOwner(pend.ownerKey)) return;
+  if (activeBotOfOwner(pend.ownerKey) || activeBotOfActor(ownerKeyOf(socket))) return;
   if (botCountInRoom(room) >= maxBotsForRoom(room)) return;
   const seats = (room.users || []).filter((u) => !(u.isDev && u.isVanished)).length;
   if (seats >= deps.roomCapacity(room)) return;

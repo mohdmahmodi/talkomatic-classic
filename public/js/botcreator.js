@@ -998,6 +998,14 @@
     return status?.deployed || null;
   }
 
+  function botById(id) {
+    return (
+      (status?.bots || []).find((b) => b.id === id) ||
+      (status?.shared || []).find((b) => b.id === id) ||
+      null
+    );
+  }
+
   // ── Modals (one at a time) ────────────────────────────────────────────────
 
   function closeModal() {
@@ -1065,6 +1073,10 @@
     already_running: {
       title: "One bot at a time",
       body: "You already have a bot out in a room. Bring it home first, then send this one.",
+    },
+    bot_out: {
+      title: "That bot is already out",
+      body: "A bot from this group is out in a room right now. It can go out again once whoever sent it brings it home.",
     },
     bots_off: {
       title: "Bots are off right now",
@@ -1339,7 +1351,7 @@
     host.innerHTML = "";
     const d = deployedInfo();
     if (!d) return;
-    const bot = (status?.bots || []).find((b) => b.id === d.botId);
+    const bot = botById(d.botId);
     const bar = document.createElement("div");
     bar.className = "bc-live";
     bar.innerHTML =
@@ -1809,10 +1821,9 @@
   });
 
   function openHistoryModal(botId) {
-    const own = (status?.bots || []).find((x) => x.id === botId);
-    const b = own || (status?.shared || []).find((x) => x.id === botId);
+    const b = botById(botId);
     if (!b) return;
-    const isOwn = !!own;
+    const isOwn = (status?.bots || []).some((x) => x.id === botId);
     const box = openModal(true);
     box.id = "bcHistoryBox";
     box.dataset.botId = botId;

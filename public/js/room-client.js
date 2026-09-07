@@ -491,6 +491,8 @@ function getDiff(oldStr, newStr) {
 
 // ── 6. EMOTE SYSTEM ─────────────────────────────────────────────────────────
 
+const ANIMATED_AVIF_PROBE = "data:image/avif;base64,AAAALGZ0eXBhdmlzAAAAAGF2aXNhdmlmbXNmMWlzbzhtaWYxbWlhZk1BMUIAAAD5bWV0YQAAAAAAAAAvaGRscgAAAAAAAAAAcGljdAAAAAAAAAAAAAAAAFBpY3R1cmVIYW5kbGVyAAAAAA5waXRtAAAAAAABAAAAHmlsb2MAAAAARAAAAQABAAAAAQAAA+gAAAAbAAAAKGlpbmYAAAAAAAEAAAAaaW5mZQIAAAAAAQAAYXYwMUNvbG9yAAAAAGppcHJwAAAAS2lwY28AAAAUaXNwZQAAAAAAAAACAAAAAgAAABBwaXhpAAAAAAMICAgAAAAMYXYxQ4EADAAAAAATY29scm5jbHgAAgACAAIAAAAAF2lwbWEAAAAAAAAAAQABBAECgwQAAAK7bW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAAGQAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAkd0cmFrAAAAaHRraGQBAAADAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAf/////////8AAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAIAAAACAAAAAAAkZWR0cwAAABxlbHN0AAAAAQAAAAEAAABkAAAAAAABAAAAAAGzbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAAAoAAAABABVxAAAAAAAL2hkbHIAAAAAAAAAAHBpY3QAAAAAAAAAAAAAAABQaWN0dXJlSGFuZGxlcgAAAAFcbWluZgAAABR2bWhkAAAAAQAAAAAAAAAAAAAAJGRpbmYAAAAcZHJlZgAAAAAAAAABAAAADHVybCAAAAABAAABHHN0YmwAAACcc3RzZAAAAAAAAAABAAAAjGF2MDEAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAgACAEgAAABIAAAAAAAAAAEXTGF2YzYyLjMuMTAxIGxpYmFvbS1hdjEAAAAAAAAAAAAY//8AAAAMYXYxQ4EADAAAAAAKZmllbAEAAAAAEHBhc3AAAAABAAAAAQAAABBjY3N0AAAAAHwAAAAAAAAYc3R0cwAAAAAAAAABAAAAAgAAAgAAAAAUc3RzcwAAAAAAAAABAAAAAQAAABxzdHNjAAAAAAAAAAEAAAABAAAAAgAAAAEAAAAcc3RzegAAAAAAAAAAAAAAAgAAABsAAAAUAAAAFHN0Y28AAAAAAAAAAQAAA+gAAAA3bWRhdAoJAAAAAAZtfMAgMg4QAPsAAALAAAAArKZ5QDISMAPAgAAABv+AAALAAACAAJGQ";
+
 let emoteList = {};
 let emoteAutocomplete = null;
 let autocompleteActive = false;
@@ -500,18 +502,32 @@ let currentEmotePrefix = "";
 let currentEmoteInfo = null;
 let useOverlayEmotes = false;
 
+function canDisplay(src) {
+  return new Promise((resolve) => {
+    const probe = new Image();
+    probe.onload = () => resolve(probe.naturalWidth > 0);
+    probe.onerror = () => resolve(false);
+    probe.src = src;
+  });
+}
+
 async function loadEmotes() {
   const BASE =
     "https://raw.githubusercontent.com/ZackiBoiz/Multiplayer-Piano-Optimizations/refs/heads/main/emotes";
   try {
-    const resp = await fetch(`${BASE}/meta.jsonc?_=${Date.now()}`, {
-      referrerPolicy: "no-referrer",
-      signal: AbortSignal.timeout(8000),
-    });
+    const [resp, avifOk] = await Promise.all([
+      fetch(`${BASE}/meta.jsonc?_=${Date.now()}`, {
+        referrerPolicy: "no-referrer",
+        signal: AbortSignal.timeout(8000),
+      }),
+      canDisplay(ANIMATED_AVIF_PROBE),
+    ]);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const pairs = parseJSONC(await resp.text());
     const validCode = /^[A-Za-z0-9_.-]+$/;
-    const validExt = /^(?:png|gif|webp|jpe?g|avif|bmp|svg)$/i;
+    const validExt = avifOk
+      ? /^(?:png|gif|webp|jpe?g|avif|bmp|svg)$/i
+      : /^(?:png|gif|webp|jpe?g|bmp|svg)$/i;
     const next = Object.fromEntries(
       Object.entries(pairs)
         .filter(([name, ext]) =>
@@ -522,6 +538,7 @@ async function loadEmotes() {
         .map(([name, ext]) => [name, `${BASE}/assets/${name}.${ext}`]),
     );
     if (Object.keys(next).length) emoteList = next;
+    if (!avifOk) console.warn("Emotes: this browser cannot show AVIF, skipping those.");
     console.log("Emotes loaded:", Object.keys(emoteList).length);
   } catch (err) {
     console.error("Error loading emotes:", err);
@@ -965,6 +982,7 @@ function showAutocomplete(prefix) {
     img.dataset.src = emoteList[match.code];
     img.alt = `:${match.code}:`;
     img.decoding = "async";
+    dropOnError(img);
 
     const span = document.createElement("span");
     span.innerHTML = match.html;
@@ -1337,6 +1355,10 @@ function applySelfFilter() {
 const EMOTE_IMAGE_PLACEHOLDER =
   "data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA=";
 
+function dropOnError(img) {
+  img.addEventListener("error", () => img.remove(), { once: true });
+}
+
 function isEmoteImageVisible(img, container) {
   if (!img || !container) return false;
   const itemRect = img.getBoundingClientRect();
@@ -1415,6 +1437,7 @@ function createEmotesDropdown() {
       img.dataset.src = url;
       img.alt = `:${code}:`;
       img.decoding = "async";
+      dropOnError(img);
       const name = document.createElement("span");
       name.textContent = code;
       item.appendChild(img);
