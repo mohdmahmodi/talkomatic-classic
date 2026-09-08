@@ -1813,6 +1813,8 @@ function broadcastSuggestionsList(also) {
 }
 
 // ── Community suggestion board ──────────────────────────────────────────────
+const WARNING_OPEN_EVENTS = new Set(["warning ack", "get rooms"]);
+
 function boardRole(socket) {
   if (socket.isMainDev) return "user";
   if (socket.isDev) return "dev";
@@ -3683,6 +3685,21 @@ function registerSocketHandlers(opts) {
       next();
     });
 
+    socket.use((packet, next) => {
+      if (WARNING_OPEN_EVENTS.has(packet[0]) || !warnings.has(socket.deviceId))
+        return next();
+      const now = Date.now();
+      if (now - (socket.warnNudgedAt || 0) > 3000) {
+        socket.warnNudgedAt = now;
+        for (const w of warnings.pendingFor(socket.deviceId))
+          socket.emit("staff warning", {
+            id: w.id,
+            message: w.message,
+            at: w.at,
+          });
+      }
+    });
+
     if (getBuildId) socket.emit("server build", { id: getBuildId() });
 
     socket.deviceType = deviceTypeFromUA(
@@ -3719,11 +3736,15 @@ function registerSocketHandlers(opts) {
           } catch (e) {
             console.error("evasion check failed:", e.message);
           }
-        const queuedWarnings = warnings.takeFor(socket.deviceId);
+        const queuedWarnings = warnings.pendingFor(socket.deviceId);
         if (queuedWarnings.length)
           setTimeout(() => {
             for (const w of queuedWarnings)
-              socket.emit("staff warning", { message: w.message });
+              socket.emit("staff warning", {
+                id: w.id,
+                message: w.message,
+                at: w.at,
+              });
           }, 1500);
       }
 
@@ -6348,7 +6369,17 @@ function registerSocketHandlers(opts) {
             "error",
             createErrorResponse(ERROR_CODES.NOT_FOUND, "User not connected."),
           );
-        for (const s of targets) s.emit("staff warning", { message });
+        const warning = warnings.queue(
+          targets[0].deviceId,
+          message,
+          socket.staffLabel || null,
+        );
+        for (const s of targets)
+          s.emit("staff warning", {
+            id: warning?.id || null,
+            message,
+            at: warning?.at || Date.now(),
+          });
         const roomId = getUserCurrentRoom(targetUserId);
         const room = roomId ? state.rooms.get(roomId) : null;
         const targetUser = room?.users.find((u) => u.id === targetUserId);
@@ -6374,6 +6405,27 @@ function registerSocketHandlers(opts) {
           ok: true,
           targetUserId,
         });
+      }),
+    );
+
+    socket.on(
+      "warning ack",
+      safe(async (data) => {
+        const entry = warnings.ack(socket.deviceId, data?.id);
+        if (!entry) return;
+        const name = socket.handshake.session?.username || "Someone";
+        const roomId = getUserCurrentRoom(socket.handshake.session?.userId);
+        const room = roomId ? state.rooms.get(roomId) : null;
+        audit.recordNotification({
+          kind: "warning",
+          text: `${name} read and acknowledged a warning`,
+          target: name,
+          room: room ? `room:${room.name}(${room.id})` : null,
+          by: entry.by || null,
+          targetUserId: socket.handshake.session?.userId || null,
+          minLevel: 1,
+        });
+        socket.emit("warning ack result", { id: entry.id });
       }),
     );
 
@@ -9114,7 +9166,8 @@ function registerSocketHandlers(opts) {
           { name: s.name || "?", id: s.userId || "-" },
           "-",
         );
-        settleQueueItem("suggestion", s.id);
+        if (["approved", "implemented", "declined"].includes(s.status))
+          settleQueueItem("suggestion", s.id);
         broadcastBoard();
       }),
     );
@@ -9655,15 +9708,21 @@ function registerSocketHandlers(opts) {
           message =
             "A moderator has issued you a warning. Please follow the Talkomatic rules.";
         const online = findSocketsByUserId(targetUserId);
-        let delivered = false;
-        for (const s of online) {
-          s.emit("staff warning", { message });
-          delivered = true;
-        }
         const deviceId =
           (online[0] && online[0].deviceId) || (lk && lk.deviceId) || null;
+        const warning = warnings.queue(
+          deviceId,
+          message,
+          socket.staffLabel || null,
+        );
+        for (const s of online)
+          s.emit("staff warning", {
+            id: warning?.id || null,
+            message,
+            at: warning?.at || Date.now(),
+          });
+        const delivered = online.length > 0;
         const queued = !delivered && !!deviceId;
-        if (queued) warnings.queue(deviceId, message, socket.staffLabel || null);
         const targetName =
           (lk && lk.name) || online[0]?.handshake?.session?.username || "user";
         if (!delivered && !queued)

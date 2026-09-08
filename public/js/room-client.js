@@ -25,6 +25,7 @@ if (window.TalkoDesk) window.TalkoDesk.init(socket);
 let currentUsername = "";
 let currentLocation = "";
 let currentRoomId = "";
+let joinedOnServer = false;
 let currentUserId = "";
 
 function isGuestUsername(name) {
@@ -3333,6 +3334,7 @@ socket.on("room joined", (data) => {
 
   currentUserId = data.userId;
   currentRoomId = data.roomId;
+  joinedOnServer = true;
   currentUsername = data.username;
   currentLocation = data.location;
   currentRoomLayout = data.layout || currentRoomLayout;
@@ -5012,12 +5014,14 @@ socket.on("spectate ended", () => {
 });
 
 // ── Staff events received by everyone ────────────────────────────────────────
-socket.on("staff warning", (data) =>
-  notify((data && data.message) || "Please follow the room rules.", "warning", {
-    title: "Staff warning",
-    timeout: 12000,
-  }),
-);
+socket.on("warning ack result", () => {
+  if (!joinedOnServer) return window.location.reload();
+  if (chatInput)
+    socket.emit("chat update", {
+      diff: { type: "full-replace", text: lastSentMessage },
+    });
+});
+
 socket.on("staff frozen", (data) => {
   const frozen = !!(data && data.frozen);
   if (chatInput) {

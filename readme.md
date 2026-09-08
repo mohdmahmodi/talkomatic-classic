@@ -12,7 +12,7 @@
 [![Docker Ready](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white)](Dockerfile)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-ff9800)](contributing.md)
 
-[**Try it live**](https://classic.talkomatic.co/) · [Report a bug](https://github.com/mohdmahmodi/talkomatic-classic/issues) · [Discord](https://discord.gg/N7tJznESrE)
+[**Try it live**](https://classic.talkomatic.co/) · [Report a bug](https://github.com/mohdmahmodi/talkomatic-classic/issues)
 
 </div>
 

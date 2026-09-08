@@ -14,17 +14,34 @@
   var REPLY_MAX = 300;
   var READ_CAP = 200;
 
-  var STATUS_ORDER = ["open", "approved", "implemented", "declined"];
+  var STATUS_ORDER = [
+    "open",
+    "reviewing",
+    "approved",
+    "progress",
+    "implemented",
+    "declined",
+  ];
   var STATUS = {
     open: {
       cls: "st-open",
       icon: "fa-circle-dot",
       label: { any: "New", idea: "New", bug: "New" },
     },
+    reviewing: {
+      cls: "st-reviewing",
+      icon: "fa-magnifying-glass",
+      label: { any: "Reviewing", idea: "Reviewing", bug: "Reviewing" },
+    },
     approved: {
       cls: "st-approved",
       icon: "fa-check",
-      label: { any: "Approved", idea: "Approved", bug: "Confirmed" },
+      label: { any: "Planned", idea: "Planned", bug: "Confirmed" },
+    },
+    progress: {
+      cls: "st-progress",
+      icon: "fa-hammer",
+      label: { any: "In progress", idea: "In progress", bug: "Being fixed" },
     },
     implemented: {
       cls: "st-done",
@@ -33,8 +50,8 @@
     },
     declined: {
       cls: "st-declined",
-      icon: "fa-xmark",
-      label: { any: "Declined", idea: "Not doing", bug: "Won't fix" },
+      icon: "fa-circle-minus",
+      label: { any: "Closed", idea: "Not planned", bug: "Leaving as is" },
     },
   };
   var KIND = {
@@ -1361,8 +1378,8 @@
   }
 
   var BADGES = [
-    { key: "approved", cls: "sb-nb-approved", icon: "fa-check", one: "post approved", many: "posts approved" },
-    { key: "declined", cls: "sb-nb-declined", icon: "fa-xmark", one: "post declined", many: "posts declined" },
+    { key: "approved", cls: "sb-nb-approved", icon: "fa-check", one: "post updated", many: "posts updated" },
+    { key: "declined", cls: "sb-nb-declined", icon: "fa-circle-minus", one: "post closed", many: "posts closed" },
     { key: "replies", cls: "sb-nb-reply", icon: "fa-comment", one: "new reply", many: "new replies" },
   ];
 

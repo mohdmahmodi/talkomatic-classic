@@ -403,20 +403,8 @@ body, html {
   border-color: #FF9800;
 }
 
-.contribute-button.discord {
-  background-color: #000000;
-  color: white;
-  border-color: #7289DA;
-}
-
 .contribute-button.github:hover {
   background-color: #FF9800;
-  color: #000000;
-  transform: translateY(-3px);
-}
-
-.contribute-button.discord:hover {
-  background-color: #7289DA;
   color: #000000;
   transform: translateY(-3px);
 }

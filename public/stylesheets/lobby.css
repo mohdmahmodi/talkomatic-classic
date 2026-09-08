@@ -2441,17 +2441,78 @@ button:disabled {
   left: 0;
   right: 0;
   z-index: 99980;
-  background: var(--tk-accent);
-  color: #1a1206;
-  text-align: center;
+  background: #000000;
+  color: #ffffff;
+  border-bottom: 1px solid #2a2a2a;
   font-size: 13px;
-  font-weight: 700;
-  padding: 7px 16px;
-  letter-spacing: 0.3px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  line-height: 1.4;
+  padding: 8px 0;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+#lobbyTickerBar .tk-tick-track {
+  display: flex;
+  width: max-content;
+  will-change: transform;
+  animation: tkTickerSpin linear infinite;
+}
+
+#lobbyTickerBar .tk-tick-item {
+  padding: 0 2.5rem;
   white-space: nowrap;
+}
+
+#lobbyTickerBar.is-static {
+  padding: 8px 16px;
+}
+
+#lobbyTickerBar.is-static .tk-tick-track {
+  width: 100%;
+  justify-content: center;
+  animation: none;
+}
+
+#lobbyTickerBar.is-static .tk-tick-item {
+  padding: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  box-sizing: border-box;
+  text-align: center;
+}
+
+#lobbyTickerBar.is-static .tk-tick-item + .tk-tick-item {
+  display: none;
+}
+
+#lobbyTickerBar:hover .tk-tick-track {
+  animation-play-state: paused;
+}
+
+@keyframes tkTickerSpin {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #lobbyTickerBar .tk-tick-track {
+    animation: none;
+    width: 100%;
+    justify-content: center;
+  }
+  #lobbyTickerBar .tk-tick-item {
+    padding: 0 16px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #lobbyTickerBar .tk-tick-item + .tk-tick-item {
+    display: none;
+  }
 }
 
 #lobbyMaintenanceBar {

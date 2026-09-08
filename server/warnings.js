@@ -1,10 +1,12 @@
 // server/warnings.js
-// Pending staff warnings for users who are offline, keyed by the durable
-// device id and delivered on their next connect so a warning is never lost.
+// Staff warnings held against the durable device id until the person opens
+// one and ticks the box. They ride out a reload and a reconnect, so the only
+// way past a warning is to acknowledge it.
 
 const path = require("path");
 const fs = require("fs");
 const fsp = require("fs").promises;
+const crypto = require("crypto");
 
 const { DATA_DIR } = require("./datadir");
 
@@ -50,26 +52,51 @@ function flushSync() {
 }
 
 function queue(deviceId, message, by) {
-  if (!deviceId || !message) return;
+  if (!deviceId || !message) return null;
   const arr = store[deviceId] || (store[deviceId] = []);
-  arr.push({
+  const entry = {
+    id: crypto.randomBytes(8).toString("hex"),
     message: String(message).slice(0, 1000),
     by: by || null,
     at: Date.now(),
-  });
+  };
+  arr.push(entry);
   if (arr.length > MAX_PER_DEVICE) arr.splice(0, arr.length - MAX_PER_DEVICE);
   saveSoon();
+  return entry;
 }
 
-function takeFor(deviceId) {
-  if (!deviceId || !store[deviceId]) return [];
+function pendingFor(deviceId) {
+  const arr = deviceId && store[deviceId];
+  if (!arr) return [];
   const now = Date.now();
-  const out = store[deviceId].filter((w) => now - (w.at || 0) <= TTL);
-  delete store[deviceId];
+  const live = arr.filter((w) => w.id && now - (w.at || 0) <= TTL);
+  if (live.length !== arr.length) {
+    if (live.length) store[deviceId] = live;
+    else delete store[deviceId];
+    saveSoon();
+  }
+  return live;
+}
+
+function has(deviceId) {
+  const arr = deviceId && store[deviceId];
+  if (!arr || !arr.length) return false;
+  const now = Date.now();
+  return arr.some((w) => w.id && now - (w.at || 0) <= TTL);
+}
+
+function ack(deviceId, id) {
+  const arr = deviceId && id && store[deviceId];
+  if (!arr) return null;
+  const i = arr.findIndex((w) => w.id === id);
+  if (i === -1) return null;
+  const [entry] = arr.splice(i, 1);
+  if (!arr.length) delete store[deviceId];
   saveSoon();
-  return out;
+  return entry;
 }
 
 load();
 
-module.exports = { queue, takeFor, flushSync };
+module.exports = { queue, pendingFor, has, ack, flushSync };

@@ -7,9 +7,11 @@ body .modern-notify-container {
   z-index: 100002;
   gap: 10px;
   padding: 14px;
+  max-width: 100%;
 }
 
 body .modern-notify {
+  box-sizing: border-box;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: start;
@@ -18,7 +20,7 @@ body .modern-notify {
   padding: 13px 14px 15px;
   border: 1px solid #333333;
   border-left: 1px solid #333333;
-  border-radius: 10px;
+  border-radius: 10px 10px 0 0;
   background: #1b1b1b;
   color: #ffffff;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
@@ -165,6 +167,6 @@ body .modern-notify .modern-notify-progress-bar {
     padding: 10px;
   }
   body .modern-notify {
-    border-radius: 8px;
+    border-radius: 8px 8px 0 0;
   }
 }

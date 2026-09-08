@@ -80,6 +80,7 @@
           undefined,
       },
     });
+    window.socket = socket;
 
     socket.on("connect", function () {
       live = true;

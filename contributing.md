@@ -15,7 +15,7 @@ The following is a set of guidelines for contributing to Talkomatic. These are m
 
 ## Code of Conduct
 
-This project and everyone participating in it is governed by the [Talkomatic Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code. Please report unacceptable behavior to The Talkomatic Project team through the [Talkomatic Discord](https://discord.gg/N7tJznESrE).
+This project and everyone participating in it is governed by the [Talkomatic Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code. Please report unacceptable behavior to The Talkomatic Project team through the Talkomatic Discord, linked in the lobby.
 
 ## How Can I Contribute?
 

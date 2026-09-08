@@ -43,7 +43,14 @@ function load() {
   }
 }
 
-const STATUSES = ["open", "approved", "declined", "implemented"];
+const STATUSES = [
+  "open",
+  "reviewing",
+  "approved",
+  "progress",
+  "implemented",
+  "declined",
+];
 const KINDS = ["idea", "bug"];
 
 function migrate(s) {
@@ -343,9 +350,7 @@ function unreadFor(deviceId, since) {
   const from = Number(since) || 0;
   for (const s of suggestions) {
     if (s.deviceId !== deviceId) continue;
-    const decided =
-      (s.statusAt || 0) > from &&
-      ["approved", "implemented", "declined"].includes(s.status);
+    const decided = (s.statusAt || 0) > from && s.status !== "open";
     let newReplies = 0;
     let latest = decided ? s.statusAt : 0;
     for (const r of s.replies || [])

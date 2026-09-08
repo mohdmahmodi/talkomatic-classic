@@ -562,3 +562,83 @@
     font-size: 12px;
   }
 }
+
+/* ── Warning acknowledgement ── */
+
+.tkw-overlay {
+  z-index: 1000004;
+}
+
+.tkw-overlay .tkm-modal {
+  max-width: 520px;
+}
+
+.tkw-overlay .tkm-title i {
+  color: #ffb454;
+}
+
+.tkw-label {
+  color: var(--tk-muted);
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-bottom: 7px;
+}
+
+.tkw-message {
+  padding: 13px 14px;
+  border: 1px solid var(--tk-border);
+  border-radius: 8px;
+  background: var(--tk-tile);
+  color: var(--tk-text);
+  font-size: 14.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.tkw-when {
+  color: var(--tk-muted);
+  font-size: 11.5px;
+  margin-top: 7px;
+}
+
+.tkw-next {
+  color: var(--tk-muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+  margin-top: 16px;
+  padding-top: 13px;
+  border-top: 1px solid var(--tk-border);
+}
+
+.tkw-agree {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--tk-text);
+  font-size: 12.5px;
+  line-height: 1.4;
+  cursor: pointer;
+  user-select: none;
+}
+
+.tkw-agree input {
+  flex: none;
+  width: 17px;
+  height: 17px;
+  accent-color: var(--tk-accent);
+  cursor: pointer;
+}
+
+@media (max-width: 520px) {
+  .tkw-overlay .tkm-gate {
+    flex-wrap: wrap;
+  }
+  .tkw-overlay .tkm-gate-btn {
+    width: 100%;
+  }
+}

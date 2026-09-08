@@ -633,11 +633,7 @@ socket.on("reconnect", (attemptNumber) => {
   checkSignInStatus();
 });
 
-socket.on("staff warning", (data) => {
-  const msg = (data && data.message) || "Please follow the Talkomatic rules.";
-  if (window.toastr)
-    toastr.warning(msg, "Staff warning", { timeOut: 12000, closeButton: true });
-});
+socket.on("warning ack result", () => checkSignInStatus());
 
 let tabSuperseded = false;
 function showTabSupersededOverlay() {
@@ -1070,7 +1066,7 @@ function showBanScreen(info) {
       closed.className = "ac-closed";
       closed.textContent =
         d.status === "resolved"
-          ? "This appeal is closed. Any moderator can reopen it if they think it deserves another look, and this page will say so. If your ban is still in place, the Discord link below is the next stop."
+          ? "This appeal is closed. Any moderator can reopen it if they think it deserves another look, and this page will say so."
           : d.awaitingReply
             ? "Sent. Staff will read it and reply here - you will be able to write again once they have. Adding more now would only push your appeal down the queue."
             : "You cannot send any more messages here. Staff will still read what you have written.";
@@ -3447,10 +3443,31 @@ window.addEventListener("hashchange", () => {
 });
 
 // ── Lobby ticker bar ─────────────────────────────────────────────────────────
+const TICKER_SPEED = 55;
+let tickerResize = null;
+
+function sizeLobbyTicker(bar) {
+  const track = bar.firstChild;
+  if (!track) return;
+  bar.classList.remove("is-static");
+  const item = track.firstChild;
+  const span = item.scrollWidth;
+  if (span <= bar.clientWidth) {
+    bar.classList.add("is-static");
+    track.style.animationDuration = "";
+    return;
+  }
+  track.style.animationDuration = Math.round(span / TICKER_SPEED) + "s";
+}
+
 function setLobbyTicker(message) {
   let bar = document.getElementById("lobbyTickerBar");
   if (!message) {
     if (bar) bar.remove();
+    if (tickerResize) {
+      window.removeEventListener("resize", tickerResize);
+      tickerResize = null;
+    }
     return;
   }
   if (!bar) {
@@ -3458,7 +3475,25 @@ function setLobbyTicker(message) {
     bar.id = "lobbyTickerBar";
     document.body.appendChild(bar);
   }
-  bar.textContent = message;
+  const track = document.createElement("div");
+  track.className = "tk-tick-track";
+  for (let i = 0; i < 2; i++) {
+    const item = document.createElement("span");
+    item.className = "tk-tick-item";
+    item.textContent = message;
+    if (i) item.setAttribute("aria-hidden", "true");
+    track.appendChild(item);
+  }
+  bar.textContent = "";
+  bar.appendChild(track);
+  sizeLobbyTicker(bar);
+  if (!tickerResize) {
+    tickerResize = () => {
+      const live = document.getElementById("lobbyTickerBar");
+      if (live) sizeLobbyTicker(live);
+    };
+    window.addEventListener("resize", tickerResize, { passive: true });
+  }
 }
 socket.on("lobby ticker", (data) =>
   setLobbyTicker((data && data.message) || ""),

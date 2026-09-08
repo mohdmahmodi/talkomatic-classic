@@ -637,6 +637,16 @@
 .sb-update-what b.st-approved {
   color: #ffcc80;
 }
+.sb-update-what b.st-reviewing {
+  border-color: rgba(186, 104, 200, 0.45);
+  background: rgba(186, 104, 200, 0.16);
+  color: #ce93d8;
+}
+.sb-update-what b.st-progress {
+  border-color: rgba(38, 198, 218, 0.45);
+  background: rgba(38, 198, 218, 0.16);
+  color: #80deea;
+}
 .sb-update-what b.st-done {
   color: #a5d6a7;
 }
@@ -839,6 +849,16 @@
 .sb-new-pill.st-approved {
   background: #ffb74d;
 }
+.sb-new-pill.st-reviewing {
+  border-color: rgba(186, 104, 200, 0.45);
+  background: rgba(186, 104, 200, 0.16);
+  color: #ce93d8;
+}
+.sb-new-pill.st-progress {
+  border-color: rgba(38, 198, 218, 0.45);
+  background: rgba(38, 198, 218, 0.16);
+  color: #80deea;
+}
 .sb-new-pill.st-done {
   background: #66bb6a;
   color: #0b1f0d;
@@ -948,6 +968,16 @@
   background: rgba(255, 183, 77, 0.16);
   color: #ffcc80;
 }
+.sb-pill.st-reviewing {
+  border-color: rgba(186, 104, 200, 0.45);
+  background: rgba(186, 104, 200, 0.16);
+  color: #ce93d8;
+}
+.sb-pill.st-progress {
+  border-color: rgba(38, 198, 218, 0.45);
+  background: rgba(38, 198, 218, 0.16);
+  color: #80deea;
+}
 .sb-pill.st-done {
   border-color: rgba(102, 187, 106, 0.5);
   background: rgba(102, 187, 106, 0.18);
@@ -964,6 +994,12 @@
 }
 .sb-dot.st-approved {
   background: #ffb74d;
+}
+.sb-dot.st-reviewing {
+  background: #ba68c8;
+}
+.sb-dot.st-progress {
+  background: #26c6da;
 }
 .sb-dot.st-done {
   background: #66bb6a;
@@ -1188,6 +1224,16 @@
 .sb-mod-bar .sb-seg-btn.active.st-approved {
   background: #ffb74d;
   color: #1a1a1a;
+}
+.sb-mod-bar .sb-seg-btn.active.st-reviewing {
+  border-color: rgba(186, 104, 200, 0.45);
+  background: rgba(186, 104, 200, 0.16);
+  color: #ce93d8;
+}
+.sb-mod-bar .sb-seg-btn.active.st-progress {
+  border-color: rgba(38, 198, 218, 0.45);
+  background: rgba(38, 198, 218, 0.16);
+  color: #80deea;
 }
 .sb-mod-bar .sb-seg-btn.active.st-done {
   background: #66bb6a;

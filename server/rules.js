@@ -29,7 +29,7 @@ const DEFAULT_COMMUNITY = [
   {
     title: "You must be 13 or older to use Talkomatic",
     body:
-      "Talkomatic is for people aged 13 and up, and anyone under 18 should be here with the permission of a parent or legal guardian. Nobody on the site will ask your age, and you should not offer it. If you tell us you are under 13, you will be removed and your access blocked, and you are welcome back the day you meet the requirement. A parent or guardian who believes a child under 13 is using Talkomatic can reach us on Discord and we will remove the child's access.",
+      "Talkomatic is for people aged 13 and up, and anyone under 18 should be here with the permission of a parent or legal guardian. Nobody on the site will ask your age, and you should not offer it. If you tell us you are under 13, you will be removed and your access blocked, and you are welcome back the day you meet the requirement. A parent or guardian who believes a child under 13 is using Talkomatic can reach us on the Discord linked in the lobby and we will remove the child's access.",
     why: "The law does not allow a site like this to serve children under 13, and an anonymous room full of strangers is no place for a child anyway.",
     response: "Removed and blocked permanently, with underage as the reason. Appeal the day you meet the requirement.",
     block: "permanent",
