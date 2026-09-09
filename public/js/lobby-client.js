@@ -2624,13 +2624,84 @@ function openModLobbyPanel() {
 }
 
 function myKeyItem() {
+  if (localStorage.getItem("talkomatic_devKey"))
+    return {
+      icon: '<i class="fas fa-key"></i>',
+      label: "Show my staff key",
+      desc: "Reveal and copy the key this browser uses",
+      onClick: () => openMyKey(),
+    };
   return {
-    icon: '<i class="fas fa-key"></i>',
-    label: "Show my staff key",
-    desc: "Reveal and copy the key this browser uses",
-    onClick: () => openMyKey(),
+    icon: '<i class="fas fa-mobile-screen"></i>',
+    label: "Staff key & devices",
+    desc: "Add another device, or sign the others out",
+    onClick: () => socket.emit("staff key devices"),
   };
 }
+
+const DEVICE_ICON = {
+  phone: "fa-mobile-screen",
+  tablet: "fa-tablet-screen-button",
+  desktop: "fa-desktop",
+};
+
+socket.on("staff key devices", (d) => {
+  if (!d || !window.StaffUI) return;
+  const devices = (d.devices || []).map((x) => ({
+    icon: `<i class="fas ${DEVICE_ICON[x.kind] || "fa-laptop"}"></i>`,
+    label: x.kind[0].toUpperCase() + x.kind.slice(1) + (x.mine ? " (this one)" : ""),
+    desc:
+      (x.active ? "Active" : "Standby") +
+      ([x.browser, x.os].filter(Boolean).length
+        ? " · " + [x.browser, x.os].filter(Boolean).join(" on ")
+        : "") +
+      " · last used " +
+      (x.last ? new Date(x.last).toLocaleString() : "never"),
+  }));
+  StaffUI.menu({
+    title: "Staff key & devices",
+    icon: '<i class="fas fa-mobile-screen"></i>',
+    subtitle: `${devices.length} of 2 devices · one active at a time`,
+    groups: [
+      { title: "Your devices", items: devices },
+      {
+        items: [
+          {
+            icon: '<i class="fas fa-plus"></i>',
+            label: "Get a key for another device",
+            desc: "A one-time key to paste on your phone, tablet or other computer",
+            onClick: async () => {
+              const ok = await StaffUI.confirm({
+                title: "Key for another device",
+                icon: '<i class="fas fa-mobile-screen"></i>',
+                message:
+                  "You get a key that works once, within 15 minutes, on the device you paste it into. That device becomes the active one. If you already have two devices, the one used least recently is dropped.",
+                confirmText: "Show me the key",
+              });
+              if (ok) socket.emit("staff mint key");
+            },
+          },
+          {
+            icon: '<i class="fas fa-right-from-bracket"></i>',
+            label: "Sign out other devices",
+            desc: "Only this browser keeps your key",
+            danger: true,
+            onClick: async () => {
+              const ok = await StaffUI.confirm({
+                title: "Sign out other devices",
+                danger: true,
+                message:
+                  "Every other device loses your staff key right now. Do this if you think one of them is not yours.",
+                confirmText: "Sign them out",
+              });
+              if (ok) socket.emit("staff sign out other devices");
+            },
+          },
+        ],
+      },
+    ],
+  });
+});
 
 function removeKeyItem() {
   return {
@@ -2645,7 +2716,7 @@ function removeKeyItem() {
 async function removeMyKey() {
   if (!window.StaffUI) return;
   const devKey = localStorage.getItem("talkomatic_devKey");
-  const modKey = localStorage.getItem("talkomatic_modKey");
+  const modKey = localStorage.getItem("talkomatic_modKey") || currentUserIsMod;
   if (!devKey && !modKey) {
     lobbyNotify("This browser has no staff key saved.", "info");
     return;
@@ -2656,14 +2727,15 @@ async function removeMyKey() {
     icon: '<i class="fas fa-key"></i>',
     danger: true,
     subtitle: "This browser only",
-    message:
-      "This browser will forget your " +
-      (devKey ? "admin" : "moderator") +
-      " key and you will go back to being an ordinary user here. The key itself is not revoked and still works everywhere else, so make sure you have a copy before you do this: getting back in means pasting it again with Enter staff key. If you think the key has leaked, tell an admin instead so it can be properly revoked.",
+    message: devKey
+      ? "This browser will forget your admin key and you will go back to being an ordinary user here. The key itself is not revoked and still works everywhere else, so make sure you have a copy before you do this: getting back in means pasting it again with Enter staff key."
+      : "This browser is dropped from your staff key and you go back to being an ordinary user here. Your role is not affected. To sign in here again later, get a one-time key from another of your devices, or ask a mod leader.",
     confirmText: "Remove key",
   });
   if (!ok) return;
 
+  if (modKey) socket.emit("staff forget device");
+  if (window.StaffKey) await StaffKey.forget();
   localStorage.removeItem("talkomatic_devKey");
   localStorage.removeItem("talkomatic_modKey");
   lobbyNotify("Staff key removed from this browser. Reloading...", "success", {
@@ -2674,9 +2746,7 @@ async function removeMyKey() {
 
 function openMyKey() {
   if (!window.StaffUI) return;
-  const devKey = localStorage.getItem("talkomatic_devKey");
-  const modKey = localStorage.getItem("talkomatic_modKey");
-  const key = devKey || modKey;
+  const key = localStorage.getItem("talkomatic_devKey");
   const wrap = StaffUI.el("div");
 
   if (!key) {
@@ -2697,9 +2767,7 @@ function openMyKey() {
   wrap.appendChild(
     StaffUI.el("p", {
       text:
-        "This is the " +
-        (devKey ? "admin" : "moderator") +
-        " key this browser is signed in with. Treat it like a password: it is the only proof of your role, so never paste it anywhere public or share it, not even with other staff. If it leaks, tell an admin and it will be revoked.",
+        "This is the admin key this browser is signed in with. Treat it like a password: it is the only proof of your role, so never paste it anywhere public or share it, not even with other staff. If it leaks, tell an admin and it will be revoked.",
     }),
   );
 
@@ -2747,7 +2815,9 @@ socket.on("dev mod granted", (data) => {
   const wrap = StaffUI.el("div");
   wrap.appendChild(
     StaffUI.el("p", {
-      text: `New ${data.level >= 3 ? "leader (L3)" : data.level === 1 ? "junior (L1)" : "full (L2)"} mod key for "${data.label}". This is shown ONCE, so copy it now and send it to them.`,
+      text: data.reissued
+        ? `New sign-in key for "${data.label}". It works once, on the device they paste it into, and expires in 24 hours. Shown ONCE, so copy it now and send it to them.`
+        : `New ${data.level >= 3 ? "leader (L3)" : data.level === 1 ? "junior (L1)" : "full (L2)"} mod key for "${data.label}". It works once, on the device they paste it into. Shown ONCE, so copy it now and send it to them.`,
     }),
   );
   const input = StaffUI.el("input", {
@@ -2771,7 +2841,7 @@ socket.on("dev mod granted", (data) => {
   code.textContent = cmd;
   wrap.appendChild(code);
   StaffUI.modal({
-    title: "Mod key granted",
+    title: data.reissued ? "Sign-in key ready" : "Mod key granted",
     icon: '<i class="fas fa-key"></i>',
     wide: true,
     body: wrap,
@@ -2841,6 +2911,12 @@ function openModKeyActions(k) {
             };
           }),
           {
+            icon: '<i class="fas fa-mobile-screen"></i>',
+            label: "Send a new sign-in key",
+            desc: "For a new phone or a cleared browser. One use, 24 hours.",
+            onClick: () => socket.emit("dev reissue mod key", { hash: k.hash }),
+          },
+          {
             icon: '<i class="fas fa-user-xmark"></i>',
             label: "Revoke mod key",
             desc: "Remove their access instantly",
@@ -2869,7 +2945,14 @@ socket.on("dev mod keys", (keys) => {
     ? list.map((k) => ({
         icon: '<i class="fas fa-user-shield"></i>',
         label: `${k.label} - ${k.level >= 3 ? "L3" : k.level === 1 ? "L1" : "L2"}`,
-        desc: "key " + k.hash.slice(0, 12) + "…",
+        desc:
+          "key " +
+          k.hash.slice(0, 12) +
+          "… · " +
+          ((k.devices || []).length || "no") +
+          " device" +
+          ((k.devices || []).length === 1 ? "" : "s") +
+          (k.request ? " · asked for a new key" : ""),
         keepOpen: true,
         onClick: () => openModKeyActions(k),
       }))
@@ -3043,71 +3126,9 @@ socket.on("staff action result", (data) => {
     );
 });
 
-function revokedNoticeBody(reason, removedAt) {
-  const wrap = document.createElement("div");
-  const p1 = document.createElement("p");
-  p1.textContent =
-    "The Talkomatic team has removed your moderator key" +
-    (removedAt ? " on " + new Date(removedAt).toLocaleDateString() : "") +
-    ".";
-  wrap.appendChild(p1);
-  if (reason) {
-    const q = document.createElement("p");
-    q.style.cssText =
-      "border-left:3px solid #ff5468;padding:8px 10px;background:rgba(255,84,104,.08);border-radius:0 6px 6px 0;";
-    q.textContent = "Reason: " + reason;
-    wrap.appendChild(q);
-  }
-  const p2 = document.createElement("p");
-  p2.style.cssText = "color:#8d8d8d;font-size:12px;";
-  p2.textContent =
-    "You are back to being an ordinary user. If you believe this was a mistake, raise it with staff.";
-  wrap.appendChild(p2);
-  return wrap;
-}
-
-socket.on("staff revoked", (d) => {
-  localStorage.removeItem("talkomatic_modKey");
+socket.on("staff revoked", () => {
   currentUserIsMod = false;
   currentUserModLevel = 0;
-  const reason = d && d.reason;
-  if (window.StaffUI && StaffUI.modal && reason) {
-    StaffUI.modal({
-      title: "You are no longer a moderator",
-      icon: '<i class="fas fa-user-xmark"></i>',
-      body: revokedNoticeBody(reason, Date.now()),
-      actions: [
-        {
-          label: "Understood",
-          kind: "primary",
-          onClick: () => window.location.reload(),
-        },
-      ],
-    });
-    setTimeout(() => window.location.reload(), 60000);
-  } else {
-    lobbyNotify("Your mod key was revoked.", "warning", { timeout: 6000 });
-    setTimeout(() => window.location.reload(), 1500);
-  }
-});
-
-socket.on("staff revoked notice", (d) => {
-  localStorage.removeItem("talkomatic_modKey");
-  if (window.StaffUI && StaffUI.modal) {
-    StaffUI.modal({
-      title: "You are no longer a moderator",
-      icon: '<i class="fas fa-user-xmark"></i>',
-      body: revokedNoticeBody(d && d.reason, d && d.removedAt),
-      actions: [{ label: "Understood", kind: "primary", onClick: () => {} }],
-    });
-  } else {
-    lobbyNotify(
-      "Your moderator key was removed" +
-        (d && d.reason ? ": " + d.reason : "."),
-      "warning",
-      { title: "You are no longer a moderator", timeout: 12000 },
-    );
-  }
 });
 
 // The name, location and picture the key last signed in with, sent by the
@@ -3156,7 +3177,7 @@ async function openStaffKeyEntry() {
     icon: '<i class="fas fa-key"></i>',
     subtitle: "Enter your dev or mod key",
     message:
-      "All keys are verified, logged, and monitored on our servers. Sharing your key with anyone will result in a permanent ban from Talkomatic.",
+      "A key works once, on the device you paste it into. All keys are verified, logged, and monitored on our servers. Sharing your key with anyone will result in a permanent ban from Talkomatic.",
     fields: [
       {
         name: "value",

@@ -68,6 +68,7 @@ function isOpsEntry(e) {
 function redactEntry(entry, view) {
   const copy = Object.assign({}, entry);
   delete copy.ip;
+  delete copy.ips;
   delete copy.targetIp;
   for (const f of MASKED_FIELDS)
     if (copy[f] != null) copy[f] = maskIps(copy[f]);
@@ -266,7 +267,7 @@ function recordRulesAccepted({ userId, deviceId, username, ip }) {
   });
 }
 
-function recordKeyAlert({ role, label, ip, kind, detail }) {
+function recordKeyAlert({ role, label, ip, ips, kind, detail }) {
   push({
     ts: Date.now(),
     type: "security",
@@ -275,6 +276,7 @@ function recordKeyAlert({ role, label, ip, kind, detail }) {
     label: label || role || "?",
     kind: kind || "alert",
     ip: ip || null,
+    ips: ips && ips.length ? ips : null,
     detail: detail || null,
   });
 }
@@ -583,13 +585,17 @@ const ACTION_GROUPS = [
       "set rules", "reset rules", "allow link domain", "remove link domain",
       "merge person", "split person", "amend writeup",
       "override own appeal", "export record",
+      "reissue staff key", "decline staff key request", "mint sign-in key for mod",
     ],
   },
   {
     key: "passive",
     label: "Not counted as work",
     blurb: "Watching and signing in. Real, but not a workload.",
-    actions: ["spectate", "unspectate", "staff key entered", "staff login", "staff logout"],
+    actions: [
+      "spectate", "unspectate", "staff key entered", "staff login", "staff logout",
+      "mint sign-in key", "switched device", "signed out other devices",
+    ],
   },
 ];
 

@@ -291,6 +291,22 @@
     row.appendChild(val);
     return row;
   }
+  const ALERT_TITLE = {
+    concurrent: "key in use from multiple IPs",
+    shared: "key shared, revoked",
+    networks: "key moving between networks",
+    switching: "key passed between devices",
+    mismatch: "sign-in from an unknown device",
+    fingerprint: "sign-in from a different browser",
+  };
+  const ALERT_KIND = {
+    concurrent: "same key, several IPs",
+    shared: "same key, two people",
+    networks: "several networks",
+    switching: "device switching",
+    mismatch: "unknown device",
+    fingerprint: "browser changed",
+  };
   function addKv(parent, k, v, vClass, uid) {
     const row = kvRow(k, v, vClass, uid);
     if (row) parent.appendChild(row);
@@ -383,9 +399,7 @@
       title.appendChild(
         span(
           "act",
-          e.kind === "concurrent"
-            ? "key in use from multiple IPs"
-            : "key used from a new IP",
+          ALERT_TITLE[e.kind] || "key used from a new IP",
         ),
       );
     } else if (e.type === "action") {
@@ -417,7 +431,9 @@
               ? "mod application"
               : e.kind === "suggestion"
                 ? "feature suggestion"
-                : "user report",
+                : e.kind === "key"
+                  ? "staff key request"
+                  : "user report",
         ),
       );
     } else {
@@ -457,8 +473,9 @@
     if (e.type === "security") {
       addKv(body, "Key", e.label);
       addKv(body, "Role", e.role);
-      addKv(body, "Kind", e.kind === "concurrent" ? "same key, several IPs" : "new IP");
+      addKv(body, "Kind", ALERT_KIND[e.kind] || "new IP");
       addKv(body, "IP", e.ip, "ip");
+      for (const ip of e.ips || []) addKv(body, "Seen from", ip, "ip");
       addKv(body, "When", fmtTime(e.ts), "dimv");
     } else if (e.type === "action") {
       const t = parseTarget(e.target);
@@ -1626,7 +1643,34 @@
     grid.appendChild(
       modStat("Key", m.hash ? m.hash.slice(0, 12) + "…" : "?", "mono"),
     );
+    if (m.key) {
+      const devs = m.key.devices || [];
+      grid.appendChild(
+        modStat(
+          "Devices",
+          devs.length
+            ? devs.map((d) => deviceLine(d) + (d.active ? " (active)" : "")).join(", ")
+            : "None yet",
+          devs.length ? null : "dim",
+          devs.length
+            ? devs
+                .map((d) => deviceLine(d) + (d.ip ? " · " + d.ip : "") + " · last " + fmtTime(d.last))
+                .join("\n")
+            : "No device has signed in with this key yet",
+        ),
+      );
+      if (m.key.switches)
+        grid.appendChild(
+          modStat(
+            "Switches",
+            m.key.switches + " this hour",
+            m.key.switches >= 4 ? "warn" : null,
+            "Times the key moved between devices in the last hour",
+          ),
+        );
+    }
     card.appendChild(grid);
+    if (m.key && m.key.request) card.appendChild(keyRequestRow(m.key));
 
     const actions = divc("mc-actions");
     // Every mod can open their own record (without its flags); reading other
@@ -3418,6 +3462,54 @@
     if (recordCtx) recordCtx.host = wrap;
   }
 
+  function deviceLine(d) {
+    const what = [d.browser, d.os].filter(Boolean).join(" on ");
+    return d.kind + (what ? " · " + what : "");
+  }
+
+  function keyRequestRow(k) {
+    const r = k.request;
+    const row = divc("former-why");
+    row.appendChild(span("former-why-k", r.kind === "revoked" ? "Asked for the key back" : "Lost their key"));
+    row.appendChild(span("former-why-v", r.text || "No details given"));
+    const when = span("mc-v dim", relTime(r.at));
+    when.title = fmtTime(r.at);
+    row.appendChild(when);
+    const mayAct = viewerIsDev() || (viewerIsLeader() && (k.level || 1) < 3);
+    if (!mayAct || !window.StaffUI) return row;
+    const acts = divc("mc-actions");
+    const reissue = document.createElement("button");
+    reissue.className = "btn sm";
+    reissue.appendChild(icon("fa-key"));
+    reissue.appendChild(document.createTextNode(" Reissue key"));
+    reissue.addEventListener("click", async () => {
+      const ok = await StaffUI.confirm({
+        title: "Reissue " + (k.label || "their") + "'s key",
+        message:
+          "Their role, level and record are kept. The new key lands on the device that asked, by itself.",
+        confirmText: "Reissue",
+      });
+      if (ok) socket.emit("staff key reissue", { id: r.id });
+    });
+    acts.appendChild(reissue);
+    const decline = document.createElement("button");
+    decline.className = "btn sm danger";
+    decline.appendChild(icon("fa-xmark"));
+    decline.appendChild(document.createTextNode(" Decline"));
+    decline.addEventListener("click", async () => {
+      const note = await StaffUI.prompt({
+        title: "Decline " + (k.label || "their") + "'s request",
+        fields: [{ name: "value", label: "Note to them (optional)", type: "textarea", maxLength: 300 }],
+        confirmText: "Decline",
+        danger: true,
+      });
+      if (note != null) socket.emit("staff key decline", { id: r.id, note: String(note || "").trim() });
+    });
+    acts.appendChild(decline);
+    row.appendChild(acts);
+    return row;
+  }
+
   function buildFormerCard(f) {
     const card = divc("modcard former");
 
@@ -3444,6 +3536,7 @@
       span("former-why-v" + (f.reason ? "" : " dim"), f.reason || "Not given"),
     );
     card.appendChild(why);
+    if (f.request) card.appendChild(keyRequestRow(f));
 
     const grid = divc("mc-grid");
     grid.appendChild(

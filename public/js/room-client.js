@@ -5139,71 +5139,9 @@ socket.on("staff action result", (data) => {
   if (window.StaffUI) StaffUI.actionToast(data);
   else notify((data.ok ? "Done: " : "Failed: ") + data.action, data.ok ? "success" : "error");
 });
-function revokedNoticeBody(reason, removedAt) {
-  const wrap = document.createElement("div");
-  const p1 = document.createElement("p");
-  p1.textContent =
-    "The Talkomatic team has removed your moderator key" +
-    (removedAt ? " on " + new Date(removedAt).toLocaleDateString() : "") +
-    ".";
-  wrap.appendChild(p1);
-  if (reason) {
-    const q = document.createElement("p");
-    q.style.cssText =
-      "border-left:3px solid #ff5468;padding:8px 10px;background:rgba(255,84,104,.08);border-radius:0 6px 6px 0;";
-    q.textContent = "Reason: " + reason;
-    wrap.appendChild(q);
-  }
-  const p2 = document.createElement("p");
-  p2.style.cssText = "color:#8d8d8d;font-size:12px;";
-  p2.textContent =
-    "You are back to being an ordinary user. If you believe this was a mistake, raise it with staff.";
-  wrap.appendChild(p2);
-  return wrap;
-}
-
-socket.on("staff revoked", (d) => {
-  localStorage.removeItem("talkomatic_modKey");
+socket.on("staff revoked", () => {
   currentUserIsMod = false;
   currentUserModLevel = 0;
-  const reason = d && d.reason;
-  if (window.StaffUI && StaffUI.modal && reason) {
-    StaffUI.modal({
-      title: "You are no longer a moderator",
-      icon: '<i class="fas fa-user-xmark"></i>',
-      body: revokedNoticeBody(reason, Date.now()),
-      actions: [
-        {
-          label: "Understood",
-          kind: "primary",
-          onClick: () => window.location.reload(),
-        },
-      ],
-    });
-    setTimeout(() => window.location.reload(), 60000);
-  } else {
-    notify("Your mod key was revoked.", "warning", { timeout: 6000 });
-    setTimeout(() => window.location.reload(), 1500);
-  }
-});
-
-socket.on("staff revoked notice", (d) => {
-  localStorage.removeItem("talkomatic_modKey");
-  if (window.StaffUI && StaffUI.modal) {
-    StaffUI.modal({
-      title: "You are no longer a moderator",
-      icon: '<i class="fas fa-user-xmark"></i>',
-      body: revokedNoticeBody(d && d.reason, d && d.removedAt),
-      actions: [{ label: "Understood", kind: "primary", onClick: () => {} }],
-    });
-  } else {
-    notify(
-      "Your moderator key was removed" +
-        (d && d.reason ? ": " + d.reason : "."),
-      "warning",
-      { title: "You are no longer a moderator", timeout: 12000 },
-    );
-  }
 });
 
 // ── Staff key entry (no console needed) ──────────────────────────────────────

@@ -535,9 +535,33 @@ io.use((socket, next) => {
     // Mod mode: validate modKey by hash against mod-keys.json. Dev outranks mod,
     // so only check when the connection is not already a dev.
     if (!socket.isDev) {
-      const modKey = socket.handshake.auth.modKey;
-      const mk = modKey ? roles.getModKeyByPlain(modKey) : null;
-      if (mk) {
+      const pasted = socket.handshake.auth.modKey;
+      const cookieToken = devicetoken.cookieValue(
+        socket.handshake.headers.cookie,
+        devicetoken.STAFF_COOKIE,
+      );
+      const modKey =
+        pasted && String(pasted).startsWith("mk_") ? pasted : cookieToken || pasted;
+      const ua = socket.handshake.headers["user-agent"];
+      const found = modKey
+        ? roles.resolveModKey(modKey, socket.deviceId, clientIp, ua)
+        : roles.pendingReissueFor(socket.deviceId, clientIp, ua);
+      const mk =
+        found && (found.status === "active" || found.status === "standby")
+          ? found.key
+          : null;
+      if (mk && (found.token || modKey !== cookieToken)) {
+        socket.staffToken = found.token || modKey;
+        socket.staffRestored = !modKey;
+      }
+      if (found?.changed) rooms.keyFingerprintChanged(mk, found.changed, clientIp);
+      if (found?.status === "mismatch") {
+        socket.deadKey = true;
+        rooms.keyTokenMismatch(found.key, found.device, clientIp);
+      } else if (found?.status === "standby") {
+        socket.staffStandby = { hash: mk.hash, label: mk.label, level: mk.level };
+      } else if (mk) {
+        socket.deviceKind = roles.deviceInfo(ua).kind;
         socket.isMod = true;
         socket.modKeyHash = mk.hash;
         socket.modLevel = mk.level || 1;
@@ -561,8 +585,12 @@ io.use((socket, next) => {
           socket.staffLabel = null;
           socket.formerModNotice = {
             label: mk.label,
-            reason: "The key was used from too many different networks.",
+            hash: mk.hash,
+            level: mk.level,
+            known: true,
+            reason: "Your key was used from too many different networks.",
             removedAt: Date.now(),
+            auto: true,
           };
         }
         console.log(`[MOD] Mod mode activated (${mk.label}) for IP:${clientIp}`);
@@ -573,9 +601,14 @@ io.use((socket, next) => {
         if (former)
           socket.formerModNotice = {
             label: former.label,
+            hash: former.hash,
+            level: former.level,
+            known: former.tokens.includes(roles.hashKey(modKey)),
             reason: former.reason || null,
             removedAt: former.removedAt || null,
+            auto: former.removedBy === "system",
           };
+        else socket.deadKey = true;
       }
     }
 
@@ -1607,11 +1640,49 @@ app.post(`${API}/themes`, (req, res) => {
   }
 });
 
+const staffCookieOpts = (req) => ({
+  httpOnly: true,
+  sameSite: "strict",
+  secure: req.secure,
+  path: "/",
+});
+
+app.use((req, res, next) => {
+  const held = req.cookies?.[devicetoken.STAFF_COOKIE];
+  if (held)
+    res.cookie(devicetoken.STAFF_COOKIE, held, {
+      ...staffCookieOpts(req),
+      maxAge: 365 * 86400000,
+    });
+  next();
+});
+
+app.post(`${API}/staff/token`, (req, res) => {
+  const token = typeof req.body?.token === "string" ? req.body.token : "";
+  if (!token) {
+    res.clearCookie(devicetoken.STAFF_COOKIE, staffCookieOpts(req));
+    return res.json({ ok: true });
+  }
+  if (!roles.tokenBelongsTo(token, requester(req).deviceId))
+    return sendErrorResponse(res, ERROR_CODES.FORBIDDEN, "Not your sign-in.", 403);
+  res.cookie(devicetoken.STAFF_COOKIE, token, {
+    ...staffCookieOpts(req),
+    maxAge: 365 * 86400000,
+  });
+  res.json({ ok: true });
+});
+
 // Takedown: full mods and up. The staff key rides a header because this page
 // has no socket; it is validated the same way the socket handshake does it.
 app.delete(`${API}/themes/:id`, (req, res) => {
   try {
-    const key = String(req.headers["x-staff-key"] || "");
+    const cookie = req.cookies?.[devicetoken.STAFF_COOKIE];
+    const key = String(
+      req.headers["x-staff-key"] ||
+        (cookie && roles.tokenBelongsTo(cookie, requester(req).deviceId)
+          ? cookie
+          : ""),
+    );
     const v = key ? roles.validateKey(key) : { role: null };
     const allowed =
       v.role === "dev" || (v.role === "mod" && (v.level || 1) >= 2);

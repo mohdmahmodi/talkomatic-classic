@@ -267,6 +267,7 @@ const CARD_FLOORS = {
   suggestion: 2,
   application: 3,
   abuse: 3,
+  key: 3,
 };
 
 function backfillCards() {

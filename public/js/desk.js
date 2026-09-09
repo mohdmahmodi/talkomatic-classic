@@ -854,6 +854,8 @@
   function init(sock) {
     if (!sock || socket) return;
     socket = sock;
+    window.socket = sock;
+    window.dispatchEvent(new Event("talkomatic:socket"));
 
     socket.on("desk ready", (d) => {
       if (!d || !d.me) return;
@@ -2114,6 +2116,7 @@
     application: "fa-file-signature",
     suggestion: "fa-lightbulb",
     abuse: "fa-triangle-exclamation",
+    key: "fa-key",
   };
   const QNAME = {
     report: "Report",
@@ -2121,6 +2124,7 @@
     application: "Mod application",
     suggestion: "Suggestion",
     abuse: "Worth a look",
+    key: "Staff key",
   };
 
   const isDev = () => !!me && me.role === "dev";
@@ -2156,6 +2160,8 @@
       );
     if (kind === "abuse")
       return (c.target || "A moderator") + " is worth a look";
+    if (kind === "key")
+      return (c.target || "A moderator") + " asked for a new staff key";
     return c.by || "";
   }
 
@@ -2218,6 +2224,19 @@
 
     if (kind === "appeal") {
       for (const l of c.lines || []) b.appendChild(qField("Ban", l));
+      if (c.reason) b.appendChild(qField("What they say", c.reason, "quote"));
+      return b;
+    }
+
+    if (kind === "key") {
+      const chips = el("div", "dk-q-chips");
+      const revoked = /removed/i.test(c.category || "");
+      chips.appendChild(
+        qChip(c.category || "Lost key", revoked ? "warn" : "cat", revoked ? "fa-robot" : "fa-key"),
+      );
+      for (const l of c.lines || [])
+        chips.appendChild(qChip(l, /new device/i.test(l) ? "warn" : "", l.length <= 2 ? "fa-user-shield" : "fa-laptop"));
+      b.appendChild(chips);
       if (c.reason) b.appendChild(qField("What they say", c.reason, "quote"));
       return b;
     }
@@ -2364,6 +2383,42 @@
       return bar;
     }
 
+    if (kind === "key" && c.ids && c.ids[0]) {
+      const leaderKey = (c.lines || [])[0] === "L3";
+      if (!isLeader() || (leaderKey && !isDev())) return bar;
+      const id = c.ids[0];
+      add("Reissue key", "fa-key", "primary", () =>
+        ask(
+          {
+            title: "Reissue " + (c.target || "their") + "'s key",
+            message:
+              "Their role, level and record are kept. The new key lands on the device that asked, by itself, with no key text to pass around. Type REISSUE to confirm.",
+            label: "Confirm",
+            placeholder: "REISSUE",
+            max: 10,
+            icon: '<i class="fas fa-key"></i>',
+          },
+          (v) => {
+            if (String(v || "").trim().toUpperCase() === "REISSUE")
+              socket.emit("staff key reissue", { id });
+          },
+        ),
+      );
+      add("Decline", "fa-xmark", "danger", () =>
+        ask(
+          {
+            title: "Decline " + (c.target || "their") + "'s request",
+            label: "Note to them (optional)",
+            max: 300,
+            icon: '<i class="fas fa-xmark"></i>',
+          },
+          (note) =>
+            socket.emit("staff key decline", { id, note: String(note || "").trim() }),
+        ),
+      );
+      return bar;
+    }
+
     if (kind === "appeal" && c.itemId) {
       add("Open the chat", "fa-comments", "primary", () =>
         openAppeal(c.itemId),
@@ -2382,13 +2437,17 @@
       const bug = c.category === "Bug";
       const setStatus = (status) =>
         socket.emit("board status", { id: c.itemId, status });
-      add(bug ? "Confirm" : "Approve", "fa-check", "primary", () =>
+      add("Reviewing", "fa-magnifying-glass", "", () => setStatus("reviewing"));
+      add(bug ? "Confirmed" : "Planned", "fa-check", "primary", () =>
         setStatus("approved"),
       );
-      add(bug ? "Fixed" : "Built", bug ? "fa-wrench" : "fa-rocket", "", () =>
+      add(bug ? "Being fixed" : "In progress", "fa-hammer", "", () =>
+        setStatus("progress"),
+      );
+      add(bug ? "Fixed" : "Built", "fa-check-double", "", () =>
         setStatus("implemented"),
       );
-      add(bug ? "Won't fix" : "Not doing", "fa-xmark", "", () =>
+      add(bug ? "Leaving as is" : "Not planned", "fa-circle-minus", "", () =>
         setStatus("declined"),
       );
       add("Reply", "fa-reply", "", () =>

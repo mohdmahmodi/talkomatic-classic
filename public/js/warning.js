@@ -1,7 +1,10 @@
-(function () {
+(function boot() {
   "use strict";
 
-  if (typeof socket === "undefined") return;
+  if (typeof socket === "undefined") {
+    window.addEventListener("talkomatic:socket", boot, { once: true });
+    return;
+  }
 
   var queue = [];
   var overlay = null;

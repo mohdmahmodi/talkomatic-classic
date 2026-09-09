@@ -85,6 +85,13 @@
     socket.on("connect", function () {
       live = true;
       socket.emit("themes open");
+      socket.emit("check signin status");
+    });
+
+    socket.on("signin status", function (d) {
+      var was = staffOk;
+      staffOk = !!d && (!!d.isDev || (!!d.isMod && (d.modLevel || 1) >= 2));
+      if (staffOk !== was) render();
     });
 
     socket.on("themes data", function (d) {
@@ -312,8 +319,9 @@
 
     var staffKey =
       localStorage.getItem("talkomatic_devKey") ||
-      localStorage.getItem("talkomatic_modKey");
-    if (staffKey) {
+      localStorage.getItem("talkomatic_modKey") ||
+      "";
+    if (staffKey || staffOk) {
       var rm = el("button", "btn", '<i class="fas fa-trash"></i> Remove');
       rm.addEventListener("click", function () {
         if (!confirm('Take down "' + (t.title || "this theme") + '" for everyone?')) return;
@@ -366,6 +374,8 @@
     else out.sort(function (a, b) { return b.at - a.at; });
     return out;
   }
+
+  var staffOk = false;
 
   function render() {
     cardIndex = {};

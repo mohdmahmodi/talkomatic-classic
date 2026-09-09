@@ -9,13 +9,23 @@ const { CONFIG } = require("./state");
 
 const { DATA_DIR } = require("./datadir");
 const ipban = require("./ipban");
+const ipredact = require("./ipredact");
 
 const MOD_KEYS_PATH = path.join(DATA_DIR, "mod-keys.json");
 const MODLOG_PATH = path.join(DATA_DIR, "modlog.txt");
 const KEY_ACTIVITY_PATH = path.join(DATA_DIR, "key-activity.json");
 const FORMER_MODS_PATH = path.join(DATA_DIR, "former-mods.json");
+const KEY_REQUESTS_PATH = path.join(DATA_DIR, "key-requests.json");
+
+const MAX_DEVICES = 2;
+const MINT_TTL_MS = 15 * 60 * 1000;
+const MINTS_PER_HOUR = 5;
+const HOUR_MS = 60 * 60 * 1000;
 
 let modKeys = [];
+let modKeysSaveTimer = null;
+let keyRequests = { list: [], declines: {} };
+let keyRequestsSaveTimer = null;
 
 let formerMods = [];
 const FORMER_CAP = 300;
@@ -37,20 +47,55 @@ function normalizeLevel(v) {
   return n === 2 ? 2 : 1;
 }
 
+function normalizeDevices(list) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((d) => d && typeof d.id === "string" && typeof d.token === "string")
+    .map((d) => ({
+      id: d.id,
+      token: d.token,
+      kind: String(d.kind || "device"),
+      browser: d.browser ? String(d.browser) : null,
+      os: d.os ? String(d.os) : null,
+      at: Number(d.at) || 0,
+      last: Number(d.last) || 0,
+      ip: d.ip ? String(d.ip) : null,
+    }))
+    .slice(-MAX_DEVICES);
+}
+
+function normalizeKey(k) {
+  const secret = k.secret && typeof k.secret.hash === "string" ? k.secret : null;
+  return {
+    hash: k.hash,
+    label: String(k.label || "mod"),
+    level: normalizeLevel(k.level),
+    grantedBy: k.grantedBy ? String(k.grantedBy) : null,
+    grantedAt: typeof k.grantedAt === "number" ? k.grantedAt : null,
+    legacy: k.legacy !== false,
+    secret: secret
+      ? {
+          hash: secret.hash,
+          at: Number(secret.at) || 0,
+          expires: Number(secret.expires) || null,
+        }
+      : null,
+    devices: normalizeDevices(k.devices),
+    active: typeof k.active === "string" ? k.active : null,
+    switches: Array.isArray(k.switches)
+      ? k.switches.map(Number).filter(Boolean)
+      : [],
+    mints: Array.isArray(k.mints) ? k.mints.slice(-30) : [],
+    pending: typeof k.pending === "string" ? k.pending : null,
+  };
+}
+
 function loadModKeys() {
   try {
     const raw = fs.readFileSync(MOD_KEYS_PATH, "utf8");
     const arr = JSON.parse(raw);
     modKeys = Array.isArray(arr)
-      ? arr
-          .filter((k) => k && typeof k.hash === "string")
-          .map((k) => ({
-            hash: k.hash,
-            label: String(k.label || "mod"),
-            level: normalizeLevel(k.level),
-            grantedBy: k.grantedBy ? String(k.grantedBy) : null,
-            grantedAt: typeof k.grantedAt === "number" ? k.grantedAt : null,
-          }))
+      ? arr.filter((k) => k && typeof k.hash === "string").map(normalizeKey)
       : [];
   } catch (err) {
     if (err.code !== "ENOENT")
@@ -64,6 +109,14 @@ async function saveModKeys() {
   const tmp = MOD_KEYS_PATH + ".tmp";
   await fsp.writeFile(tmp, JSON.stringify(modKeys, null, 2), "utf8");
   await fsp.rename(tmp, MOD_KEYS_PATH);
+}
+
+function saveModKeysSoon() {
+  if (modKeysSaveTimer) return;
+  modKeysSaveTimer = setTimeout(() => {
+    modKeysSaveTimer = null;
+    saveModKeys().catch((e) => console.error("mod-keys save failed:", e));
+  }, 500);
 }
 
 function loadFormerMods() {
@@ -81,6 +134,7 @@ function loadFormerMods() {
             removedAt: typeof f.removedAt === "number" ? f.removedAt : null,
             removedBy: f.removedBy ? String(f.removedBy) : null,
             reason: f.reason ? String(f.reason) : null,
+            tokens: Array.isArray(f.tokens) ? f.tokens.map(String) : [],
           }))
       : [];
   } catch (err) {
@@ -240,11 +294,331 @@ function stripStaffNames(text, view) {
   return out;
 }
 
-function getModKeyByPlain(key) {
-  if (!key) return null;
-  const h = hashKey(key);
-  return modKeys.find((k) => k.hash === h) || null;
+function secretOpen(k, h, now) {
+  return (
+    !!k.secret &&
+    k.secret.hash === h &&
+    (!k.secret.expires || k.secret.expires > now)
+  );
 }
+
+function keyForPlainHash(h, now) {
+  return (
+    modKeys.find(
+      (k) =>
+        k.devices.some((d) => d.token === h) ||
+        secretOpen(k, h, now) ||
+        (k.legacy && k.hash === h),
+    ) || null
+  );
+}
+
+function deviceInfo(ua) {
+  const s = String(ua || "").toLowerCase();
+  const kind = /ipad|tablet|(android(?!.*mobile))/.test(s)
+    ? "tablet"
+    : /mobile|iphone|android/.test(s)
+      ? "phone"
+      : "desktop";
+  const os = /iphone|ipad|ipod/.test(s)
+    ? "iOS"
+    : /android/.test(s)
+      ? "Android"
+      : /windows/.test(s)
+        ? "Windows"
+        : /mac os x|macintosh/.test(s)
+          ? "macOS"
+          : /cros/.test(s)
+            ? "ChromeOS"
+            : /linux/.test(s)
+              ? "Linux"
+              : null;
+  const browser = /edg\//.test(s)
+    ? "Edge"
+    : /opr\/|opera/.test(s)
+      ? "Opera"
+      : /samsungbrowser/.test(s)
+        ? "Samsung Internet"
+        : /firefox|fxios/.test(s)
+          ? "Firefox"
+          : /crios|chrome/.test(s)
+            ? "Chrome"
+            : /safari/.test(s)
+              ? "Safari"
+              : null;
+  return { kind, os, browser };
+}
+
+function enroll(key, deviceId, ip, info, takeover) {
+  const token = "mt_" + crypto.randomBytes(24).toString("hex");
+  const now = Date.now();
+  key.devices = key.devices.filter((d) => d.id !== deviceId);
+  if (key.devices.length >= MAX_DEVICES)
+    key.devices
+      .sort((a, b) => a.last - b.last)
+      .splice(0, key.devices.length - MAX_DEVICES + 1);
+  const device = {
+    id: deviceId,
+    token: hashKey(token),
+    kind: info.kind,
+    browser: info.browser,
+    os: info.os,
+    at: now,
+    last: now,
+    ip: ip || null,
+  };
+  key.devices.push(device);
+  if (takeover || !key.devices.some((d) => d.id === key.active))
+    key.active = deviceId;
+  saveModKeysSoon();
+  return {
+    key,
+    status: key.active === deviceId ? "active" : "standby",
+    device,
+    token,
+  };
+}
+
+function resolveModKey(plain, deviceId, ip, ua) {
+  if (!plain) return null;
+  const h = hashKey(plain);
+  const now = Date.now();
+  for (const key of modKeys) {
+    const dev = key.devices.find((d) => d.token === h);
+    if (!dev) continue;
+    if (dev.id !== deviceId) {
+      key.devices = key.devices.filter((d) => d !== dev);
+      if (key.active === dev.id) key.active = key.devices[0]?.id || null;
+      saveModKeysSoon();
+      return { key, status: "mismatch", device: dev };
+    }
+    dev.last = now;
+    if (ip) dev.ip = ip;
+    if (!key.devices.some((d) => d.id === key.active)) key.active = dev.id;
+    const info = deviceInfo(ua);
+    const changed =
+      dev.browser && dev.os && info.browser && info.os &&
+      (dev.browser !== info.browser || dev.os !== info.os)
+        ? { from: dev.browser + " on " + dev.os, to: info.browser + " on " + info.os }
+        : null;
+    for (const f of ["kind", "browser", "os"]) if (info[f]) dev[f] = info[f];
+    saveModKeysSoon();
+    return {
+      key,
+      status: key.active === dev.id ? "active" : "standby",
+      device: dev,
+      changed,
+    };
+  }
+  const key = modKeys.find(
+    (k) => secretOpen(k, h, now) || (k.legacy && k.hash === h),
+  );
+  if (!key || !deviceId) return null;
+  const fresh = secretOpen(key, h, now);
+  if (fresh) key.secret = null;
+  return enroll(key, deviceId, ip, deviceInfo(ua), fresh);
+}
+
+function tokenBelongsTo(plain, deviceId) {
+  if (!plain || !deviceId) return false;
+  const h = hashKey(plain);
+  return modKeys.some((k) =>
+    k.devices.some((d) => d.token === h && d.id === deviceId),
+  );
+}
+
+function pendingReissueFor(deviceId, ip, ua) {
+  const key = deviceId && modKeys.find((k) => k.pending === deviceId);
+  if (!key) return null;
+  key.pending = null;
+  return enroll(key, deviceId, ip, deviceInfo(ua), true);
+}
+
+function setPendingReissue(hash, deviceId) {
+  const key = modKeyByHash(hash);
+  if (!key || !deviceId) return false;
+  key.pending = deviceId;
+  key.devices = key.devices.filter((d) => d.id !== deviceId);
+  saveModKeysSoon();
+  return true;
+}
+
+function mintKey(hash, by, ttl) {
+  const key = modKeyByHash(hash);
+  if (!key) return null;
+  const now = Date.now();
+  key.mints = key.mints.filter((m) => m.at > now - HOUR_MS * 24 * 30).slice(-29);
+  if (key.mints.filter((m) => m.at > now - HOUR_MS).length >= MINTS_PER_HOUR)
+    return { throttled: true };
+  const plain = "mk_" + crypto.randomBytes(24).toString("hex");
+  key.secret = { hash: hashKey(plain), at: now, expires: now + (ttl || MINT_TTL_MS) };
+  key.legacy = false;
+  key.mints.push({
+    at: now,
+    ip: by?.ip || null,
+    deviceId: by?.deviceId || null,
+    userId: by?.userId || null,
+  });
+  saveModKeysSoon();
+  return { key: plain, expires: key.secret.expires };
+}
+
+function switchDevice(hash, deviceId, ip) {
+  const key = modKeyByHash(hash);
+  const device = key && key.devices.find((d) => d.id === deviceId);
+  if (!device) return null;
+  const now = Date.now();
+  const from = key.devices.find((d) => d.id === key.active) || null;
+  key.active = deviceId;
+  device.last = now;
+  if (ip) device.ip = ip;
+  key.switches = key.switches.filter((t) => t > now - HOUR_MS).concat(now);
+  saveModKeysSoon();
+  return {
+    from,
+    device,
+    count: key.switches.length,
+    ips: [...new Set(key.devices.map((d) => d.ip).filter(Boolean))],
+  };
+}
+
+function dropDevice(hash, deviceId) {
+  const key = modKeyByHash(hash);
+  if (!key) return false;
+  const before = key.devices.length;
+  key.devices = key.devices.filter((d) => d.id !== deviceId);
+  if (key.active === deviceId) key.active = key.devices[0]?.id || null;
+  saveModKeysSoon();
+  return key.devices.length !== before;
+}
+
+function keepDevice(hash, deviceId) {
+  const key = modKeyByHash(hash);
+  if (!key) return [];
+  const gone = key.devices.filter((d) => d.id !== deviceId).map((d) => d.id);
+  key.devices = key.devices.filter((d) => d.id === deviceId);
+  key.active = key.devices.length ? deviceId : null;
+  saveModKeysSoon();
+  return gone;
+}
+
+function keyForDevice(deviceId) {
+  let best = null;
+  let at = -1;
+  for (const k of modKeys)
+    for (const d of k.devices)
+      if (d.id === deviceId && d.last > at) {
+        best = k;
+        at = d.last;
+      }
+  return best;
+}
+
+function deviceView(key, showIp) {
+  return key.devices.map((d) => ({
+    id: d.id.slice(0, 8),
+    kind: d.kind,
+    browser: d.browser,
+    os: d.os,
+    at: d.at,
+    last: d.last,
+    active: d.id === key.active,
+    ...(showIp ? { ip: d.ip } : {}),
+  }));
+}
+
+function restoreFormer(hash) {
+  if (modKeyByHash(hash)) return null;
+  const f = formerByHash(hash);
+  if (!f) return null;
+  const key = normalizeKey({ ...f, legacy: false, devices: [] });
+  modKeys.push(key);
+  saveModKeysSoon();
+  return key;
+}
+
+function loadKeyRequests() {
+  try {
+    const obj = JSON.parse(fs.readFileSync(KEY_REQUESTS_PATH, "utf8"));
+    keyRequests = {
+      list: Array.isArray(obj?.list) ? obj.list.filter((r) => r && r.id) : [],
+      declines:
+        obj?.declines && typeof obj.declines === "object" ? obj.declines : {},
+    };
+  } catch (err) {
+    if (err.code !== "ENOENT")
+      console.error("Error loading key-requests.json:", err);
+    keyRequests = { list: [], declines: {} };
+  }
+}
+
+function saveKeyRequestsSoon() {
+  if (keyRequestsSaveTimer) return;
+  keyRequestsSaveTimer = setTimeout(async () => {
+    keyRequestsSaveTimer = null;
+    try {
+      const tmp = KEY_REQUESTS_PATH + ".tmp";
+      await fsp.writeFile(tmp, JSON.stringify(keyRequests), "utf8");
+      await fsp.rename(tmp, KEY_REQUESTS_PATH);
+    } catch (e) {
+      console.error("key-requests save failed:", e);
+    }
+  }, 500);
+}
+
+function openKeyRequest(r) {
+  if (!r?.label || !r.deviceId) return null;
+  if (keyRequests.list.some((x) => x.label === r.label || x.deviceId === r.deviceId))
+    return null;
+  const entry = {
+    id: crypto.randomBytes(6).toString("hex"),
+    label: String(r.label).slice(0, 40),
+    hash: r.hash || null,
+    level: normalizeLevel(r.level),
+    kind: r.kind === "revoked" ? "revoked" : "lost",
+    text: String(r.text || "").slice(0, 600),
+    deviceId: r.deviceId,
+    ip: r.ip || null,
+    known: !!r.known,
+    at: Date.now(),
+  };
+  keyRequests.list.push(entry);
+  saveKeyRequestsSoon();
+  return entry;
+}
+
+const keyRequestById = (id) =>
+  keyRequests.list.find((r) => r.id === id) || null;
+
+const keyRequestFor = (field, value) =>
+  (value && keyRequests.list.find((r) => r[field] === value)) || null;
+
+function closeKeyRequest(id) {
+  const r = keyRequestById(id);
+  if (!r) return null;
+  keyRequests.list = keyRequests.list.filter((x) => x !== r);
+  saveKeyRequestsSoon();
+  return r;
+}
+
+function noteDecline(deviceId, note) {
+  if (!deviceId) return;
+  keyRequests.declines[deviceId] = { note: String(note || "").slice(0, 300), at: Date.now() };
+  saveKeyRequestsSoon();
+}
+
+function takeDecline(deviceId) {
+  const d = deviceId && keyRequests.declines[deviceId];
+  if (!d) return null;
+  delete keyRequests.declines[deviceId];
+  saveKeyRequestsSoon();
+  return d;
+}
+
+const requestSummary = (r) =>
+  r
+    ? { id: r.id, kind: r.kind, at: r.at, text: ipredact.redact(r.text), known: r.known }
+    : null;
 
 function getModKeyByHash(hash) {
   if (!hash) return null;
@@ -265,7 +639,7 @@ function modLevelForLabel(label) {
 function validateKey(key) {
   const dk = getDevKey(key);
   if (dk) return { role: "dev", label: dk.label, hash: dk.hash };
-  const mk = getModKeyByPlain(key);
+  const mk = key ? keyForPlainHash(hashKey(key), Date.now()) : null;
   if (mk)
     return {
       role: "mod",
@@ -278,7 +652,7 @@ function validateKey(key) {
 
 async function grantModKey(label, level, grantedBy) {
   const key = "mk_" + crypto.randomBytes(24).toString("hex");
-  const entry = {
+  const entry = normalizeKey({
     hash: hashKey(key),
     label: String(label || "mod")
       .trim()
@@ -288,7 +662,9 @@ async function grantModKey(label, level, grantedBy) {
       ? String(grantedBy).trim().slice(0, 60) || null
       : null,
     grantedAt: Date.now(),
-  };
+    legacy: false,
+    secret: { hash: hashKey(key), at: Date.now(), expires: null },
+  });
   modKeys.push(entry);
   carryKeyActivity(entry.label, entry.hash);
   await saveModKeys();
@@ -333,6 +709,7 @@ async function revokeModKey(hash, opts) {
       opts && opts.reason
         ? String(opts.reason).trim().slice(0, 300) || null
         : null,
+    tokens: gone.devices.map((d) => d.token),
   });
   if (formerMods.length > FORMER_CAP)
     formerMods = formerMods.slice(formerMods.length - FORMER_CAP);
@@ -365,6 +742,7 @@ function listFormerMods(view) {
       reason: f.reason || null,
       lastSeen: f.hash ? lastSeenForHash(f.hash) : null,
       returned: active.has(f.label),
+      request: requestSummary(keyRequestFor("hash", f.hash)),
     }));
 }
 
@@ -406,6 +784,10 @@ function listModKeys(view) {
       : teamLabel(k.grantedBy || null, null, view),
     grantedAt: k.grantedAt || null,
     lastSeen: lastSeenForHash(k.hash),
+    devices: deviceView(k, showAll),
+    switches: k.switches.filter((t) => t > Date.now() - HOUR_MS).length,
+    minted: k.mints.length,
+    request: requestSummary(keyRequestFor("hash", k.hash)),
   }));
 }
 
@@ -505,10 +887,12 @@ function networkReport(hash, now) {
   const at = now || Date.now();
   const v4 = new Set();
   const v6 = new Set();
+  const ips = [];
   for (const [ip, m] of Object.entries(rec?.ips || {})) {
     if (at - (m.last || 0) > NET_WINDOW_MS) continue;
     const fam = netFamily(ip);
     (fam.includes(":") ? v6 : v4).add(fam);
+    ips.push(ip);
   }
   const level =
     v4.size >= NET_REVIEW_AT
@@ -523,6 +907,7 @@ function networkReport(hash, now) {
   return {
     v4: [...v4],
     v6: [...v6],
+    ips,
     level,
     windowDays: NET_WINDOW_MS / 86400000,
     warnAt: NET_WARN_AT,
@@ -577,7 +962,8 @@ function getFormerModByPlain(key) {
   if (!key) return null;
   const h = hashKey(key);
   for (let i = formerMods.length - 1; i >= 0; i--)
-    if (formerMods[i].hash === h) return formerMods[i];
+    if (formerMods[i].hash === h || formerMods[i].tokens.includes(h))
+      return formerMods[i];
   return null;
 }
 
@@ -608,6 +994,7 @@ loadModKeys();
 loadDevKeys();
 loadKeyActivity();
 loadFormerMods();
+loadKeyRequests();
 
 module.exports = {
   hashKey,
@@ -634,8 +1021,24 @@ module.exports = {
   teamLabel,
   teamReviewer,
   stripStaffNames,
-  getModKeyByPlain,
   getModKeyByHash,
+  deviceInfo,
+  resolveModKey,
+  tokenBelongsTo,
+  pendingReissueFor,
+  setPendingReissue,
+  mintKey,
+  switchDevice,
+  dropDevice,
+  keepDevice,
+  keyForDevice,
+  restoreFormer,
+  openKeyRequest,
+  keyRequestById,
+  keyRequestFor,
+  closeKeyRequest,
+  noteDecline,
+  takeDecline,
   modLevelForLabel,
   validateKey,
   grantModKey,

@@ -949,12 +949,14 @@ function judgeStaffKey(hash, role, label) {
   if (!call) return;
   const who = keywatch.summary(hash);
   const nets = [...new Set(who.flatMap((h) => h.networks))];
+  const ips = [...new Set(who.flatMap((h) => h.ips))];
 
   if (call === "watch") {
     keywatch.markHandled(hash);
     audit.recordKeyAlert({
       role,
       label,
+      ips,
       kind: "concurrent",
       detail:
         `The ${role} key "${label}" is being held by ${who.length} browsers at once, ` +
@@ -973,7 +975,7 @@ function judgeStaffKey(hash, role, label) {
       ? " Dev keys cannot be revoked at runtime - change DEV_KEY_HASH."
       : " The key has been revoked.");
 
-  audit.recordKeyAlert({ role, label, kind: "shared", detail });
+  audit.recordKeyAlert({ role, label, ips, kind: "shared", detail });
   audit.recordNotification({
     kind: "abuse",
     role,
@@ -993,9 +995,7 @@ function judgeStaffKey(hash, role, label) {
   revokeSharedKey(
     hash,
     label,
-    headline,
-    "Revoked automatically: the key was in use by two separate accounts, " +
-      "on two different networks, at the same time.",
+    "Your key was in use on two devices, on two different networks, at the same time. A staff key belongs to one person.",
   );
 }
 
@@ -1012,6 +1012,7 @@ function keyNetworksChanged(hash, label, role, newIp) {
     audit.recordKeyAlert({
       role,
       label,
+      ips: r.ips,
       kind: "networks",
       detail:
         `The ${role} key "${label}" has been used from ${where}.` +
@@ -1023,7 +1024,7 @@ function keyNetworksChanged(hash, label, role, newIp) {
   }
   const headline = `ALERT 👑 ${label} key on ${r.v4.length} networks`;
   const detail = `${headline}. Used from ${where}. The key has been revoked.`;
-  audit.recordKeyAlert({ role, label, kind: "networks", detail });
+  audit.recordKeyAlert({ role, label, ips: r.ips, kind: "networks", detail });
   audit.recordNotification({
     kind: "abuse",
     role,
@@ -1041,13 +1042,105 @@ function keyNetworksChanged(hash, label, role, newIp) {
   revokeSharedKey(
     hash,
     label,
-    headline,
-    `Revoked automatically: the key was used from ${r.v4.length} different networks within ${r.windowDays} days.`,
+    `Your key was used from ${r.v4.length} different networks within ${r.windowDays} days.`,
   );
   return "revoke";
 }
 
-async function revokeSharedKey(hash, label, headline, reason) {
+function demoteSocket(s) {
+  s.isMod = false;
+  s.modKeyHash = null;
+  s.modLevel = 0;
+  s.staffLabel = null;
+  s.staffStandby = null;
+  const uid = s.handshake?.session?.userId;
+  if (uid && s.roomId) {
+    const room = state.rooms.get(s.roomId);
+    const u = room?.users?.find((x) => x.id === uid);
+    if (u) {
+      u.isMod = false;
+      updateRoom(s.roomId);
+      updateLobby();
+    }
+  }
+}
+
+function keyTokenMismatch(key, device, ip) {
+  audit.recordKeyAlert({
+    role: "mod",
+    label: key.label,
+    ip,
+    ips: device.ip ? [device.ip] : null,
+    kind: "mismatch",
+    detail: `A sign-in for the mod key "${key.label}" arrived from a device it was never issued to. That sign-in has been dropped; the key itself still works on its own devices.`,
+  });
+}
+
+function keyFingerprintChanged(key, changed, ip) {
+  audit.recordKeyAlert({
+    role: "mod",
+    label: key.label,
+    ip,
+    kind: "fingerprint",
+    detail: `A device holding the mod key "${key.label}" signed in as ${changed.to}; it was issued to ${changed.from}. A browser upgrade does not do this; a copied profile does.`,
+  });
+}
+
+const SWITCH_WARN_AT = 4;
+const SWITCH_REVOKE_AT = 8;
+
+function judgeSwitching(hash, label, r) {
+  if (r.count === SWITCH_WARN_AT)
+    return audit.recordKeyAlert({
+      role: "mod",
+      label,
+      ips: r.ips,
+      kind: "switching",
+      detail: `The mod key "${label}" moved between its devices ${r.count} times in the last hour. One person rarely does this; two people taking turns do.`,
+    });
+  if (r.count < SWITCH_REVOKE_AT) return;
+  const detail = `ALERT 👑 ${label} key passed between devices ${r.count} times in an hour. The key has been revoked.`;
+  audit.recordKeyAlert({ role: "mod", label, ips: r.ips, kind: "switching", detail });
+  audit.recordNotification({
+    kind: "abuse",
+    role: "mod",
+    label,
+    text: detail,
+    minLevel: 3,
+    card: {
+      target: label,
+      targetRole: "mod",
+      reason: "One key, two devices, taking turns",
+      lines: [`${r.count} switches in an hour`],
+    },
+  });
+  revokeSharedKey(
+    hash,
+    label,
+    `Your key was passed between two devices ${r.count} times in an hour. A staff key belongs to one person.`,
+  );
+}
+
+function keyRequestCard(r) {
+  return {
+    ids: [r.id],
+    target: r.label,
+    targetRole: "mod",
+    category: r.kind === "revoked" ? "Key removed by Automod" : "Lost key",
+    reason: r.text,
+    deviceId: r.deviceId,
+    lines: [
+      r.level >= 3 ? "L3" : r.level === 2 ? "L2" : "L1",
+      r.known ? "Device known to this key" : "New device",
+    ],
+  };
+}
+
+function settleKeyRequest(id) {
+  staffchat.settleQueue((m) => (m.card.ids || []).includes(id));
+}
+
+async function revokeSharedKey(hash, label, reason) {
   try {
     const ok = await roles.revokeModKey(hash, { reason, by: "system" });
     if (!ok) return;
@@ -1058,21 +1151,8 @@ async function revokeSharedKey(hash, label, headline, reason) {
     });
     for (const [, s] of io().sockets.sockets) {
       if (!s.isMod || s.modKeyHash !== hash) continue;
-      s.isMod = false;
-      s.modKeyHash = null;
-      s.modLevel = 0;
-      s.staffLabel = null;
-      const uid = s.handshake?.session?.userId;
-      if (uid && s.roomId) {
-        const room = state.rooms.get(s.roomId);
-        const u = room?.users?.find((x) => x.id === uid);
-        if (u) {
-          u.isMod = false;
-          updateRoom(s.roomId);
-          updateLobby();
-        }
-      }
-      s.emit("staff revoked", { reason: headline });
+      demoteSocket(s);
+      s.emit("staff revoked", { reason, auto: true });
     }
     broadcastModKeyLists();
     staffchat.rosterDirty();
@@ -3756,8 +3836,58 @@ function registerSocketHandlers(opts) {
             label: n.label,
             reason: n.reason,
             removedAt: n.removedAt,
+            auto: n.auto,
+            canAsk: !roles.keyRequestFor("hash", n.hash),
           });
         }, 1500);
+      }
+
+      if (socket.staffToken)
+        socket.emit("staff token", {
+          token: socket.staffToken,
+          reload: !!socket.staffRestored,
+        });
+      else if (socket.deadKey) socket.emit("staff token", { token: null });
+      if (socket.isMod && socket.modKeyHash)
+        for (const [, s] of io().sockets.sockets)
+          if (
+            s !== socket &&
+            s.isMod &&
+            s.modKeyHash === socket.modKeyHash &&
+            s.deviceId !== socket.deviceId
+          ) {
+            demoteSocket(s);
+            s.emit("staff moved", { device: socket.deviceKind });
+          }
+      if (socket.staffStandby) {
+        const key = roles.modKeyByHash(socket.staffStandby.hash);
+        const holder = key && key.devices.find((d) => d.id === key.active);
+        setTimeout(
+          () =>
+            socket.emit("staff standby", {
+              label: socket.staffStandby.label,
+              device: holder ? holder.kind : "another device",
+            }),
+          800,
+        );
+      }
+      if (
+        socket.deviceId &&
+        !socket.isDev &&
+        !socket.isMod &&
+        !socket.staffStandby &&
+        !socket.formerModNotice &&
+        !socket.handshake?.auth?.app
+      ) {
+        const declined = roles.takeDecline(socket.deviceId);
+        const lost = declined ? null : roles.keyForDevice(socket.deviceId);
+        if (declined)
+          setTimeout(() => socket.emit("staff key declined", declined), 1500);
+        else if (lost && !roles.keyRequestFor("deviceId", socket.deviceId))
+          setTimeout(
+            () => socket.emit("staff key lost", { label: lost.label }),
+            1500,
+          );
       }
 
       // An approved application is an offer, not a key: the status carries
@@ -3782,6 +3912,7 @@ function registerSocketHandlers(opts) {
           deviceId: socket.deviceId || null,
           userId: socket.handshake?.session?.userId || null,
           network: ipban.computeRangeCidr(clientIp) || null,
+          ip: clientIp,
         });
         setTimeout(
           () => judgeStaffKey(hash, role, label),
@@ -7856,27 +7987,12 @@ function registerSocketHandlers(opts) {
           reason,
           by: socket.staffLabel || (socket.isDev ? "dev" : "mod"),
         });
-        if (ok) {
-          for (const [, s] of io().sockets.sockets) {
+        if (ok)
+          for (const [, s] of io().sockets.sockets)
             if (s.isMod && s.modKeyHash === hash) {
-              s.isMod = false;
-              s.modKeyHash = null;
-              s.modLevel = 0;
-              s.staffLabel = null;
-              const uid = s.handshake?.session?.userId;
-              if (uid && s.roomId) {
-                const room = state.rooms.get(s.roomId);
-                const u = room?.users?.find((x) => x.id === uid);
-                if (u) {
-                  u.isMod = false;
-                  updateRoom(s.roomId);
-                  updateLobby();
-                }
-              }
+              demoteSocket(s);
               s.emit("staff revoked", { reason });
             }
-          }
-        }
         logStaff(socket, "revoke mod", hash.slice(0, 8), "-");
         broadcastModKeyLists();
         staffchat.rosterDirty();
@@ -7893,6 +8009,248 @@ function registerSocketHandlers(opts) {
       safe(async () => {
         if (!requireStaff(socket)) return;
         sendModKeyLists(socket);
+      }),
+    );
+
+    socket.on(
+      "staff mint key",
+      safe(async () => {
+        if (!socket.isMod || !socket.modKeyHash) return;
+        const r = roles.mintKey(socket.modKeyHash, {
+          ip: socket.clientIp,
+          deviceId: socket.deviceId,
+          userId: socket.handshake?.session?.userId,
+        });
+        if (!r || r.throttled)
+          return socket.emit("staff key minted", { throttled: true });
+        logStaff(socket, "mint sign-in key", "-", "-");
+        socket.emit("staff key minted", { key: r.key, expires: r.expires });
+        broadcastModKeyLists();
+      }),
+    );
+
+    socket.on(
+      "staff key devices",
+      safe(async () => {
+        const key = socket.isMod && roles.modKeyByHash(socket.modKeyHash);
+        if (!key) return;
+        socket.emit("staff key devices", {
+          devices: key.devices.map((d) => ({
+            kind: d.kind,
+            browser: d.browser,
+            os: d.os,
+            at: d.at,
+            last: d.last,
+            active: d.id === key.active,
+            mine: d.id === socket.deviceId,
+          })),
+          minted: key.mints.length,
+        });
+      }),
+    );
+
+    socket.on(
+      "staff switch device",
+      safe(async () => {
+        const sb = socket.staffStandby;
+        if (!sb || !socket.deviceId) return;
+        const r = roles.switchDevice(sb.hash, socket.deviceId, socket.clientIp);
+        if (!r) return socket.emit("staff token", { token: null, reload: true });
+        for (const [, s] of io().sockets.sockets) {
+          if (s.isMod && s.modKeyHash === sb.hash && s.deviceId !== socket.deviceId) {
+            demoteSocket(s);
+            s.emit("staff moved", { device: r.device.kind });
+          }
+          if (s.staffStandby?.hash === sb.hash && s.deviceId === socket.deviceId)
+            s.emit("staff switched", { device: r.device.kind });
+        }
+        audit.recordAction({
+          roleTag: "mod",
+          label: sb.label,
+          action: "switched device",
+          target: r.from ? `${r.from.kind} to ${r.device.kind}` : r.device.kind,
+          ip: socket.clientIp,
+        });
+        judgeSwitching(sb.hash, sb.label, r);
+        broadcastModKeyLists();
+      }),
+    );
+
+    socket.on(
+      "staff forget device",
+      safe(async () => {
+        const hash = socket.modKeyHash || socket.staffStandby?.hash;
+        if (!hash || !socket.deviceId) return;
+        roles.dropDevice(hash, socket.deviceId);
+        broadcastModKeyLists();
+      }),
+    );
+
+    socket.on(
+      "staff sign out other devices",
+      safe(async () => {
+        if (!socket.isMod || !socket.modKeyHash || !socket.deviceId) return;
+        const hash = socket.modKeyHash;
+        const gone = new Set(roles.keepDevice(hash, socket.deviceId));
+        for (const [, s] of io().sockets.sockets)
+          if (
+            gone.has(s.deviceId) &&
+            (s.modKeyHash === hash || s.staffStandby?.hash === hash)
+          ) {
+            if (s.isMod) demoteSocket(s);
+            s.emit("staff token", { token: null, reload: true });
+          }
+        logStaff(socket, "signed out other devices", "-", "-");
+        socket.emit("staff action result", {
+          action: "sign out other devices",
+          ok: true,
+          count: gone.size,
+        });
+        broadcastModKeyLists();
+      }),
+    );
+
+    socket.on(
+      "staff key request",
+      safe(async (data) => {
+        if (socket.isDev || socket.isMod || !socket.deviceId) return;
+        const fail = (error) =>
+          socket.emit("staff key request result", { ok: false, error });
+        const text = String(data?.text || "").trim().slice(0, 600);
+        if (text.length < 5) return fail("Say what happened first.");
+        const former = socket.formerModNotice;
+        const key = former || roles.keyForDevice(socket.deviceId);
+        if (!key) return fail("This device is not linked to a staff key.");
+        const r = roles.openKeyRequest({
+          label: key.label,
+          hash: key.hash,
+          level: key.level,
+          kind: former ? "revoked" : "lost",
+          text,
+          deviceId: socket.deviceId,
+          ip: socket.clientIp,
+          known: former ? former.known : true,
+        });
+        if (!r) return fail("There is already an open request for this key.");
+        staffchat.systemQueues("key", `${r.label} asked for a new staff key`, {
+          minLevel: 3,
+          card: keyRequestCard(r),
+        });
+        audit.recordNotification({
+          kind: "key",
+          role: "mod",
+          label: r.label,
+          text: `${r.label} asked for a new staff key after ${r.kind === "revoked" ? "Automod removed it" : "losing it"}: ${text}`,
+          minLevel: 3,
+        });
+        socket.emit("staff key request result", { ok: true });
+        broadcastModKeyLists();
+      }),
+    );
+
+    const takeKeyRequest = (data) => {
+      if (!requireModLevel(socket, 3)) return null;
+      const r = roles.keyRequestById(String(data?.id || ""));
+      if (!r) return null;
+      if (r.level >= 3 && !socket.isDev) {
+        socket.emit(
+          "error",
+          createErrorResponse(
+            ERROR_CODES.FORBIDDEN,
+            "Only an admin can act on a mod leader's key.",
+          ),
+        );
+        return null;
+      }
+      return r;
+    };
+
+    socket.on(
+      "staff key reissue",
+      safe(async (data) => {
+        const r = takeKeyRequest(data);
+        if (!r) return;
+        if (!roles.modKeyByHash(r.hash) && !roles.restoreFormer(r.hash)) return;
+        roles.setPendingReissue(r.hash, r.deviceId);
+        roles.closeKeyRequest(r.id);
+        settleKeyRequest(r.id);
+        for (const [, s] of io().sockets.sockets)
+          if (s.deviceId === r.deviceId) s.emit("staff key restored", { label: r.label });
+        logStaff(socket, "reissue staff key", `${r.label}(${r.hash.slice(0, 8)})`, "-");
+        socket.emit("staff action result", { action: "reissue staff key", ok: true });
+        broadcastModKeyLists();
+        staffchat.rosterDirty();
+      }),
+    );
+
+    socket.on(
+      "staff key decline",
+      safe(async (data) => {
+        const r = takeKeyRequest(data);
+        if (!r) return;
+        const note = String(data?.note || "").trim().slice(0, 300);
+        roles.closeKeyRequest(r.id);
+        settleKeyRequest(r.id);
+        if (r.kind === "lost") roles.dropDevice(r.hash, r.deviceId);
+        const payload = { note, at: Date.now() };
+        let live = false;
+        for (const [, s] of io().sockets.sockets)
+          if (s.deviceId === r.deviceId) {
+            live = true;
+            s.emit("staff key declined", payload);
+          }
+        if (!live) roles.noteDecline(r.deviceId, note);
+        logStaff(
+          socket,
+          "decline staff key request",
+          `${r.label}(${String(r.hash || "").slice(0, 8)})`,
+          "-",
+          note || null,
+        );
+        socket.emit("staff action result", { action: "decline staff key request", ok: true });
+        broadcastModKeyLists();
+      }),
+    );
+
+    socket.on(
+      "dev reissue mod key",
+      safe(async (data) => {
+        if (!requireModLevel(socket, 3)) return;
+        const key = roles.getModKeyByHash(String(data?.hash || ""));
+        if (!key) return;
+        if (key.level >= 3 && !socket.isDev)
+          return socket.emit(
+            "error",
+            createErrorResponse(
+              ERROR_CODES.FORBIDDEN,
+              "Only an admin can reissue a mod leader's key.",
+            ),
+          );
+        const r = roles.mintKey(
+          key.hash,
+          {
+            ip: socket.clientIp,
+            deviceId: socket.deviceId,
+            userId: socket.handshake?.session?.userId,
+          },
+          24 * 60 * 60 * 1000,
+        );
+        if (!r || r.throttled)
+          return socket.emit("staff action result", {
+            action: "reissue mod key",
+            ok: false,
+            error: "That key has had too many new sign-ins this hour.",
+          });
+        logStaff(socket, "mint sign-in key for mod", `${key.label}(${key.hash.slice(0, 8)})`, "-");
+        socket.emit("dev mod granted", {
+          key: r.key,
+          hash: key.hash,
+          label: key.label,
+          level: key.level,
+          expires: r.expires,
+          reissued: true,
+        });
+        broadcastModKeyLists();
       }),
     );
 
@@ -9934,25 +10292,11 @@ function registerSocketHandlers(opts) {
             reason,
             by: socket.staffLabel || "dev",
           });
-          for (const [, s] of io().sockets.sockets) {
+          for (const [, s] of io().sockets.sockets)
             if (s.isMod && s.modKeyHash === hash) {
-              s.isMod = false;
-              s.modKeyHash = null;
-              s.modLevel = 0;
-              s.staffLabel = null;
-              const uid = s.handshake?.session?.userId;
-              if (uid && s.roomId) {
-                const r = state.rooms.get(s.roomId);
-                const u = r?.users?.find((x) => x.id === uid);
-                if (u) {
-                  u.isMod = false;
-                  updateRoom(s.roomId);
-                  updateLobby();
-                }
-              }
+              demoteSocket(s);
               s.emit("staff revoked", { reason });
             }
-          }
         }
         logStaff(
           socket,
@@ -10347,6 +10691,8 @@ function purgeAllGhostUsers() {
 
 module.exports = {
   keyNetworksChanged,
+  keyTokenMismatch,
+  keyFingerprintChanged,
   knownName,
   loadRooms,
   saveRooms,

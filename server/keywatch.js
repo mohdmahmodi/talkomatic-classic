@@ -13,6 +13,7 @@ function join(hash, socketId, info) {
   group.set(socketId, {
     deviceId: info.deviceId || null,
     network: info.network || null,
+    ip: info.ip || null,
     userId: info.userId || null,
     since: Date.now(),
   });
@@ -72,6 +73,7 @@ function holders(hash) {
         (h = {
           key,
           networks: new Set(),
+          ips: new Set(),
           since: s.since,
           sockets: 0,
           identified: false,
@@ -81,6 +83,7 @@ function holders(hash) {
     h.since = Math.min(h.since, s.since);
     if (s.deviceId) h.identified = true;
     if (s.network) h.networks.add(s.network);
+    if (s.ip) h.ips.add(s.ip);
   }
   return [...by.values()];
 }
@@ -110,6 +113,7 @@ function summary(hash) {
       id: h.key,
       sockets: h.sockets,
       networks: [...h.networks],
+      ips: [...h.ips],
       since: h.since,
     }));
 }

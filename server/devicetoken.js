@@ -75,39 +75,43 @@ function userIdFor(id) {
     .slice(0, 32);
 }
 
-function idFromCookieHeader(header) {
+function cookieValue(header, name) {
   if (typeof header !== "string" || !header) return null;
   for (const part of header.split(";")) {
     const eq = part.indexOf("=");
-    if (eq === -1) continue;
-    if (part.slice(0, eq).trim() !== COOKIE_NAME) continue;
-    let value = part.slice(eq + 1).trim();
+    if (eq === -1 || part.slice(0, eq).trim() !== name) continue;
+    const value = part.slice(eq + 1).trim();
     try {
-      value = decodeURIComponent(value);
-    } catch (_) {}
-    return verify(value);
+      return decodeURIComponent(value);
+    } catch (_) {
+      return value;
+    }
   }
   return null;
 }
 
+function idFromCookieHeader(header) {
+  return verify(cookieValue(header, COOKIE_NAME));
+}
+
 function middleware(req, res, next) {
   let id = req.cookies ? verify(req.cookies[COOKIE_NAME]) : null;
-  if (!id) {
-    const t = issue();
-    id = t.id;
-    res.cookie(COOKIE_NAME, t.token, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: req.secure,
-      maxAge: MAX_AGE_MS,
-    });
-  }
+  const t = id ? { id, token: req.cookies[COOKIE_NAME] } : issue();
+  id = t.id;
+  res.cookie(COOKIE_NAME, t.token, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: req.secure,
+    maxAge: MAX_AGE_MS,
+  });
   req.deviceId = id;
   next();
 }
 
 module.exports = {
   COOKIE_NAME,
+  STAFF_COOKIE: "tk_staff",
+  cookieValue,
   middleware,
   issue,
   verify,
