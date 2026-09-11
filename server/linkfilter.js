@@ -584,10 +584,30 @@ function splitUrlish(text) {
 
 // A second host hiding in an allowed link's path or query - a redirector
 // target, "?q=evil.com" - keeps the whole thing blocked.
+const REDIRECTOR = /^\/(?:redirect|url|l\.php|link|away|out|exit)(?:[\/?#]|$)/;
+
+function unescaped(tail) {
+  let out = tail;
+  for (let i = 0; i < 3; i++) {
+    let next = out.replace(/\+/g, " ");
+    try {
+      next = decodeURIComponent(next);
+    } catch (_) {
+      next = next.replace(/%([0-9a-f]{2})/gi, (_, h) =>
+        String.fromCharCode(parseInt(h, 16)),
+      );
+    }
+    if (next === out) break;
+    out = next;
+  }
+  return scan(out).text.replace(DOT_ALL, ".").toLowerCase();
+}
+
 function tailSmuggles(tail) {
+  const text = unescaped(tail);
   LINK.lastIndex = 0;
   let m;
-  while ((m = LINK.exec(tail)) !== null) {
+  while ((m = LINK.exec(text)) !== null) {
     if (m[0] === "") {
       LINK.lastIndex++;
       continue;
@@ -628,6 +648,7 @@ function allowedRange(value, start, end) {
     const parts = splitUrlish(text);
     if (!parts) continue;
     if (!HOST_OK.test(parts.host) || !hostAllowed(parts.host)) continue;
+    if (REDIRECTOR.test(parts.tail)) continue;
     if (!parts.tail || !tailSmuggles(parts.tail)) return true;
   }
   return false;
