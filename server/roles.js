@@ -431,7 +431,7 @@ function pendingReissueFor(deviceId, ip, ua) {
   const key = deviceId && modKeys.find((k) => k.pending === deviceId);
   if (!key) return null;
   key.pending = null;
-  return enroll(key, deviceId, ip, deviceInfo(ua), true);
+  return { ...enroll(key, deviceId, ip, deviceInfo(ua), true), restored: true };
 }
 
 function setPendingReissue(hash, deviceId) {

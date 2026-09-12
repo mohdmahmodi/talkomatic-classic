@@ -543,16 +543,17 @@ io.use((socket, next) => {
       const modKey =
         pasted && String(pasted).startsWith("mk_") ? pasted : cookieToken || pasted;
       const ua = socket.handshake.headers["user-agent"];
-      const found = modKey
+      let found = modKey
         ? roles.resolveModKey(modKey, socket.deviceId, clientIp, ua)
-        : roles.pendingReissueFor(socket.deviceId, clientIp, ua);
+        : null;
+      if (!found) found = roles.pendingReissueFor(socket.deviceId, clientIp, ua);
       const mk =
         found && (found.status === "active" || found.status === "standby")
           ? found.key
           : null;
       if (mk && (found.token || modKey !== cookieToken)) {
         socket.staffToken = found.token || modKey;
-        socket.staffRestored = !modKey;
+        socket.staffRestored = !!found.restored;
       }
       if (found?.changed) rooms.keyFingerprintChanged(mk, found.changed, clientIp);
       if (found?.status === "mismatch") {

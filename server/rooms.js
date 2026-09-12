@@ -1048,6 +1048,10 @@ function keyNetworksChanged(hash, label, role, newIp) {
 }
 
 function demoteSocket(s) {
+  if (s.keyWatchHash) {
+    keywatch.leave(s.keyWatchHash, s.id);
+    s.keyWatchHash = null;
+  }
   s.isMod = false;
   s.modKeyHash = null;
   s.modLevel = 0;
