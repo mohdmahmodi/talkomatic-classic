@@ -1444,6 +1444,34 @@ function actionsOn(who, since, limit = 10) {
   return out;
 }
 
+function identityOn(who, since, limit = 40) {
+  const keys = personKeys(who);
+  const ips = new Set(who.ips || []);
+  const out = [];
+  for (let i = entries.length - 1; i >= 0 && out.length < limit; i--) {
+    const e = entries[i];
+    if ((e.ts || 0) < since) break;
+    if (e.type !== "identity") continue;
+    if (
+      !(e.userId && keys.userIds.has(e.userId)) &&
+      !(e.deviceId && keys.deviceIds.has(e.deviceId)) &&
+      !(e.ip && ips.has(e.ip) && e.username && (who.names || []).includes(e.username))
+    )
+      continue;
+    out.push({
+      at: e.ts,
+      event: e.event,
+      username: e.username || null,
+      location: e.location || null,
+      prevUsername: e.prevUsername || null,
+      prevLocation: e.prevLocation || null,
+      by: e.by || null,
+      role: e.byRole || null,
+    });
+  }
+  return out;
+}
+
 function entriesOn(who) {
   return hitsOn(who, 0).sort((a, b) => (a.id || 0) - (b.id || 0));
 }
@@ -1722,6 +1750,7 @@ module.exports = {
   recordWriteup,
   getEntry,
   actionsOn,
+  identityOn,
   entriesOn,
   actsForLabel,
   toAct,

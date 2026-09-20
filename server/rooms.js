@@ -1595,7 +1595,7 @@ function appealFile(a, view, person) {
 }
 
 const QUICK_FILE_MS = 180 * 24 * 60 * 60 * 1000;
-const QUICK_FILE_MAX = 40;
+const QUICK_FILE_MAX = 80;
 const HEAVY_ACTIONS = new Set(["ban", "ban ip", "ip block", "id block", "kick+ban"]);
 
 function buildQuickFile(targetUserId, socket) {
@@ -1713,6 +1713,54 @@ function buildQuickFile(targetUserId, socket) {
       });
   }
 
+  for (const e of audit.identityOn(
+    {
+      userId: targetUserId,
+      userIds: [...keys.userIds],
+      deviceId: who.deviceId,
+      deviceIds: [...keys.deviceIds],
+      ips: [...keys.ips],
+      names: person ? person.names : [],
+    },
+    since,
+    QUICK_FILE_MAX,
+  )) {
+    if (e.event === "forced-rename") continue;
+    let action;
+    if (e.event === "rename") {
+      const nameChanged = e.prevUsername && e.prevUsername !== e.username;
+      const locChanged = (e.prevLocation || "") !== (e.location || "");
+      if (nameChanged && locChanged)
+        action = "renamed " + e.prevUsername + " to " + e.username + ", location " + (e.location || "On The Web");
+      else if (nameChanged) action = "renamed " + e.prevUsername + " to " + e.username;
+      else if (locChanged)
+        action = "location " + (e.prevLocation || "On The Web") + " to " + (e.location || "On The Web");
+      else action = "signed in as " + e.username;
+    } else if (e.event === "accepted-rules") {
+      action = "read the rules and came back after a block";
+    } else {
+      action = "signed in as " + e.username + (e.location ? " / " + e.location : "");
+    }
+    events.push({ at: e.at, kind: "identity", action, base: e.event, by: null });
+  }
+
+  const targetLabel =
+    targetSocket && (targetSocket.isMod || targetSocket.isDev) ? targetSocket.staffLabel : null;
+  const targetRole = targetSocket && targetSocket.isDev ? "dev" : targetSocket && targetSocket.isMod ? "mod" : null;
+  if (targetLabel && canViewModRecord(socket, targetLabel, targetRole))
+    for (const act of audit.actsForLabel(targetLabel, targetRole, since).slice(-QUICK_FILE_MAX)) {
+      if (act.group !== "users") continue;
+      events.push({
+        at: act.ts,
+        kind: "staffwork",
+        action: act.action,
+        base: act.base,
+        by: null,
+        target: act.targetName || null,
+        reason: mask((act.receipt && act.receipt.reason && act.receipt.reason.text) || null),
+      });
+    }
+
   const reportList = [...keys.userIds]
     .flatMap((uid) => reports.forTarget(uid))
     .filter((r) => (r.at || 0) >= since)
@@ -1763,6 +1811,7 @@ function buildQuickFile(targetUserId, socket) {
       : null,
     counts: {
       actions: shown.filter((e) => e.kind === "action" || e.kind === "warn").length,
+      identity: shown.filter((e) => e.kind === "identity").length,
       blocks: shown.filter((e) => e.kind === "block").length,
       appeals: list.length,
       reports: reportList.length,
@@ -1770,6 +1819,7 @@ function buildQuickFile(targetUserId, socket) {
     events: shown.slice(0, QUICK_FILE_MAX),
     window: QUICK_FILE_MS,
     fullRecord: socket.isDev || (socket.modLevel || 1) >= 2,
+    staff: targetRole,
   };
 }
 
@@ -8856,11 +8906,26 @@ function registerSocketHandlers(opts) {
         const targetUserId =
           typeof data?.targetUserId === "string" ? data.targetUserId.slice(0, 120) : "";
         if (!targetUserId) return;
-        if (!canActOn(socket, targetUserId))
-          return socket.emit(
-            "error",
-            createErrorResponse(ERROR_CODES.FORBIDDEN, "You cannot view this user."),
-          );
+        if (getUserStaffRole(targetUserId) === "dev" && !socket.isDev) {
+          const t = findSocketsByUserId(targetUserId)[0];
+          const r = getUserCurrentRoom(targetUserId);
+          const u = r ? state.rooms.get(r)?.users.find((x) => x.id === targetUserId) : null;
+          return socket.emit("staff file", {
+            targetUserId,
+            name: u?.username || t?.handshake?.session?.username || null,
+            names: [],
+            online: true,
+            devices: 0,
+            firstSeen: null,
+            evader: false,
+            block: null,
+            counts: { actions: 0, blocks: 0, appeals: 0, reports: 0, identity: 0 },
+            events: [],
+            window: QUICK_FILE_MS,
+            fullRecord: false,
+            staff: null,
+          });
+        }
         socket.emit("staff file", buildQuickFile(targetUserId, socket));
       }),
     );

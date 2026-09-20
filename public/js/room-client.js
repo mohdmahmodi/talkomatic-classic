@@ -2660,23 +2660,23 @@ function createUserRow(user, container) {
       staffBtn.title = "Staff actions";
       staffBtn.addEventListener("click", () => openUserStaffMenu(user));
       tools.appendChild(staffBtn);
+    }
 
-      if (!leaderCanManage) {
-        nameEl.classList.add("ui-name-file");
-        nameEl.title = "History: blocks, warnings, appeals, reports";
-        nameEl.setAttribute("role", "button");
-        nameEl.tabIndex = 0;
-        nameEl.addEventListener("click", (e) => {
-          e.stopPropagation();
+    if (user.id !== currentUserId && (currentUserIsDev || targetVisibleRole !== "dev")) {
+      nameEl.classList.add("ui-name-file");
+      nameEl.title = "History: names, blocks, warnings, appeals, reports";
+      nameEl.setAttribute("role", "button");
+      nameEl.tabIndex = 0;
+      nameEl.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openQuickFile(user, nameEl);
+      });
+      nameEl.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
           openQuickFile(user, nameEl);
-        });
-        nameEl.addEventListener("keydown", (e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            openQuickFile(user, nameEl);
-          }
-        });
-      }
+        }
+      });
     }
   }
   if (user.id !== currentUserId) {
@@ -4090,8 +4090,7 @@ function openUserStaffMenu(user) {
   const items = [];
   const look = [];
 
-  if (!leaderManagingMod)
-    look.push({
+  look.push({
       icon: '<i class="fas fa-clock-rotate-left"></i>',
       label: "History",
       desc: "Blocks, warnings, appeals and reports on this person, in order",
@@ -4403,7 +4402,10 @@ function openUserStaffMenu(user) {
   // A leader on a mod target sees the team actions and nothing else: room
   // discipline (warn, kick, wipe) on fellow staff stays out of their menu.
   const groups = leaderManagingMod
-    ? [{ title: "Mod team", items: roles }]
+    ? [
+        { title: "Look first", items: look },
+        { title: "Mod team", items: roles },
+      ]
     : [
         { title: "Look first", items: look },
         { title: "Clean up what they show", items: cleanup },

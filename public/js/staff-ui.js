@@ -226,7 +226,7 @@
   .tk-pop-pill.warn{background:rgba(255,180,84,.16);color:#ffb454;border:1px solid rgba(255,180,84,.45);}
   .tk-pop-pill.dim{background:rgba(255,255,255,.06);color:#cfcfcf;border:1px solid rgba(255,255,255,.14);
     font-weight:normal;}
-  .tk-pop-tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:10px 12px 0;}
+  .tk-pop-tiles{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;padding:10px 12px 0;}
   .tk-pop-tile{background:#1b1b1b;border:1px solid #333;border-radius:6px;padding:7px 4px 6px;text-align:center;}
   .tk-pop-tile b{display:block;font-size:17px;line-height:1.1;color:#fff;}
   .tk-pop-tile span{display:block;font-size:10.5px;color:#9a9a9a;margin-top:2px;letter-spacing:.2px;}
@@ -235,7 +235,12 @@
     border:1px solid rgba(255,84,104,.35);font-size:12.5px;}
   .tk-pop-now b{color:#ff8a8e;}
   .tk-pop-now .tk-pop-nowsub{color:#d6d6d6;margin-top:2px;font-size:12px;}
-  .tk-pop-list{flex:1;overflow-y:auto;overflow-x:hidden;padding:10px 12px 8px;}
+  .tk-pop-list{flex:1;overflow-y:auto;overflow-x:hidden;padding:10px 12px 8px;min-height:120px;
+    scrollbar-width:thin;scrollbar-color:#616161 #161616;}
+  .tk-pop-list::-webkit-scrollbar{width:9px;}
+  .tk-pop-list::-webkit-scrollbar-track{background:#161616;}
+  .tk-pop-list::-webkit-scrollbar-thumb{background:#616161;border-radius:5px;border:2px solid #161616;}
+  .tk-pop-list::-webkit-scrollbar-thumb:hover{background:#ff9800;}
   .tk-pop-empty{color:#9a9a9a;font-size:12.5px;text-align:center;padding:16px 8px 12px;}
   .tk-pop-row{display:flex;gap:10px;padding:7px 0;border-top:1px solid #2c2c2c;align-items:flex-start;}
   .tk-pop-row:first-child{border-top:none;padding-top:2px;}
@@ -246,6 +251,11 @@
   .tk-pop-row.k-unblock .tk-pop-dot{background:rgba(87,217,163,.14);color:#57d9a3;}
   .tk-pop-row.k-appeal .tk-pop-dot{background:rgba(90,169,255,.15);color:#5aa9ff;}
   .tk-pop-row.k-report .tk-pop-dot{background:rgba(192,139,255,.16);color:#c08bff;}
+  .tk-pop-row.k-identity .tk-pop-dot{background:rgba(255,255,255,.07);color:#bdbdbd;}
+  .tk-pop-row.k-identity .tk-pop-what{color:#d6d6d6;font-weight:normal;}
+  .tk-pop-row.k-staffwork .tk-pop-dot{background:rgba(119,221,119,.14);color:#77dd77;}
+  .tk-pop-row.k-staffwork .tk-pop-what .tk-pop-tag{font-size:10px;font-weight:bold;letter-spacing:.4px;
+    padding:1px 6px;border-radius:4px;background:#77dd77;color:#00220f;margin-right:6px;vertical-align:middle;}
   .tk-pop-main{flex:1;min-width:0;}
   .tk-pop-what{font-weight:bold;color:#fff;font-size:13px;word-break:break-word;}
   .tk-pop-what .tk-pop-by{font-weight:normal;color:#9a9a9a;}
@@ -1141,7 +1151,7 @@
         [
           "History (tap the name)",
           "jr",
-          "The block they are serving, then everything staff have done to them in order: blocks, warnings, kicks, appeals and reports, across every name and device they have used. Look here before you act.",
+          "Works on users and on other staff. The block they are serving, then everything in order: sign-ins and renames, blocks, warnings, kicks, appeals and reports, across every name and device they have used. Look here before you act.",
         ],
         [
           "Wipe typed text",
@@ -1839,6 +1849,11 @@
     "show rules": "fa-book",
     "kill bot": "fa-robot",
     "auto block": "fa-robot",
+    identity: "fa-id-card",
+    signin: "fa-right-to-bracket",
+    rename: "fa-pen",
+    "accepted-rules": "fa-book-open",
+    staffwork: "fa-shield-halved",
   };
   const FILE_LABEL = {
     kick: "Kicked from a room",
@@ -1866,6 +1881,16 @@
 
   function fileWhat(ev) {
     const base = ev.base || "";
+    if (ev.kind === "identity")
+      return String(ev.action || "").replace(/^\w/, (c) => c.toUpperCase());
+    if (ev.kind === "staffwork") {
+      const dur = DUR_RE.exec(ev.action || "");
+      const len = dur ? " · " + durationLabel(dur[1]) : "";
+      const what = ["ip block", "id block", "ban ip", "ban"].includes(base)
+        ? "Blocked" + len
+        : FILE_LABEL[base] || (ev.action || base).replace(/^\w/, (c) => c.toUpperCase());
+      return what + (ev.target ? ": " + ev.target : "");
+    }
     const dur = DUR_RE.exec(ev.action || "");
     const len = dur ? durationLabel(dur[1]) : ev.duration ? durationLabel(ev.duration) : "";
     if (base === "auto block")
@@ -1907,6 +1932,7 @@
     const head = el("div", { class: "tk-pop-head" });
     const who = el("div", { class: "tk-pop-who" });
     const nm = el("div", { class: "tk-pop-name", text: d.name || "Anonymous" });
+    if (d.staff) nm.appendChild(el("span", { class: "tk-chip " + (d.staff === "dev" ? "dev" : "mod"), text: d.staff === "dev" ? "ADMIN" : "MOD", style: "margin-left:7px" }));
     if (d.online === false) nm.appendChild(el("span", { class: "tk-pop-off", text: "offline" }));
     who.appendChild(nm);
     if (d.names && d.names.length) {
@@ -1958,6 +1984,7 @@
       ["Blocks", c.blocks || 0, (c.blocks || 0) > 0],
       ["Appeals", c.appeals || 0, false],
       ["Reports", c.reports || 0, (c.reports || 0) >= 3],
+      ["Names", c.identity || 0, false],
     ].forEach(([label, n, hot]) =>
       tiles.appendChild(
         el("div", { class: "tk-pop-tile" + (hot ? " hot" : "") }, [
@@ -1997,7 +2024,9 @@
       const row = el("div", { class: "tk-pop-row k-" + kind });
       row.appendChild(el("div", { class: "tk-pop-dot", html: '<i class="fas ' + icon + '"></i>' }));
       const main = el("div", { class: "tk-pop-main" });
-      const what = el("div", { class: "tk-pop-what", text: fileWhat(ev) });
+      const what = el("div", { class: "tk-pop-what" });
+      if (kind === "staffwork") what.appendChild(el("span", { class: "tk-pop-tag", text: "AS STAFF" }));
+      what.appendChild(document.createTextNode(fileWhat(ev)));
       if (ev.by) what.appendChild(el("span", { class: "tk-pop-by", text: " · " + ev.by }));
       main.appendChild(what);
       if (ev.reason) main.appendChild(el("div", { class: "tk-pop-why", text: ev.reason }));
