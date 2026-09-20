@@ -226,6 +226,10 @@
   .tk-pop-pill.warn{background:rgba(255,180,84,.16);color:#ffb454;border:1px solid rgba(255,180,84,.45);}
   .tk-pop-pill.dim{background:rgba(255,255,255,.06);color:#cfcfcf;border:1px solid rgba(255,255,255,.14);
     font-weight:normal;}
+  .tk-pop-tenure{display:flex;flex-wrap:wrap;gap:4px 14px;margin:0 12px;padding:8px 0 0;font-size:12px;color:#d6d6d6;}
+  .tk-pop-tenure b{color:#fff;font-weight:bold;}
+  .tk-pop-tenure span{white-space:nowrap;}
+  .tk-pop-tenure i{color:#ff9800;margin-right:5px;font-size:11px;}
   .tk-pop-tiles{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;padding:10px 12px 0;}
   .tk-pop-tile{background:#1b1b1b;border:1px solid #333;border-radius:6px;padding:7px 4px 6px;text-align:center;}
   .tk-pop-tile b{display:block;font-size:17px;line-height:1.1;color:#fff;}
@@ -1976,6 +1980,29 @@
     x.addEventListener("click", () => o.onClose && o.onClose());
     head.appendChild(x);
     wrap.appendChild(head);
+
+    if (d.tenure && d.tenure.since) {
+      const t = d.tenure;
+      const sinceDays = Math.floor((Date.now() - t.since) / 86400000);
+      const sinceTxt =
+        sinceDays < 1 ? "today" : sinceDays === 1 ? "yesterday" : sinceDays + " days ago";
+      const hrs = (h) => (h >= 10 ? Math.round(h) : h) + "h";
+      const ten = el("div", { class: "tk-pop-tenure" }, [
+        el("span", {
+          html: '<i class="fas fa-calendar-check"></i>First seen <b>' + escape(sinceTxt) + "</b>",
+          title: new Date(t.since).toLocaleString(),
+        }),
+        el("span", {
+          html: '<i class="fas fa-calendar-days"></i><b>' + t.days + "</b> " + (t.days === 1 ? "day" : "days") + " on the site",
+          title: "Distinct days with a visit, last 90 days",
+        }),
+        el("span", {
+          html: '<i class="fas fa-clock"></i><b>' + hrs(t.hours) + "</b> in rooms" + (t.activeHours ? " · " + hrs(t.activeHours) + " with the tab in front" : ""),
+          title: "Time spent in rooms, recorded by the server",
+        }),
+      ]);
+      wrap.appendChild(ten);
+    }
 
     const c = d.counts || {};
     const tiles = el("div", { class: "tk-pop-tiles" });

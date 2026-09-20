@@ -1789,6 +1789,25 @@ function buildQuickFile(targetUserId, socket) {
   );
   shown.sort((x, y) => (y.at || 0) - (x.at || 0));
 
+  const tenure = { since: 0, last: 0, days: 0, hours: 0, activeHours: 0 };
+  {
+    const dayset = new Set();
+    let sec = 0;
+    let active = 0;
+    for (const did of keys.deviceIds) {
+      const r = identity.getRecord(did);
+      if (!r) continue;
+      if (r.first && (!tenure.since || r.first < tenure.since)) tenure.since = r.first;
+      if (r.last && r.last > tenure.last) tenure.last = r.last;
+      for (const d of r.days || []) dayset.add(d);
+      sec += r.sec || 0;
+      active += r.active || 0;
+    }
+    tenure.days = dayset.size;
+    tenure.hours = Math.round((sec / 3600) * 10) / 10;
+    tenure.activeHours = Math.round((active / 3600) * 10) / 10;
+  }
+
   const eff = personblocks.effective(who, keys);
   const b = eff ? eff.block : null;
   const shownName =
@@ -1803,7 +1822,8 @@ function buildQuickFile(targetUserId, socket) {
     names: person ? person.names.filter((n) => n !== shownName).slice(0, 6) : [],
     online: !!targetSocket,
     devices: person ? person.devices.length : who.deviceId ? 1 : 0,
-    firstSeen: person ? person.first || null : null,
+    firstSeen: tenure.since || (person ? person.first || null : null),
+    tenure: tenure.since ? tenure : null,
     evader: !!(person && person.evader),
     block: eff
       ? {
