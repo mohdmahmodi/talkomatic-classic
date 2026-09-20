@@ -286,10 +286,16 @@ function claimsOverlap(a, b) {
   );
 }
 
-function foreignClaimAt(bs, userId, x, y) {
+function paddedClaim(c, pad) {
+  return { x: c.x - pad, y: c.y - pad, w: c.w + pad * 2, h: c.h + pad * 2 };
+}
+
+function foreignClaimAt(bs, userId, x, y, size) {
+  const pad = (Number(size) || 0) / 2;
   for (const c of boardClaims(bs)) {
     if (c.owner === userId) continue;
-    if (x >= c.x && x <= c.x + c.w && y >= c.y && y <= c.y + c.h) return c;
+    const r = paddedClaim(c, pad);
+    if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return c;
   }
   return null;
 }
@@ -335,19 +341,20 @@ function pointInRings(rings, pt) {
   return inside;
 }
 
-function claimCrossed(socket, bs, x1, y1, x2, y2) {
+function claimCrossed(socket, bs, x1, y1, x2, y2, size) {
   if (isStaffSocket(socket)) return null;
   const userId = socket.handshake.session?.userId;
+  const pad = (Number(size) || 0) / 2;
   for (const c of boardClaims(bs)) {
     if (c.owner === userId) continue;
-    if (segmentHitsRect(x1, y1, x2, y2, c)) return c;
+    if (segmentHitsRect(x1, y1, x2, y2, paddedClaim(c, pad))) return c;
   }
   return null;
 }
 
-function claimBlocking(socket, bs, x, y) {
+function claimBlocking(socket, bs, x, y, size) {
   if (isStaffSocket(socket)) return null;
-  return foreignClaimAt(bs, socket.handshake.session?.userId, x, y);
+  return foreignClaimAt(bs, socket.handshake.session?.userId, x, y, size);
 }
 
 function sendClaims(roomId) {
@@ -4954,6 +4961,7 @@ function registerSocketHandlers(opts) {
           bsClaim,
           data.point.x,
           data.point.y,
+          data.size,
         );
         if (blocked)
           return socket.emit("board blocked", {
@@ -4966,8 +4974,8 @@ function registerSocketHandlers(opts) {
           points: [{ x: data.point.x, y: data.point.y }],
           color: data.color.slice(0, 7),
           // Brush sizes are world units and zoom-relative on the client
-          // (screen px / zoom), so deep zoom sends tiny fractions and far
-          // zoom-out sends large ones.
+          // (screen px / zoom, floored at 100%), so deep zoom sends tiny
+          // fractions; zooming out never grows the brush.
           size: Math.min(Math.max(data.size, 1e-9), 5000),
           eraser: !!data.eraser,
           gradient: data.eraser ? null : sanitizeGradient(data.gradient),
@@ -5014,8 +5022,8 @@ function registerSocketHandlers(opts) {
         for (const p of data.points) {
           if (typeof p.x !== "number" || typeof p.y !== "number") continue;
           const hit = last
-            ? claimCrossed(socket, bs, last.x, last.y, p.x, p.y)
-            : claimBlocking(socket, bs, p.x, p.y);
+            ? claimCrossed(socket, bs, last.x, last.y, p.x, p.y, active.size)
+            : claimBlocking(socket, bs, p.x, p.y, active.size);
           if (hit) {
             stoppedBy = hit;
             break;
@@ -5137,15 +5145,32 @@ function registerSocketHandlers(opts) {
             id: s.id,
             name: c.name || "Someone",
           });
+        const addSize = Math.min(Math.max(Number(s.size) || 3, 1e-9), 5000);
         for (let i = 0; i < points.length; i++) {
           const a = points[i];
           const b = points[i + 1] || a;
-          const c = claimCrossed(socket, bsAdd, a.x, a.y, b.x, b.y);
+          const c = claimCrossed(socket, bsAdd, a.x, a.y, b.x, b.y, addSize);
           if (c) return refuse(c);
         }
         if (s.fill && !isStaffSocket(socket)) {
           const rings =
             Array.isArray(s.rings) && s.rings.length ? s.rings : [points];
+          for (const ring of rings) {
+            if (!Array.isArray(ring)) continue;
+            for (let i = 0; i < ring.length; i++) {
+              const a = ring[i];
+              const b = ring[(i + 1) % ring.length];
+              if (
+                typeof a?.x !== "number" ||
+                typeof a?.y !== "number" ||
+                typeof b?.x !== "number" ||
+                typeof b?.y !== "number"
+              )
+                continue;
+              const c = claimCrossed(socket, bsAdd, a.x, a.y, b.x, b.y, 0);
+              if (c) return refuse(c);
+            }
+          }
           for (const c of boardClaims(bsAdd)) {
             if (c.owner === userId) continue;
             const mid = { x: c.x + c.w / 2, y: c.y + c.h / 2 };

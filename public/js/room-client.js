@@ -41,6 +41,22 @@ let currentRoomLayout = "vertical";
 let userLayoutPreference = null;
 let currentRoomName = "";
 let currentRoomCreatedAt = 0;
+let roomUptimeBase = -1;
+let roomUptimeMark = 0;
+
+function setRoomClock(data) {
+  currentRoomCreatedAt = data.createdAt || 0;
+  const up = Number(data.uptime);
+  if (!(currentRoomCreatedAt > 0)) roomUptimeBase = -1;
+  else if (Number.isFinite(up) && up >= 0) roomUptimeBase = up;
+  else roomUptimeBase = Math.max(0, Date.now() - currentRoomCreatedAt);
+  roomUptimeMark = performance.now();
+}
+
+function roomUptimeText() {
+  if (roomUptimeBase < 0) return "";
+  return msToTime(roomUptimeBase + (performance.now() - roomUptimeMark));
+}
 let lastSentMessage = "";
 let chatInput = null;
 const CLIENT_PROTOCOL = 1;
@@ -2905,7 +2921,8 @@ function updateRoomInfo(data) {
 
   if (nameEl)
     nameEl.textContent = `Room: ${currentRoomName || data.roomName || data.roomId}`;
-  if (uptimeEl) uptimeEl.textContent = msToTime(Date.now() - data.createdAt);
+  if (data.createdAt) setRoomClock(data);
+  if (uptimeEl) uptimeEl.textContent = roomUptimeText();
   if (idEl) idEl.textContent = `Room ID: ${data.roomId || currentRoomId}`;
 
   const roomType = data.roomType || data.type;
@@ -3157,14 +3174,15 @@ function updateTimeLabels() {
 
   const uptimeEl = document.querySelector(".room-uptime");
   if (uptimeEl) {
-    uptimeEl.textContent = currentRoomCreatedAt > 0 ? msToTime(Date.now() - currentRoomCreatedAt) : "";
+    uptimeEl.textContent = roomUptimeText();
   }
 }
 
 function msToTime(duration) {
-  const seconds = parseInt((duration / 1000) % 60),
-    minutes = parseInt((duration / (1000 * 60)) % 60),
-    hours = parseInt((duration / (1000 * 60 * 60)));
+  const ms = Math.max(0, Number(duration) || 0);
+  const seconds = Math.floor((ms / 1000) % 60),
+    minutes = Math.floor((ms / (1000 * 60)) % 60),
+    hours = Math.floor(ms / (1000 * 60 * 60));
 
   return (hours > 0 ? hours + ":" : "") + String(minutes).padStart(2, "0") + ":" + String(seconds).padStart(2, "0");
 }
@@ -3357,7 +3375,7 @@ socket.on("room joined", (data) => {
   currentRoomLayout = data.layout || currentRoomLayout;
   currentRoomName = data.roomName;
   currentRoomMaxSize = data.maxSize || 0;
-  currentRoomCreatedAt = data.createdAt || 0;
+  setRoomClock(data);
 
   currentUserIsDev = !!data.isDev;
   currentUserIsMod = !!data.isMod;
@@ -4918,7 +4936,7 @@ function renderSpectate(data, noteText) {
   if (data.userId) currentUserId = data.userId;
   currentRoomName = data.roomName;
   currentRoomLayout = data.layout || currentRoomLayout;
-  currentRoomCreatedAt = data.createdAt || 0;
+  setRoomClock(data);
 
   currentUserIsDev = !!data.isDev;
   currentUserIsMod = !!data.isMod;
@@ -4930,7 +4948,7 @@ function renderSpectate(data, noteText) {
   const rid = document.querySelector(".second-navbar .room-id");
   if (rt) rt.textContent = `${getRoomTypeDisplay(data.roomType) || "Public"} room`;
   if (rn) rn.textContent = data.roomName || "*";
-  if (ru) ru.textContent = currentRoomCreatedAt > 0 ? msToTime(Date.now() - currentRoomCreatedAt) : "";
+  if (ru) ru.textContent = roomUptimeText();
   if (rid) rid.textContent = data.roomId ? "Room ID: " + data.roomId : "*";
   const c = document.querySelector(".chat-container");
   if (c) {

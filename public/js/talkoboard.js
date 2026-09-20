@@ -1064,7 +1064,8 @@ class Talkoboard {
       { passive: true },
     );
     const endGesture = (e) => {
-      if (!gesture || (e.touches && e.touches.length >= 2)) return;
+      if (e.touches && e.touches.length >= 2) return;
+      if (!gesture && !this._gesturing) return;
       gesture = null;
       this.isPanning = false;
       this._gesturing = false;
@@ -1474,11 +1475,21 @@ class Talkoboard {
     return this.SHAPES.includes(name || this.tool);
   }
 
-  foreignClaimAt(pt) {
+  claimPad(size) {
+    return (size == null ? this.worldBrushSize() : size) / 2;
+  }
+
+  paddedClaim(c, pad) {
+    return { x: c.x - pad, y: c.y - pad, w: c.w + pad * 2, h: c.h + pad * 2 };
+  }
+
+  foreignClaimAt(pt, size) {
     if (!pt || this.isStaff) return null;
+    const pad = this.claimPad(size);
     for (const c of this.claims) {
       if (c.owner === this.userId) continue;
-      if (pt.x >= c.x && pt.x <= c.x + c.w && pt.y >= c.y && pt.y <= c.y + c.h)
+      const r = this.paddedClaim(c, pad);
+      if (pt.x >= r.x && pt.x <= r.x + r.w && pt.y >= r.y && pt.y <= r.y + r.h)
         return c;
     }
     return null;
@@ -1515,11 +1526,12 @@ class Talkoboard {
     return true;
   }
 
-  claimCrossed(a, b) {
+  claimCrossed(a, b, size) {
     if (this.isStaff) return null;
+    const pad = this.claimPad(size);
     for (const c of this.claims) {
       if (c.owner === this.userId) continue;
-      if (this.segmentHitsRect(a, b, c)) return c;
+      if (this.segmentHitsRect(a, b, this.paddedClaim(c, pad))) return c;
     }
     return null;
   }
@@ -3085,6 +3097,13 @@ class Talkoboard {
 
   onPointerDown(e) {
     e.preventDefault();
+    if (this._gesturing) return;
+    if (e.pointerType === "touch" && !e.isPrimary) {
+      this.stopZoom();
+      this._abortCurrentStroke();
+      this._gesturing = true;
+      return;
+    }
     this.canvas.setPointerCapture(e.pointerId);
 
     if (this.eyedropperActive) {
@@ -3152,8 +3171,10 @@ class Talkoboard {
 
   // The size slider is in screen pixels at the moment you paint: a size-3 pen
   // looks 3px wide at any zoom, so zooming deep in gives finer world detail.
+  // Zooming out stops at the 100% size, so a pen never grows into something
+  // that covers the board in one move.
   worldBrushSize() {
-    return this.size / this.zoom;
+    return this.size / Math.max(this.zoom, 1);
   }
 
   startStrokeAt(pt) {
@@ -3235,10 +3256,11 @@ class Talkoboard {
     if (this.drawing || this._penLifted) {
       const pt = this.getCanvasPoint(e);
       const from = this.lastPoint || pt;
-      if (this.claimCrossed(from, pt)) {
+      const sz = this.currentStroke ? this.currentStroke.size : undefined;
+      if (this.claimCrossed(from, pt, sz)) {
         if (this.drawing) {
           this.liftPenAtFence();
-          const c = this.foreignClaimAt(pt) || this.claimCrossed(from, pt);
+          const c = this.foreignClaimAt(pt, sz) || this.claimCrossed(from, pt, sz);
           this.showHint("That is " + ((c && c.name) || "someone") + "'s area");
         }
         this.lastPoint = pt;
