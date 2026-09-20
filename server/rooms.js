@@ -3170,6 +3170,11 @@ async function saveRooms(force = false) {
             }),
             bannedUserIds: Array.from(room.bannedUserIds || []),
             bannedKeys: Array.from(room.bannedKeys || []),
+            parked: parkedForRoom(id).concat(
+              (room.users || [])
+                .map((u) => [u.id, state.getBuffer(u.id, id)])
+                .filter(([, t]) => typeof t === "string" && t.trim()),
+            ),
           },
         ];
       });
@@ -3236,6 +3241,11 @@ async function loadRooms() {
           item[1].bannedKeys = new Set(
             Array.isArray(item[1].bannedKeys) ? item[1].bannedKeys : [],
           );
+          if (Array.isArray(item[1].parked))
+            for (const entry of item[1].parked)
+              if (Array.isArray(entry) && typeof entry[0] === "string")
+                parkText(item[0], entry[0], entry[1]);
+          delete item[1].parked;
         }
         return item;
       }),
@@ -3254,6 +3264,48 @@ async function loadRooms() {
 
 // ── Room Timers ─────────────────────────────────────────────────────────────
 
+const PARK_MS = 10 * 60 * 1000;
+const parkedText = new Map();
+
+function parkKey(roomId, userId) {
+  return roomId + ":" + userId;
+}
+
+function parkText(roomId, userId, text, at) {
+  const t = typeof text === "string" ? text : "";
+  if (!t.trim()) {
+    parkedText.delete(parkKey(roomId, userId));
+    return;
+  }
+  parkedText.set(parkKey(roomId, userId), { text: t, at: at || Date.now() });
+}
+
+function takeParkedText(roomId, userId) {
+  const key = parkKey(roomId, userId);
+  const p = parkedText.get(key);
+  if (!p) return null;
+  parkedText.delete(key);
+  if (Date.now() - p.at > PARK_MS) return null;
+  return p.text;
+}
+
+function sweepParkedText() {
+  const now = Date.now();
+  for (const [key, p] of parkedText)
+    if (now - p.at > PARK_MS) parkedText.delete(key);
+}
+
+function parkedForRoom(roomId) {
+  const now = Date.now();
+  const out = [];
+  const prefix = roomId + ":";
+  for (const [key, p] of parkedText) {
+    if (!key.startsWith(prefix) || now - p.at > PARK_MS) continue;
+    out.push([key.slice(prefix.length), p.text]);
+  }
+  return out;
+}
+
 function startRoomDeletionTimer(roomId) {
   if (state.roomDeletionTimers.has(roomId)) {
     clearTimeout(state.roomDeletionTimers.get(roomId));
@@ -3262,6 +3314,8 @@ function startRoomDeletionTimer(roomId) {
     const room = state.rooms.get(roomId);
     if (room && room.users.length === 0) {
       state.rooms.delete(roomId);
+      for (const key of [...parkedText.keys()])
+        if (key.startsWith(roomId + ":")) parkedText.delete(key);
       gamesFloor.roomClosed(roomId);
       state.roomDeletionTimers.delete(roomId);
       state.roomSoloSince.delete(roomId);
@@ -3567,10 +3621,11 @@ async function processPendingChatUpdates(userId, socket) {
 
 // ── Leave / Join Room ───────────────────────────────────────────────────────
 
-async function leaveRoom(socket, userId) {
+async function leaveRoom(socket, userId, opts) {
   try {
     const roomId = socket.roomId;
     if (!roomId) return;
+    if (opts && opts.park) parkText(roomId, userId, state.getBuffer(userId, roomId));
     stopActiveTime(socket);
     clearAFKTimers(userId);
 
@@ -3799,6 +3854,9 @@ function joinRoom(socket, roomId, userId) {
       avatar: socket.handshake.session?.avatar || null,
     });
 
+    const restoredText = takeParkedText(roomId, userId);
+    if (restoredText) state.setBuffer(userId, roomId, restoredText);
+
     if (socket.isDev) {
       state.devUsers.add(userId);
     }
@@ -3838,10 +3896,10 @@ function joinRoom(socket, roomId, userId) {
               "Session save failed.",
             ),
           );
-        emitJoinSuccess(socket, room, userId, username, location);
+        emitJoinSuccess(socket, room, userId, username, location, restoredText);
       });
     } else {
-      emitJoinSuccess(socket, room, userId, username, location);
+      emitJoinSuccess(socket, room, userId, username, location, restoredText);
     }
     debouncedSaveRooms().catch(() => {});
   } catch (err) {
@@ -3856,7 +3914,7 @@ function joinRoom(socket, roomId, userId) {
   }
 }
 
-function emitJoinSuccess(socket, room, userId, username, location) {
+function emitJoinSuccess(socket, room, userId, username, location, restoredText) {
   const joinedUser = room.users?.find((u) => u.id === userId) || {
     id: userId,
     username,
@@ -3898,6 +3956,12 @@ function emitJoinSuccess(socket, room, userId, username, location) {
   socket.leave("lobby");
 
   emitRoomUserJoined(room, joinedUser);
+  if (restoredText)
+    emitRoomChatUpdate(socket, {
+      userId,
+      username,
+      diff: { type: "full-replace", text: restoredText },
+    });
   updateRoom(room.id);
   updateLobby();
 
@@ -10763,7 +10827,7 @@ function registerSocketHandlers(opts) {
           setTimeout(() => broadcastReportsList(), 150);
         if (userId) {
           clearAFKTimers(userId);
-          await leaveRoom(socket, userId);
+          await leaveRoom(socket, userId, { park: reason !== "server namespace disconnect" });
           state.devUsers.delete(userId);
           cancelLinkSweep(userId);
           if (state.typingTimeouts.has(userId)) {
@@ -10826,6 +10890,7 @@ function startCleanupIntervals() {
     } catch (e) {
       console.error("board claim sweep failed:", e);
     }
+    sweepParkedText();
   }, 30000);
 
   setInterval(() => {
