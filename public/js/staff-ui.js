@@ -226,10 +226,13 @@
   .tk-pop-pill.warn{background:rgba(255,180,84,.16);color:#ffb454;border:1px solid rgba(255,180,84,.45);}
   .tk-pop-pill.dim{background:rgba(255,255,255,.06);color:#cfcfcf;border:1px solid rgba(255,255,255,.14);
     font-weight:normal;}
-  .tk-pop-tenure{display:flex;flex-wrap:wrap;gap:4px 14px;margin:0 12px;padding:8px 0 0;font-size:12px;color:#d6d6d6;}
-  .tk-pop-tenure b{color:#fff;font-weight:bold;}
-  .tk-pop-tenure span{white-space:nowrap;}
-  .tk-pop-tenure i{color:#ff9800;margin-right:5px;font-size:11px;}
+  .tk-pop-tenure{margin:10px 12px 0;border:1px solid #333;border-radius:6px;background:#1b1b1b;font-size:12px;color:#d6d6d6;}
+  .tk-pop-trow{display:flex;gap:10px;padding:5px 10px;border-top:1px solid #2c2c2c;align-items:baseline;}
+  .tk-pop-trow:first-child{border-top:none;}
+  .tk-pop-tlabel{flex:0 0 96px;color:#9a9a9a;font-size:11px;letter-spacing:.2px;text-transform:uppercase;}
+  .tk-pop-tval{flex:1;min-width:0;line-height:1.4;}
+  .tk-pop-tval b{color:#fff;font-weight:bold;}
+  .tk-pop-tval em{font-style:normal;color:#8d8d8d;font-size:11px;}
   .tk-pop-tiles{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;padding:10px 12px 0;}
   .tk-pop-tile{background:#1b1b1b;border:1px solid #333;border-radius:6px;padding:7px 4px 6px;text-align:center;}
   .tk-pop-tile b{display:block;font-size:17px;line-height:1.1;color:#fff;}
@@ -1983,24 +1986,43 @@
 
     if (d.tenure && d.tenure.since) {
       const t = d.tenure;
-      const sinceDays = Math.floor((Date.now() - t.since) / 86400000);
-      const sinceTxt =
-        sinceDays < 1 ? "today" : sinceDays === 1 ? "yesterday" : sinceDays + " days ago";
-      const hrs = (h) => (h >= 10 ? Math.round(h) : h) + "h";
-      const ten = el("div", { class: "tk-pop-tenure" }, [
-        el("span", {
-          html: '<i class="fas fa-calendar-check"></i>First seen <b>' + escape(sinceTxt) + "</b>",
-          title: new Date(t.since).toLocaleString(),
-        }),
-        el("span", {
-          html: '<i class="fas fa-calendar-days"></i><b>' + t.days + "</b> " + (t.days === 1 ? "day" : "days") + " on the site",
-          title: "Distinct days with a visit, last 90 days",
-        }),
-        el("span", {
-          html: '<i class="fas fa-clock"></i><b>' + hrs(t.hours) + "</b> in rooms" + (t.activeHours ? " · " + hrs(t.activeHours) + " with the tab in front" : ""),
-          title: "Time spent in rooms, recorded by the server",
-        }),
+      const day = 86400000;
+      const fmtDate = (ts) => new Date(ts).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" });
+      const num = (n) => Math.round(n).toLocaleString();
+      const sinceDays = Math.floor((Date.now() - t.since) / day);
+      const atFloor = t.recordsSince && t.since - t.recordsSince < 3 * day;
+      const rows = [];
+      rows.push([
+        "Here since",
+        "<b>" + escape(fmtDate(t.since)) + "</b> · " + num(sinceDays) + " days" +
+          (atFloor ? " <em>at least: records only go back to " + escape(fmtDate(t.recordsSince)) + "</em>" : ""),
+        atFloor
+          ? "The site only started keeping records on " + fmtDate(t.recordsSince) + ". Anyone here before that shows this date."
+          : "First time any of their devices reached the site: " + new Date(t.since).toLocaleString(),
       ]);
+      rows.push([
+        "Days visited",
+        "<b>" + num(t.days) + "</b> of the last " + (t.dayWindow || 90),
+        "Number of separate days they showed up, over the last " + (t.dayWindow || 90) + " days",
+      ]);
+      rows.push([
+        "Time in rooms",
+        "<b>" + num(t.hours) + " h</b> <em>any tab, idle included</em>",
+        "Hours spent sitting in a room since " + fmtDate(t.recordsSince) + ", whether or not they were looking at it",
+      ]);
+      if (t.activeSince)
+        rows.push([
+          "Actually looking",
+          "<b>" + num(t.activeHours) + " h</b> <em>tab in front, counted since " + escape(fmtDate(t.activeSince)) + "</em>",
+          "Hours with the room tab in front of them. This only started being counted on " + fmtDate(t.activeSince) + ", so it is short for everyone.",
+        ]);
+      const ten = el("div", { class: "tk-pop-tenure" });
+      rows.forEach(([label, html, title]) => {
+        const row = el("div", { class: "tk-pop-trow", title });
+        row.appendChild(el("span", { class: "tk-pop-tlabel", text: label }));
+        row.appendChild(el("span", { class: "tk-pop-tval", html }));
+        ten.appendChild(row);
+      });
       wrap.appendChild(ten);
     }
 

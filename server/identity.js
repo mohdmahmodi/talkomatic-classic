@@ -142,6 +142,20 @@ function allRecords() {
   return store;
 }
 
+const ACTIVE_EPOCH = Date.UTC(2026, 8, 3);
+let epochCache = 0;
+
+function epoch() {
+  if (epochCache) return epochCache;
+  let min = 0;
+  for (const id of Object.keys(store)) {
+    const f = store[id] && store[id].first;
+    if (f && (!min || f < min)) min = f;
+  }
+  epochCache = min || Date.now();
+  return epochCache;
+}
+
 function touch(id, ip, name, loc) {
   if (!validId(id)) return;
   const r = rec(id);
@@ -166,6 +180,7 @@ function addActiveTime(id, ms) {
   if (!validId(id) || !(ms > 0)) return;
   const r = store[id];
   if (!r) return;
+  if (!r.activeFrom) r.activeFrom = Date.now();
   r.active = Math.min(
     TOTAL_SEC_CAP,
     (r.active || 0) + Math.min(ACTIVE_SEGMENT_CAP_SEC, ms / 1000),
@@ -362,6 +377,9 @@ function flushSync() {
 load();
 
 module.exports = {
+  epoch,
+  ACTIVE_EPOCH,
+  MAX_DAYS,
   validId,
   touch,
   addTime,

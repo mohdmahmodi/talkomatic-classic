@@ -1789,7 +1789,16 @@ function buildQuickFile(targetUserId, socket) {
   );
   shown.sort((x, y) => (y.at || 0) - (x.at || 0));
 
-  const tenure = { since: 0, last: 0, days: 0, hours: 0, activeHours: 0 };
+  const tenure = {
+    since: 0,
+    last: 0,
+    days: 0,
+    hours: 0,
+    activeHours: 0,
+    activeSince: 0,
+    recordsSince: identity.epoch(),
+    dayWindow: identity.MAX_DAYS || 90,
+  };
   {
     const dayset = new Set();
     let sec = 0;
@@ -1802,10 +1811,14 @@ function buildQuickFile(targetUserId, socket) {
       for (const d of r.days || []) dayset.add(d);
       sec += r.sec || 0;
       active += r.active || 0;
+      const af = r.activeFrom || (r.active ? identity.ACTIVE_EPOCH : 0);
+      if (af && (!tenure.activeSince || af < tenure.activeSince)) tenure.activeSince = af;
     }
     tenure.days = dayset.size;
     tenure.hours = Math.round((sec / 3600) * 10) / 10;
     tenure.activeHours = Math.round((active / 3600) * 10) / 10;
+    if (tenure.activeSince && tenure.activeSince < identity.ACTIVE_EPOCH)
+      tenure.activeSince = identity.ACTIVE_EPOCH;
   }
 
   const eff = personblocks.effective(who, keys);
