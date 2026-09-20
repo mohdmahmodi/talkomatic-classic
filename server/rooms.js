@@ -2432,6 +2432,109 @@ function broadcastBanHistory(also) {
   } catch (_) {}
 }
 
+const SIGNIN_FLOOD_WINDOW = 2 * 60 * 1000;
+const SIGNIN_FLOOD_IDS = 6;
+const SIGNIN_FLOOD_ANY_IDS = 12;
+const SIGNIN_FLOOD_BLOCK = "1h";
+const signinsByNet = new Map();
+
+function signinNetKey(ip) {
+  if (!ip) return null;
+  return String(ip).includes(":") ? ipban.computeRangeCidr(ip) || ip : ip;
+}
+
+function noteSigninFlood(socket, userId, username) {
+  const key = signinNetKey(socket.clientIp);
+  if (!key) return null;
+  const now = Date.now();
+  const name = String(username || "").trim().toLowerCase();
+  const list = (signinsByNet.get(key) || []).filter((e) => now - e.at < SIGNIN_FLOOD_WINDOW);
+  list.push({ at: now, userId, did: socket.deviceId || null, name });
+  signinsByNet.set(key, list);
+  const ids = new Set(list.map((e) => e.userId));
+  const sameName = new Set(list.filter((e) => e.name === name).map((e) => e.userId));
+  if (sameName.size < SIGNIN_FLOOD_IDS && ids.size < SIGNIN_FLOOD_ANY_IDS) return null;
+  signinsByNet.delete(key);
+  return { key, count: ids.size, seconds: Math.round((now - list[0].at) / 1000), entries: list };
+}
+
+function sweepSigninFlood() {
+  const now = Date.now();
+  for (const [key, list] of signinsByNet) {
+    const kept = list.filter((e) => now - e.at < SIGNIN_FLOOD_WINDOW);
+    if (kept.length) signinsByNet.set(key, kept);
+    else signinsByNet.delete(key);
+  }
+}
+
+async function floodGuardSigninFlood(socket, username, location, hit) {
+  const ip = socket.clientIp || null;
+  const did = socket.deviceId || null;
+  const expiry = durations.expiryFor(SIGNIN_FLOOD_BLOCK);
+  const reason =
+    "Flood guard: signed in " + hit.count + " times in " + hit.seconds +
+    " seconds with a new identity each time. Automatic 1 hour block.";
+  const entry = {
+    expiry,
+    label: username || null,
+    by: null,
+    byRole: null,
+    ts: Date.now(),
+    reason,
+    did,
+  };
+  placeBlock(hit.key, { ...entry });
+  const dids = new Set(hit.entries.map((e) => e.did).filter(Boolean));
+  if (did) dids.add(did);
+  for (const d of dids) placeBlock(ipban.idKey(d), { ...entry, did: d });
+  settlePersonBlocks({ deviceId: did, ip });
+  blocklist.saveSoon();
+  evasion.invalidate();
+  banhistory.record({
+    ip: hit.key,
+    name: username || null,
+    action: "ban",
+    reason,
+    duration: SIGNIN_FLOOD_BLOCK,
+  });
+  broadcastBlockList();
+  broadcastBanHistory();
+  audit.recordNotification({
+    kind: "floodguard",
+    minLevel: 1,
+    text:
+      (username ? "\"" + username + "\"" : "Somebody") +
+      " signed in " + hit.count + " times with a new id each time in " + hit.seconds +
+      " seconds" + (location ? " (location \"" + location + "\")" : "") +
+      ". Blocked for 1 hour by the flood guard.",
+    target: username || null,
+    targetUserId: socket.handshake?.session?.userId || null,
+    ip,
+    card: {
+      ids: [...dids],
+      target: username || "(no name)",
+      deviceId: did,
+      category: "sign-in flood, blocked automatically",
+      reason,
+    },
+  });
+  const affected = new Set();
+  for (const [, s] of io().sockets.sockets) {
+    if (s.isDev || s.isMod) continue;
+    if ((s.clientIp && ipban.matchesKey(s.clientIp, hit.key)) || (s.deviceId && dids.has(s.deviceId)))
+      affected.add(s);
+  }
+  affected.add(socket);
+  for (const s of affected) {
+    try {
+      const uid = s.handshake?.session?.userId;
+      s.emit("kicked", { message: "Your connection has been blocked by staff." });
+      if (s.roomId && uid) await leaveRoom(s, uid);
+      s.disconnect(true);
+    } catch (_) {}
+  }
+}
+
 function applyNamePolicy(socket, username) {
   if (!socket || socket.isDev || socket.isMod) return;
   if (!isListedName(username)) return;
@@ -4722,6 +4825,14 @@ function registerSocketHandlers(opts) {
           if (u && u.avatar !== avatar) {
             u.avatar = avatar;
             emitRoomSnapshot(room);
+          }
+        }
+
+        if (!socket.isDev && !socket.isMod && !socket.isBot) {
+          const flood = noteSigninFlood(socket, userId, username);
+          if (flood) {
+            await floodGuardSigninFlood(socket, username, location, flood);
+            return;
           }
         }
 
@@ -10891,6 +11002,7 @@ function startCleanupIntervals() {
       console.error("board claim sweep failed:", e);
     }
     sweepParkedText();
+    sweepSigninFlood();
   }, 30000);
 
   setInterval(() => {

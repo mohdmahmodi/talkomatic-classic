@@ -2117,6 +2117,8 @@
     suggestion: "fa-lightbulb",
     abuse: "fa-triangle-exclamation",
     key: "fa-key",
+    floodguard: "fa-shield-halved",
+    evasion: "fa-user-secret",
   };
   const QNAME = {
     report: "Report",
@@ -2125,6 +2127,8 @@
     suggestion: "Suggestion",
     abuse: "Worth a look",
     key: "Staff key",
+    floodguard: "Flood guard",
+    evasion: "Ban evasion",
   };
 
   const isDev = () => !!me && me.role === "dev";
@@ -2162,6 +2166,8 @@
       return (c.target || "A moderator") + " is worth a look";
     if (kind === "key")
       return (c.target || "A moderator") + " asked for a new staff key";
+    if (kind === "floodguard") return (c.target || "Somebody") + " was blocked for a sign-in flood";
+    if (kind === "evasion") return (c.target || "Somebody") + " may be getting around a block";
     return c.by || "";
   }
 
@@ -5918,6 +5924,8 @@
 .dk-q.q-application{border-left-color: #c08bff;}
 .dk-q.q-suggestion{border-left-color: #57d9a3;}
 .dk-q.q-abuse{border-left-color: #ff5468;}
+.dk-q.q-floodguard{border-left-color: #ffb454;}
+.q-floodguard .dk-q-ico{color: #ffb454;background:rgba(255,180,84,.12);}
 .dk-q.is-done{opacity:.62;}
 .dk-q-h{display:flex;align-items:flex-start;gap:9px;min-width:0;}
 .dk-q-ico{flex:none;width:24px;height:24px;border-radius:5px;background: #252525;display:flex;
