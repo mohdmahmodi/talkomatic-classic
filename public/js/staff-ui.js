@@ -194,6 +194,76 @@
   .tk-presize{position:absolute;left:0;top:0;bottom:0;width:9px;margin-left:-5px;cursor:ew-resize;z-index:2;
     transition:background .12s;}
   .tk-presize:hover{background:linear-gradient(90deg,rgba(255,152,0,.3),transparent);}
+  .tk-pop{position:fixed;z-index:99990;width:390px;max-width:calc(100vw - 20px);background:#202020;
+    border:1px solid #616161;border-radius:8px;box-shadow:0 18px 55px rgba(0,0,0,.65);color:#fff;
+    font-family:inherit;font-size:13px;line-height:1.45;display:flex;flex-direction:column;
+    max-height:min(72vh,620px);animation:tkRise .16s ease-out;box-sizing:border-box;}
+  .tk-pop *{box-sizing:border-box;}
+  .tk-pop-arrow{position:absolute;width:12px;height:12px;background:#202020;border:1px solid #616161;
+    transform:rotate(45deg);left:26px;z-index:2;}
+  .tk-pop.tk-pop-above .tk-pop-arrow{bottom:-7px;border-top:none;border-left:none;}
+  .tk-pop.tk-pop-below .tk-pop-arrow{top:-7px;border-bottom:none;border-right:none;
+    background:linear-gradient(135deg,#616161,#4a4a4a);}
+  .tk-pop-head{display:flex;align-items:flex-start;gap:10px;padding:12px 12px 10px 14px;
+    border-bottom:1px solid #616161;background:linear-gradient(to bottom,#616161,#303030);
+    border-radius:8px 8px 0 0;}
+  .tk-pop-who{flex:1;min-width:0;}
+  .tk-pop-name{font-size:15px;font-weight:bold;color:#ff9800;word-break:break-word;line-height:1.25;}
+  .tk-pop-name .tk-pop-off{font-size:11px;font-weight:normal;color:#cfcfcf;margin-left:6px;}
+  .tk-pop-aka{margin-top:3px;display:flex;flex-wrap:wrap;gap:4px;align-items:center;}
+  .tk-pop-aka .tk-pop-akal{font-size:11px;color:#cfcfcf;margin-right:2px;}
+  .tk-pop-aka span.tk-pop-chip{font-size:11px;padding:1px 7px;border-radius:10px;background:rgba(0,0,0,.35);
+    border:1px solid rgba(255,255,255,.14);color:#ededed;max-width:150px;overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap;}
+  .tk-pop-x{background:rgba(0,0,0,.25);border:none;color:#fff;font-size:19px;line-height:1;width:28px;height:28px;
+    border-radius:4px;cursor:pointer;flex:none;display:flex;align-items:center;justify-content:center;}
+  .tk-pop-x:hover{background:#ff9800;color:#000;}
+  .tk-pop-status{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:7px;}
+  .tk-pop-pill{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:bold;
+    padding:3px 9px;border-radius:12px;letter-spacing:.2px;}
+  .tk-pop-pill.ok{background:rgba(87,217,163,.16);color:#57d9a3;border:1px solid rgba(87,217,163,.4);}
+  .tk-pop-pill.bad{background:rgba(255,84,104,.16);color:#ff8a8e;border:1px solid rgba(255,84,104,.45);}
+  .tk-pop-pill.warn{background:rgba(255,180,84,.16);color:#ffb454;border:1px solid rgba(255,180,84,.45);}
+  .tk-pop-pill.dim{background:rgba(255,255,255,.06);color:#cfcfcf;border:1px solid rgba(255,255,255,.14);
+    font-weight:normal;}
+  .tk-pop-tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:10px 12px 0;}
+  .tk-pop-tile{background:#1b1b1b;border:1px solid #333;border-radius:6px;padding:7px 4px 6px;text-align:center;}
+  .tk-pop-tile b{display:block;font-size:17px;line-height:1.1;color:#fff;}
+  .tk-pop-tile span{display:block;font-size:10.5px;color:#9a9a9a;margin-top:2px;letter-spacing:.2px;}
+  .tk-pop-tile.hot b{color:#ff8a8e;}
+  .tk-pop-now{margin:10px 12px 0;padding:9px 11px;border-radius:6px;background:rgba(255,84,104,.09);
+    border:1px solid rgba(255,84,104,.35);font-size:12.5px;}
+  .tk-pop-now b{color:#ff8a8e;}
+  .tk-pop-now .tk-pop-nowsub{color:#d6d6d6;margin-top:2px;font-size:12px;}
+  .tk-pop-list{flex:1;overflow-y:auto;overflow-x:hidden;padding:10px 12px 8px;}
+  .tk-pop-empty{color:#9a9a9a;font-size:12.5px;text-align:center;padding:16px 8px 12px;}
+  .tk-pop-row{display:flex;gap:10px;padding:7px 0;border-top:1px solid #2c2c2c;align-items:flex-start;}
+  .tk-pop-row:first-child{border-top:none;padding-top:2px;}
+  .tk-pop-dot{flex:none;width:26px;height:26px;border-radius:6px;display:flex;align-items:center;
+    justify-content:center;font-size:11.5px;margin-top:1px;background:rgba(255,152,0,.12);color:#ff9800;}
+  .tk-pop-row.k-block .tk-pop-dot{background:rgba(255,84,104,.14);color:#ff5468;}
+  .tk-pop-row.k-warn .tk-pop-dot{background:rgba(255,180,84,.15);color:#ffb454;}
+  .tk-pop-row.k-unblock .tk-pop-dot{background:rgba(87,217,163,.14);color:#57d9a3;}
+  .tk-pop-row.k-appeal .tk-pop-dot{background:rgba(90,169,255,.15);color:#5aa9ff;}
+  .tk-pop-row.k-report .tk-pop-dot{background:rgba(192,139,255,.16);color:#c08bff;}
+  .tk-pop-main{flex:1;min-width:0;}
+  .tk-pop-what{font-weight:bold;color:#fff;font-size:13px;word-break:break-word;}
+  .tk-pop-what .tk-pop-by{font-weight:normal;color:#9a9a9a;}
+  .tk-pop-row.k-block .tk-pop-what{color:#ff8a8e;}
+  .tk-pop-row.k-unblock .tk-pop-what{color:#57d9a3;}
+  .tk-pop-why{color:#c9c9c9;font-size:12px;margin-top:1px;word-break:break-word;}
+  .tk-pop-quote{margin-top:3px;padding:3px 8px;border-left:2px solid #444;color:#a9a9a9;font-size:11.5px;
+    font-style:italic;white-space:pre-wrap;word-break:break-word;max-height:54px;overflow:hidden;}
+  .tk-pop-when{flex:none;color:#8d8d8d;font-size:11px;margin-top:2px;white-space:nowrap;}
+  .tk-pop-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 12px 9px;
+    border-top:1px solid #616161;font-size:11px;color:#8d8d8d;}
+  .tk-pop-foot .tk-btn{padding:6px 11px;font-size:12px;}
+  .tk-pop-loading{padding:26px 12px;text-align:center;color:#9a9a9a;font-size:12.5px;}
+  @media (max-width:576px){
+    .tk-pop{left:6px !important;right:6px !important;top:auto !important;bottom:6px !important;
+      width:auto;max-width:none;max-height:76vh;border-radius:8px;}
+    .tk-pop-arrow{display:none;}
+  }
   @media (max-width:640px){
     .tk-presize{display:none;}
   }
@@ -1069,6 +1139,11 @@
       title: "Per-user actions (tap a user's row in a room)",
       items: [
         [
+          "History (tap the name)",
+          "jr",
+          "The block they are serving, then everything staff have done to them in order: blocks, warnings, kicks, appeals and reports, across every name and device they have used. Look here before you act.",
+        ],
+        [
           "Wipe typed text",
           "jr",
           "Clears what the user has typed from everyone's screen. The fastest way to pull a slur off the page.",
@@ -1106,7 +1181,7 @@
         [
           "IP block",
           "mod",
-          "Blocks the user's address and disconnects them. 1h / 24h / 7d or permanent; only an admin can lift a permanent block.",
+          "Blocks the user's device and network and disconnects them. 1 hour to 1 month, or permanent; only an admin can lift a permanent block. A person serves one block: a second block on any of their devices or addresses stretches every block they have to the longest one, never two clocks, and one appeal covers the lot.",
         ],
         [
           "Freeze / unfreeze",
@@ -1653,11 +1728,310 @@
     });
   }
 
+  let activePop = null;
+
+  function popover(opts) {
+    const o = opts || {};
+    if (activePop) {
+      const same = activePop.key && activePop.key === o.key;
+      activePop.close();
+      if (same) return null;
+    }
+    const pop = el("div", { class: "tk-pop", role: "dialog" });
+    const arrow = el("div", { class: "tk-pop-arrow" });
+    pop.appendChild(arrow);
+    const slot = el("div", {
+      class: "tk-pop-slot",
+      style: "display:flex;flex-direction:column;min-height:0;flex:1;",
+    });
+    pop.appendChild(slot);
+    if (o.body) slot.appendChild(o.body);
+
+    function place() {
+      const a = o.anchor && o.anchor.getBoundingClientRect
+        ? o.anchor.getBoundingClientRect()
+        : null;
+      if (!a || window.matchMedia("(max-width:576px)").matches) {
+        pop.style.left = pop.style.top = pop.style.width = "";
+        return;
+      }
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const w = Math.min(390, vw - 20);
+      const h = pop.offsetHeight || 300;
+      let left = Math.round(a.left - 22);
+      left = Math.max(10, Math.min(left, vw - w - 10));
+      const above = a.top - 10 >= h || a.top > vh - a.bottom;
+      pop.classList.toggle("tk-pop-above", above);
+      pop.classList.toggle("tk-pop-below", !above);
+      pop.style.left = left + "px";
+      pop.style.width = w + "px";
+      if (above) {
+        pop.style.top = Math.max(8, a.top - 10 - h) + "px";
+      } else {
+        pop.style.top = Math.min(vh - h - 8, a.bottom + 10) + "px";
+      }
+      const ax = Math.max(14, Math.min(w - 26, a.left + Math.min(a.width / 2, 40) - left - 6));
+      arrow.style.left = ax + "px";
+    }
+
+    function close() {
+      if (activePop !== ctrl) return;
+      activePop = null;
+      pop.remove();
+      document.removeEventListener("keydown", onKey, true);
+      document.removeEventListener("mousedown", onDown, true);
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+      if (o.onClose) o.onClose();
+    }
+    function onKey(e) {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        close();
+      }
+    }
+    function onDown(e) {
+      if (pop.contains(e.target)) return;
+      if (o.anchor && o.anchor.contains && o.anchor.contains(e.target)) return;
+      if (e.target.closest && e.target.closest(".tk-backdrop,.tk-pl-back,.tk-panel")) return;
+      close();
+    }
+    const ctrl = {
+      key: o.key || null,
+      close,
+      place,
+      setBody(node) {
+        slot.innerHTML = "";
+        if (node) slot.appendChild(node);
+        place();
+      },
+    };
+    activePop = ctrl;
+    document.body.appendChild(pop);
+    place();
+    requestAnimationFrame(place);
+    document.addEventListener("keydown", onKey, true);
+    document.addEventListener("mousedown", onDown, true);
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return ctrl;
+  }
+
+  const DUR_RE = /\b(1h|6h|24h|3d|7d|30d|permanent)\b/;
+  const FILE_ICON = {
+    block: "fa-ban",
+    unblock: "fa-lock-open",
+    warn: "fa-bullhorn",
+    appeal: "fa-scale-balanced",
+    report: "fa-flag",
+    kick: "fa-user-slash",
+    "kick+ban": "fa-user-slash",
+    "wipe buffer": "fa-broom",
+    rename: "fa-user-secret",
+    "reset location": "fa-location-dot",
+    "turn pfp off": "fa-image-portrait",
+    "allow pfp": "fa-rotate-left",
+    freeze: "fa-snowflake",
+    unfreeze: "fa-snowflake",
+    silence: "fa-volume-xmark",
+    unsilence: "fa-volume-high",
+    "show rules": "fa-book",
+    "kill bot": "fa-robot",
+    "auto block": "fa-robot",
+  };
+  const FILE_LABEL = {
+    kick: "Kicked from a room",
+    "kick+ban": "Kicked and room-banned",
+    warn: "Warned",
+    "wipe buffer": "Typed text wiped",
+    rename: "Name reset",
+    "reset location": "Location reset",
+    "turn pfp off": "Picture turned off",
+    "allow pfp": "Picture allowed again",
+    freeze: "Typing frozen",
+    unfreeze: "Typing unfrozen",
+    silence: "Stopped from being read",
+    unsilence: "Can be read again",
+    "show rules": "Shown the rules",
+    "kill bot": "Bot stopped",
+    unblock: "Block lifted",
+    "unblock ip": "Block lifted",
+    "appeal filed": "Appealed the block",
+    "appeal lifted": "Appeal accepted, block lifted",
+    "appeal dismissed": "Appeal declined",
+    "appeal ended": "Appeal closed, block ended",
+    report: "Reported",
+  };
+
+  function fileWhat(ev) {
+    const base = ev.base || "";
+    const dur = DUR_RE.exec(ev.action || "");
+    const len = dur ? durationLabel(dur[1]) : ev.duration ? durationLabel(ev.duration) : "";
+    if (base === "auto block")
+      return "Blocked automatically" + (len ? " · " + len : "");
+    if (["ip block", "id block", "ban ip", "ban"].includes(base))
+      return "Blocked" + (len ? " · " + len : "") + (/\(range\)/.test(ev.action || "") ? " · network" : "");
+    if (base === "report")
+      return "Reported" + (/ for (.+)$/.test(ev.action || "") ? " for " + /for (.+)$/.exec(ev.action)[1] : "");
+    return FILE_LABEL[base] || (ev.action || base).replace(/^\w/, (c) => c.toUpperCase());
+  }
+
+  function ago(ts) {
+    const d = Math.max(0, Date.now() - ts);
+    const m = Math.floor(d / 60000);
+    if (m < 1) return "now";
+    if (m < 60) return m + "m ago";
+    const h = Math.floor(m / 60);
+    if (h < 48) return h + "h ago";
+    const days = Math.floor(h / 24);
+    if (days < 60) return days + "d ago";
+    return Math.floor(days / 30) + "mo ago";
+  }
+
+  function left(ms) {
+    if (ms <= 0) return "ending";
+    const m = Math.ceil(ms / 60000);
+    if (m < 60) return m + " min left";
+    const h = Math.floor(m / 60);
+    if (h < 48) return h + "h " + (m % 60) + "m left";
+    const d = Math.floor(h / 24);
+    return d + "d " + (h % 24) + "h left";
+  }
+
+  function fileCard(data, opts) {
+    const o = opts || {};
+    const d = data || {};
+    const wrap = el("div", { style: "display:flex;flex-direction:column;min-height:0;flex:1;" });
+
+    const head = el("div", { class: "tk-pop-head" });
+    const who = el("div", { class: "tk-pop-who" });
+    const nm = el("div", { class: "tk-pop-name", text: d.name || "Anonymous" });
+    if (d.online === false) nm.appendChild(el("span", { class: "tk-pop-off", text: "offline" }));
+    who.appendChild(nm);
+    if (d.names && d.names.length) {
+      const aka = el("div", { class: "tk-pop-aka" }, [
+        el("span", { class: "tk-pop-akal", text: "also" }),
+      ]);
+      d.names.slice(0, 4).forEach((n) =>
+        aka.appendChild(el("span", { class: "tk-pop-chip", text: n, title: n })),
+      );
+      if (d.names.length > 4)
+        aka.appendChild(el("span", { class: "tk-pop-chip", text: "+" + (d.names.length - 4) }));
+      who.appendChild(aka);
+    }
+    const status = el("div", { class: "tk-pop-status" });
+    if (d.block) {
+      const b = d.block;
+      status.appendChild(
+        el("span", {
+          class: "tk-pop-pill bad",
+          html:
+            '<i class="fas fa-ban"></i>' +
+            (b.permanent ? "Blocked · permanent" : "Blocked · " + escape(left(b.expiry - Date.now()))),
+        }),
+      );
+      if (b.covered === false)
+        status.appendChild(el("span", { class: "tk-pop-pill dim", text: "on another device" }));
+    } else {
+      status.appendChild(
+        el("span", { class: "tk-pop-pill ok", html: '<i class="fas fa-circle-check"></i>Not blocked' }),
+      );
+    }
+    if (d.evader)
+      status.appendChild(
+        el("span", { class: "tk-pop-pill warn", html: '<i class="fas fa-triangle-exclamation"></i>Evasion flag' }),
+      );
+    if (d.devices > 1)
+      status.appendChild(el("span", { class: "tk-pop-pill dim", text: d.devices + " devices" }));
+    who.appendChild(status);
+    head.appendChild(who);
+    const x = el("button", { class: "tk-pop-x", text: "×", title: "Close", "aria-label": "Close" });
+    x.addEventListener("click", () => o.onClose && o.onClose());
+    head.appendChild(x);
+    wrap.appendChild(head);
+
+    const c = d.counts || {};
+    const tiles = el("div", { class: "tk-pop-tiles" });
+    [
+      ["Actions", c.actions || 0, false],
+      ["Blocks", c.blocks || 0, (c.blocks || 0) > 0],
+      ["Appeals", c.appeals || 0, false],
+      ["Reports", c.reports || 0, (c.reports || 0) >= 3],
+    ].forEach(([label, n, hot]) =>
+      tiles.appendChild(
+        el("div", { class: "tk-pop-tile" + (hot ? " hot" : "") }, [
+          el("b", { text: String(n) }),
+          el("span", { text: label }),
+        ]),
+      ),
+    );
+    wrap.appendChild(tiles);
+
+    if (d.block) {
+      const b = d.block;
+      const until = b.permanent
+        ? "Does not end on its own."
+        : "Ends " + new Date(b.expiry).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) + ".";
+      const byLine = b.auto ? "Placed automatically" : b.by ? "By " + b.by : "";
+      const sinceLine = b.since
+        ? "Since " + new Date(b.since).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })
+        : "";
+      const now = el("div", { class: "tk-pop-now" }, [
+        el("div", { html: "<b>Current block.</b> " + escape(b.reason || "No reason written down.") }),
+        el("div", {
+          class: "tk-pop-nowsub",
+          text: [byLine, sinceLine, until].filter(Boolean).join(" · "),
+        }),
+      ]);
+      wrap.appendChild(now);
+    }
+
+    const list = el("div", { class: "tk-pop-list" });
+    const events = Array.isArray(d.events) ? d.events : [];
+    if (!events.length)
+      list.appendChild(el("div", { class: "tk-pop-empty", text: "Nothing on file. Nobody has had to act on this person." }));
+    events.forEach((ev) => {
+      const kind = ev.kind || "action";
+      const icon = FILE_ICON[ev.base] || FILE_ICON[kind] || "fa-circle";
+      const row = el("div", { class: "tk-pop-row k-" + kind });
+      row.appendChild(el("div", { class: "tk-pop-dot", html: '<i class="fas ' + icon + '"></i>' }));
+      const main = el("div", { class: "tk-pop-main" });
+      const what = el("div", { class: "tk-pop-what", text: fileWhat(ev) });
+      if (ev.by) what.appendChild(el("span", { class: "tk-pop-by", text: " · " + ev.by }));
+      main.appendChild(what);
+      if (ev.reason) main.appendChild(el("div", { class: "tk-pop-why", text: ev.reason }));
+      if (ev.quote) main.appendChild(el("div", { class: "tk-pop-quote", text: ev.quote }));
+      row.appendChild(main);
+      row.appendChild(
+        el("div", {
+          class: "tk-pop-when",
+          text: ago(ev.at || 0),
+          title: ev.at ? new Date(ev.at).toLocaleString() : "",
+        }),
+      );
+      list.appendChild(row);
+    });
+    wrap.appendChild(list);
+
+    const foot = el("div", { class: "tk-pop-foot" });
+    const months = Math.round((d.window || 0) / (30 * 24 * 3600 * 1000));
+    foot.appendChild(el("span", { text: months ? "Last " + months + " months, newest first" : "Newest first" }));
+    if (o.onActions)
+      foot.appendChild(
+        el("button", { class: "tk-btn", text: "Actions", onclick: () => o.onActions() }),
+      );
+    wrap.appendChild(foot);
+    return wrap;
+  }
+
   window.StaffUI = {
     rank,
     escape,
     el,
     modal,
+    popover,
+    fileCard,
     alert,
     confirm,
     prompt,

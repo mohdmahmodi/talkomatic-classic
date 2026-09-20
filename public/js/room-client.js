@@ -2660,6 +2660,23 @@ function createUserRow(user, container) {
       staffBtn.title = "Staff actions";
       staffBtn.addEventListener("click", () => openUserStaffMenu(user));
       tools.appendChild(staffBtn);
+
+      if (!leaderCanManage) {
+        nameEl.classList.add("ui-name-file");
+        nameEl.title = "History: blocks, warnings, appeals, reports";
+        nameEl.setAttribute("role", "button");
+        nameEl.tabIndex = 0;
+        nameEl.addEventListener("click", (e) => {
+          e.stopPropagation();
+          openQuickFile(user, nameEl);
+        });
+        nameEl.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            openQuickFile(user, nameEl);
+          }
+        });
+      }
     }
   }
   if (user.id !== currentUserId) {
@@ -4037,6 +4054,24 @@ async function openUserNoteDialog(user, { viewOnly = true } = {}) {
   if (r != null) socket.emit("staff note", { targetUserId: user.id, message: r });
 }
 
+let quickFile = null;
+
+function openQuickFile(user, anchor) {
+  if (!window.StaffUI || !StaffUI.popover) return;
+  const key = "file:" + user.id;
+  const ctrl = StaffUI.popover({
+    key,
+    anchor,
+    body: StaffUI.el("div", { class: "tk-pop-loading", text: "Reading the file..." }),
+    onClose: () => {
+      if (quickFile && quickFile.id === user.id) quickFile = null;
+    },
+  });
+  if (!ctrl) return;
+  quickFile = { id: user.id, ctrl, user };
+  socket.emit("staff get file", { targetUserId: user.id });
+}
+
 // ── Per-user staff menu ──────────────────────────────────────────────────────
 function openUserStaffMenu(user) {
   if (!window.StaffUI) return;
@@ -4053,6 +4088,20 @@ function openUserStaffMenu(user) {
     (user.modLevel || 1) < 3;
   const cleanup = [];
   const items = [];
+  const look = [];
+
+  if (!leaderManagingMod)
+    look.push({
+      icon: '<i class="fas fa-clock-rotate-left"></i>',
+      label: "History",
+      desc: "Blocks, warnings, appeals and reports on this person, in order",
+      onClick: () => {
+        const row = document.querySelector(
+          `.chat-row[data-user-id="${user.id}"] .ui-name`,
+        );
+        openQuickFile(user, row || document.body);
+      },
+    });
 
   cleanup.push({
     icon: '<i class="fas fa-broom"></i>',
@@ -4356,6 +4405,7 @@ function openUserStaffMenu(user) {
   const groups = leaderManagingMod
     ? [{ title: "Mod team", items: roles }]
     : [
+        { title: "Look first", items: look },
         { title: "Clean up what they show", items: cleanup },
         { title: "Warn and remove", items },
       ];
@@ -5138,6 +5188,19 @@ socket.on("staff action result", (data) => {
   if (data.action === "room size" && data.size) currentRoomMaxSize = data.size;
   if (window.StaffUI) StaffUI.actionToast(data);
   else notify((data.ok ? "Done: " : "Failed: ") + data.action, data.ok ? "success" : "error");
+});
+socket.on("staff file", (data) => {
+  if (!quickFile || !data || data.targetUserId !== quickFile.id) return;
+  const { ctrl, user } = quickFile;
+  ctrl.setBody(
+    StaffUI.fileCard(data, {
+      onClose: ctrl.close,
+      onActions: () => {
+        ctrl.close();
+        openUserStaffMenu(user);
+      },
+    }),
+  );
 });
 socket.on("staff revoked", () => {
   currentUserIsMod = false;

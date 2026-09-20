@@ -335,6 +335,25 @@ button,
   display: none; /* Initially hidden */
 }
 
+.ui-name.ui-name-file {
+  flex: 0 1 auto;
+  cursor: pointer;
+  border-radius: 3px;
+  padding: 0 3px;
+  margin: 0 -3px;
+  text-decoration: underline dotted transparent;
+  text-underline-offset: 3px;
+  transition:
+    background 0.12s,
+    text-decoration-color 0.12s;
+}
+.ui-name-file:hover,
+.ui-name-file:focus-visible {
+  background: rgba(255, 152, 0, 0.14);
+  text-decoration-color: currentColor;
+  outline: none;
+}
+
 .mute-button {
   margin-left: 8px;
   margin-right: 4px;

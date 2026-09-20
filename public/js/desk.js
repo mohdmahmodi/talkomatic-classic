@@ -4573,6 +4573,23 @@
       rows.push(el("div", "dk-ap-file-n", "Also known as " + f.names.slice(1).join(", ")));
     if (f.evader)
       rows.push(el("div", "dk-ap-file-n", "Flagged for getting around a block before."));
+    (a.earlier || []).forEach((e) => {
+      const what =
+        e.status === "open"
+          ? "another appeal still open"
+          : e.resolution === "lifted"
+            ? "an earlier appeal was accepted"
+            : e.resolution === "ended"
+              ? "an earlier appeal closed when that block ended"
+              : "an earlier appeal was declined";
+      rows.push(
+        el(
+          "div",
+          "dk-ap-file-n",
+          "Appeal #" + e.id + (e.sameBlock ? " about this same block: " : ": ") + what + ".",
+        ),
+      );
+    });
     if (f.reports)
       rows.push(
         el(

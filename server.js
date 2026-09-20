@@ -48,6 +48,7 @@ const diag = require("./server/diag");
 const roles = require("./server/roles");
 const appeals = require("./server/appeals");
 const ipban = require("./server/ipban");
+const personblocks = require("./server/personblocks");
 const devicetoken = require("./server/devicetoken");
 const ipredact = require("./server/ipredact");
 const identity = require("./server/identity");
@@ -458,8 +459,20 @@ io.use((socket, next) => {
       legacyId: socket.legacyDeviceId || null,
     });
     if (activeBlock) {
-      const block = activeBlock.block;
-      const expiry = block && typeof block === "object" ? block.expiry : block;
+      let eff = null;
+      try {
+        eff = personblocks.effective({
+          ip: clientIp,
+          deviceId,
+          legacyId: socket.legacyDeviceId || null,
+        });
+      } catch (_) {}
+      const block = eff && eff.block ? eff.block : activeBlock.block;
+      const expiry = eff
+        ? eff.expiry
+        : block && typeof block === "object"
+          ? block.expiry
+          : block;
       const err = new Error("IP blocked");
       // Surfaced to the client's connect_error handler so the lobby can show
       // a clear ban screen with a live countdown (or "permanent").
@@ -1139,6 +1152,14 @@ app.get(`${API}/me`, (req, res) => {
   else res.json({ isSignedIn: false, isBot: !!req.isBot });
 });
 
+function personBlockFor(req) {
+  const who = requester(req);
+  who.userId = req.session?.userId || null;
+  const keys = personblocks.keysFor(who);
+  const eff = personblocks.effective(who, keys);
+  return { who, keys, eff: eff && eff.covered ? eff : null };
+}
+
 // Ban appeal, submitted straight from the ban screen. The IP block only rejects
 // socket connections, so a banned user can still reach this HTTP route. We only
 // accept an appeal from an IP that is actually blocked, capture a snapshot of
@@ -1146,14 +1167,13 @@ app.get(`${API}/me`, (req, res) => {
 // appeal per IP, so the inbox cannot be flooded.
 app.post(`${API}/appeal`, (req, res) => {
   try {
-    const who = requester(req);
+    const { who, keys, eff } = personBlockFor(req);
     const { ip } = who;
+    if (!eff) return res.json({ ok: false, code: "not_banned" });
     const active = ipban.findActiveBlockFor(who);
-    if (!active) return res.json({ ok: false, code: "not_banned" });
-    const block = active.block;
     // Filed under the id the block matched, so the history behind that block
     // is the history staff see beside the appeal.
-    const appealDeviceId = active.deviceId;
+    const appealDeviceId = (active && active.deviceId) || who.deviceId || null;
 
     const message = sanitizeMessage(
       typeof req.body?.message === "string" ? req.body.message : "",
@@ -1169,7 +1189,7 @@ app.post(`${API}/appeal`, (req, res) => {
     const name =
       req.session?.username ||
       rooms.knownName({ deviceId: appealDeviceId, userId, ip });
-    const b = block && typeof block === "object" ? block : {};
+    const b = eff.block || {};
 
     const result = appeals.submit({
       ip,
@@ -1177,13 +1197,15 @@ app.post(`${API}/appeal`, (req, res) => {
       userId,
       name,
       message,
+      keys,
+      spell: eff.since || null,
       ban: {
         by: b.by || null,
         byRole: b.byRole || null,
         label: b.label || null,
         reason: b.reason || null,
-        expiry: b.expiry || 0,
-        permanent: (b.expiry || 0) >= Number.MAX_SAFE_INTEGER,
+        expiry: eff.expiry || 0,
+        permanent: !!eff.permanent,
         ts: b.ts || null,
         auditId: b.auditId || null,
       },
@@ -1206,33 +1228,30 @@ app.post(`${API}/appeal`, (req, res) => {
 // socket to push to it. Never exposes anything about the moderator beyond the
 // label they already sign their messages with.
 function appealForBrowser(req) {
-  const who = requester(req);
+  const { who, keys, eff } = personBlockFor(req);
   const { ip, deviceId } = who;
-  // Which ban they are serving right now. The appeal shown is the one about
-  // THIS ban: an old one from a ban they already served is history and must
-  // not stand in the way of appealing the ban they are actually under.
-  const active = ipban.findActiveBlockFor(who);
-  const b = active && typeof active.block === "object" ? active.block : null;
-  const banKey = active
+  const b = eff ? eff.block : null;
+  const banKey = eff
     ? appeals.banKeyOf({
         ts: b ? b.ts : null,
-        expiry: b ? b.expiry : active.block,
+        expiry: eff.expiry,
         reason: b ? b.reason : null,
       })
     : null;
   return {
     ip,
     deviceId,
-    banned: !!active,
+    banned: !!eff,
     banKey,
     // Staff can end this for good on a decline. Read here so the ban screen
     // says so up front instead of after they have written it all out.
-    barred: appeals.isBarred({
-      ip,
-      deviceId,
-      userId: req.session?.userId || null,
-    }),
-    appeal: appeals.forUser(ip, deviceId, banKey),
+    barred:
+      appeals.isBarred({
+        ip,
+        deviceId,
+        userId: req.session?.userId || null,
+      }) || [...keys.deviceIds].some((id) => appeals.isBarred({ deviceId: id })),
+    appeal: appeals.forPerson(keys, eff ? eff.since : null, banKey),
   };
 }
 
@@ -1343,8 +1362,12 @@ app.post(`${API}/appeal/message`, (req, res) => {
 // them.
 const OWN_FILE_MS = 90 * 24 * 60 * 60 * 1000;
 
-function ownFile(req, deviceId) {
-  const who = { userId: req.session?.userId || null, deviceId };
+function ownFile(req, deviceId, legacyId) {
+  const who = {
+    userId: req.session?.userId || null,
+    deviceId,
+    deviceIds: legacyId ? [legacyId] : [],
+  };
   return audit.actionsOn(who, Date.now() - OWN_FILE_MS, 10).map((p) => ({
     action: p.action,
     by: roles.publicStaffName(p.by, p.role),
@@ -1356,24 +1379,22 @@ function ownFile(req, deviceId) {
 }
 
 app.get(`${API}/ban-status`, (req, res) => {
-  const who = requester(req);
-  const { deviceId } = who;
-  const active = ipban.findActiveBlockFor(who);
-  const block = active ? active.block : null;
-  const b = block && typeof block === "object" ? block : null;
-  const expiry = b ? b.expiry : block;
-  const banned = !!active;
+  const { who, eff } = personBlockFor(req);
+  const { deviceId, legacyId } = who;
+  const banned = !!eff;
+  const b = eff ? eff.block : null;
   const reason = b ? ipredact.redact(b.reason || null) : null;
   const rule = /^Rule (\d+)\b/.exec(reason || "");
   res.json({
     banned,
-    permanent: banned && expiry >= Number.MAX_SAFE_INTEGER,
-    expiry: banned ? expiry : 0,
+    permanent: banned && !!eff.permanent,
+    expiry: banned ? eff.expiry : 0,
     reason,
     rule: rule ? Number(rule[1]) : null,
     by: banned ? roles.publicStaffName(b && b.by, b && b.byRole) : null,
     bannedAt: (b && b.ts) || null,
-    file: deviceId ? ownFile(req, deviceId) : [],
+    since: banned ? eff.since || null : null,
+    file: deviceId ? ownFile(req, deviceId, legacyId) : [],
     ackRequired: !banned && !!deviceId && identity.ackDue(deviceId),
   });
 });
@@ -1382,11 +1403,12 @@ app.get(`${API}/ban-status`, (req, res) => {
 // gate checks and leaves a line in the log beside the block.
 app.post(`${API}/ban-acknowledge`, (req, res) => {
   const who = requester(req);
-  const { ip, deviceId } = who;
+  const { ip, deviceId, legacyId } = who;
   if (!deviceId) return res.json({ ok: false, code: "no_device" });
   if (ipban.findActiveBlockFor(who))
     return res.json({ ok: false, code: "still_blocked" });
   identity.setAckDue(deviceId, false);
+  if (legacyId) identity.setAckDue(legacyId, false);
   audit.recordRulesAccepted({
     userId: req.session?.userId || null,
     deviceId,

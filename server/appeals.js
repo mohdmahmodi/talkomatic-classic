@@ -181,18 +181,81 @@ function openForIp(ip, banKey) {
   );
 }
 
-function submit({ ip, deviceId, userId, name, message, ban }) {
+function matches(a, keys) {
+  if (!keys) return false;
+  const ip = keys.ip || (keys.ips && keys.ips.size === 1 ? [...keys.ips][0] : null);
+  return (
+    (a.ip && ip && a.ip === ip) ||
+    (a.deviceId && keys.deviceIds && keys.deviceIds.has(a.deviceId)) ||
+    (a.userId && keys.userIds && keys.userIds.has(a.userId))
+  );
+}
+
+function sameSpell(a, spell, banKey) {
+  if (a.spell && spell) return a.spell === spell;
+  return !!banKey && (a.banKey || banKeyOf(a.ban)) === banKey;
+}
+
+function openForKeys(keys) {
+  return appeals.find((a) => a.status === "open" && matches(a, keys)) || null;
+}
+
+function forPerson(keys, spell, banKey) {
+  const mine = appeals.filter((a) => matches(a, keys));
+  if (!mine.length) return null;
+  const open = mine.filter((a) => a.status === "open").sort((x, y) => y.at - x.at);
+  if (open.length) return open[0];
+  return (
+    mine
+      .filter((a) => sameSpell(a, spell, banKey))
+      .sort((x, y) => y.at - x.at)[0] || null
+  );
+}
+
+function resolveOpenForKeys(keys, resolution, reviewedBy) {
+  let n = 0;
+  const now = Date.now();
+  for (const a of appeals)
+    if (a.status === "open" && matches(a, keys)) {
+      a.status = "resolved";
+      a.resolution = resolution || "lifted";
+      a.reviewedBy = reviewedBy || null;
+      a.reviewedAt = now;
+      systemNote(
+        a,
+        a.resolution === "lifted"
+          ? "Your ban has been lifted."
+          : "This appeal was closed.",
+      );
+      n++;
+    }
+  if (n) saveSoon();
+  return n;
+}
+
+function submit({ ip, deviceId, userId, name, message, ban, keys, spell }) {
   if (!ip) return { ok: false, code: "no_ip" };
   if (isBarred({ ip, deviceId, userId })) return { ok: false, code: "barred" };
   const key = banKeyOf(ban);
-  if (openForIp(ip, key)) return { ok: false, code: "already" };
+  const k = keys || {
+    ip,
+    ips: new Set([ip]),
+    deviceIds: new Set(deviceId ? [deviceId] : []),
+    userIds: new Set(userId ? [userId] : []),
+  };
+  for (const id of k.deviceIds)
+    if (barFor({ deviceId: id })) return { ok: false, code: "barred" };
+  const open = openForKeys(k);
+  if (open) return { ok: false, code: "already", id: open.id };
   const decided = appeals.find(
     (a) =>
-      (a.ip === ip || (deviceId && a.deviceId === deviceId)) &&
       a.status === "resolved" &&
-      (a.banKey || banKeyOf(a.ban)) === key,
+      a.resolution !== "lifted" &&
+      a.resolution !== "ended" &&
+      matches(a, k) &&
+      sameSpell(a, spell, key),
   );
-  if (decided) return { ok: false, code: "decided" };
+  if (decided) return { ok: false, code: "decided", id: decided.id };
   const now = Date.now();
   const a = {
     id: ++seq,
@@ -213,6 +276,7 @@ function submit({ ip, deviceId, userId, name, message, ban }) {
     lockedAt: null,
     ban: ban || null,
     banKey: key,
+    spell: spell || null,
   };
   appeals.push(a);
   if (appeals.length > MAX) appeals = appeals.slice(-MAX);
@@ -501,6 +565,9 @@ module.exports = {
   get,
   banKeyOf,
   forUser,
+  forPerson,
+  matches,
+  resolveOpenForKeys,
   reopen,
   userReply,
   staffReply,

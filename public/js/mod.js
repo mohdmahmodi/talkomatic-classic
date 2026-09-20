@@ -4629,6 +4629,28 @@
       if (file.names && file.names.length > 1)
         fv.appendChild(span("ap-file-none", "Also known as " + file.names.slice(1).join(", ")));
       if (file.evader) fv.appendChild(span("ap-file-none", "Flagged for getting around a block before."));
+      (a.earlier || []).forEach((e) => {
+        const what =
+          e.status === "open"
+            ? "another appeal still open"
+            : e.resolution === "lifted"
+              ? "an earlier appeal was accepted"
+              : e.resolution === "ended"
+                ? "an earlier appeal closed when that block ended"
+                : "an earlier appeal was declined";
+        fv.appendChild(
+          span(
+            "ap-file-none",
+            "Appeal #" +
+              e.id +
+              (e.sameBlock ? " about this same block: " : ": ") +
+              what +
+              (e.reviewedAt ? " " + relTime(e.reviewedAt) : " " + relTime(e.at)) +
+              (e.reviewedBy ? " by " + String(e.reviewedBy).replace(/^(dev|mod):/, "") : "") +
+              ".",
+          ),
+        );
+      });
       if (file.reports)
         fv.appendChild(
           span("ap-file-none", file.reports + (file.reports === 1 ? " report" : " reports") + " from other users on record"),

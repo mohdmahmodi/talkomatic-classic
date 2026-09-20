@@ -123,7 +123,7 @@ const TLD = new Set(
     "consulting management marketing careers education academy institute " +
     "school college university training courses reviews ninja rocks wtf " +
     "ooo icu cyou cfd sbs quest bond monster makeup boutique jewelry " +
-    "clothing shoes bags fashion beauty"
+    "clothing shoes bags fashion beauty moe uno"
   ).split(/\s+/),
 );
 

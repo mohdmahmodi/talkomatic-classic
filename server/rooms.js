@@ -65,6 +65,7 @@ const cases = require("./cases");
 const record = require("./record");
 const devicetoken = require("./devicetoken");
 const durations = require("./durations");
+const personblocks = require("./personblocks");
 const crypto = require("crypto");
 
 const gamePrevText = new Map();
@@ -1593,6 +1594,211 @@ function appealFile(a, view, person) {
   };
 }
 
+const QUICK_FILE_MS = 180 * 24 * 60 * 60 * 1000;
+const QUICK_FILE_MAX = 40;
+const HEAVY_ACTIONS = new Set(["ban", "ban ip", "ip block", "id block", "kick+ban"]);
+
+function buildQuickFile(targetUserId, socket) {
+  const view = roles.viewFor(socket);
+  const targetSocket = findSocketsByUserId(targetUserId)[0];
+  const roomId = getUserCurrentRoom(targetUserId);
+  const room = roomId ? state.rooms.get(roomId) : null;
+  const targetUser = room ? room.users.find((u) => u.id === targetUserId) : null;
+  const seen = lastseen.get(targetUserId);
+  const who = {
+    userId: targetUserId,
+    deviceId: targetSocket?.deviceId || (seen && seen.deviceId) || null,
+    legacyId: targetSocket?.legacyDeviceId || null,
+    ip: targetSocket?.clientIp || (seen && seen.ip) || null,
+  };
+  const keys = personblocks.keysFor(who);
+  const person = keys.person;
+  const mask = (s) => (view.ip ? s : audit.maskIps(s));
+  const now = Date.now();
+  const since = now - QUICK_FILE_MS;
+  const events = [];
+
+  for (const p of audit.actionsOn(
+    {
+      userId: targetUserId,
+      userIds: [...keys.userIds],
+      deviceId: who.deviceId,
+      deviceIds: [...keys.deviceIds],
+    },
+    since,
+    QUICK_FILE_MAX,
+  )) {
+    const base = audit.baseAction(p.action);
+    const details =
+      p.details && /^text before wipe:/i.test(p.details) ? null : p.details;
+    events.push({
+      at: p.at,
+      kind: HEAVY_ACTIONS.has(base) ? "block" : base === "warn" ? "warn" : "action",
+      action: p.action,
+      base,
+      by: roles.teamLabel(p.by, p.role, view),
+      reason: mask(details) || null,
+      quote: mask(p.quote) || null,
+    });
+  }
+
+  const idKeys = new Set([...keys.deviceIds].map((d) => ipban.idKey(d)));
+  const hitsKey = (key) => {
+    if (!key) return false;
+    if (idKeys.has(key) || keys.ips.has(key)) return true;
+    if (ipban.isRangeKey(key))
+      for (const ip of keys.ips) if (ipban.ipInCidr(ip, key)) return true;
+    return false;
+  };
+  const autoSeen = new Set();
+  for (const e of banhistory.recent(3000)) {
+    if ((e.at || 0) < since) break;
+    if (!hitsKey(e.ip)) continue;
+    if (e.action === "unban") {
+      const stamp = Math.floor((e.at || 0) / 5000);
+      if (autoSeen.has("u" + stamp)) continue;
+      autoSeen.add("u" + stamp);
+      events.push({
+        at: e.at,
+        kind: "unblock",
+        action: "unblock",
+        base: "unblock",
+        by: e.by ? roles.enforcedLabel(e.by, e.byRole, view) : null,
+        reason: /^lifted together/i.test(e.reason || "") ? null : mask(e.reason) || null,
+      });
+    } else if (!e.by) {
+      const stamp = Math.floor((e.at || 0) / 5000);
+      if (autoSeen.has("b" + stamp)) continue;
+      autoSeen.add("b" + stamp);
+      events.push({
+        at: e.at,
+        kind: "block",
+        action: e.duration === "permanent" ? "auto block permanent" : "auto block " + (e.duration || ""),
+        base: "auto block",
+        auto: true,
+        by: null,
+        duration: e.duration || null,
+        reason: mask(e.reason) || (e.duration === "permanent" ? "Name on the block list." : null),
+      });
+    }
+  }
+
+  const list = appeals.list().filter((a) => appeals.matches(a, keys));
+  for (const a of list) {
+    if ((a.at || 0) >= since)
+      events.push({
+        at: a.at,
+        kind: "appeal",
+        action: "appeal filed",
+        base: "appeal filed",
+        by: null,
+        appealId: a.id,
+        reason: mask(a.message ? String(a.message).slice(0, 200) : null),
+      });
+    if (a.status === "resolved" && a.reviewedAt && a.reviewedAt >= since)
+      events.push({
+        at: a.reviewedAt,
+        kind: "appeal",
+        action:
+          a.resolution === "lifted"
+            ? "appeal accepted"
+            : a.resolution === "ended"
+              ? "appeal closed (block ended)"
+              : "appeal declined",
+        base: "appeal " + (a.resolution || "dismissed"),
+        appealId: a.id,
+        by: a.reviewedBy
+          ? String(roles.teamReviewer(a.reviewedBy, view) || "").replace(/^(dev|mod):/, "")
+          : null,
+      });
+  }
+
+  const reportList = [...keys.userIds]
+    .flatMap((uid) => reports.forTarget(uid))
+    .filter((r) => (r.at || 0) >= since)
+    .sort((x, y) => (y.at || 0) - (x.at || 0));
+  for (const r of reportList.slice(0, 10))
+    events.push({
+      at: r.at,
+      kind: "report",
+      action: "reported" + (r.category ? " for " + r.category : ""),
+      base: "report",
+      by: r.byName || null,
+      reason: mask(r.reason) || null,
+      quote: mask(r.targetText) || null,
+    });
+
+  const accepted = events.filter((e) => e.base === "appeal lifted").map((e) => e.at);
+  const shown = events.filter(
+    (e) => e.kind !== "unblock" || !accepted.some((t) => Math.abs(t - e.at) < 5000),
+  );
+  shown.sort((x, y) => (y.at || 0) - (x.at || 0));
+
+  const eff = personblocks.effective(who, keys);
+  const b = eff ? eff.block : null;
+  const shownName =
+    targetUser?.username ||
+    targetSocket?.handshake?.session?.username ||
+    (seen && seen.name) ||
+    knownName(who) ||
+    null;
+  return {
+    targetUserId,
+    name: shownName,
+    names: person ? person.names.filter((n) => n !== shownName).slice(0, 6) : [],
+    online: !!targetSocket,
+    devices: person ? person.devices.length : who.deviceId ? 1 : 0,
+    firstSeen: person ? person.first || null : null,
+    evader: !!(person && person.evader),
+    block: eff
+      ? {
+          expiry: eff.expiry,
+          permanent: !!eff.permanent,
+          since: eff.since || null,
+          covered: !!eff.covered,
+          reason: mask(b && b.reason) || null,
+          by: b && b.by ? roles.enforcedLabel(b.by, b.byRole, view) : null,
+          auto: !!b && !b.by,
+        }
+      : null,
+    counts: {
+      actions: shown.filter((e) => e.kind === "action" || e.kind === "warn").length,
+      blocks: shown.filter((e) => e.kind === "block").length,
+      appeals: list.length,
+      reports: reportList.length,
+    },
+    events: shown.slice(0, QUICK_FILE_MAX),
+    window: QUICK_FILE_MS,
+    fullRecord: socket.isDev || (socket.modLevel || 1) >= 2,
+  };
+}
+
+function earlierAppeals(a, view, all) {
+  let keys;
+  try {
+    keys = personblocks.keysFor({
+      ip: a.ip,
+      deviceId: a.deviceId,
+      userId: a.userId,
+    });
+  } catch (_) {
+    return [];
+  }
+  return (all || appeals.list())
+    .filter((o) => o.id !== a.id && appeals.matches(o, keys))
+    .slice(0, 5)
+    .map((o) => ({
+      id: o.id,
+      at: o.at,
+      name: o.name || null,
+      status: o.status,
+      resolution: o.resolution || null,
+      reviewedAt: o.reviewedAt || null,
+      reviewedBy: view && view.ip ? o.reviewedBy || null : roles.teamReviewer(o.reviewedBy, view),
+      sameBlock: !!(a.spell && o.spell && a.spell === o.spell),
+    }));
+}
+
 function historyOpts(data) {
   return {
     offset: data?.offset,
@@ -1753,10 +1959,20 @@ const NO_MORE_APPEALS =
   "You will not be able to file another appeal. This decision is final.";
 
 function appealStillBlocked(a) {
-  return (
+  if (
     ipban.findActiveBlock(a.ip) !== null ||
     (!!a.deviceId && ipban.findActiveIdBlock(a.deviceId) !== null)
-  );
+  )
+    return true;
+  try {
+    return !!personblocks.effective({
+      ip: a.ip,
+      deviceId: a.deviceId,
+      userId: a.userId,
+    });
+  } catch (_) {
+    return false;
+  }
 }
 
 // An open appeal about a ban that is gone, whether it ran out or somebody
@@ -1782,12 +1998,13 @@ if (appealSweep.unref) appealSweep.unref();
 
 function buildAppealsList(view) {
   sweepEndedAppeals();
-  return appeals.list().map((a) => appealRow(a, view));
+  const all = appeals.list();
+  return all.map((a) => appealRow(a, view, all));
 }
 
 // One appeal as staff see it. The person lookup is done once here and
 // shared with the file, which is what makes opening a single appeal cheap.
-function appealRow(a, view) {
+function appealRow(a, view, all) {
   const showIp = !!(view && view.ip);
   {
     const stillBlocked = appealStillBlocked(a);
@@ -1833,6 +2050,7 @@ function appealRow(a, view) {
       banAt: ban.ts || null,
       banWriteup: writeupOf(ban.auditId, view),
       file: appealFile(a, view, person),
+      earlier: earlierAppeals(a, view, all),
       locked: !!a.locked,
       lockedBy: showIp
         ? a.lockedBy || null
@@ -2140,8 +2358,23 @@ function placeBlock(key, entry) {
   if (held !== undefined && ipban.isActiveBlock(held)) {
     const heldExpiry = held && typeof held === "object" ? held.expiry : held;
     if (heldExpiry > entry.expiry) entry = { ...entry, expiry: heldExpiry };
+    const heldSince =
+      held && typeof held === "object" ? held.since || held.ts : 0;
+    if (heldSince) entry = { ...entry, since: heldSince };
   }
+  if (!entry.since) entry = { ...entry, since: entry.ts || Date.now() };
   state.blockedIPs.set(key, entry);
+}
+
+function settlePersonBlocks(who) {
+  let changed = [];
+  try {
+    changed = personblocks.align(who);
+  } catch (e) {
+    console.error("personblocks.align failed:", e);
+  }
+  if (changed.length) blocklist.saveSoon();
+  return changed;
 }
 
 async function settleNamePolicy(socket, username) {
@@ -2159,6 +2392,7 @@ async function settleNamePolicy(socket, username) {
   };
   if (ip) placeBlock(ipban.computeRangeCidr(ip) || ip, { ...entry });
   if (did) placeBlock(ipban.idKey(did), { ...entry });
+  settlePersonBlocks({ deviceId: did, ip });
   blocklist.saveSoon();
   evasion.invalidate();
   banhistory.record({
@@ -6046,6 +6280,12 @@ function registerSocketHandlers(opts) {
         if (blockKey) placeBlock(blockKey, { ...blockEntry });
         if (blockedDid) placeBlock(ipban.idKey(blockedDid), { ...blockEntry });
         if (legacyDid) placeBlock(ipban.idKey(legacyDid), { ...blockEntry });
+        const stretched = settlePersonBlocks({
+          deviceId: blockedDid,
+          legacyId: legacyDid,
+          userId: targetUserId,
+          ip,
+        });
         blocklist.saveSoon();
         evasion.invalidate();
         banhistory.record({
@@ -6112,6 +6352,7 @@ function registerSocketHandlers(opts) {
           targetUserId,
           duration,
           rangeApplied: !!cidr,
+          stretched: stretched.length,
         });
         clearReportAfterAction(socket, targetUserId);
       }),
@@ -6266,6 +6507,8 @@ function registerSocketHandlers(opts) {
             duration,
           });
         }
+        for (const t of targets)
+          if (t.did) settlePersonBlocks({ deviceId: t.did });
         blocklist.saveSoon();
         evasion.invalidate();
         broadcastBlockList();
@@ -6295,7 +6538,13 @@ function registerSocketHandlers(opts) {
           } catch (_) {}
         }
         const rangeCount = targets.filter((t) => t.range).length;
-        const single = targets.length === 1 ? targets[0] : null;
+        const dids = new Set(targets.map((t) => t.did).filter(Boolean));
+        const single =
+          targets.length === 1
+            ? targets[0]
+            : dids.size === 1 && targets.every((t) => t.did)
+              ? targets.find((t) => ipban.isIdKey(t.key)) || targets[0]
+              : null;
         const singleUserId = single && single.did ? devicetoken.userIdFor(single.did) : null;
         const receipt = singleUserId
           ? receipts.capture({
@@ -7770,15 +8019,15 @@ function registerSocketHandlers(opts) {
           );
         const blockedName =
           (prev && typeof prev === "object" && prev.label) || null;
+        const { did, keys: companionKeys } = personblocks.companionsOf(ip);
         const removed = state.blockedIPs.delete(ip);
         state.botBlacklist.delete(ip);
-        // A device and the network it was blocked with go together. Lifting
-        // one and leaving the other is how somebody ends up unbanned and
-        // still blocked at the same time.
-        const did = ipban.isIdKey(ip)
-          ? ip.slice(3)
-          : (prev && typeof prev === "object" && prev.did) || null;
-        const companions = did ? ipban.removeBlocksForDevice(did) : [];
+        const companions = [];
+        for (const key of companionKeys)
+          if (state.blockedIPs.delete(key)) companions.push(key);
+        if (did)
+          for (const key of ipban.removeBlocksForDevice(did))
+            if (!companions.includes(key)) companions.push(key);
         blocklist.saveSoon();
         evasion.invalidate();
         const byRole = socket.isDev ? "dev" : "mod";
@@ -7805,8 +8054,12 @@ function registerSocketHandlers(opts) {
         let resolved = ipban.isIdKey(ip)
           ? appeals.resolveOpenForDevice(ip.slice(3), "lifted", reviewer)
           : appeals.resolveOpenForIp(ip, "lifted", reviewer);
-        if (did && !ipban.isIdKey(ip))
-          resolved += appeals.resolveOpenForDevice(did, "lifted", reviewer);
+        if (did)
+          resolved += appeals.resolveOpenForKeys(
+            personblocks.keysFor({ deviceId: did }),
+            "lifted",
+            reviewer,
+          );
         if (resolved) broadcastAppealsList();
         logStaff(
           socket,
@@ -7861,10 +8114,22 @@ function registerSocketHandlers(opts) {
             : { label: null, by: null, reason: null, ts: Date.now() };
         rec.expiry = expiry;
         state.blockedIPs.set(ip, rec);
+        const companions = personblocks.companionsOf(ip).keys;
+        for (const key of companions) {
+          const held = state.blockedIPs.get(key);
+          if (held && typeof held === "object") held.expiry = expiry;
+          else state.blockedIPs.set(key, { expiry, ts: Date.now() });
+        }
         blocklist.saveSoon();
         evasion.invalidate();
         broadcastBlockList();
-        logStaff(socket, `set block duration ${duration}`, ip, "-");
+        logStaff(
+          socket,
+          `set block duration ${duration}`,
+          ip,
+          "-",
+          companions.length ? "also " + companions.join(", ") : undefined,
+        );
         socket.emit("staff action result", {
           action: "set block duration",
           ok: true,
@@ -8584,6 +8849,22 @@ function registerSocketHandlers(opts) {
       }),
     );
 
+    socket.on(
+      "staff get file",
+      safe(async (data) => {
+        if (!requireStaff(socket)) return;
+        const targetUserId =
+          typeof data?.targetUserId === "string" ? data.targetUserId.slice(0, 120) : "";
+        if (!targetUserId) return;
+        if (!canActOn(socket, targetUserId))
+          return socket.emit(
+            "error",
+            createErrorResponse(ERROR_CODES.FORBIDDEN, "You cannot view this user."),
+          );
+        socket.emit("staff file", buildQuickFile(targetUserId, socket));
+      }),
+    );
+
     // ── One person across every name and device ────────────────────────────
     socket.on(
       "staff get person",
@@ -8907,9 +9188,12 @@ function registerSocketHandlers(opts) {
           logStaff(socket, "override own appeal", a.name || a.ip, "-", decision);
         if (decision === "lift") {
           if (!requireDev(socket)) return;
+          const who = { ip: a.ip, deviceId: a.deviceId, userId: a.userId };
           const removedKeys = ipban.removeBlocksForIp(a.ip);
           if (a.deviceId)
             removedKeys.push(...ipban.removeBlocksForDevice(a.deviceId));
+          for (const key of personblocks.liftAll(who))
+            if (!removedKeys.includes(key)) removedKeys.push(key);
           const removed = removedKeys.length > 0;
           state.botBlacklist.delete(a.ip);
           blocklist.saveSoon();
@@ -8923,9 +9207,20 @@ function registerSocketHandlers(opts) {
               byRole: socket.isDev ? "dev" : "mod",
               reason: "appeal accepted",
             });
+          for (const key of removedKeys)
+            if (key !== a.ip)
+              banhistory.record({
+                ip: key,
+                name: a.name || null,
+                action: "unban",
+                by: socket.staffLabel || null,
+                byRole: socket.isDev ? "dev" : "mod",
+                reason: "lifted together with the appeal",
+              });
           broadcastBlockList();
           broadcastBanHistory();
           appeals.resolveOpenForIp(a.ip, "lifted", reviewer);
+          appeals.resolveOpenForKeys(personblocks.keysFor(who), "lifted", reviewer);
           logStaff(socket, "lift ban (appeal)", a.name || a.ip, "-");
         } else {
           const note = sanitizeMessage(

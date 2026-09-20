@@ -39,4 +39,24 @@ function labelFor(key) {
   return d ? d.label : String(key || "");
 }
 
-module.exports = { DURATIONS, LONG, USAGE, isValid, msFor, expiryFor, labelFor };
+function nearestKey(ms) {
+  if (!(ms > 0)) return "1h";
+  if (ms === Infinity) return "permanent";
+  let best = DURATIONS[0];
+  for (const d of DURATIONS) {
+    if (d.ms === Infinity) continue;
+    if (Math.abs(d.ms - ms) < Math.abs(best.ms - ms)) best = d;
+  }
+  return best.key;
+}
+
+module.exports = {
+  DURATIONS,
+  LONG,
+  USAGE,
+  isValid,
+  msFor,
+  expiryFor,
+  labelFor,
+  nearestKey,
+};

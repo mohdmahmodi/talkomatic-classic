@@ -7,6 +7,8 @@ const identity = require("./identity");
 const audit = require("./audit");
 const blocklist = require("./blocklist");
 const banhistory = require("./banhistory");
+const personblocks = require("./personblocks");
+const durations = require("./durations");
 
 const ALERT_COOLDOWN_MS = 60 * 60 * 1000;
 const recentAlerts = new Map();
@@ -71,6 +73,7 @@ function placeAutoBlock({ deviceId, ip, username, signal }) {
 
   let permanent = false;
   let expiry = 0;
+  let since = 0;
   for (const k of live) {
     const b = state.blockedIPs.get(k);
     if (ipban.isPermanentBlock(b)) permanent = true;
@@ -78,6 +81,8 @@ function placeAutoBlock({ deviceId, ip, username, signal }) {
       const e = b && typeof b === "object" ? b.expiry : b;
       if (e > expiry) expiry = e;
     }
+    const s = b && typeof b === "object" ? b.since || b.ts || 0 : 0;
+    if (s && (!since || s < since)) since = s;
   }
   if (permanent) expiry = Number.MAX_SAFE_INTEGER;
   if (!expiry) return null;
@@ -88,6 +93,7 @@ function placeAutoBlock({ deviceId, ip, username, signal }) {
     label: username || (rec && rec.name) || null,
     by: null,
     ts: Date.now(),
+    since: since || Date.now(),
     reason: "Ban evasion.",
     did: deviceId,
   };
@@ -107,6 +113,9 @@ function placeAutoBlock({ deviceId, ip, username, signal }) {
   }
   if (!placed.length) return null;
 
+  try {
+    personblocks.align({ deviceId, ip });
+  } catch (_) {}
   blocklist.saveSoon();
   cache = null;
   banhistory.record({
@@ -114,7 +123,7 @@ function placeAutoBlock({ deviceId, ip, username, signal }) {
     name: entry.label,
     action: "ban",
     reason: "Ban evasion.",
-    duration: permanent ? "permanent" : "inherited",
+    duration: permanent ? "permanent" : durations.nearestKey(expiry - Date.now()),
   });
   return { keys: placed, expiry, permanent };
 }
