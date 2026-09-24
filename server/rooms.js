@@ -629,6 +629,27 @@ function getUsernameLocationRoomsCount(username, location, excludeUserId) {
   return 0;
 }
 
+function isSeasonedDevice(did) {
+  const rec = did ? identity.getRecord(did) : null;
+  return !!(rec && rec.days && rec.days.length >= 2);
+}
+
+function freshSameNetworkInRoom(room, roomId, socket, userId) {
+  const key = signinNetKey(socket.clientIp);
+  if (!key || !io()) return 0;
+  const seated = new Set((room.users || []).map((u) => u.id));
+  const ids = new Set();
+  for (const [, s] of io().sockets.sockets) {
+    if (s.roomId !== roomId || s.spectating) continue;
+    if (s.isDev || s.isMod || s.isBot || s.isModLog) continue;
+    const uid = s.handshake?.session?.userId;
+    if (!uid || uid === userId || !seated.has(uid)) continue;
+    if (isSeasonedDevice(s.deviceId)) continue;
+    if (signinNetKey(s.clientIp) === key) ids.add(uid);
+  }
+  return ids.size;
+}
+
 function getUserCurrentRoom(userId) {
   for (const [roomId, room] of state.rooms) {
     if (room.users && room.users.some((u) => u.id === userId)) return roomId;
@@ -2432,9 +2453,10 @@ function broadcastBanHistory(also) {
   } catch (_) {}
 }
 
-const SIGNIN_FLOOD_WINDOW = 2 * 60 * 1000;
-const SIGNIN_FLOOD_IDS = 6;
+const SIGNIN_FLOOD_WINDOW = 5 * 60 * 1000;
+const SIGNIN_FLOOD_IDS = 4;
 const SIGNIN_FLOOD_ANY_IDS = 12;
+const SIGNIN_FLOOD_ANY_WINDOW = 2 * 60 * 1000;
 const SIGNIN_FLOOD_BLOCK = "1h";
 const signinsByNet = new Map();
 
@@ -2443,19 +2465,55 @@ function signinNetKey(ip) {
   return String(ip).includes(":") ? ipban.computeRangeCidr(ip) || ip : ip;
 }
 
+function nameStem(username) {
+  const stem = nameguard.skeleton(username).replace(/(.)\1+/g, "$1");
+  return stem || nameguard.fold(username);
+}
+
+function withinOneEdit(a, b) {
+  if (Math.abs(a.length - b.length) > 1) return false;
+  let i = 0;
+  let j = 0;
+  let edits = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) {
+      i++;
+      j++;
+      continue;
+    }
+    if (++edits > 1) return false;
+    if (a.length > b.length) i++;
+    else if (b.length > a.length) j++;
+    else {
+      i++;
+      j++;
+    }
+  }
+  return edits + (a.length - i) + (b.length - j) <= 1;
+}
+
+function namesAlike(a, b) {
+  if (a === b) return true;
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  if (short.length < 3) return false;
+  return long.includes(short) || withinOneEdit(short, long);
+}
+
 function noteSigninFlood(socket, userId, username) {
   const key = signinNetKey(socket.clientIp);
   if (!key) return null;
+  if (isSeasonedDevice(socket.deviceId)) return null;
   const now = Date.now();
-  const name = String(username || "").trim().toLowerCase();
+  const name = nameStem(username);
   const list = (signinsByNet.get(key) || []).filter((e) => now - e.at < SIGNIN_FLOOD_WINDOW);
   list.push({ at: now, userId, did: socket.deviceId || null, name });
   signinsByNet.set(key, list);
-  const ids = new Set(list.map((e) => e.userId));
-  const sameName = new Set(list.filter((e) => e.name === name).map((e) => e.userId));
+  const who = (e) => e.did || e.userId;
+  const ids = new Set(list.filter((e) => now - e.at < SIGNIN_FLOOD_ANY_WINDOW).map(who));
+  const sameName = new Set(list.filter((e) => namesAlike(e.name, name)).map(who));
   if (sameName.size < SIGNIN_FLOOD_IDS && ids.size < SIGNIN_FLOOD_ANY_IDS) return null;
   signinsByNet.delete(key);
-  return { key, count: ids.size, seconds: Math.round((now - list[0].at) / 1000), entries: list };
+  return { key, count: Math.max(ids.size, sameName.size), seconds: Math.round((now - list[0].at) / 1000), entries: list };
 }
 
 function sweepSigninFlood() {
@@ -3915,6 +3973,23 @@ function joinRoom(socket, roomId, userId) {
       return socket.emit(
         "room full",
         createErrorResponse(ERROR_CODES.ROOM_FULL, "Room is full."),
+      );
+
+    if (
+      !isStaff &&
+      !socket.isBot &&
+      !isSeasonedDevice(socket.deviceId) &&
+      freshSameNetworkInRoom(room, roomId, socket, userId) >=
+        CONFIG.LIMITS.MAX_SAME_NETWORK_PER_ROOM
+    )
+      return socket.emit(
+        "error",
+        createErrorResponse(
+          ERROR_CODES.FORBIDDEN,
+          "Too many people from your network are already in this room.",
+          null,
+          true,
+        ),
       );
 
     if (socket.isBot && room.allowBots === false)
