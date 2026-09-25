@@ -21,6 +21,7 @@ const {
   isReservedName,
   isGuestName,
   isListedName,
+  tuned,
 } = require("./state");
 const {
   chatUpdateLimiter,
@@ -631,7 +632,7 @@ function getUsernameLocationRoomsCount(username, location, excludeUserId) {
 
 function isSeasonedDevice(did) {
   const rec = did ? identity.getRecord(did) : null;
-  return !!(rec && rec.days && rec.days.length >= 2);
+  return !!(rec && rec.days && rec.days.length >= SEASONED_DAYS);
 }
 
 function freshSameNetworkInRoom(room, roomId, socket, userId) {
@@ -2453,13 +2454,16 @@ function broadcastBanHistory(also) {
   } catch (_) {}
 }
 
-const SIGNIN_FLOOD_WINDOW = 5 * 60 * 1000;
-const SIGNIN_FLOOD_IDS = 3;
-const SIGNIN_FLOOD_ANY_IDS = 12;
-const SIGNIN_FLOOD_ANY_WINDOW = 2 * 60 * 1000;
-const SIGNIN_FLOOD_BLOCK = "1h";
-const SIGNIN_DEVICE_IDS = 3;
-const SIGNIN_DEVICE_WINDOW = 10 * 60 * 1000;
+const SIGNIN_FLOOD_WINDOW = tuned("GUARD_NET_MIN", 15) * 60 * 1000;
+const SIGNIN_FLOOD_IDS = tuned("GUARD_NET_IDS", 2);
+const SIGNIN_FLOOD_ANY_IDS = tuned("GUARD_ANY_IDS", 6);
+const SIGNIN_FLOOD_ANY_WINDOW = tuned("GUARD_ANY_MIN", 5) * 60 * 1000;
+const SIGNIN_FLOOD_BLOCK = durations.isValid(process.env.GUARD_BLOCK) ? process.env.GUARD_BLOCK : "24h";
+if (!durations.isValid(process.env.GUARD_BLOCK))
+  console.warn("[guard] GUARD_BLOCK not set, using built-in value");
+const SIGNIN_DEVICE_IDS = tuned("GUARD_DEVICE_IDS", 2);
+const SIGNIN_DEVICE_WINDOW = tuned("GUARD_DEVICE_MIN", 30) * 60 * 1000;
+const SEASONED_DAYS = tuned("GUARD_SEASONED_DAYS", 7);
 const signinsByNet = new Map();
 const signinsByDevice = new Map();
 
@@ -2551,7 +2555,8 @@ async function floodGuardSigninFlood(socket, username, location, hit) {
   const expiry = durations.expiryFor(SIGNIN_FLOOD_BLOCK);
   const reason =
     "Flood guard: signed in " + hit.count + " times in " + hit.seconds +
-    " seconds with a new identity each time. Automatic 1 hour block.";
+    " seconds with a new identity each time. Automatic " +
+    durations.labelFor(SIGNIN_FLOOD_BLOCK).toLowerCase() + " block.";
   const entry = {
     expiry,
     label: username || null,
@@ -2584,7 +2589,7 @@ async function floodGuardSigninFlood(socket, username, location, hit) {
       (username ? "\"" + username + "\"" : "Somebody") +
       " signed in " + hit.count + " times with a new id each time in " + hit.seconds +
       " seconds" + (location ? " (location \"" + location + "\")" : "") +
-      ". Blocked for 1 hour by the flood guard.",
+      ". Blocked for " + durations.labelFor(SIGNIN_FLOOD_BLOCK).toLowerCase() + " by the flood guard.",
     target: username || null,
     targetUserId: socket.handshake?.session?.userId || null,
     ip,

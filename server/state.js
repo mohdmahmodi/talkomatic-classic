@@ -11,6 +11,13 @@ const cloudflare = require("./cloudflare");
 
 // ── Config ──────────────────────────────────────────────────────────────────
 
+function tuned(name, def) {
+  const n = Number(process.env[name]);
+  if (Number.isFinite(n) && n > 0) return n;
+  console.warn("[guard] " + name + " not set, using built-in value");
+  return def;
+}
+
 const CONFIG = {
   LIMITS: {
     MAX_USERNAME_LENGTH: 15,
@@ -34,13 +41,13 @@ const CONFIG = {
     MAX_ID_GEN_ATTEMPTS: 100,
     BATCH_SIZE_LIMIT: 50,
     MAX_ROOMS_PER_USER: 1,
-    MAX_SAME_NETWORK_PER_ROOM: 2,
+    MAX_SAME_NETWORK_PER_ROOM: tuned("GUARD_ROOM_NET", 1),
     BOT_DETECTION_JOIN_THRESHOLD: 10,
     BOT_DETECTION_WINDOW: 60000,
     MAX_REQUESTS_PER_MINUTE: 300,
     MAX_BOT_REQUESTS_PER_MINUTE: 500,
     MAX_BOT_TOKENS_PER_IP: 3,
-    MAX_BOT_CONNECTIONS_PER_NETWORK: 3,
+    MAX_BOT_CONNECTIONS_PER_NETWORK: tuned("GUARD_BOT_NET", 1),
     BOT_TOKEN_REQUEST_COOLDOWN: 300000,
     IP_USER_CLEANUP_INTERVAL: 3600000,
 
@@ -398,6 +405,7 @@ function isListedName(name) {
 
 module.exports = {
   CONFIG,
+  tuned,
   ERROR_CODES,
   wordFilter,
   state,
