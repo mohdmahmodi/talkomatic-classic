@@ -537,6 +537,62 @@ a,
   line-height: 1.5;
 }
 
+.ideas-pulse {
+  margin: -4px 0 12px;
+  padding: 7px 9px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--external-links-color) 6%, transparent);
+  color: var(--external-links-color);
+  font-size: 11px;
+}
+
+.ideas-pulse-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.ideas-pulse-line + .ideas-pulse-line {
+  margin-top: 4px;
+}
+
+.ideas-pulse-name {
+  flex: none;
+  width: 48px;
+  font-weight: bold;
+  opacity: 0.8;
+}
+
+.ideas-pulse-name > i {
+  width: 12px;
+  margin-right: 5px;
+  font-size: 10px;
+  text-align: center;
+  color: var(--accent-bright);
+}
+
+.ideas-pulse-stats {
+  min-width: 0;
+  opacity: 0.85;
+}
+
+.ideas-pulse-stat {
+  white-space: nowrap;
+}
+
+.ideas-pulse-stat > b {
+  font-variant-numeric: tabular-nums;
+}
+
+.ideas-pulse-stat.good > b {
+  color: #4caf50;
+}
+
+.ideas-pulse-dot {
+  margin: 0 5px;
+  opacity: 0.4;
+}
+
 .ideas-card-btn {
   display: block;
   padding: 10px 12px;

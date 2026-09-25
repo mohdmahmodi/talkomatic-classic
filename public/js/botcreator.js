@@ -3684,7 +3684,9 @@
 
     h.appendChild(document.createTextNode("Send " + (edit.name || "the bot") + " to a room"));
 
-    const saved = (status?.bots || []).some((b) => b.id === edit.id);
+    const saved = [...(status?.bots || []), ...(status?.shared || [])].some(
+      (b) => b.id === edit.id,
+    );
     const p = document.createElement("p");
     p.textContent = saved
       ? "Rooms have bot seats by size: 1 for every 5 people they can hold. The bot runs while you are on Talkomatic."

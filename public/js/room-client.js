@@ -3004,6 +3004,11 @@ function adjustLayout() {
     (row) => !(hidingBots && row.classList.contains("bot-user")),
   );
   if (!container || rows.length === 0) return;
+  if (document.hidden || container.clientHeight === 0) {
+    layoutStale = true;
+    return;
+  }
+  layoutStale = false;
 
   const activeEl = document.activeElement;
   let activeUserId = null;
@@ -3060,6 +3065,7 @@ function adjustLayout() {
     const avail = getAvailableViewportHeight() - containerTop;
     const gap = (rows.length - 1) * 10;
     const h = Math.floor((avail - gap) / rows.length);
+    if (h < 100) container.style.overflowY = "auto";
     rows.forEach((row) => {
       row.style.height = `${h}px`;
       row.style.minHeight = "100px";
@@ -3090,6 +3096,41 @@ function adjustLayout() {
   }
 
   refreshLayoutToggle();
+}
+
+var layoutStale = false;
+var layoutSettleTimer = null;
+var layoutObservedSize = "";
+
+function relayoutSoon() {
+  requestAnimationFrame(adjustLayout);
+  if (layoutSettleTimer) clearTimeout(layoutSettleTimer);
+  layoutSettleTimer = setTimeout(adjustLayout, 350);
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) relayoutSoon();
+});
+window.addEventListener("pageshow", relayoutSoon);
+window.addEventListener("focus", () => {
+  if (layoutStale) relayoutSoon();
+});
+window.addEventListener("orientationchange", relayoutSoon);
+
+if (window.ResizeObserver) {
+  const watchContainer = () => {
+    const container = document.querySelector(".chat-container");
+    if (!container) return;
+    new ResizeObserver(() => {
+      const size = container.clientWidth + "x" + container.clientHeight;
+      if (size === layoutObservedSize) return;
+      layoutObservedSize = size;
+      requestAnimationFrame(adjustLayout);
+    }).observe(container);
+  };
+  if (document.readyState === "loading")
+    document.addEventListener("DOMContentLoaded", watchContainer);
+  else watchContainer();
 }
 
 function refreshLayoutToggle() {

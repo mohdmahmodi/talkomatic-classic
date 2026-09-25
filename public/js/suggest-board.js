@@ -1407,6 +1407,59 @@
     link.classList.toggle("has-notif", words.length > 0);
   }
 
+  var PULSE = [
+    {
+      icon: "fa-bug",
+      name: "Bugs",
+      stats: [
+        { key: "bugs", label: "reported" },
+        { key: "fixed", label: "fixed", good: true },
+      ],
+    },
+    {
+      icon: "fa-lightbulb",
+      name: "Ideas",
+      stats: [
+        { key: "ideas", label: "posted" },
+        { key: "planned", label: "planned" },
+        { key: "built", label: "built", good: true },
+      ],
+    },
+  ];
+
+  function renderPulse(t) {
+    var link = document.getElementById("suggestBoxLink");
+    if (!link) return;
+    var host = document.getElementById("ideasPulse");
+    if (!t || !(t.bugs || t.ideas)) {
+      if (host) host.remove();
+      return;
+    }
+    if (!host) {
+      host = el("div", "ideas-pulse");
+      host.id = "ideasPulse";
+      link.parentNode.insertBefore(host, link);
+    }
+    host.textContent = "";
+    PULSE.forEach(function (g) {
+      var line = el("div", "ideas-pulse-line");
+      var name = el("span", "ideas-pulse-name");
+      name.innerHTML = icon(g.icon);
+      name.appendChild(document.createTextNode(g.name));
+      line.appendChild(name);
+      var stats = el("span", "ideas-pulse-stats");
+      g.stats.forEach(function (s, i) {
+        if (i) stats.appendChild(el("span", "ideas-pulse-dot", "·"));
+        var stat = el("span", "ideas-pulse-stat" + (s.good ? " good" : ""));
+        stat.appendChild(el("b", null, String(t[s.key] || 0)));
+        stat.appendChild(document.createTextNode(" " + s.label));
+        stats.appendChild(stat);
+      });
+      line.appendChild(stats);
+      host.appendChild(line);
+    });
+  }
+
   function describeUpdate(i) {
     var what = (KIND[i.kind] || KIND.idea).label.toLowerCase();
     var name = "“" + i.title + "”";
@@ -1452,6 +1505,7 @@
 
   socket.on("board badges", function (counts) {
     renderBadges(counts);
+    renderPulse(counts && counts.totals);
     maybeNotice(counts);
   });
 

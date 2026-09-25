@@ -259,7 +259,8 @@ function io() {
 // ── Talkoboard: Server-Side Stroke Storage (ephemeral) ──────────────────────
 
 const boardState = new Map();
-const MAX_BOARD_STROKES = 2000;
+const MAX_BOARD_STROKES = 12000;
+const MAX_BOARD_POINTS = 400000;
 const MAX_POINTS_PER_STROKE = 5000;
 
 function getBoardState(roomId) {
@@ -458,12 +459,24 @@ function boardAddWaitMs(userId) {
   return rec ? Math.max(0, (rec.until || 0) - Date.now()) : 0;
 }
 
-function trimBoard(bs) {
-  let guard = 0;
-  while (bs.strokes.length > MAX_BOARD_STROKES && guard++ < 200) {
-    const counts = new Map();
-    for (const s of bs.strokes)
-      counts.set(s.owner, (counts.get(s.owner) || 0) + 1);
+function boardPoints(bs) {
+  let n = 0;
+  for (const s of bs.strokes) n += s.points.length;
+  return n;
+}
+
+function trimBoard(bs, roomId) {
+  let points = boardPoints(bs);
+  if (bs.strokes.length <= MAX_BOARD_STROKES && points <= MAX_BOARD_POINTS)
+    return;
+  const counts = new Map();
+  for (const s of bs.strokes)
+    counts.set(s.owner, (counts.get(s.owner) || 0) + 1);
+  const gone = [];
+  while (
+    bs.strokes.length &&
+    (bs.strokes.length > MAX_BOARD_STROKES || points > MAX_BOARD_POINTS)
+  ) {
     let heaviest = null;
     let most = 0;
     for (const [owner, n] of counts)
@@ -471,11 +484,44 @@ function trimBoard(bs) {
         most = n;
         heaviest = owner;
       }
-    const idx = bs.strokes.findIndex((s) => s.owner === heaviest);
-    bs.strokes.splice(idx === -1 ? 0 : idx, 1);
+    let idx = bs.strokes.findIndex((s) => s.owner === heaviest);
+    if (idx === -1) idx = 0;
+    const [s] = bs.strokes.splice(idx, 1);
+    points -= s.points.length;
+    counts.set(s.owner, (counts.get(s.owner) || 1) - 1);
+    if (s.id) gone.push(s.id);
   }
-  if (bs.strokes.length > MAX_BOARD_STROKES)
-    bs.strokes = bs.strokes.slice(-MAX_BOARD_STROKES);
+  if (gone.length && roomId && io())
+    io().to(roomId).emit("board strokes trimmed", { ids: gone });
+}
+
+function snapStep(size) {
+  return Math.pow(2, Math.floor(Math.log2(Math.max(size, 1e-12) / 16)));
+}
+
+function snap(v, step) {
+  const q = v / step;
+  return Math.abs(q) > 4e15 ? v : Math.round(q) * step;
+}
+
+function pieceId(id, n) {
+  return id ? String(id).slice(0, 56) + "~" + n : null;
+}
+
+function removeBoardStroke(bs, id, owner) {
+  let idx = -1;
+  for (let i = bs.strokes.length - 1; i >= 0; i--)
+    if (bs.strokes[i].id === id && bs.strokes[i].owner === owner) {
+      idx = i;
+      break;
+    }
+  if (idx === -1) return false;
+  bs.strokes.splice(idx, 1);
+  const piece = id + "~";
+  bs.strokes = bs.strokes.filter(
+    (s) => !(s.owner === owner && typeof s.id === "string" && s.id.startsWith(piece)),
+  );
+  return true;
 }
 
 // ── Taking somebody's pen away ──────────────────────────────────────────────
@@ -502,8 +548,10 @@ function finalizeBoardUserStroke(roomId, userId) {
   if (!bs) return;
   const active = bs.active.get(userId);
   if (active && active.points && active.points.length > 0) {
+    delete active.base;
+    delete active.pieces;
     bs.strokes.push(active);
-    trimBoard(bs);
+    trimBoard(bs, roomId);
     saveBoardSoon();
   }
   bs.active.delete(userId);
@@ -5326,15 +5374,17 @@ function registerSocketHandlers(opts) {
             name: blocked.name || "Someone",
           });
 
+        // Brush sizes are world units and zoom-relative on the client
+        // (screen px / zoom, floored at 100%), so deep zoom sends tiny
+        // fractions; zooming out never grows the brush.
+        const startSize = Math.min(Math.max(data.size, 1e-9), 5000);
+        const step = snapStep(startSize);
         const stroke = {
           id: strokeId,
           owner: userId,
-          points: [{ x: data.point.x, y: data.point.y }],
+          points: [{ x: snap(data.point.x, step), y: snap(data.point.y, step) }],
           color: data.color.slice(0, 7),
-          // Brush sizes are world units and zoom-relative on the client
-          // (screen px / zoom, floored at 100%), so deep zoom sends tiny
-          // fractions; zooming out never grows the brush.
-          size: Math.min(Math.max(data.size, 1e-9), 5000),
+          size: startSize,
           eraser: !!data.eraser,
           gradient: data.eraser ? null : sanitizeGradient(data.gradient),
         };
@@ -5375,6 +5425,7 @@ function registerSocketHandlers(opts) {
         if (!active) return;
 
         const validPoints = [];
+        const step = snapStep(active.size);
         let last = active.points[active.points.length - 1] || null;
         let stoppedBy = null;
         for (const p of data.points) {
@@ -5386,8 +5437,10 @@ function registerSocketHandlers(opts) {
             stoppedBy = hit;
             break;
           }
-          validPoints.push({ x: p.x, y: p.y });
-          last = p;
+          const q = { x: snap(p.x, step), y: snap(p.y, step) };
+          if (last && q.x === last.x && q.y === last.y) continue;
+          validPoints.push(q);
+          last = q;
         }
 
         if (stoppedBy) {
@@ -5411,7 +5464,18 @@ function registerSocketHandlers(opts) {
         active.points.push(...validPoints);
 
         if (active.points.length > MAX_POINTS_PER_STROKE) {
-          active.points = active.points.slice(-MAX_POINTS_PER_STROKE);
+          const base = active.base || active.id;
+          const n = (active.pieces || 0) + 1;
+          const done = { ...active, points: active.points.slice(0, MAX_POINTS_PER_STROKE) };
+          delete done.base;
+          delete done.pieces;
+          bs.strokes.push(done);
+          trimBoard(bs, socket.roomId);
+          saveBoardSoon();
+          active.points = active.points.slice(MAX_POINTS_PER_STROKE - 1);
+          active.base = base;
+          active.pieces = n;
+          active.id = pieceId(base, n);
         }
 
         emitSubAppEvent(
@@ -5448,11 +5512,7 @@ function registerSocketHandlers(opts) {
         if (typeof id !== "string" || id.length > 64) return;
 
         const bs = getBoardState(socket.roomId);
-        const idx = bs.strokes.findIndex(
-          (s) => s.id === id && s.owner === userId,
-        );
-        if (idx !== -1) {
-          bs.strokes.splice(idx, 1);
+        if (removeBoardStroke(bs, id, userId)) {
           saveBoardSoon();
         } else {
           const active = bs.active.get(userId);
@@ -5488,11 +5548,21 @@ function registerSocketHandlers(opts) {
         if (typeof s.id !== "string" || s.id.length > 64) return;
         if (!Array.isArray(s.points) || s.points.length === 0) return;
 
+        const pointCap = s.fill
+          ? MAX_POINTS_PER_STROKE
+          : MAX_POINTS_PER_STROKE * 8;
+        const addStep = s.fill
+          ? 0
+          : snapStep(Math.min(Math.max(Number(s.size) || 3, 1e-9), 5000));
         const points = [];
         for (const p of s.points) {
           if (typeof p?.x === "number" && typeof p?.y === "number") {
-            points.push({ x: p.x, y: p.y });
-            if (points.length >= MAX_POINTS_PER_STROKE) break;
+            points.push(
+              addStep
+                ? { x: snap(p.x, addStep), y: snap(p.y, addStep) }
+                : { x: p.x, y: p.y },
+            );
+            if (points.length >= pointCap) break;
           }
         }
         if (points.length === 0) return;
@@ -5552,9 +5622,17 @@ function registerSocketHandlers(opts) {
         };
 
         const bs = getBoardState(socket.roomId);
-        if (bs.strokes.some((x) => x.id === stroke.id)) return;
-        bs.strokes.push(stroke);
-        trimBoard(bs);
+        if (bs.strokes.some((x) => x.id === stroke.id && x.owner === userId))
+          return;
+        if (points.length <= MAX_POINTS_PER_STROKE) bs.strokes.push(stroke);
+        else
+          for (let i = 0, n = 0; i < points.length - 1; i += MAX_POINTS_PER_STROKE - 1, n++)
+            bs.strokes.push({
+              ...stroke,
+              id: n ? pieceId(stroke.id, n) : stroke.id,
+              points: points.slice(i, i + MAX_POINTS_PER_STROKE),
+            });
+        trimBoard(bs, socket.roomId);
         saveBoardSoon();
         emitSubAppEvent(socket, "board stroke add", { userId, stroke }, false);
       }),

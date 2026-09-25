@@ -1999,14 +1999,19 @@ class Talkoboard {
   // ═══════════════════════════════════════════════════════════════════════════
 
   nextStrokeId() {
+    if (!this._idTag)
+      this._idTag =
+        Date.now().toString(36) +
+        Math.random().toString(36).slice(2, 8) +
+        "-";
     this._strokeSeq += 1;
-    return `${this.userId}:${this._strokeSeq}`;
+    return this._idTag + this._strokeSeq.toString(36);
   }
 
   undo() {
     while (this.undoStack.length > 0) {
       const id = this.undoStack.pop();
-      const idx = this.strokes.findIndex((s) => s.id === id);
+      const idx = this.strokes.findLastIndex((s) => s.id === id);
       if (idx === -1) continue;
       const [stroke] = this.strokes.splice(idx, 1);
       this.redoStack.push(stroke);
@@ -3357,9 +3362,10 @@ class Talkoboard {
   // ═══════════════════════════════════════════════════════════════════════════
 
   flush() {
-    if (this.pointBuffer.length === 0) return;
-    const points = this.pointBuffer.splice(0);
-    this.socket.emit("board stroke move", { points });
+    while (this.pointBuffer.length > 0) {
+      const points = this.pointBuffer.splice(0, 200);
+      this.socket.emit("board stroke move", { points });
+    }
   }
 
   sendCursorPosition(e) {
@@ -3442,8 +3448,28 @@ class Talkoboard {
 
   handleRemoteStrokeRemove(data) {
     if (!data || !data.id) return;
-    const idx = this.strokes.findIndex((s) => s.id === data.id);
+    const idx = this.strokes.findLastIndex((s) => s.id === data.id);
     if (idx !== -1) this.strokes.splice(idx, 1);
+    const piece = data.id + "~";
+    this.strokes = this.strokes.filter(
+      (s) => !(typeof s.id === "string" && s.id.startsWith(piece)),
+    );
+    if (this.isOpen) this.redraw();
+  }
+
+  handleStrokesTrimmed(data) {
+    const ids = new Set(Array.isArray(data?.ids) ? data.ids : []);
+    if (!ids.size) return;
+    let mine = 0;
+    this.strokes = this.strokes.filter((s) => {
+      if (!ids.has(s.id)) return true;
+      if (s.owner === this.userId) mine++;
+      return false;
+    });
+    if (mine) {
+      this.reconcileHistory();
+      this.showHint("The board is full, so your oldest lines are being removed");
+    }
     if (this.isOpen) this.redraw();
   }
 
@@ -3769,6 +3795,9 @@ class Talkoboard {
     );
     this.socket.on("board stroke add", (data) =>
       this.handleRemoteStrokeAdd(data),
+    );
+    this.socket.on("board strokes trimmed", (data) =>
+      this.handleStrokesTrimmed(data),
     );
 
     // ── Full state sync ─────────────────────────────────────────────

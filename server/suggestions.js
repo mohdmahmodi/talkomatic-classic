@@ -346,8 +346,9 @@ function headline(s) {
 // lobby badge, plus the posts themselves so the board can point at them.
 function unreadFor(deviceId, since) {
   const out = { approved: 0, declined: 0, replies: 0, items: [] };
-  if (!deviceId) return out;
   const from = Number(since) || 0;
+  out.totals = boardTotals();
+  if (!deviceId) return out;
   for (const s of suggestions) {
     if (s.deviceId !== deviceId) continue;
     const decided = (s.statusAt || 0) > from && s.status !== "open";
@@ -377,6 +378,18 @@ function unreadFor(deviceId, since) {
   out.items.sort((a, b) => b.latest - a.latest);
   out.items = out.items.slice(0, 8);
   return out;
+}
+
+function boardTotals() {
+  const t = { bugs: 0, fixed: 0, ideas: 0, planned: 0, built: 0 };
+  for (const s of suggestions) {
+    const bug = s.kind === "bug";
+    bug ? t.bugs++ : t.ideas++;
+    if (s.status === "implemented") bug ? t.fixed++ : t.built++;
+    else if (!bug && (s.status === "approved" || s.status === "progress"))
+      t.planned++;
+  }
+  return t;
 }
 
 // ── Legacy API kept for the old mod-dashboard events ────────────────────────
