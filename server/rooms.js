@@ -53,6 +53,7 @@ const banhistory = require("./banhistory");
 const blocklist = require("./blocklist");
 const ipban = require("./ipban");
 const evasion = require("./evasion");
+const proxyguard = require("./proxyguard");
 const diag = require("./diag");
 const gamesFloor = require("./games");
 const gamesSocket = require("./games/socket");
@@ -3944,6 +3945,21 @@ function joinRoom(socket, roomId, userId) {
     if (!location) location = "";
 
     const clientIp = socket.clientIp || socket.handshake.address;
+    if (
+      !isStaff &&
+      !socket.isBot &&
+      !isSeasonedDevice(socket.deviceId) &&
+      proxyguard.cached(clientIp)?.flagged
+    )
+      return socket.emit(
+        "error",
+        createErrorResponse(
+          ERROR_CODES.FORBIDDEN,
+          "VPNs, proxies and hosting networks can't be used on Talkomatic. Turn it off, reload the page and sign in again.",
+          null,
+          true,
+        ),
+      );
     if (CONFIG.FEATURES.ENABLE_BOT_PROTECTION) {
       if (isBlacklisted(userId, clientIp))
         return socket.emit(
@@ -4886,6 +4902,39 @@ function registerSocketHandlers(opts) {
               "That username is reserved. Please choose another.",
             ),
           );
+        }
+
+        if (!staff && !socket.isBot && !isSeasonedDevice(socket.deviceId)) {
+          const net = await proxyguard.check(socket.clientIp);
+          if (net && net.flagged) {
+            if (net.fresh)
+              audit.recordNotification({
+                kind: "floodguard",
+                minLevel: 1,
+                text:
+                  "\"" + username + "\" tried to sign in from a " + net.type +
+                  " address (location \"" + (location || "") + "\"). Refused.",
+                target: username || null,
+                targetUserId: null,
+                ip: socket.clientIp || null,
+                card: {
+                  ids: socket.deviceId ? [socket.deviceId] : [],
+                  target: username || "(no name)",
+                  deviceId: socket.deviceId || null,
+                  category: "VPN or proxy sign-in, refused automatically",
+                  reason: net.type,
+                },
+              });
+            return socket.emit(
+              "error",
+              createErrorResponse(
+                ERROR_CODES.FORBIDDEN,
+                "VPNs, proxies and hosting networks can't be used on Talkomatic. Turn it off, reload the page and sign in again.",
+                null,
+                true,
+              ),
+            );
+          }
         }
 
         if (!socket.handshake.session)
