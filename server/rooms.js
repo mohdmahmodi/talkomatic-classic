@@ -2454,11 +2454,14 @@ function broadcastBanHistory(also) {
 }
 
 const SIGNIN_FLOOD_WINDOW = 5 * 60 * 1000;
-const SIGNIN_FLOOD_IDS = 4;
+const SIGNIN_FLOOD_IDS = 3;
 const SIGNIN_FLOOD_ANY_IDS = 12;
 const SIGNIN_FLOOD_ANY_WINDOW = 2 * 60 * 1000;
 const SIGNIN_FLOOD_BLOCK = "1h";
+const SIGNIN_DEVICE_IDS = 3;
+const SIGNIN_DEVICE_WINDOW = 10 * 60 * 1000;
 const signinsByNet = new Map();
+const signinsByDevice = new Map();
 
 function signinNetKey(ip) {
   if (!ip) return null;
@@ -2516,8 +2519,25 @@ function noteSigninFlood(socket, userId, username) {
   return { key, count: Math.max(ids.size, sameName.size), seconds: Math.round((now - list[0].at) / 1000), entries: list };
 }
 
+function noteDeviceChurn(socket, userId) {
+  const did = socket.deviceId;
+  if (!did) return null;
+  const now = Date.now();
+  const list = (signinsByDevice.get(did) || []).filter((e) => now - e.at < SIGNIN_DEVICE_WINDOW);
+  if (!list.some((e) => e.userId === userId)) list.push({ at: now, userId, did });
+  signinsByDevice.set(did, list);
+  if (list.length < SIGNIN_DEVICE_IDS) return null;
+  signinsByDevice.delete(did);
+  return { key: null, count: list.length, seconds: Math.round((now - list[0].at) / 1000), entries: list };
+}
+
 function sweepSigninFlood() {
   const now = Date.now();
+  for (const [did, list] of signinsByDevice) {
+    const kept = list.filter((e) => now - e.at < SIGNIN_DEVICE_WINDOW);
+    if (kept.length) signinsByDevice.set(did, kept);
+    else signinsByDevice.delete(did);
+  }
   for (const [key, list] of signinsByNet) {
     const kept = list.filter((e) => now - e.at < SIGNIN_FLOOD_WINDOW);
     if (kept.length) signinsByNet.set(key, kept);
@@ -2541,15 +2561,15 @@ async function floodGuardSigninFlood(socket, username, location, hit) {
     reason,
     did,
   };
-  placeBlock(hit.key, { ...entry });
+  if (hit.key) placeBlock(hit.key, { ...entry });
   const dids = new Set(hit.entries.map((e) => e.did).filter(Boolean));
   if (did) dids.add(did);
   for (const d of dids) placeBlock(ipban.idKey(d), { ...entry, did: d });
-  settlePersonBlocks({ deviceId: did, ip });
+  settlePersonBlocks({ deviceId: did, ip: hit.key ? ip : null });
   blocklist.saveSoon();
   evasion.invalidate();
   banhistory.record({
-    ip: hit.key,
+    ip: hit.key || (did ? ipban.idKey(did) : null),
     name: username || null,
     action: "ban",
     reason,
@@ -2579,7 +2599,7 @@ async function floodGuardSigninFlood(socket, username, location, hit) {
   const affected = new Set();
   for (const [, s] of io().sockets.sockets) {
     if (s.isDev || s.isMod) continue;
-    if ((s.clientIp && ipban.matchesKey(s.clientIp, hit.key)) || (s.deviceId && dids.has(s.deviceId)))
+    if ((hit.key && s.clientIp && ipban.matchesKey(s.clientIp, hit.key)) || (s.deviceId && dids.has(s.deviceId)))
       affected.add(s);
   }
   affected.add(socket);
@@ -4904,7 +4924,8 @@ function registerSocketHandlers(opts) {
         }
 
         if (!socket.isDev && !socket.isMod && !socket.isBot) {
-          const flood = noteSigninFlood(socket, userId, username);
+          const flood =
+            noteDeviceChurn(socket, userId) || noteSigninFlood(socket, userId, username);
           if (flood) {
             await floodGuardSigninFlood(socket, username, location, flood);
             return;

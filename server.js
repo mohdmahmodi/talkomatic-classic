@@ -638,6 +638,14 @@ io.use((socket, next) => {
         if (!botToken) return next(new Error("Bot token required"));
         const tokenData = validateBotToken(botToken);
         if (!tokenData) return next(new Error("Invalid bot token"));
+        const netOf = (ip) =>
+          String(ip).includes(":") ? ipban.computeRangeCidr(ip) || ip : ip;
+        const net = netOf(clientIp);
+        let live = 0;
+        for (const [, s] of io.sockets.sockets)
+          if (s.isBot && s.clientIp && netOf(s.clientIp) === net) live++;
+        if (live >= CONFIG.LIMITS.MAX_BOT_CONNECTIONS_PER_NETWORK)
+          return next(new Error("Too many bot connections from this network"));
         socket.isBot = true;
         socket.botToken = tokenData;
       } else return next(new Error("Automated access blocked"));
