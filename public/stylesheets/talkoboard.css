@@ -369,6 +369,11 @@
   max-width: 100%;
   max-height: 120px;
 }
+.tb-slider-end {
+  flex: none;
+  font-size: 10.5px;
+  color: #8a8a96;
+}
 .tb-trace-actions {
   display: flex;
   flex-wrap: wrap;

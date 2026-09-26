@@ -103,6 +103,7 @@ class Talkoboard {
     this.trace = null;
     this._traceDrag = null;
     this.TRACE_MAX_PX = 2048;
+    this.TRACE_MAX_WORLD = 5 * 3600;
 
     // ── Layers ──────────────────────────────────────────────────────
     this.LAYERS = 5;
@@ -791,12 +792,18 @@ class Talkoboard {
     this.traceThumb.className = "tb-trace-thumb";
     this.traceBody.appendChild(this.traceThumb);
 
-    const slider = (label, min, max, step, onInput) => {
+    const slider = (label, min, max, step, onInput, ends) => {
       const t = document.createElement("div");
       t.className = "tb-pop-title";
       t.textContent = label;
       const row = document.createElement("div");
       row.className = "tb-size-row";
+      if (ends) {
+        const lo = document.createElement("span");
+        lo.className = "tb-slider-end";
+        lo.textContent = ends[0];
+        row.appendChild(lo);
+      }
       const input = document.createElement("input");
       input.type = "range";
       input.min = String(min);
@@ -806,13 +813,19 @@ class Talkoboard {
       const val = document.createElement("span");
       val.className = "tb-size-label";
       row.appendChild(input);
+      if (ends) {
+        const hi = document.createElement("span");
+        hi.className = "tb-slider-end";
+        hi.textContent = ends[1];
+        row.appendChild(hi);
+      }
       row.appendChild(val);
       this.traceBody.appendChild(t);
       this.traceBody.appendChild(row);
       return { input, val };
     };
-    this.traceAlpha = slider("See-through", 5, 100, 5, (v) => this.setTraceAlpha(v / 100));
-    this.traceSize = slider("Size", 10, 400, 5, (v) => this.setTraceScale(v / 100));
+    this.traceAlpha = slider("How strong the picture shows", 5, 100, 5, (v) => this.setTraceAlpha(v / 100), ["faint", "solid"]);
+    this.traceSize = slider("Size", 10, 400, 5, (v) => this.setTraceScale(v / 100), ["small", "big"]);
 
     const actions = document.createElement("div");
     actions.className = "tb-trace-actions";
@@ -827,6 +840,7 @@ class Talkoboard {
     );
     this.traceFlipBtn = pill("fa-left-right", "Flip", () => this.setTraceFlip(!this.trace?.flip));
     this.traceEyeBtn = pill("fa-eye", "Hide", () => this.setTraceVisible(!this.trace?.visible));
+    pill("fa-expand", "Fit to screen", () => this.fitTraceToView());
     pill("fa-folder-open", "Change", () => this.traceFile.click());
     pill("fa-trash", "Remove", () => this.removeTrace());
     this.traceBody.appendChild(actions);
@@ -901,28 +915,52 @@ class Talkoboard {
     const ph = this.displayHeight || window.innerHeight || 600;
     const vw = pw / this.zoom;
     const vh = ph / this.zoom;
-    const fit = Math.min((vw * 0.6) / c.width, (vh * 0.6) / c.height);
-    const w = c.width * fit;
-    const h = c.height * fit;
-    const centre = this.screenToWorld(pw / 2, ph / 2);
     const prev = this.trace;
     this.trace = {
       img: c,
       thumb,
       ratio: c.width / c.height,
-      x: centre.x - w / 2,
-      y: centre.y - h / 2,
-      w,
-      h,
-      fitW: w,
-      alpha: prev ? prev.alpha : 0.5,
+      x: 0,
+      y: 0,
+      w: 1,
+      h: 1,
+      fitW: 1,
+      alpha: prev ? prev.alpha : 0.7,
       visible: true,
       flip: false,
     };
+    this.fitTraceToView();
     this.renderTracePanel();
     this.setTool("trace");
     this.togglePop("trace", true);
-    this.showHint("Drag the picture to move it, drag a corner to resize. Then pick the pen and draw over it", 4000);
+    this.showHint("Drag the picture to move it, drag a corner to resize. Then pick the pen and draw over it. Too faint? Slide it toward solid", 5000);
+    this.scheduleRedraw();
+  }
+
+  clampTraceSize(w) {
+    const t = this.trace;
+    const lim = this.TRACE_MAX_WORLD;
+    const maxW = t.ratio >= 1 ? lim : lim * t.ratio;
+    return Math.min(w, maxW);
+  }
+
+  fitTraceToView() {
+    const t = this.trace;
+    if (!t) return;
+    if (!(this.displayWidth > 0 && this.displayHeight > 0)) this.resizeCanvas();
+    const pw = this.displayWidth || window.innerWidth || 800;
+    const ph = this.displayHeight || window.innerHeight || 600;
+    const vw = pw / this.zoom;
+    const vh = ph / this.zoom;
+    const fit = Math.min((vw * 0.8) / t.img.width, (vh * 0.8) / t.img.height);
+    t.w = this.clampTraceSize(t.img.width * fit);
+    t.h = t.w / t.ratio;
+    t.fitW = t.w;
+    const centre = this.screenToWorld(pw / 2, ph / 2);
+    t.x = centre.x - t.w / 2;
+    t.y = centre.y - t.h / 2;
+    t.visible = true;
+    this.renderTracePanel();
     this.scheduleRedraw();
   }
 
@@ -946,8 +984,9 @@ class Talkoboard {
     if (!t) return;
     const cx = t.x + t.w / 2;
     const cy = t.y + t.h / 2;
-    t.w = t.fitW * Math.max(0.1, Math.min(4, scale));
+    t.w = this.clampTraceSize(t.fitW * Math.max(0.1, Math.min(4, scale)));
     t.h = t.w / t.ratio;
+    if (t.w < t.fitW * scale - 1e-6) this.showHint("That is as big as a traced picture can be");
     t.x = cx - t.w / 2;
     t.y = cy - t.h / 2;
     this.renderTracePanel();
@@ -1034,7 +1073,7 @@ class Talkoboard {
     const anchorY = bottom ? d.y : d.y + d.h;
     const wantW = right ? d.w + dx : d.w - dx;
     const wantH = bottom ? d.h + dy : d.h - dy;
-    let w = Math.max(minW, Math.max(wantW, wantH * t.ratio));
+    let w = this.clampTraceSize(Math.max(minW, Math.max(wantW, wantH * t.ratio)));
     let h = w / t.ratio;
     t.w = w;
     t.h = h;
