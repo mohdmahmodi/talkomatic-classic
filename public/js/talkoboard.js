@@ -824,8 +824,8 @@ class Talkoboard {
       this.traceBody.appendChild(row);
       return { input, val };
     };
-    this.traceAlpha = slider("How strong the picture shows", 5, 100, 5, (v) => this.setTraceAlpha(v / 100), ["faint", "solid"]);
-    this.traceSize = slider("Size", 10, 400, 5, (v) => this.setTraceScale(v / 100), ["small", "big"]);
+    this.traceAlpha = slider("How strong the picture shows", 15, 100, 5, (v) => this.setTraceAlpha(v / 100), ["faint", "solid"]);
+    this.traceSize = slider("Size", 0, 100, 1, (v) => this.setTraceScale(this.sizeFromSlider(v)), ["quarter", "4 times"]);
 
     const actions = document.createElement("div");
     actions.className = "tb-trace-actions";
@@ -868,10 +868,10 @@ class Talkoboard {
     }
     const a = Math.round(t.alpha * 100);
     this.traceAlpha.input.value = String(a);
-    this.traceAlpha.val.textContent = a + "%";
-    const sc = Math.round((t.w / t.fitW) * 100);
-    this.traceSize.input.value = String(Math.max(10, Math.min(400, sc)));
-    this.traceSize.val.textContent = sc + "%";
+    this.traceAlpha.val.textContent = a < 30 ? a + "% (faint)" : a + "%";
+    const scale = t.w / t.fitW;
+    this.traceSize.input.value = String(Math.round(this.sliderFromSize(scale)));
+    this.traceSize.val.textContent = Math.round(scale * 100) + "%";
     this.traceMoveBtn.classList.toggle("active", this.tool === "trace");
     this.traceFlipBtn.classList.toggle("active", !!t.flip);
     this.traceEyeBtn.innerHTML =
@@ -915,7 +915,6 @@ class Talkoboard {
     const ph = this.displayHeight || window.innerHeight || 600;
     const vw = pw / this.zoom;
     const vh = ph / this.zoom;
-    const prev = this.trace;
     this.trace = {
       img: c,
       thumb,
@@ -925,7 +924,7 @@ class Talkoboard {
       w: 1,
       h: 1,
       fitW: 1,
-      alpha: prev ? prev.alpha : 0.7,
+      alpha: 0.7,
       visible: true,
       flip: false,
     };
@@ -972,9 +971,17 @@ class Talkoboard {
     this.scheduleRedraw();
   }
 
+  sizeFromSlider(v) {
+    return 0.25 * Math.pow(16, Math.max(0, Math.min(100, v)) / 100);
+  }
+
+  sliderFromSize(scale) {
+    return (Math.log(Math.max(0.25, Math.min(4, scale)) / 0.25) / Math.log(16)) * 100;
+  }
+
   setTraceAlpha(a) {
     if (!this.trace) return;
-    this.trace.alpha = Math.max(0.05, Math.min(1, a));
+    this.trace.alpha = Math.max(0.15, Math.min(1, a));
     this.renderTracePanel();
     this.scheduleRedraw();
   }
@@ -984,7 +991,7 @@ class Talkoboard {
     if (!t) return;
     const cx = t.x + t.w / 2;
     const cy = t.y + t.h / 2;
-    t.w = this.clampTraceSize(t.fitW * Math.max(0.1, Math.min(4, scale)));
+    t.w = this.clampTraceSize(t.fitW * Math.max(0.25, Math.min(4, scale)));
     t.h = t.w / t.ratio;
     if (t.w < t.fitW * scale - 1e-6) this.showHint("That is as big as a traced picture can be");
     t.x = cx - t.w / 2;
