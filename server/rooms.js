@@ -296,7 +296,7 @@ function paddedClaim(c, pad) {
 function foreignClaimAt(bs, userId, x, y, size) {
   const pad = (Number(size) || 0) / 2;
   for (const c of boardClaims(bs)) {
-    if (c.owner === userId) continue;
+    if (c.owner === userId || c.open) continue;
     const r = paddedClaim(c, pad);
     if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return c;
   }
@@ -349,7 +349,7 @@ function claimCrossed(socket, bs, x1, y1, x2, y2, size) {
   const userId = socket.handshake.session?.userId;
   const pad = (Number(size) || 0) / 2;
   for (const c of boardClaims(bs)) {
-    if (c.owner === userId) continue;
+    if (c.owner === userId || c.open) continue;
     if (segmentHitsRect(x1, y1, x2, y2, paddedClaim(c, pad))) return c;
   }
   return null;
@@ -371,6 +371,7 @@ function sendClaims(roomId) {
     w: c.w,
     h: c.h,
     away: !!c.away,
+    open: !!c.open,
   }));
   const room = state.rooms.get(roomId);
   const byId = new Map((room?.users || []).map((u) => [u.id, u]));
@@ -558,6 +559,27 @@ function finalizeBoardUserStroke(roomId, userId) {
 }
 
 const MAX_RINGS_PER_STROKE = 256;
+const BOARD_LAYERS = 5;
+
+function boardLayer(v) {
+  const n = Math.floor(Number(v));
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(n, BOARD_LAYERS - 1);
+}
+
+function boardAlpha(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n >= 1) return 1;
+  return Math.max(0.05, Math.round(n * 100) / 100);
+}
+
+function strokeExtras(stroke, src) {
+  const layer = boardLayer(src && src.layer);
+  const alpha = boardAlpha(src && src.alpha);
+  if (layer) stroke.layer = layer;
+  if (alpha < 1) stroke.alpha = alpha;
+  return stroke;
+}
 
 function sanitizeRings(rings, budget) {
   if (!Array.isArray(rings)) return null;
@@ -5205,6 +5227,7 @@ function registerSocketHandlers(opts) {
 
         const room = state.rooms.get(socket.roomId);
         const me = room?.users?.find((u) => u.id === userId);
+        const prev = claims.find((c) => c.owner === userId);
         const next = {
           owner: userId,
           name: (me && me.username) || "Someone",
@@ -5214,9 +5237,27 @@ function registerSocketHandlers(opts) {
           h,
           ts: Date.now(),
         };
+        if (prev && prev.open) next.open = true;
         bs.claims = claims.filter((c) => c.owner !== userId).concat([next]);
         sendClaims(socket.roomId);
         socket.emit("board claim result", { ok: true });
+      }),
+    );
+
+    socket.on(
+      "board claim open",
+      safe(async (data) => {
+        const userId = socket.handshake.session?.userId;
+        if (!socket.roomId || !userId) return;
+        const bs = boardState.get(socket.roomId);
+        if (!bs || !Array.isArray(bs.claims)) return;
+        const mine = bs.claims.find((c) => c.owner === userId);
+        if (!mine) return;
+        const open = !!(data && data.open);
+        if (!!mine.open === open) return;
+        if (open) mine.open = true;
+        else delete mine.open;
+        sendClaims(socket.roomId);
       }),
     );
 
@@ -5379,15 +5420,18 @@ function registerSocketHandlers(opts) {
         // fractions; zooming out never grows the brush.
         const startSize = Math.min(Math.max(data.size, 1e-9), 5000);
         const step = snapStep(startSize);
-        const stroke = {
-          id: strokeId,
-          owner: userId,
-          points: [{ x: snap(data.point.x, step), y: snap(data.point.y, step) }],
-          color: data.color.slice(0, 7),
-          size: startSize,
-          eraser: !!data.eraser,
-          gradient: data.eraser ? null : sanitizeGradient(data.gradient),
-        };
+        const stroke = strokeExtras(
+          {
+            id: strokeId,
+            owner: userId,
+            points: [{ x: snap(data.point.x, step), y: snap(data.point.y, step) }],
+            color: data.color.slice(0, 7),
+            size: startSize,
+            eraser: !!data.eraser,
+            gradient: data.eraser ? null : sanitizeGradient(data.gradient),
+          },
+          data,
+        );
 
         const bs = getBoardState(socket.roomId);
         finalizeBoardUserStroke(socket.roomId, userId);
@@ -5403,6 +5447,8 @@ function registerSocketHandlers(opts) {
             size: stroke.size,
             eraser: stroke.eraser,
             gradient: stroke.gradient,
+            layer: stroke.layer || 0,
+            alpha: stroke.alpha || 1,
             point: stroke.points[0],
           },
           false,
@@ -5600,26 +5646,29 @@ function registerSocketHandlers(opts) {
             }
           }
           for (const c of boardClaims(bsAdd)) {
-            if (c.owner === userId) continue;
+            if (c.owner === userId || c.open) continue;
             const mid = { x: c.x + c.w / 2, y: c.y + c.h / 2 };
             if (pointInRings(rings, mid)) return refuse(c);
           }
         }
 
-        const stroke = {
-          id: s.id,
-          owner: userId,
-          points,
-          color: typeof s.color === "string" ? s.color.slice(0, 7) : "#000000",
-          size: Math.min(Math.max(Number(s.size) || 3, 1e-9), 5000),
-          eraser: !!s.eraser,
-          gradient: s.eraser ? null : sanitizeGradient(s.gradient),
-          fill: !!s.fill,
-          rings: s.fill
-            ? sanitizeRings(s.rings, MAX_POINTS_PER_STROKE - points.length)
-            : null,
-          sharp: !!s.sharp,
-        };
+        const stroke = strokeExtras(
+          {
+            id: s.id,
+            owner: userId,
+            points,
+            color: typeof s.color === "string" ? s.color.slice(0, 7) : "#000000",
+            size: Math.min(Math.max(Number(s.size) || 3, 1e-9), 5000),
+            eraser: !!s.eraser,
+            gradient: s.eraser ? null : sanitizeGradient(s.gradient),
+            fill: !!s.fill,
+            rings: s.fill
+              ? sanitizeRings(s.rings, MAX_POINTS_PER_STROKE - points.length)
+              : null,
+            sharp: !!s.sharp,
+          },
+          s,
+        );
 
         const bs = getBoardState(socket.roomId);
         if (bs.strokes.some((x) => x.id === stroke.id && x.owner === userId))

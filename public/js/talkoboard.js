@@ -13,14 +13,17 @@ const TOOL_HELP = [
   { name: "fill", fa: "fa-fill", label: "Filled", tip: "Filled shapes on or off. Boxes, circles and triangles come out solid." },
   { name: "bucket", fa: "fa-fill-drip", label: "Bucket", key: "B", tip: "Tap inside a closed shape to fill it with color." },
   { name: "claim", fa: "fa-vector-square", label: "Protect", tip: "Drag a box around your art. Only you can draw inside it, and other people's strokes stop at the edge." },
+  { name: "open", fa: "fa-lock-open", label: "Open", tip: "Let other people draw inside your protected area for a while. Tap again to close it." },
   { name: "release", fa: "fa-square-xmark", label: "Release", tip: "Give your protected area back so anyone can draw there again." },
-  { name: "color", fa: "fa-palette", label: "Color", key: "C", tip: "Pick a color or a gradient." },
+  { name: "color", fa: "fa-palette", label: "Color", key: "C", tip: "Pick a color or a gradient, and set how see-through it is." },
   { name: "size", fa: "fa-circle", label: "Size", key: "S", tip: "Brush thickness." },
+  { name: "layers", fa: "fa-layer-group", label: "Layers", key: "Y", tip: "Five shared layers, bottom to top. Sketch on one and color on another: the eraser only rubs out its own layer." },
   { name: "inspect", fa: "fa-user-shield", label: "Inspect", staff: true, tip: "Mod tools: tap a drawing to see who made it." },
 ];
 
 const BOARD_TIPS = [
-  "Protect keeps a drawing yours. Everyone can still see it, nobody else can draw over it.",
+  "Protect keeps a drawing yours. Everyone can still see it, nobody else can draw over it. Open lets friends in without giving it up.",
+  "Layers stack bottom to top and everyone shares the same five. Hiding a layer only hides it for you.",
   "Scroll to zoom and hold Space to move. Shift snaps lines and makes squares and circles.",
   "Ctrl+Z undoes your last stroke and Ctrl+Y brings it back.",
 ];
@@ -93,6 +96,14 @@ class Talkoboard {
     this.shapeStart = null;
     this.preview = null;
     this.fillShapes = false;
+    this.alpha = 1;
+
+    // ── Layers ──────────────────────────────────────────────────────
+    this.LAYERS = 5;
+    this.layer = 0;
+    this.hiddenLayers = new Set();
+    this._layerTop = 0;
+    this._layersUsed = 1;
 
     // ── Claimed areas ───────────────────────────────────────────────
     this.claims = [];
@@ -252,6 +263,8 @@ class Talkoboard {
           fill: !!input.fill,
           rings: input.rings || null,
           sharp: !!input.sharp,
+          layer: b.layerOf({ layer: input.layer }),
+          alpha: b.alphaOf({ alpha: input.alpha }),
         };
         b.strokes.push(stroke);
         if (b.isOpen) b.redraw();
@@ -426,6 +439,10 @@ class Talkoboard {
     this.fillBtn.addEventListener("click", () => this.setFillShapes(!this.fillShapes));
     const bucket = tool("bucket");
     const claim = tool("claim");
+    const openHelp = helpFor("open");
+    this.openBtn = labelled(this.makeBtn("tb-btn", this.icon(openHelp.fa), openHelp.tip), openHelp);
+    this.openBtn.addEventListener("click", () => this.toggleClaimOpen());
+    this.openBtn.style.display = "none";
     const releaseHelp = helpFor("release");
     this.releaseBtn = labelled(this.makeBtn("tb-btn", this.icon(releaseHelp.fa), releaseHelp.tip), releaseHelp);
     this.releaseBtn.addEventListener("click", () => this.socket.emit("board unclaim", {}));
@@ -435,7 +452,10 @@ class Talkoboard {
     this.colorBtn = labelled(this.makeBtn("tb-btn tb-color-btn", "", tipText(colorHelp)), colorHelp);
     this.colorSwatch = document.createElement("span");
     this.colorSwatch.className = "tb-color-current";
-    this.colorSwatch.style.background = this.color;
+    this.colorFill = document.createElement("i");
+    this.colorFill.className = "tb-color-fill";
+    this.colorFill.style.background = this.color;
+    this.colorSwatch.appendChild(this.colorFill);
     this.colorBtn.insertBefore(this.colorSwatch, this.colorBtn.firstChild);
     this.colorBtn.addEventListener("click", () => this.togglePop("color"));
 
@@ -446,6 +466,10 @@ class Talkoboard {
     this.sizeBtn.insertBefore(this.sizeDot, this.sizeBtn.firstChild);
     this.sizeBtn.addEventListener("click", () => this.togglePop("size"));
 
+    const layersHelp = helpFor("layers");
+    this.layersBtn = labelled(this.makeBtn("tb-btn tb-layers-btn", this.icon(layersHelp.fa), tipText(layersHelp)), layersHelp);
+    this.layersBtn.addEventListener("click", () => this.togglePop("layers"));
+
     const drawTools = [
       this.penBtn,
       this.eraserBtn,
@@ -455,10 +479,12 @@ class Talkoboard {
       bucket,
       sep(),
       claim,
+      this.openBtn,
       this.releaseBtn,
       sep(),
       this.colorBtn,
       this.sizeBtn,
+      this.layersBtn,
     ];
     tools.appendChild(this.panBtn);
     for (const el of drawTools) tools.appendChild(el);
@@ -519,6 +545,7 @@ class Talkoboard {
     this.colorPanel.classList.add("tb-pop");
     this.pops.color = { panel: this.colorPanel, btn: this.colorBtn };
     this.buildSizePanel(this.modal);
+    this.buildLayersPanel(this.modal);
     this.buildSavePanel(this.modal);
     this.buildHelpPanel(this.modal);
     this.buildTooltip();
@@ -577,6 +604,114 @@ class Talkoboard {
     parent.appendChild(panel);
     this.pops.size = { panel, btn: this.sizeBtn };
     this.setSize(this.size);
+  }
+
+  buildLayersPanel(parent) {
+    const panel = document.createElement("div");
+    panel.className = "tb-pop tb-layers-panel";
+    panel.addEventListener("pointerdown", (e) => e.stopPropagation());
+    const title = document.createElement("div");
+    title.className = "tb-pop-title";
+    title.textContent = "Layers";
+    panel.appendChild(title);
+    const list = document.createElement("div");
+    list.className = "tb-layer-list";
+    this.layerRows = [];
+    for (let i = this.LAYERS - 1; i >= 0; i--) {
+      const row = document.createElement("div");
+      row.className = "tb-layer-row";
+      const eye = this.makeBtn("tb-layer-eye", this.icon("fa-eye"));
+      eye.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.toggleLayerHidden(i);
+      });
+      const name = document.createElement("span");
+      name.className = "tb-layer-name";
+      name.textContent = "Layer " + (i + 1);
+      const note = document.createElement("span");
+      note.className = "tb-layer-note";
+      note.textContent = i === this.LAYERS - 1 ? "top" : i === 0 ? "bottom" : "";
+      const count = document.createElement("span");
+      count.className = "tb-layer-count";
+      row.appendChild(eye);
+      row.appendChild(name);
+      row.appendChild(note);
+      row.appendChild(count);
+      row.addEventListener("click", () => this.setLayer(i));
+      list.appendChild(row);
+      this.layerRows[i] = { row, eye, count };
+    }
+    panel.appendChild(list);
+    const foot = document.createElement("div");
+    foot.className = "tb-layer-foot";
+    foot.textContent =
+      "Everyone shares these five, stacked bottom to top. The eraser only rubs out the layer it is on. Hiding one is just for you.";
+    panel.appendChild(foot);
+    parent.appendChild(panel);
+    this.pops.layers = { panel, btn: this.layersBtn };
+    this.setLayer(this.layer);
+  }
+
+  setLayer(i) {
+    const n = Math.max(0, Math.min(this.LAYERS - 1, Math.floor(i) || 0));
+    this.layer = n;
+    this.hiddenLayers.delete(n);
+    this.renderLayerRows();
+    if (this.isOpen) this.scheduleRedraw();
+  }
+
+  toggleLayerHidden(i) {
+    if (i === this.layer) return this.showHint("You are drawing on that layer");
+    if (this.hiddenLayers.has(i)) this.hiddenLayers.delete(i);
+    else this.hiddenLayers.add(i);
+    this.renderLayerRows();
+    if (this.isOpen) this.redraw();
+  }
+
+  renderLayerRows() {
+    if (!this.layerRows) return;
+    const counts = new Array(this.LAYERS).fill(0);
+    for (const s of this.strokes) counts[this.layerOf(s)]++;
+    for (let i = 0; i < this.LAYERS; i++) {
+      const r = this.layerRows[i];
+      if (!r) continue;
+      const hidden = this.hiddenLayers.has(i);
+      r.row.classList.toggle("active", i === this.layer);
+      r.row.classList.toggle("hidden", hidden);
+      r.eye.innerHTML = this.icon(hidden ? "fa-eye-slash" : "fa-eye");
+      this.setTip(r.eye, hidden ? "Show this layer" : i === this.layer ? "Your current layer" : "Hide this layer for me");
+      r.count.textContent = counts[i] ? String(counts[i]) : "";
+    }
+    if (this.layersBtn) {
+      const lbl = this.layersBtn.querySelector(".tb-btn-label");
+      if (lbl) lbl.textContent = "Layer " + (this.layer + 1);
+      this.layersBtn.classList.toggle("tb-layers-up", this.layer > 0);
+    }
+  }
+
+  layerOf(s) {
+    const n = s && s.layer;
+    if (typeof n !== "number" || !(n > 0)) return 0;
+    return Math.min(this.LAYERS - 1, Math.floor(n));
+  }
+
+  alphaOf(s) {
+    const a = s && s.alpha;
+    if (typeof a !== "number" || !(a < 1)) return 1;
+    return Math.max(0.05, a);
+  }
+
+  layerVisible(s) {
+    return !this.hiddenLayers.has(this.layerOf(s));
+  }
+
+  setAlpha(pct) {
+    const n = Math.max(5, Math.min(100, Math.round(pct) || 100));
+    this.alpha = n / 100;
+    if (this.alphaInput) this.alphaInput.value = String(n);
+    if (this.alphaLabel) this.alphaLabel.textContent = n + "%";
+    if (this.colorFill) this.colorFill.style.opacity = String(this.alpha);
+    this.updateSizeDot();
   }
 
   buildSavePanel(parent) {
@@ -721,6 +856,7 @@ class Talkoboard {
     pop.panel.classList.add("show");
     pop.btn.classList.add("active");
     if (name === "help") this.markIntroSeen();
+    if (name === "layers") this.renderLayerRows();
     if (name === "color") {
       this.renderRecentColors();
       this.renderUserColors();
@@ -790,6 +926,24 @@ class Talkoboard {
     customRow.appendChild(customLabel);
     customRow.appendChild(this.eyedropperBtn);
 
+    const alphaTitle = document.createElement("div");
+    alphaTitle.className = "tb-pop-title";
+    alphaTitle.textContent = "Opacity";
+    const alphaRow = document.createElement("div");
+    alphaRow.className = "tb-size-row tb-alpha-row";
+    this.alphaInput = document.createElement("input");
+    this.alphaInput.type = "range";
+    this.alphaInput.min = "5";
+    this.alphaInput.max = "100";
+    this.alphaInput.step = "5";
+    this.alphaInput.value = "100";
+    this.alphaInput.addEventListener("input", (e) => this.setAlpha(+e.target.value));
+    this.alphaLabel = document.createElement("span");
+    this.alphaLabel.className = "tb-size-label";
+    this.alphaLabel.textContent = "100%";
+    alphaRow.appendChild(this.alphaInput);
+    alphaRow.appendChild(this.alphaLabel);
+
     const gradTitle = document.createElement("div");
     gradTitle.className = "tb-pop-title";
     gradTitle.textContent = "Gradients";
@@ -823,6 +977,8 @@ class Talkoboard {
     panel.appendChild(presetTitle);
     panel.appendChild(presetGrid);
     panel.appendChild(customRow);
+    panel.appendChild(alphaTitle);
+    panel.appendChild(alphaRow);
     panel.appendChild(gradTitle);
     panel.appendChild(gradRow);
     panel.appendChild(recentTitle);
@@ -1104,10 +1260,11 @@ class Talkoboard {
         else return;
         return e.preventDefault();
       }
-      if (this.watching && (KEYS[k] || k === "c" || k === "s")) return;
+      if (this.watching && (KEYS[k] || k === "c" || k === "s" || k === "y")) return;
       if (KEYS[k]) this.setTool(KEYS[k]);
       else if (k === "c") this.togglePop("color");
       else if (k === "s") this.togglePop("size");
+      else if (k === "y") this.togglePop("layers");
       else if (k === "f") this.fitToView();
       else if (k === "=" || k === "+") this.adjustZoom(0.15);
       else if (k === "-") this.adjustZoom(-0.15);
@@ -1233,7 +1390,7 @@ class Talkoboard {
     if (!color) return;
     this.color = color;
     this.gradient = null;
-    this.colorSwatch.style.background = color;
+    this.colorFill.style.background = color;
     if (this.colorInput) this.colorInput.value = this.normalizeHex(color);
     if (this.eraser || this.panMode || this.inspectActive) this.setTool("pen");
     this.updateSizeDot();
@@ -1245,7 +1402,7 @@ class Talkoboard {
   setGradient(stops) {
     if (!Array.isArray(stops) || stops.length < 2) return;
     this.gradient = stops.slice();
-    this.colorSwatch.style.background =
+    this.colorFill.style.background =
       "linear-gradient(135deg, " + stops.join(", ") + ")";
     if (this.eraser || this.panMode || this.inspectActive) this.setTool("pen");
     this.updateSizeDot();
@@ -1284,6 +1441,7 @@ class Talkoboard {
       : this.gradient
         ? "linear-gradient(135deg, " + this.gradient.join(", ") + ")"
         : this.color;
+    this.sizeDot.style.opacity = String(this.alpha);
   }
 
   // ── Gradient helpers ────────────────────────────────────────────
@@ -1415,6 +1573,7 @@ class Talkoboard {
     for (let i = candidates.length - 1; i >= 0; i--) {
       const s = candidates[i];
       if (!s || !s.points || !s.points.length) continue;
+      if (!this.layerVisible(s)) continue;
       if (s.fill && this.pointInFilled(s, pt)) return s;
       const tol = Math.max((s.size || 3) / 2, 6 / this.zoom);
       if (this.strokeHit(s, pt, tol)) return s;
@@ -1487,7 +1646,7 @@ class Talkoboard {
     if (!pt || this.isStaff) return null;
     const pad = this.claimPad(size);
     for (const c of this.claims) {
-      if (c.owner === this.userId) continue;
+      if (c.owner === this.userId || c.open) continue;
       const r = this.paddedClaim(c, pad);
       if (pt.x >= r.x && pt.x <= r.x + r.w && pt.y >= r.y && pt.y <= r.y + r.h)
         return c;
@@ -1530,7 +1689,7 @@ class Talkoboard {
     if (this.isStaff) return null;
     const pad = this.claimPad(size);
     for (const c of this.claims) {
-      if (c.owner === this.userId) continue;
+      if (c.owner === this.userId || c.open) continue;
       if (this.segmentHitsRect(a, b, this.paddedClaim(c, pad))) return c;
     }
     return null;
@@ -1538,9 +1697,30 @@ class Talkoboard {
 
   setClaims(list) {
     this.claims = Array.isArray(list) ? list : [];
-    const mine = this.claims.some((c) => c.owner === this.userId);
+    const mine = this.claims.find((c) => c.owner === this.userId);
     if (this.releaseBtn) this.releaseBtn.style.display = mine ? "" : "none";
+    if (this.openBtn) {
+      this.openBtn.style.display = mine ? "" : "none";
+      const open = !!(mine && mine.open);
+      this.openBtn.classList.toggle("active", open);
+      const ico = this.openBtn.querySelector("i");
+      if (ico) ico.className = "fas " + (open ? "fa-lock" : "fa-lock-open");
+      const lbl = this.openBtn.querySelector(".tb-btn-label");
+      if (lbl) lbl.textContent = open ? "Close" : "Open";
+    }
     if (this.isOpen) this.scheduleRedraw();
+  }
+
+  toggleClaimOpen() {
+    const mine = this.claims.find((c) => c.owner === this.userId);
+    if (!mine) return;
+    const open = !mine.open;
+    this.socket.emit("board claim open", { open });
+    this.showHint(
+      open
+        ? "Your area is open: anyone can draw in it until you close it"
+        : "Your area is closed again",
+    );
   }
 
   constrainPoint(a, b, kind, shift) {
@@ -1608,7 +1788,7 @@ class Talkoboard {
       kind === "rect" || kind === "ellipse" || kind === "triangle";
     if (closedShape && this.fillShapes && !this.isStaff) {
       for (const c of this.claims) {
-        if (c.owner === this.userId) continue;
+        if (c.owner === this.userId || c.open) continue;
         const mid = { x: c.x + c.w / 2, y: c.y + c.h / 2 };
         if (this.pointInFilled({ points: pts }, mid))
           return this.showHint("That is " + (c.name || "someone") + "'s area");
@@ -1625,6 +1805,8 @@ class Talkoboard {
       gradient: this.gradient ? this.gradient.slice() : null,
       fill: closed && this.fillShapes,
       sharp: kind !== "ellipse",
+      layer: this.layer,
+      alpha: this.alpha,
     };
     this.addOwnStroke(stroke);
   }
@@ -1640,6 +1822,8 @@ class Talkoboard {
       fill: !!stroke.fill,
       rings: stroke.rings || null,
       sharp: !!stroke.sharp,
+      layer: this.layerOf(stroke),
+      alpha: this.alphaOf(stroke),
     };
   }
 
@@ -1733,6 +1917,8 @@ class Talkoboard {
       eraser: false,
       gradient: null,
       fill: true,
+      layer: this.layer,
+      alpha: this.alpha,
     });
   }
 
@@ -2356,7 +2542,7 @@ class Talkoboard {
   // stroke into one image, so one huge doodle far off in a corner shrinks
   // everything else; that is why the view save is offered first.
   exportBoard(mode) {
-    const all = this.allStrokes();
+    const all = this.visibleStrokes();
     if (!all.length) return this.showHint("Nothing to save yet");
     let v;
     if (mode === "all") {
@@ -2426,6 +2612,8 @@ class Talkoboard {
     this._viewTransformed = false;
     this._painted = { panX: this.panX, panY: this.panY, zoom: this.zoom };
     this.paint(this.ctx, this.dpr, this.displayWidth, this.displayHeight, false);
+    if (this.pops && this.pops.layers && this.pops.layers.panel.classList.contains("show"))
+      this.renderLayerRows();
   }
 
   // Dots every 1, 2 or 5 world units times a power of ten, whichever lands
@@ -2442,6 +2630,7 @@ class Talkoboard {
   }
 
   paint(ctx, dpr, w, h, plain) {
+    if (!(ctx.canvas.width > 0 && ctx.canvas.height > 0)) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
     ctx.fillStyle = "#ffffff";
@@ -2454,21 +2643,120 @@ class Talkoboard {
     const S = Math.min(this.zoom, this.SAFE_CANVAS_SCALE);
     this._rs = this.zoom / S;
 
+    const tx = this.panX + this._rox * this.zoom;
+    const ty = this.panY + this._roy * this.zoom;
     ctx.save();
-    ctx.translate(this.panX + this._rox * this.zoom, this.panY + this._roy * this.zoom);
+    ctx.translate(tx, ty);
     ctx.scale(S, S);
 
     const view = this.viewWorldRect();
-    for (const stroke of this.strokes) this.renderStrokeCulled(ctx, stroke, view);
-    for (const [, stroke] of this.remoteActiveStrokes)
-      this.renderStrokeCulled(ctx, stroke, view);
-    if (this.currentStroke) this.renderStrokeCulled(ctx, this.currentStroke, view);
+    const buckets = this.layerBuckets();
+    let first = true;
+    for (let i = 0; i < buckets.length; i++) {
+      const list = buckets[i];
+      if (!list) continue;
+      if (first) {
+        for (const stroke of list) this.renderStrokeCulled(ctx, stroke, view);
+        first = false;
+        continue;
+      }
+      const sc = this.scratchFor(ctx, "_layerScratch");
+      sc.setTransform(dpr, 0, 0, dpr, 0, 0);
+      sc.translate(tx, ty);
+      sc.scale(S, S);
+      for (const stroke of list) this.renderStrokeCulled(sc, stroke, view);
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(sc.canvas, 0, 0);
+      ctx.restore();
+    }
 
     if (!plain) {
       for (const c of this.claims) this.renderClaim(ctx, c);
       if (this.preview) this.renderPreview(ctx);
     }
     ctx.restore();
+  }
+
+  layerBuckets() {
+    const buckets = new Array(this.LAYERS).fill(null);
+    let used = 0;
+    let top = 0;
+    const put = (s) => {
+      const L = this.layerOf(s);
+      if (this.hiddenLayers.has(L)) return;
+      if (!buckets[L]) {
+        buckets[L] = [];
+        used++;
+      }
+      if (L > top) top = L;
+      buckets[L].push(s);
+    };
+    for (const s of this.strokes) put(s);
+    for (const [, s] of this.remoteActiveStrokes) put(s);
+    if (this.currentStroke) put(this.currentStroke);
+    this._layersUsed = used;
+    this._layerTop = top;
+    return buckets;
+  }
+
+  scratchFor(ctx, key) {
+    let c = this[key];
+    if (!c) {
+      c = this[key] = document.createElement("canvas");
+    }
+    const W = ctx.canvas.width;
+    const H = ctx.canvas.height;
+    if (c.width !== W || c.height !== H) {
+      c.width = W;
+      c.height = H;
+    }
+    const sc = c.getContext("2d");
+    sc.setTransform(1, 0, 0, 1, 0, 0);
+    sc.clearRect(0, 0, W, H);
+    return sc;
+  }
+
+  canDrawLive(stroke) {
+    if (this.alphaOf(stroke) < 1) return false;
+    const L = this.layerOf(stroke);
+    if (this.hiddenLayers.has(L)) return false;
+    if (this._layersUsed <= 1 && L >= this._layerTop) return true;
+    if (L < this._layerTop) return false;
+    return !stroke.eraser;
+  }
+
+  visibleStrokes() {
+    return this.allStrokes().filter((s) => this.layerVisible(s));
+  }
+
+  renderStroke(ctx, stroke, view) {
+    const a = this.alphaOf(stroke);
+    if (a >= 1) return this.renderStrokeBody(ctx, stroke, view);
+    const compound =
+      (!stroke.eraser && stroke.gradient && stroke.gradient.length >= 2) ||
+      (stroke.fill && stroke.size > 1);
+    if (!compound) {
+      const keep = ctx.globalAlpha;
+      ctx.globalAlpha = a;
+      this.renderStrokeBody(ctx, stroke, view);
+      ctx.globalAlpha = keep;
+      return;
+    }
+    const m = ctx.getTransform();
+    const sc = this.scratchFor(ctx, "_alphaScratch");
+    sc.setTransform(m);
+    this.renderStrokeBody(sc, stroke, view);
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = a;
+    ctx.drawImage(sc.canvas, 0, 0);
+    ctx.restore();
+  }
+
+  renderStrokeBody(ctx, stroke, view) {
+    if (view) this.renderStrokeCulledBody(ctx, stroke, view);
+    else this.renderStrokeSmooth(ctx, stroke);
   }
 
   renderPreview(ctx) {
@@ -2481,7 +2769,7 @@ class Talkoboard {
         w: Math.abs(p.b.x - p.a.x),
         h: Math.abs(p.b.y - p.a.y),
       });
-    this.renderStrokeSmooth(ctx, {
+    this.renderStroke(ctx, {
       points: this.shapePoints(p.kind, p.a, p.b),
       color: this.color,
       size: this.worldBrushSize(),
@@ -2489,6 +2777,7 @@ class Talkoboard {
       gradient: this.gradient,
       fill: this.fillShapes && ["rect", "ellipse", "triangle"].includes(p.kind),
       sharp: p.kind !== "ellipse",
+      alpha: this.alpha,
     });
   }
 
@@ -2537,6 +2826,11 @@ class Talkoboard {
       bb.minY - pad > view.maxY
     )
       return;
+    this.renderStroke(ctx, stroke, view);
+  }
+
+  renderStrokeCulledBody(ctx, stroke, view) {
+    const bb = this.strokeBB(stroke);
     // Far corners turn into device-pixel numbers float32 cannot hold; those
     // strokes get clipped in JS (doubles) before the canvas sees them.
     const far = Math.max(
@@ -2918,9 +3212,9 @@ class Talkoboard {
 
     const k = this._rs;
     ctx.save();
-    ctx.setLineDash([(8 / z) * k, (6 / z) * k]);
+    ctx.setLineDash(c.open ? [(3 / z) * k, (5 / z) * k] : [(8 / z) * k, (6 / z) * k]);
     ctx.lineWidth = (1.5 / z) * k;
-    ctx.strokeStyle = mine ? "#ff9800" : "#8d8d8d";
+    ctx.strokeStyle = mine ? "#ff9800" : c.open ? "#b8b8b8" : "#8d8d8d";
 
     const far = Math.max(
       Math.abs(c.x - ox),
@@ -2961,6 +3255,7 @@ class Talkoboard {
 
     const label =
       (mine ? "Your area" : (c.name || "Someone") + "'s area") +
+      (c.open ? " (open)" : "") +
       (c.away ? " (away)" : "");
     const pad = (4 / z) * k;
     ctx.font = "bold " + (11 / z) * k + "px sans-serif";
@@ -3034,6 +3329,7 @@ class Talkoboard {
   drawSegmentsIncremental(stroke, fromIndex) {
     if (!this.isOpen) return;
     if (this._viewTransformed) return this.scheduleRedraw();
+    if (!this.canDrawLive(stroke)) return this.scheduleRedraw();
     const pts = stroke.points;
     if (fromIndex >= pts.length) return;
 
@@ -3198,6 +3494,8 @@ class Talkoboard {
       size,
       eraser: this.eraser,
       gradient,
+      layer: this.layer,
+      alpha: this.alpha,
     };
 
     this.socket.emit("board stroke start", {
@@ -3207,7 +3505,10 @@ class Talkoboard {
       size,
       eraser: this.eraser,
       gradient,
+      layer: this.layer,
+      alpha: this.alpha,
     });
+    if (!this.canDrawLive(this.currentStroke)) this.scheduleRedraw();
 
     this.pointBuffer = [];
     if (!this.flushTimer) {
@@ -3394,6 +3695,8 @@ class Talkoboard {
         Array.isArray(data.gradient) && data.gradient.length >= 2
           ? data.gradient
           : null,
+      layer: this.layerOf(data),
+      alpha: this.alphaOf(data),
     };
 
     if (!stroke.eraser) this.notePeerColor(data.userId, stroke.color);
@@ -3402,6 +3705,7 @@ class Talkoboard {
 
     this.remoteActiveStrokes.set(data.userId, stroke);
 
+    if (this.isOpen && !this.canDrawLive(stroke)) return this.scheduleRedraw();
     if (this.isOpen && !this._viewTransformed) {
       const ctx = this.ctx;
       const dpr = this.dpr;

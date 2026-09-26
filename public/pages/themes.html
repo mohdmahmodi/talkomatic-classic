@@ -119,6 +119,42 @@
       .search-clear:hover { color: var(--tk-accent); }
       .search-hint { font-size: 11.5px; color: #888; margin-top: 7px; }
 
+      .view-tabs {
+        display: flex;
+        justify-content: center;
+        gap: 6px;
+        margin-bottom: 22px;
+      }
+      .view-tabs .chip { padding: 8px 20px; font-size: 13px; }
+      .view-tabs .chip .n {
+        display: inline-block;
+        min-width: 18px;
+        margin-left: 5px;
+        padding: 1px 6px;
+        border-radius: 999px;
+        background: var(--tk-tile);
+        color: var(--tk-muted);
+        font-size: 11px;
+        text-align: center;
+      }
+      .view-tabs .chip.active .n { background: rgba(0, 0, 0, 0.25); color: #1a1a1a; }
+
+      .fav-btn {
+        width: 36px;
+        padding: 8px 0;
+        text-align: center;
+        font-size: 14px;
+      }
+      .fav-btn.on { color: #ff6b81; border-color: var(--tk-border); }
+      .fav-btn.on:hover { color: #ff8a9a; }
+      .fav-gone {
+        font-size: 11px;
+        color: #888;
+        margin-top: 8px;
+        font-style: italic;
+      }
+      .fav-gone i { color: var(--tk-accent); margin-right: 4px; }
+
       .strip {
         background: var(--tk-cream);
         color: var(--tk-cream-text);
@@ -372,6 +408,30 @@
         </div>
       </div>
 
+      <div class="view-tabs" role="tablist">
+        <button class="chip active" id="tabBrowse" type="button" role="tab">
+          <i class="fas fa-compass"></i> Browse
+        </button>
+        <button class="chip" id="tabFavs" type="button" role="tab">
+          <i class="fas fa-heart"></i> Favorites<span class="n" id="favCount">0</span>
+        </button>
+      </div>
+
+      <div class="section" id="favSection" style="display: none">
+        <div class="strip">Your Favorites...</div>
+        <div class="section-body">
+          <div id="favorites" class="comm-grid"></div>
+          <div id="favEmpty" class="empty" style="display: none">
+            <i class="fas fa-heart"></i>
+            No favorites yet. Tap the heart on any theme to keep it here.
+          </div>
+          <div id="favNoMatch" class="empty" style="display: none">
+            <i class="fas fa-magnifying-glass"></i>
+            None of your favorites match that search.
+          </div>
+        </div>
+      </div>
+
       <div class="section" id="makeOwnSection">
         <div class="strip">Make Your Own...</div>
         <div class="section-body make-own">
@@ -393,7 +453,7 @@
         </div>
       </div>
 
-      <div class="section">
+      <div class="section" id="commSection">
         <div class="strip">Community Themes...</div>
         <div class="section-body">
           <div class="comm-controls">
@@ -425,7 +485,7 @@
     <script src="js/modernnotify.min.js?v=1.1.0"></script>
     <script src="js/notify.js?v=1.0.0"></script>
     <script src="js/identity.js"></script>
-    <script src="js/themes-page.js?v=2.0.0"></script>
+    <script src="js/themes-page.js?v=2.1.0"></script>
       <script src="js/warning.js?v=1.1.0"></script>
       <script src="js/staff-key.js?v=1.0.0"></script>
   </body>

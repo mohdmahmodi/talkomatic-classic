@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  var VERSION = "6.0";
+  var VERSION = "6.1";
   var SHOW_AFTER_MS = 90000;
   var RETRY_MS = 30000;
   var REPEAT_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
@@ -43,9 +43,14 @@
         },
         {
           icon: "fa-pen-ruler",
-          tag: "new",
           title: "Talkoboard",
           text: "A drawing board the whole room shares, with pen, shapes, text and export.",
+        },
+        {
+          icon: "fa-layer-group",
+          tag: "new",
+          title: "Layers and opacity on the board",
+          text: "Five shared layers, so you can sketch on one and color on another and the eraser only touches its own. Set how see-through a color is from the Color panel. Your protected area can be opened up to friends for a while.",
         },
       ],
     },

@@ -7,6 +7,7 @@
   "use strict";
 
   var KEY = "talkomaticThemeV2";
+  var FAV_KEY = "talkomaticThemeFavs";
   var DEFS = {
     accent: "#ff9800", "accent-hover": "#f57c00", detail: "#01ffff",
     bg: "#202020", text: "#ffffff", muted: "#cccccc", border: "#616161",
@@ -43,6 +44,8 @@
   var cardIndex = {};
   var query = "";
   var sort = "top";
+  var view = "browse";
+  var favs = loadFavs();
   var live = false;
   var pendingVotes = {};
 
@@ -57,6 +60,14 @@
   var $sortNew = document.getElementById("sortNew");
   var $featuredSection = document.getElementById("featuredSection");
   var $makeOwn = document.getElementById("makeOwnSection");
+  var $tabBrowse = document.getElementById("tabBrowse");
+  var $tabFavs = document.getElementById("tabFavs");
+  var $favCount = document.getElementById("favCount");
+  var $favSection = document.getElementById("favSection");
+  var $favorites = document.getElementById("favorites");
+  var $favEmpty = document.getElementById("favEmpty");
+  var $favNoMatch = document.getElementById("favNoMatch");
+  var $commSection = document.getElementById("commSection");
 
   // ── Socket: live list and honest votes ────────────────────────────────────
 
@@ -151,6 +162,101 @@
       if (themes[i].id === id) return themes[i];
     return null;
   }
+
+  // ── Favorites ─────────────────────────────────────────────────────────────
+
+  function loadFavs() {
+    try {
+      var list = JSON.parse(localStorage.getItem(FAV_KEY) || "[]");
+      if (!Array.isArray(list)) return [];
+      return list.filter(function (f) {
+        return f && typeof f.key === "string" && f.state && typeof f.state === "object";
+      });
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function saveFavs() {
+    try { localStorage.setItem(FAV_KEY, JSON.stringify(favs)); } catch (e) {}
+  }
+
+  function favKeyOf(t) {
+    return t.id != null ? "c:" + t.id : "f:" + String(t.title || "");
+  }
+
+  function findFav(key) {
+    for (var i = 0; i < favs.length; i++) if (favs[i].key === key) return favs[i];
+    return null;
+  }
+
+  function isFav(t) {
+    return !!findFav(favKeyOf(t));
+  }
+
+  function toggleFav(t) {
+    var key = favKeyOf(t);
+    if (findFav(key)) {
+      favs = favs.filter(function (f) { return f.key !== key; });
+      toast('"' + (t.title || "Theme") + '" removed from your favorites.', "info");
+    } else {
+      favs.unshift({
+        key: key,
+        id: t.id != null ? t.id : null,
+        title: t.title || "",
+        desc: t.desc || "",
+        by: t.by || "",
+        image: t.image || "",
+        at: t.at || 0,
+        state: t.state || {},
+        saved: Date.now(),
+      });
+      toast('"' + (t.title || "Theme") + '" saved to your favorites.');
+    }
+    saveFavs();
+    render();
+  }
+
+  function favButton(t) {
+    var on = isFav(t);
+    var btn = el("button", "btn fav-btn" + (on ? " on" : ""),
+      '<i class="' + (on ? "fas" : "far") + ' fa-heart"></i>');
+    btn.type = "button";
+    btn.title = on ? "Remove from favorites" : "Save to favorites";
+    btn.setAttribute("aria-label", btn.title);
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+    btn.addEventListener("click", function () { toggleFav(t); });
+    return btn;
+  }
+
+  function favCards() {
+    var out = [];
+    favs.filter(matches).forEach(function (f) {
+      if (f.id != null) {
+        var live = findTheme(f.id);
+        out.push(live ? commCard(live) : commCard(f, true));
+        return;
+      }
+      var feat = null;
+      for (var i = 0; i < featured.length; i++)
+        if (featured[i].title === f.title) feat = featured[i];
+      out.push(featCard(feat || f));
+    });
+    return out;
+  }
+
+  function setView(which) {
+    if (view === which) return;
+    view = which;
+    $tabBrowse.classList.toggle("active", which === "browse");
+    $tabFavs.classList.toggle("active", which === "favs");
+    $tabBrowse.setAttribute("aria-selected", which === "browse" ? "true" : "false");
+    $tabFavs.setAttribute("aria-selected", which === "favs" ? "true" : "false");
+    try { sessionStorage.setItem("themesView", which); } catch (e) {}
+    render();
+  }
+  $tabBrowse.addEventListener("click", function () { setView("browse"); });
+  $tabFavs.addEventListener("click", function () { setView("favs"); });
 
   // ── Theme helpers ─────────────────────────────────────────────────────────
 
@@ -259,6 +365,7 @@
     var apply = el("button", "btn btn-primary", '<i class="fas fa-check"></i> Apply');
     apply.addEventListener("click", function () { applyTheme(f.state || {}, f.title); });
     actions.appendChild(apply);
+    actions.appendChild(favButton(f));
     body.appendChild(actions);
     card.appendChild(img);
     card.appendChild(body);
@@ -267,7 +374,7 @@
 
   // ── Community cards ───────────────────────────────────────────────────────
 
-  function commCard(t) {
+  function commCard(t, gone) {
     var card = el("div", "theme-card");
 
     var sw = el("div", "swatches");
@@ -285,6 +392,10 @@
     body.appendChild(
       el("div", "theme-meta", "shared by <b>" + esc(t.by || "Anonymous") + "</b> · " + when),
     );
+    if (gone)
+      body.appendChild(
+        el("div", "fav-gone", '<i class="fas fa-circle-info"></i>No longer shared, but your saved copy still works.'),
+      );
 
     var foot = el("div", "card-foot");
 
@@ -305,7 +416,7 @@
     votes.appendChild(up);
     votes.appendChild(score);
     votes.appendChild(down);
-    foot.appendChild(votes);
+    if (!gone) foot.appendChild(votes);
 
     var actions = el("div", "card-actions");
     var apply = el("button", "btn btn-primary", '<i class="fas fa-check"></i> Apply');
@@ -316,12 +427,13 @@
     });
     actions.appendChild(apply);
     actions.appendChild(details);
+    actions.appendChild(favButton(t));
 
     var staffKey =
       localStorage.getItem("talkomatic_devKey") ||
       localStorage.getItem("talkomatic_modKey") ||
       "";
-    if (staffKey || staffOk) {
+    if (!gone && (staffKey || staffOk)) {
       var rm = el("button", "btn", '<i class="fas fa-trash"></i> Remove');
       rm.addEventListener("click", function () {
         if (!confirm('Take down "' + (t.title || "this theme") + '" for everyone?')) return;
@@ -350,8 +462,10 @@
     expand.appendChild(miniPreview(t.state));
     card.appendChild(expand);
 
-    cardIndex[t.id] = { up: up, down: down, score: score };
-    paintVotes(t);
+    if (!gone) {
+      cardIndex[t.id] = { up: up, down: down, score: score };
+      paintVotes(t);
+    }
     return card;
   }
 
@@ -380,6 +494,21 @@
   function render() {
     cardIndex = {};
     $community.textContent = "";
+    $favorites.textContent = "";
+    $favCount.textContent = String(favs.length);
+
+    var browsing = view === "browse";
+    $favSection.style.display = browsing ? "none" : "";
+    $commSection.style.display = browsing ? "" : "none";
+    if (!browsing) {
+      $featuredSection.style.display = "none";
+      $makeOwn.style.display = "none";
+      var favShown = favCards();
+      favShown.forEach(function (c) { $favorites.appendChild(c); });
+      $favEmpty.style.display = !favs.length ? "block" : "none";
+      $favNoMatch.style.display = favs.length && !favShown.length ? "block" : "none";
+      return;
+    }
 
     var shown = sorted(themes.filter(matches));
     shown.forEach(function (t) { $community.appendChild(commCard(t)); });
@@ -435,6 +564,11 @@
       renderFeatured();
     })
     .catch(function () {});
+
+  try {
+    if (sessionStorage.getItem("themesView") === "favs") setView("favs");
+  } catch (e) {}
+  render();
 
   connect();
   // If the socket has not delivered within a few seconds, show the HTTP copy
