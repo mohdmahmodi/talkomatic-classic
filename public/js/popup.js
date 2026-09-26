@@ -25,6 +25,12 @@
           text: "Make any color see-through from the Opacity slider in the Color panel. Works with the pen, shapes, the bucket and the eraser.",
         },
         {
+          icon: "fa-image",
+          tag: "new",
+          title: "Trace a picture",
+          text: "Put any picture from your device under the board and draw over it. Move it, resize it, flip it, fade it. Only you can see it: it never leaves your browser and it is not in saved images.",
+        },
+        {
           icon: "fa-lock-open",
           tag: "new",
           title: "Share your area",

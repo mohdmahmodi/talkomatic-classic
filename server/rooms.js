@@ -333,6 +333,48 @@ function segmentHitsRect(x1, y1, x2, y2, r) {
   return true;
 }
 
+const FILL_SWALLOW_OWNERS = 2;
+const FILL_SWALLOW_STROKES = 30;
+
+function strokeBounds(s) {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  const scan = (arr) => {
+    for (const p of arr) {
+      if (typeof p?.x !== "number" || typeof p?.y !== "number") continue;
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    }
+  };
+  if (Array.isArray(s.rings) && s.rings.length) for (const r of s.rings) scan(r);
+  else scan(s.points || []);
+  return { minX, minY, maxX, maxY };
+}
+
+function fillSwallows(rings, strokes, userId) {
+  const fb = strokeBounds({ rings });
+  if (!(fb.maxX > fb.minX) || !(fb.maxY > fb.minY)) return { owners: 0, count: 0 };
+  const owners = new Set();
+  let count = 0;
+  for (const s of strokes) {
+    if (!s || s.owner === userId || !s.points || !s.points.length) continue;
+    const m = Math.max(Number(s.size) || 0, 4);
+    const b = strokeBounds(s);
+    if (b.minX < fb.minX + m || b.maxX > fb.maxX - m || b.minY < fb.minY + m || b.maxY > fb.maxY - m)
+      continue;
+    const mid = { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 };
+    if (!pointInRings(rings, mid)) continue;
+    owners.add(s.owner);
+    count++;
+  }
+  return { owners: owners.size, count };
+}
+
+function fillTooGreedy(sw) {
+  return sw.owners >= FILL_SWALLOW_OWNERS || sw.count > FILL_SWALLOW_STROKES;
+}
+
 function pointInRings(rings, pt) {
   let inside = false;
   for (const ring of rings) {
@@ -5684,6 +5726,13 @@ function registerSocketHandlers(opts) {
             const mid = { x: c.x + c.w / 2, y: c.y + c.h / 2 };
             if (pointInRings(rings, mid)) return refuse(c);
           }
+          const sw = fillSwallows(rings, bsAdd.strokes, userId);
+          if (fillTooGreedy(sw))
+            return socket.emit("board fill refused", {
+              id: s.id,
+              owners: sw.owners,
+              count: sw.count,
+            });
         }
 
         const stroke = strokeExtras(

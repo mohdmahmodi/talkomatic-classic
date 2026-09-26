@@ -18,6 +18,7 @@ const TOOL_HELP = [
   { name: "color", fa: "fa-palette", label: "Color", key: "C", tip: "Pick a color or a gradient, and set how see-through it is." },
   { name: "size", fa: "fa-circle", label: "Size", key: "S", tip: "Brush thickness." },
   { name: "layers", fa: "fa-layer-group", label: "Layers", key: "Y", tip: "Pick which of the five layers you draw on. Sketch on one, color on the one below: the eraser only rubs out its own layer, and you can hide layers while you work." },
+  { name: "trace", fa: "fa-image", label: "Trace", key: "I", tip: "Put a picture of your own under the board and draw over it. Only you can see it; it never leaves your device." },
   { name: "inspect", fa: "fa-user-shield", label: "Inspect", staff: true, tip: "Mod tools: tap a drawing to see who made it." },
 ];
 
@@ -97,6 +98,11 @@ class Talkoboard {
     this.preview = null;
     this.fillShapes = false;
     this.alpha = 1;
+
+    // ── Tracing picture (never leaves this browser) ─────────────────
+    this.trace = null;
+    this._traceDrag = null;
+    this.TRACE_MAX_PX = 2048;
 
     // ── Layers ──────────────────────────────────────────────────────
     this.LAYERS = 5;
@@ -466,6 +472,10 @@ class Talkoboard {
     this.sizeBtn.insertBefore(this.sizeDot, this.sizeBtn.firstChild);
     this.sizeBtn.addEventListener("click", () => this.togglePop("size"));
 
+    const traceHelp = helpFor("trace");
+    this.traceBtn = labelled(this.makeBtn("tb-btn", this.icon(traceHelp.fa), tipText(traceHelp)), traceHelp);
+    this.traceBtn.addEventListener("click", () => this.togglePop("trace"));
+
     const layersHelp = helpFor("layers");
     this.layersBtn = labelled(this.makeBtn("tb-btn tb-layers-btn", this.icon(layersHelp.fa), tipText(layersHelp)), layersHelp);
     this.layersBtn.addEventListener("click", () => this.togglePop("layers"));
@@ -485,6 +495,8 @@ class Talkoboard {
       this.colorBtn,
       this.sizeBtn,
       this.layersBtn,
+      sep(),
+      this.traceBtn,
     ];
     tools.appendChild(this.panBtn);
     for (const el of drawTools) tools.appendChild(el);
@@ -546,6 +558,7 @@ class Talkoboard {
     this.pops.color = { panel: this.colorPanel, btn: this.colorBtn };
     this.buildSizePanel(this.modal);
     this.buildLayersPanel(this.modal);
+    this.buildTracePanel(this.modal);
     this.buildSharePanel(this.modal);
     this.buildSavePanel(this.modal);
     this.buildHelpPanel(this.modal);
@@ -737,6 +750,355 @@ class Talkoboard {
     if (this.alphaLabel) this.alphaLabel.textContent = n + "%";
     if (this.colorFill) this.colorFill.style.opacity = String(this.alpha);
     this.updateSizeDot();
+  }
+
+  buildTracePanel(parent) {
+    const panel = document.createElement("div");
+    panel.className = "tb-pop tb-trace-panel";
+    panel.addEventListener("pointerdown", (e) => e.stopPropagation());
+    const title = document.createElement("div");
+    title.className = "tb-pop-title";
+    title.textContent = "Trace a picture";
+    panel.appendChild(title);
+
+    this.traceFile = document.createElement("input");
+    this.traceFile.type = "file";
+    this.traceFile.accept = "image/*";
+    this.traceFile.style.display = "none";
+    this.traceFile.addEventListener("change", () => {
+      const f = this.traceFile.files && this.traceFile.files[0];
+      this.traceFile.value = "";
+      this.traceFile.blur();
+      if (f) this.loadTraceFile(f);
+    });
+    panel.appendChild(this.traceFile);
+
+    this.traceEmpty = document.createElement("div");
+    const pick = this.makeBtn(
+      "tb-save-opt",
+      this.icon("fa-folder-open") + "<span><b>Choose a picture</b><small>Or drop one onto the board, or paste it</small></span>",
+    );
+    pick.addEventListener("click", () => this.traceFile.click());
+    this.traceEmpty.appendChild(pick);
+    const note = document.createElement("div");
+    note.className = "tb-trace-note";
+    note.textContent = "Only you see it. It is never sent to anyone and is left out of saved images.";
+    this.traceEmpty.appendChild(note);
+    panel.appendChild(this.traceEmpty);
+
+    this.traceBody = document.createElement("div");
+    this.traceThumb = document.createElement("div");
+    this.traceThumb.className = "tb-trace-thumb";
+    this.traceBody.appendChild(this.traceThumb);
+
+    const slider = (label, min, max, step, onInput) => {
+      const t = document.createElement("div");
+      t.className = "tb-pop-title";
+      t.textContent = label;
+      const row = document.createElement("div");
+      row.className = "tb-size-row";
+      const input = document.createElement("input");
+      input.type = "range";
+      input.min = String(min);
+      input.max = String(max);
+      input.step = String(step);
+      input.addEventListener("input", (e) => onInput(+e.target.value));
+      const val = document.createElement("span");
+      val.className = "tb-size-label";
+      row.appendChild(input);
+      row.appendChild(val);
+      this.traceBody.appendChild(t);
+      this.traceBody.appendChild(row);
+      return { input, val };
+    };
+    this.traceAlpha = slider("See-through", 5, 100, 5, (v) => this.setTraceAlpha(v / 100));
+    this.traceSize = slider("Size", 10, 400, 5, (v) => this.setTraceScale(v / 100));
+
+    const actions = document.createElement("div");
+    actions.className = "tb-trace-actions";
+    const pill = (fa, text, onClick) => {
+      const b = this.makeBtn("tb-pill", this.icon(fa) + "<span>" + text + "</span>");
+      b.addEventListener("click", onClick);
+      actions.appendChild(b);
+      return b;
+    };
+    this.traceMoveBtn = pill("fa-up-down-left-right", "Move & resize", () =>
+      this.setTool(this.tool === "trace" ? "pen" : "trace"),
+    );
+    this.traceFlipBtn = pill("fa-left-right", "Flip", () => this.setTraceFlip(!this.trace?.flip));
+    this.traceEyeBtn = pill("fa-eye", "Hide", () => this.setTraceVisible(!this.trace?.visible));
+    pill("fa-folder-open", "Change", () => this.traceFile.click());
+    pill("fa-trash", "Remove", () => this.removeTrace());
+    this.traceBody.appendChild(actions);
+    const tip = document.createElement("div");
+    tip.className = "tb-trace-note";
+    tip.textContent = "Pick any drawing tool and draw right over it. Move & resize drags the picture instead.";
+    this.traceBody.appendChild(tip);
+    panel.appendChild(this.traceBody);
+
+    parent.appendChild(panel);
+    this.pops.trace = { panel, btn: this.traceBtn };
+    this.renderTracePanel();
+  }
+
+  renderTracePanel() {
+    if (!this.traceBody) return;
+    const t = this.trace;
+    this.traceEmpty.style.display = t ? "none" : "";
+    this.traceBody.style.display = t ? "" : "none";
+    if (this.traceBtn) this.traceBtn.classList.toggle("tb-has-trace", !!t);
+    if (!t) return;
+    if (this.traceThumb.firstChild !== t.thumb) {
+      this.traceThumb.innerHTML = "";
+      this.traceThumb.appendChild(t.thumb);
+    }
+    const a = Math.round(t.alpha * 100);
+    this.traceAlpha.input.value = String(a);
+    this.traceAlpha.val.textContent = a + "%";
+    const sc = Math.round((t.w / t.fitW) * 100);
+    this.traceSize.input.value = String(Math.max(10, Math.min(400, sc)));
+    this.traceSize.val.textContent = sc + "%";
+    this.traceMoveBtn.classList.toggle("active", this.tool === "trace");
+    this.traceFlipBtn.classList.toggle("active", !!t.flip);
+    this.traceEyeBtn.innerHTML =
+      this.icon(t.visible ? "fa-eye" : "fa-eye-slash") + "<span>" + (t.visible ? "Hide" : "Show") + "</span>";
+    this.traceEyeBtn.classList.toggle("active", !t.visible);
+  }
+
+  loadTraceFile(file) {
+    if (!file || !/^image\//.test(file.type || "")) return this.showHint("That is not a picture");
+    if (file.size > 25 * 1024 * 1024) return this.showHint("That picture is too big (25 MB max)");
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      this.setTraceImage(img);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      this.showHint("Could not read that picture");
+    };
+    img.src = url;
+  }
+
+  setTraceImage(source) {
+    const nw = source.naturalWidth || source.width;
+    const nh = source.naturalHeight || source.height;
+    if (!nw || !nh) return this.showHint("Could not read that picture");
+    const k = Math.min(1, this.TRACE_MAX_PX / Math.max(nw, nh));
+    const c = document.createElement("canvas");
+    c.width = Math.max(1, Math.round(nw * k));
+    c.height = Math.max(1, Math.round(nh * k));
+    c.getContext("2d").drawImage(source, 0, 0, c.width, c.height);
+    const thumb = document.createElement("canvas");
+    const tk = Math.min(1, 260 / c.width, 110 / c.height);
+    thumb.width = Math.max(1, Math.round(c.width * tk));
+    thumb.height = Math.max(1, Math.round(c.height * tk));
+    thumb.getContext("2d").drawImage(c, 0, 0, thumb.width, thumb.height);
+
+    if (!(this.displayWidth > 0 && this.displayHeight > 0)) this.resizeCanvas();
+    const pw = this.displayWidth || window.innerWidth || 800;
+    const ph = this.displayHeight || window.innerHeight || 600;
+    const vw = pw / this.zoom;
+    const vh = ph / this.zoom;
+    const fit = Math.min((vw * 0.6) / c.width, (vh * 0.6) / c.height);
+    const w = c.width * fit;
+    const h = c.height * fit;
+    const centre = this.screenToWorld(pw / 2, ph / 2);
+    const prev = this.trace;
+    this.trace = {
+      img: c,
+      thumb,
+      ratio: c.width / c.height,
+      x: centre.x - w / 2,
+      y: centre.y - h / 2,
+      w,
+      h,
+      fitW: w,
+      alpha: prev ? prev.alpha : 0.5,
+      visible: true,
+      flip: false,
+    };
+    this.renderTracePanel();
+    this.setTool("trace");
+    this.togglePop("trace", true);
+    this.showHint("Drag the picture to move it, drag a corner to resize. Then pick the pen and draw over it", 4000);
+    this.scheduleRedraw();
+  }
+
+  removeTrace() {
+    this.trace = null;
+    this._traceDrag = null;
+    if (this.tool === "trace") this.setTool("pen");
+    this.renderTracePanel();
+    this.scheduleRedraw();
+  }
+
+  setTraceAlpha(a) {
+    if (!this.trace) return;
+    this.trace.alpha = Math.max(0.05, Math.min(1, a));
+    this.renderTracePanel();
+    this.scheduleRedraw();
+  }
+
+  setTraceScale(scale) {
+    const t = this.trace;
+    if (!t) return;
+    const cx = t.x + t.w / 2;
+    const cy = t.y + t.h / 2;
+    t.w = t.fitW * Math.max(0.1, Math.min(4, scale));
+    t.h = t.w / t.ratio;
+    t.x = cx - t.w / 2;
+    t.y = cy - t.h / 2;
+    this.renderTracePanel();
+    this.scheduleRedraw();
+  }
+
+  setTraceFlip(on) {
+    if (!this.trace) return;
+    this.trace.flip = !!on;
+    this.renderTracePanel();
+    this.scheduleRedraw();
+  }
+
+  setTraceVisible(on) {
+    if (!this.trace) return;
+    this.trace.visible = !!on;
+    this.renderTracePanel();
+    this.scheduleRedraw();
+  }
+
+  traceScreenRect() {
+    const t = this.trace;
+    return {
+      x: this.panX + t.x * this.zoom,
+      y: this.panY + t.y * this.zoom,
+      w: t.w * this.zoom,
+      h: t.h * this.zoom,
+    };
+  }
+
+  traceHit(sx, sy) {
+    const t = this.trace;
+    if (!t || !t.visible) return null;
+    const r = this.traceScreenRect();
+    const grab = 14;
+    const near = (px, py) => Math.abs(sx - px) <= grab && Math.abs(sy - py) <= grab;
+    if (near(r.x, r.y)) return "nw";
+    if (near(r.x + r.w, r.y)) return "ne";
+    if (near(r.x, r.y + r.h)) return "sw";
+    if (near(r.x + r.w, r.y + r.h)) return "se";
+    if (sx >= r.x && sx <= r.x + r.w && sy >= r.y && sy <= r.y + r.h) return "move";
+    return null;
+  }
+
+  traceCursorFor(hit) {
+    if (hit === "nw" || hit === "se") return "nwse-resize";
+    if (hit === "ne" || hit === "sw") return "nesw-resize";
+    if (hit === "move") return "move";
+    return "grab";
+  }
+
+  beginTraceDrag(hit, e) {
+    const t = this.trace;
+    const rect = this.canvasWrap.getBoundingClientRect();
+    this._traceDrag = {
+      hit,
+      sx: e.clientX - rect.left,
+      sy: e.clientY - rect.top,
+      x: t.x,
+      y: t.y,
+      w: t.w,
+      h: t.h,
+    };
+    this.canvas.style.cursor = this.traceCursorFor(hit);
+  }
+
+  moveTraceDrag(e) {
+    const d = this._traceDrag;
+    const t = this.trace;
+    if (!d || !t) return;
+    const rect = this.canvasWrap.getBoundingClientRect();
+    const dx = (e.clientX - rect.left - d.sx) / this.zoom;
+    const dy = (e.clientY - rect.top - d.sy) / this.zoom;
+    if (d.hit === "move") {
+      t.x = d.x + dx;
+      t.y = d.y + dy;
+      this.scheduleRedraw();
+      return;
+    }
+    const minW = Math.max(16 / this.zoom, 1e-9);
+    const right = d.hit === "ne" || d.hit === "se";
+    const bottom = d.hit === "sw" || d.hit === "se";
+    const anchorX = right ? d.x : d.x + d.w;
+    const anchorY = bottom ? d.y : d.y + d.h;
+    const wantW = right ? d.w + dx : d.w - dx;
+    const wantH = bottom ? d.h + dy : d.h - dy;
+    let w = Math.max(minW, Math.max(wantW, wantH * t.ratio));
+    let h = w / t.ratio;
+    t.w = w;
+    t.h = h;
+    t.x = right ? anchorX : anchorX - w;
+    t.y = bottom ? anchorY : anchorY - h;
+    this.renderTracePanel();
+    this.scheduleRedraw();
+  }
+
+  endTraceDrag() {
+    this._traceDrag = null;
+    this.updateCursor();
+  }
+
+  paintTrace(ctx, w, h) {
+    const t = this.trace;
+    if (!t || !t.visible) return;
+    const r = this.traceScreenRect();
+    const x0 = Math.max(0, r.x);
+    const y0 = Math.max(0, r.y);
+    const x1 = Math.min(w, r.x + r.w);
+    const y1 = Math.min(h, r.y + r.h);
+    if (x1 - x0 <= 0 || y1 - y0 <= 0) return;
+    const iw = t.img.width;
+    const ih = t.img.height;
+    let u0 = (x0 - r.x) / r.w;
+    let u1 = (x1 - r.x) / r.w;
+    const v0 = (y0 - r.y) / r.h;
+    const v1 = (y1 - r.y) / r.h;
+    if (t.flip) {
+      const a = 1 - u1;
+      u1 = 1 - u0;
+      u0 = a;
+    }
+    ctx.save();
+    ctx.globalAlpha = t.alpha;
+    ctx.imageSmoothingEnabled = true;
+    if (t.flip) {
+      ctx.translate(x1 + x0, 0);
+      ctx.scale(-1, 1);
+    }
+    ctx.drawImage(t.img, u0 * iw, v0 * ih, Math.max(1e-6, (u1 - u0) * iw), Math.max(1e-6, (v1 - v0) * ih), x0, y0, x1 - x0, y1 - y0);
+    ctx.restore();
+  }
+
+  paintTraceFrame(ctx, w, h) {
+    const t = this.trace;
+    if (!t || !t.visible || this.tool !== "trace") return;
+    const r = this.traceScreenRect();
+    const lim = 1e6;
+    const cl = (v) => Math.max(-lim, Math.min(lim, v));
+    ctx.save();
+    ctx.setLineDash([6, 4]);
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = "#ff9800";
+    ctx.strokeRect(cl(r.x), cl(r.y), cl(r.x + r.w) - cl(r.x), cl(r.y + r.h) - cl(r.y));
+    ctx.setLineDash([]);
+    ctx.fillStyle = "#ffffff";
+    for (const [cx, cy] of [[r.x, r.y], [r.x + r.w, r.y], [r.x, r.y + r.h], [r.x + r.w, r.y + r.h]]) {
+      if (cx < -20 || cy < -20 || cx > w + 20 || cy > h + 20) continue;
+      ctx.fillRect(cx - 5, cy - 5, 10, 10);
+      ctx.strokeRect(cx - 5, cy - 5, 10, 10);
+    }
+    ctx.restore();
   }
 
   buildSharePanel(parent) {
@@ -1393,11 +1755,12 @@ class Talkoboard {
         else return;
         return e.preventDefault();
       }
-      if (this.watching && (KEYS[k] || k === "c" || k === "s" || k === "y")) return;
+      if (this.watching && (KEYS[k] || k === "c" || k === "s" || k === "y" || k === "i")) return;
       if (KEYS[k]) this.setTool(KEYS[k]);
       else if (k === "c") this.togglePop("color");
       else if (k === "s") this.togglePop("size");
       else if (k === "y") this.togglePop("layers");
+      else if (k === "i") this.togglePop("trace");
       else if (k === "f") this.fitToView();
       else if (k === "=" || k === "+") this.adjustZoom(0.15);
       else if (k === "-") this.adjustZoom(-0.15);
@@ -1409,6 +1772,31 @@ class Talkoboard {
       e.preventDefault();
     };
     document.addEventListener("keydown", this._keyHandler);
+    this._pasteHandler = (e) => {
+      if (!this.isOpen || this.watching || this.isTypingTarget(e.target)) return;
+      const items = (e.clipboardData && e.clipboardData.items) || [];
+      for (const it of items) {
+        if (it.kind === "file" && /^image\//.test(it.type)) {
+          e.preventDefault();
+          return this.loadTraceFile(it.getAsFile());
+        }
+      }
+    };
+    document.addEventListener("paste", this._pasteHandler);
+    this.modal.addEventListener("dragover", (e) => {
+      if (!this.isOpen || this.watching) return;
+      e.preventDefault();
+      this.modal.classList.add("tb-dropping");
+    });
+    this.modal.addEventListener("dragleave", () => this.modal.classList.remove("tb-dropping"));
+    this.modal.addEventListener("drop", (e) => {
+      this.modal.classList.remove("tb-dropping");
+      if (!this.isOpen || this.watching) return;
+      e.preventDefault();
+      const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (f) this.loadTraceFile(f);
+    });
+
     this._keyUpHandler = (e) => {
       if (e.key !== " " || !this.isOpen) return;
       this._spaceDown = false;
@@ -1486,6 +1874,10 @@ class Talkoboard {
     // still drew them locally, which read as "spectators can draw".
     if (this.watching && name !== "pan" && !(name === "inspect" && this.isStaff))
       name = "pan";
+    if (name === "trace" && !this.trace) {
+      this.togglePop("trace", true);
+      name = "pen";
+    }
     this.tool = name;
     this.panMode = name === "pan";
     this.eraser = name === "eraser";
@@ -1498,6 +1890,10 @@ class Talkoboard {
       this.showHint("Mod tools: tap a drawing to see who made it");
     else this.closeModCard();
     if (name === "bucket") this.showHint("Tap inside a closed shape to fill it");
+    if (name === "trace") this.showHint("Drag the picture to move it, drag a corner to resize");
+    if (this.traceBtn) this.traceBtn.classList.toggle("tb-trace-on", name === "trace");
+    this.renderTracePanel();
+    if (this.trace) this.scheduleRedraw();
     if (name === "claim")
       this.showHint("Drag a box around your art. Only you can draw inside it", 3200);
     if (this.fillBtn)
@@ -1714,6 +2110,38 @@ class Talkoboard {
     return null;
   }
 
+  fillSwallows(rings) {
+    const fb = this.strokeBB({ rings, points: rings[0] || [] });
+    const out = { owners: 0, count: 0 };
+    if (!(fb.maxX > fb.minX) || !(fb.maxY > fb.minY)) return out;
+    const owners = new Set();
+    for (const s of this.strokes) {
+      if (!s || s.owner === this.userId || !s.points || !s.points.length) continue;
+      const m = Math.max(s.size || 0, 4);
+      const b = this.strokeBB(s);
+      if (b.minX < fb.minX + m || b.maxX > fb.maxX - m || b.minY < fb.minY + m || b.maxY > fb.maxY - m)
+        continue;
+      const mid = { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 };
+      if (!this.pointInFilled({ rings, points: rings[0] }, mid)) continue;
+      owners.add(s.owner);
+      out.count++;
+    }
+    out.owners = owners.size;
+    return out;
+  }
+
+  fillTooGreedy(sw) {
+    return sw.owners >= 2 || sw.count > 30;
+  }
+
+  greedyFillHint(sw) {
+    return (
+      "That would paint around " +
+      (sw.owners >= 2 ? sw.owners + " other people's drawings" : "a lot of someone else's drawing") +
+      ". Fill inside your own lines instead"
+    );
+  }
+
   pointInFilled(stroke, pt) {
     const rings =
       Array.isArray(stroke.rings) && stroke.rings.length
@@ -1927,6 +2355,8 @@ class Talkoboard {
         if (this.pointInFilled({ points: pts }, mid))
           return this.showHint("That is " + (c.name || "someone") + "'s area");
       }
+      const sw = this.fillSwallows([pts]);
+      if (this.fillTooGreedy(sw)) return this.showHint(this.greedyFillHint(sw));
     }
     const closed = kind === "rect" || kind === "ellipse" || kind === "triangle";
     const stroke = {
@@ -2080,6 +2510,11 @@ class Talkoboard {
     if (total > 1400) {
       out = out.map((r) => this.simplifyRing(r, 2.5 / probe.zoom));
       total = out.reduce((n, r) => n + r.length, 0);
+    }
+
+    if (!this.isStaff) {
+      const sw = this.fillSwallows(out);
+      if (this.fillTooGreedy(sw)) return this.showHint(this.greedyFillHint(sw));
     }
 
     this.addOwnStroke({
@@ -2527,6 +2962,10 @@ class Talkoboard {
       this.canvas.style.cursor = "crosshair";
       return;
     }
+    if (this.tool === "trace") {
+      this.canvas.style.cursor = "grab";
+      return;
+    }
     this.canvas.style.cursor =
       this._spaceDown || this.panMode ? "grab" : "crosshair";
   }
@@ -2810,7 +3249,10 @@ class Talkoboard {
     ctx.clearRect(0, 0, w, h);
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, w, h);
-    if (!plain) this.paintGrid(ctx, w, h);
+    if (!plain) {
+      this.paintGrid(ctx, w, h);
+      this.paintTrace(ctx, w, h);
+    }
 
     const centre = this.screenToWorld(w / 2, h / 2);
     this._rox = centre.x;
@@ -2851,6 +3293,7 @@ class Talkoboard {
       if (this.preview) this.renderPreview(ctx);
     }
     ctx.restore();
+    if (!plain) this.paintTraceFrame(ctx, w, h);
   }
 
   layerBuckets() {
@@ -3615,7 +4058,13 @@ class Talkoboard {
       return;
     }
 
-    if (this.panMode || this._spaceDown || e.button === 1) {
+    if (this.tool === "trace" && this.trace && !this._spaceDown && e.button === 0) {
+      const rect = this.canvasWrap.getBoundingClientRect();
+      const hit = this.traceHit(e.clientX - rect.left, e.clientY - rect.top);
+      if (hit) return this.beginTraceDrag(hit, e);
+    }
+
+    if (this.panMode || this._spaceDown || e.button === 1 || this.tool === "trace") {
       this.isPanning = true;
       this.panStart = {
         x: e.clientX,
@@ -3719,6 +4168,14 @@ class Talkoboard {
 
     this.sendCursorPosition(e);
 
+    if (this._traceDrag) return this.moveTraceDrag(e);
+    if (this.tool === "trace" && this.trace && !this.isPanning) {
+      const rect = this.canvasWrap.getBoundingClientRect();
+      this.canvas.style.cursor = this.traceCursorFor(
+        this.traceHit(e.clientX - rect.left, e.clientY - rect.top),
+      );
+    }
+
     if (this.isPanning && this.panStart) {
       this.panX = this.panStart.px + (e.clientX - this.panStart.x);
       this.panY = this.panStart.py + (e.clientY - this.panStart.y);
@@ -3793,6 +4250,8 @@ class Talkoboard {
 
   onPointerUp(e) {
     this._penLifted = false;
+
+    if (this._traceDrag) return this.endTraceDrag();
 
     if (this.isPanning) {
       this.isPanning = false;
@@ -4341,6 +4800,17 @@ class Talkoboard {
       } else if (window.toastr) {
         toastr.warning(msg, "Board");
       }
+    });
+
+    this.socket.on("board fill refused", (data) => {
+      const id = data && data.id;
+      if (id) {
+        this.strokes = this.strokes.filter((s) => s.id !== id);
+        this.undoStack = this.undoStack.filter((x) => x !== id);
+        this.updateUndoRedoButtons();
+        this.scheduleRedraw();
+      }
+      this.showHint(this.greedyFillHint(data || {}));
     });
 
     this.socket.on("board too fast", (data) => {

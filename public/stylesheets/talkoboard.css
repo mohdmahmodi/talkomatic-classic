@@ -338,6 +338,77 @@
 .tb-share-panel {
   width: 300px;
 }
+.tb-trace-panel {
+  width: 300px;
+}
+.tb-trace-note {
+  margin-top: 8px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: #8a8a96;
+}
+.tb-trace-thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 60px;
+  max-height: 120px;
+  margin-bottom: 4px;
+  border: 1px solid #e4e4ea;
+  border-radius: 8px;
+  overflow: hidden;
+  background-color: #fff;
+  background-image:
+    linear-gradient(45deg, #ececf1 25%, transparent 25%, transparent 75%, #ececf1 75%),
+    linear-gradient(45deg, #ececf1 25%, transparent 25%, transparent 75%, #ececf1 75%);
+  background-size: 12px 12px;
+  background-position: 0 0, 6px 6px;
+}
+.tb-trace-thumb canvas {
+  display: block;
+  max-width: 100%;
+  max-height: 120px;
+}
+.tb-trace-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+.tb-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 11px;
+  border: 1px solid #e4e4ea;
+  border-radius: 999px;
+  background: #fafafc;
+  color: #2b2b33;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.tb-pill:hover {
+  background: #f0f0f4;
+}
+.tb-pill.active {
+  background: #ffe6c2;
+  border-color: #ffd39a;
+  color: #a85400;
+}
+.tb-has-trace > i {
+  color: #a85400;
+}
+.tb-btn.tb-trace-on {
+  background: #ffe6c2;
+  color: #a85400;
+}
+.tb-overlay.tb-dropping .tb-stage {
+  outline: 3px dashed #ff9800;
+  outline-offset: -6px;
+}
 .tb-share-opt.active {
   border-color: #ff9800;
   background: #fff4e3;
