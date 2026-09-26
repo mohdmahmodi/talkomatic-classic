@@ -895,7 +895,7 @@ class Talkoboard {
     img.src = url;
   }
 
-  setTraceImage(source) {
+  setTraceImage(source, quiet) {
     const nw = source.naturalWidth || source.width;
     const nh = source.naturalHeight || source.height;
     if (!nw || !nh) return this.showHint("Could not read that picture");
@@ -930,10 +930,12 @@ class Talkoboard {
     };
     this.fitTraceToView();
     this.renderTracePanel();
+    if (quiet) return;
     this.setTool("trace");
     this.togglePop("trace", true);
     this.showHint("Drag the picture to move it, drag a corner to resize. Then pick the pen and draw over it. Too faint? Slide it toward solid", 5000);
     this.scheduleRedraw();
+    this.traceStore("put");
   }
 
   clampTraceSize(w) {
@@ -961,6 +963,7 @@ class Talkoboard {
     t.visible = true;
     this.renderTracePanel();
     this.scheduleRedraw();
+    this.traceStore("put");
   }
 
   removeTrace() {
@@ -969,6 +972,76 @@ class Talkoboard {
     if (this.tool === "trace") this.setTool("pen");
     this.renderTracePanel();
     this.scheduleRedraw();
+    this.traceStore("delete");
+  }
+
+  traceDb() {
+    if (this._traceDbP) return this._traceDbP;
+    this._traceDbP = new Promise((resolve) => {
+      try {
+        const req = indexedDB.open("talkoboard", 1);
+        req.onupgradeneeded = () => req.result.createObjectStore("trace");
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => resolve(null);
+        req.onblocked = () => resolve(null);
+      } catch (_) {
+        resolve(null);
+      }
+    });
+    return this._traceDbP;
+  }
+
+  traceStore(action) {
+    clearTimeout(this._traceSaveTimer);
+    this._traceSaveTimer = setTimeout(async () => {
+      const db = await this.traceDb();
+      if (!db) return;
+      const key = this.roomKey();
+      try {
+        if (action === "delete" || !this.trace)
+          return db.transaction("trace", "readwrite").objectStore("trace").delete(key);
+        const t = this.trace;
+        if (!t.blob) t.blob = await new Promise((r) => t.img.toBlob(r, "image/png"));
+        if (!t.blob || this.trace !== t) return;
+        db.transaction("trace", "readwrite").objectStore("trace").put(
+          { blob: t.blob, x: t.x, y: t.y, w: t.w, h: t.h, fitW: t.fitW, alpha: t.alpha, flip: !!t.flip, visible: t.visible !== false, at: Date.now() },
+          key,
+        );
+      } catch (_) {}
+    }, 500);
+  }
+
+  async restoreTrace() {
+    const key = this.roomKey();
+    if (this.trace || this._traceRestoredFor === key) return;
+    this._traceRestoredFor = key;
+    const db = await this.traceDb();
+    if (!db) return;
+    let rec = null;
+    try {
+      rec = await new Promise((resolve) => {
+        const req = db.transaction("trace", "readonly").objectStore("trace").get(key);
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => resolve(null);
+      });
+    } catch (_) {}
+    if (!rec || !rec.blob || this.trace) return;
+    const url = URL.createObjectURL(rec.blob);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      if (this.trace) return;
+      this.setTraceImage(img, true);
+      const t = this.trace;
+      if (!t) return;
+      Object.assign(t, { x: rec.x, y: rec.y, w: rec.w, h: rec.h, fitW: rec.fitW || rec.w, alpha: rec.alpha || 0.7, flip: !!rec.flip, visible: rec.visible !== false });
+      t.h = t.w / t.ratio;
+      this.renderTracePanel();
+      this.scheduleRedraw();
+      this.showHint("Your traced picture is back where you left it", 3000);
+    };
+    img.onerror = () => URL.revokeObjectURL(url);
+    img.src = url;
   }
 
   sizeFromSlider(v) {
@@ -984,6 +1057,7 @@ class Talkoboard {
     this.trace.alpha = Math.max(0.15, Math.min(1, a));
     this.renderTracePanel();
     this.scheduleRedraw();
+    this.traceStore("put");
   }
 
   setTraceScale(scale) {
@@ -998,6 +1072,7 @@ class Talkoboard {
     t.y = cy - t.h / 2;
     this.renderTracePanel();
     this.scheduleRedraw();
+    this.traceStore("put");
   }
 
   setTraceFlip(on) {
@@ -1005,6 +1080,7 @@ class Talkoboard {
     this.trace.flip = !!on;
     this.renderTracePanel();
     this.scheduleRedraw();
+    this.traceStore("put");
   }
 
   setTraceVisible(on) {
@@ -1012,6 +1088,7 @@ class Talkoboard {
     this.trace.visible = !!on;
     this.renderTracePanel();
     this.scheduleRedraw();
+    this.traceStore("put");
   }
 
   traceScreenRect() {
@@ -1093,6 +1170,7 @@ class Talkoboard {
   endTraceDrag() {
     this._traceDrag = null;
     this.updateCursor();
+    this.traceStore("put");
   }
 
   paintTrace(ctx, w, h) {
@@ -3270,6 +3348,7 @@ class Talkoboard {
     clearTimeout(this._settleTimer);
     this.canvas.style.transform = "";
     this._viewTransformed = false;
+    this.saveView();
     this._painted = { panX: this.panX, panY: this.panY, zoom: this.zoom };
     this.paint(this.ctx, this.dpr, this.displayWidth, this.displayHeight, false);
     if (this.pops && this.pops.layers && this.pops.layers.panel.classList.contains("show"))
@@ -4489,6 +4568,51 @@ class Talkoboard {
     this.remoteActiveStrokes.delete(userId);
   }
 
+  roomKey() {
+    const id = typeof currentRoomId !== "undefined" && currentRoomId ? String(currentRoomId) : "";
+    return id || "room";
+  }
+
+  viewKey() {
+    return "tb_view_" + this.roomKey();
+  }
+
+  saveView() {
+    if (!this.isOpen || this._viewRestoredFor !== this.roomKey()) return;
+    clearTimeout(this._saveViewTimer);
+    this._saveViewTimer = setTimeout(() => {
+      try {
+        localStorage.setItem(
+          this.viewKey(),
+          JSON.stringify({ panX: this.panX, panY: this.panY, zoom: this.zoom, w: this.displayWidth, h: this.displayHeight }),
+        );
+      } catch (_) {}
+    }, 400);
+  }
+
+  restoreView() {
+    const key = this.roomKey();
+    if (this._viewRestoredFor === key) return;
+    this._viewRestoredFor = key;
+    let v = null;
+    try {
+      v = JSON.parse(localStorage.getItem(this.viewKey()) || "null");
+    } catch (_) {}
+    if (v && Number.isFinite(v.zoom) && Number.isFinite(v.panX) && Number.isFinite(v.panY) && v.zoom > 0) {
+      const cx = (v.w / 2 - v.panX) / v.zoom;
+      const cy = (v.h / 2 - v.panY) / v.zoom;
+      this.zoom = Math.min(this.MAX_ZOOM, Math.max(this.MIN_ZOOM, v.zoom));
+      this.panX = this.displayWidth / 2 - cx * this.zoom;
+      this.panY = this.displayHeight / 2 - cy * this.zoom;
+      this.updateZoomLabel();
+      return;
+    }
+    if (this.strokes.length) {
+      this.fitToView();
+      this.showHint("Showing the whole drawing. Scroll to zoom in", 3000);
+    }
+  }
+
   handleBoardState(data) {
     this.strokes = [];
     this.remoteActiveStrokes.clear();
@@ -4513,7 +4637,11 @@ class Talkoboard {
     }
 
     this.reconcileHistory();
-    if (this.isOpen) this.redraw();
+    if (this.isOpen) {
+      this.restoreView();
+      this.restoreTrace();
+      this.redraw();
+    }
   }
 
   reconcileHistory() {
