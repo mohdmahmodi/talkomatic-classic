@@ -10,17 +10,44 @@
 
   var SECTIONS = [
     {
+      title: "On the Talkoboard",
+      items: [
+        {
+          icon: "fa-layer-group",
+          tag: "new",
+          title: "Layers",
+          text: "Five layers everyone shares, stacked bottom to top. Put your lineart on one and color on the one below it, and the color never goes over the lines. The eraser only rubs out the layer it is on, and you can hide layers for yourself while you work.",
+        },
+        {
+          icon: "fa-droplet",
+          tag: "new",
+          title: "Opacity",
+          text: "Make any color see-through from the Opacity slider in the Color panel. Works with the pen, shapes, the bucket and the eraser.",
+        },
+        {
+          icon: "fa-lock-open",
+          tag: "new",
+          title: "Share your area",
+          text: "Protect still keeps a patch of the board yours, and the box you can take is now twice as wide. Next to it, choose who may draw inside: only you, everyone, or the friends you tick off a list.",
+        },
+      ],
+    },
+    {
       title: "Make it yours",
       items: [
         {
-          icon: "fa-palette",
+          icon: "fa-heart",
           tag: "new",
+          title: "Favorite themes",
+          text: "Tap the heart on any theme on the Themes page and it goes in your Favorites tab, ready to apply without searching. Favorites stay yours even if the theme is later taken down.",
+        },
+        {
+          icon: "fa-palette",
           title: "Themes",
           text: "Repaint the whole site with no CSS. Press Customize in the lobby, or Apps then Theme Editor in a room. Publish yours on the Themes page and use anyone else's in a click.",
         },
         {
           icon: "fa-user-astronaut",
-          tag: "new",
           title: "Profile pictures",
           text: "Pick a picture to sit next to your name in the lobby, in rooms, and on the board.",
         },
@@ -31,26 +58,18 @@
       items: [
         {
           icon: "fa-robot",
-          tag: "new",
           title: "Bot Creator",
           text: "Build a bot out of rules without writing code, then send it into a room. Share it with friends and they can edit and send it too.",
         },
         {
           icon: "fa-dice",
-          tag: "new",
           title: "Games in rooms",
           text: "Tic Tac Toe, Connect Four, Draw & Guess and Flag Guess, all inside the room under Apps. Popshot is there for playing on your own.",
         },
         {
           icon: "fa-pen-ruler",
           title: "Talkoboard",
-          text: "A drawing board the whole room shares, with pen, shapes, text and export.",
-        },
-        {
-          icon: "fa-layer-group",
-          tag: "new",
-          title: "Layers and opacity on the board",
-          text: "Five shared layers, so you can sketch on one and color on another and the eraser only touches its own. Set how see-through a color is from the Color panel. Your protected area can be opened up to friends for a while.",
+          text: "A drawing board the whole room shares, with pen, shapes, fills, protected areas and export.",
         },
       ],
     },
@@ -59,9 +78,8 @@
       items: [
         {
           icon: "fa-lightbulb",
-          tag: "new",
           title: "Ideas & Bugs board",
-          text: "Post an idea or report something broken, vote on everyone else's, and watch the status change as they get picked up.",
+          text: "Post an idea or report something broken, vote on everyone else's, and watch the status change as they get picked up. Layers, opacity and favorites all came from there.",
         },
         {
           icon: "fa-shield-halved",
@@ -75,7 +93,6 @@
       items: [
         {
           icon: "fa-chart-simple",
-          tag: "new",
           title: "Site Stats",
           text: "See how busy Talkomatic has been, by day and by month.",
         },

@@ -13,17 +13,17 @@ const TOOL_HELP = [
   { name: "fill", fa: "fa-fill", label: "Filled", tip: "Filled shapes on or off. Boxes, circles and triangles come out solid." },
   { name: "bucket", fa: "fa-fill-drip", label: "Bucket", key: "B", tip: "Tap inside a closed shape to fill it with color." },
   { name: "claim", fa: "fa-vector-square", label: "Protect", tip: "Drag a box around your art. Only you can draw inside it, and other people's strokes stop at the edge." },
-  { name: "open", fa: "fa-lock-open", label: "Open", tip: "Let other people draw inside your protected area for a while. Tap again to close it." },
+  { name: "open", fa: "fa-lock", label: "Only me", tip: "Choose who may draw inside your protected area: just you, everyone, or people you pick." },
   { name: "release", fa: "fa-square-xmark", label: "Release", tip: "Give your protected area back so anyone can draw there again." },
   { name: "color", fa: "fa-palette", label: "Color", key: "C", tip: "Pick a color or a gradient, and set how see-through it is." },
   { name: "size", fa: "fa-circle", label: "Size", key: "S", tip: "Brush thickness." },
-  { name: "layers", fa: "fa-layer-group", label: "Layers", key: "Y", tip: "Five shared layers, bottom to top. Sketch on one and color on another: the eraser only rubs out its own layer." },
+  { name: "layers", fa: "fa-layer-group", label: "Layers", key: "Y", tip: "Pick which of the five layers you draw on. Sketch on one, color on the one below: the eraser only rubs out its own layer, and you can hide layers while you work." },
   { name: "inspect", fa: "fa-user-shield", label: "Inspect", staff: true, tip: "Mod tools: tap a drawing to see who made it." },
 ];
 
 const BOARD_TIPS = [
-  "Protect keeps a drawing yours. Everyone can still see it, nobody else can draw over it. Open lets friends in without giving it up.",
-  "Layers stack bottom to top and everyone shares the same five. Hiding a layer only hides it for you.",
+  "Protect keeps a drawing yours. Everyone can still see it, nobody else can draw over it. The button next to it lets everyone, or just the friends you pick, draw inside.",
+  "Layers stack bottom to top and everyone shares the same five. Tap a layer to draw on it. Hide only hides it for you.",
   "Scroll to zoom and hold Space to move. Shift snaps lines and makes squares and circles.",
   "Ctrl+Z undoes your last stroke and Ctrl+Y brings it back.",
 ];
@@ -441,7 +441,7 @@ class Talkoboard {
     const claim = tool("claim");
     const openHelp = helpFor("open");
     this.openBtn = labelled(this.makeBtn("tb-btn", this.icon(openHelp.fa), openHelp.tip), openHelp);
-    this.openBtn.addEventListener("click", () => this.toggleClaimOpen());
+    this.openBtn.addEventListener("click", () => this.togglePop("share"));
     this.openBtn.style.display = "none";
     const releaseHelp = helpFor("release");
     this.releaseBtn = labelled(this.makeBtn("tb-btn", this.icon(releaseHelp.fa), releaseHelp.tip), releaseHelp);
@@ -546,6 +546,7 @@ class Talkoboard {
     this.pops.color = { panel: this.colorPanel, btn: this.colorBtn };
     this.buildSizePanel(this.modal);
     this.buildLayersPanel(this.modal);
+    this.buildSharePanel(this.modal);
     this.buildSavePanel(this.modal);
     this.buildHelpPanel(this.modal);
     this.buildTooltip();
@@ -614,38 +615,47 @@ class Talkoboard {
     title.className = "tb-pop-title";
     title.textContent = "Layers";
     panel.appendChild(title);
+    const intro = document.createElement("div");
+    intro.className = "tb-layer-intro";
+    intro.textContent = "Tap a layer to draw on it. Higher layers sit on top of lower ones.";
+    panel.appendChild(intro);
     const list = document.createElement("div");
     list.className = "tb-layer-list";
     this.layerRows = [];
     for (let i = this.LAYERS - 1; i >= 0; i--) {
       const row = document.createElement("div");
       row.className = "tb-layer-row";
-      const eye = this.makeBtn("tb-layer-eye", this.icon("fa-eye"));
-      eye.addEventListener("click", (e) => {
-        e.stopPropagation();
-        this.toggleLayerHidden(i);
-      });
+      const mark = document.createElement("span");
+      mark.className = "tb-layer-mark";
+      const text = document.createElement("span");
+      text.className = "tb-layer-text";
       const name = document.createElement("span");
       name.className = "tb-layer-name";
       name.textContent = "Layer " + (i + 1);
       const note = document.createElement("span");
       note.className = "tb-layer-note";
-      note.textContent = i === this.LAYERS - 1 ? "top" : i === 0 ? "bottom" : "";
+      text.appendChild(name);
+      text.appendChild(note);
       const count = document.createElement("span");
       count.className = "tb-layer-count";
-      row.appendChild(eye);
-      row.appendChild(name);
-      row.appendChild(note);
+      const eye = this.makeBtn("tb-layer-eye", "");
+      eye.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.toggleLayerHidden(i);
+      });
+      row.appendChild(mark);
+      row.appendChild(text);
       row.appendChild(count);
+      row.appendChild(eye);
       row.addEventListener("click", () => this.setLayer(i));
       list.appendChild(row);
-      this.layerRows[i] = { row, eye, count };
+      this.layerRows[i] = { row, mark, note, eye, count };
     }
     panel.appendChild(list);
     const foot = document.createElement("div");
     foot.className = "tb-layer-foot";
     foot.textContent =
-      "Everyone shares these five, stacked bottom to top. The eraser only rubs out the layer it is on. Hiding one is just for you.";
+      "Everyone shares these five. The eraser only rubs out the layer you are on. Hide takes a layer off your screen only; nobody else notices.";
     panel.appendChild(foot);
     parent.appendChild(panel);
     this.pops.layers = { panel, btn: this.layersBtn };
@@ -654,14 +664,17 @@ class Talkoboard {
 
   setLayer(i) {
     const n = Math.max(0, Math.min(this.LAYERS - 1, Math.floor(i) || 0));
+    const changed = n !== this.layer;
     this.layer = n;
     this.hiddenLayers.delete(n);
     this.renderLayerRows();
+    if (this.isOpen && changed) this.showHint("Now drawing on Layer " + (n + 1));
     if (this.isOpen) this.scheduleRedraw();
   }
 
   toggleLayerHidden(i) {
-    if (i === this.layer) return this.showHint("You are drawing on that layer");
+    if (i === this.layer)
+      return this.showHint("That is the layer you draw on. Pick another layer first, then hide this one");
     if (this.hiddenLayers.has(i)) this.hiddenLayers.delete(i);
     else this.hiddenLayers.add(i);
     this.renderLayerRows();
@@ -676,11 +689,23 @@ class Talkoboard {
       const r = this.layerRows[i];
       if (!r) continue;
       const hidden = this.hiddenLayers.has(i);
-      r.row.classList.toggle("active", i === this.layer);
+      const active = i === this.layer;
+      r.row.classList.toggle("active", active);
       r.row.classList.toggle("hidden", hidden);
-      r.eye.innerHTML = this.icon(hidden ? "fa-eye-slash" : "fa-eye");
-      this.setTip(r.eye, hidden ? "Show this layer" : i === this.layer ? "Your current layer" : "Hide this layer for me");
-      r.count.textContent = counts[i] ? String(counts[i]) : "";
+      r.mark.innerHTML = this.icon(active ? "fa-circle-check" : "fa-circle");
+      r.note.textContent = active
+        ? "drawing here"
+        : hidden
+          ? "hidden for you"
+          : i === this.LAYERS - 1
+            ? "top"
+            : i === 0
+              ? "bottom"
+              : "";
+      r.eye.innerHTML = this.icon(hidden ? "fa-eye-slash" : "fa-eye") + "<span>" + (hidden ? "Show" : "Hide") + "</span>";
+      r.eye.classList.toggle("disabled", active);
+      this.setTip(r.eye, hidden ? "Show this layer again" : active ? "You cannot hide the layer you draw on" : "Hide this layer on your screen only");
+      r.count.textContent = counts[i] ? counts[i] + (counts[i] === 1 ? " stroke" : " strokes") : "empty";
     }
     if (this.layersBtn) {
       const lbl = this.layersBtn.querySelector(".tb-btn-label");
@@ -712,6 +737,106 @@ class Talkoboard {
     if (this.alphaLabel) this.alphaLabel.textContent = n + "%";
     if (this.colorFill) this.colorFill.style.opacity = String(this.alpha);
     this.updateSizeDot();
+  }
+
+  buildSharePanel(parent) {
+    const panel = document.createElement("div");
+    panel.className = "tb-pop tb-share-panel";
+    panel.addEventListener("pointerdown", (e) => e.stopPropagation());
+    const title = document.createElement("div");
+    title.className = "tb-pop-title";
+    title.textContent = "Who can draw in your area";
+    panel.appendChild(title);
+    const option = (fa, label, note, mode) => {
+      const b = this.makeBtn(
+        "tb-save-opt tb-share-opt",
+        this.icon(fa) + "<span><b>" + label + "</b><small>" + note + "</small></span>",
+      );
+      b.dataset.mode = mode;
+      b.addEventListener("click", () => this.setShareMode(mode));
+      panel.appendChild(b);
+      return b;
+    };
+    this.shareOpts = {
+      me: option("fa-lock", "Only me", "Nobody else can draw inside", "me"),
+      all: option("fa-lock-open", "Everyone", "Anyone in the room can draw with you", "all"),
+      some: option("fa-user-group", "People I pick", "Tick the friends who may draw inside", "some"),
+    };
+    this.shareList = document.createElement("div");
+    this.shareList.className = "tb-share-list";
+    panel.appendChild(this.shareList);
+    parent.appendChild(panel);
+    this.pops.share = { panel, btn: this.openBtn };
+  }
+
+  myClaim() {
+    return this.claims.find((c) => c.owner === this.userId) || null;
+  }
+
+  shareModeOf(c) {
+    if (!c) return "me";
+    if (c.open) return "all";
+    return Array.isArray(c.guests) && c.guests.length ? "some" : "me";
+  }
+
+  setShareMode(mode) {
+    const mine = this.myClaim();
+    if (!mine) return;
+    if (mode === "some") {
+      this.shareGuests = new Set(Array.isArray(mine.guests) ? mine.guests : []);
+      this.sharePicking = true;
+      this.renderSharePanel();
+      this.socket.emit("board people");
+      return;
+    }
+    this.sharePicking = false;
+    this.socket.emit("board claim open", { open: mode === "all", guests: [] });
+    this.showHint(
+      mode === "all"
+        ? "Your area is open: anyone can draw in it until you change this"
+        : "Your area is yours alone again",
+    );
+    this.renderSharePanel();
+  }
+
+  toggleShareGuest(id, on) {
+    if (!this.shareGuests) this.shareGuests = new Set();
+    if (on) this.shareGuests.add(id);
+    else this.shareGuests.delete(id);
+    this.socket.emit("board claim open", { open: false, guests: [...this.shareGuests] });
+  }
+
+  renderSharePanel() {
+    if (!this.shareOpts) return;
+    const mine = this.myClaim();
+    const mode = this.sharePicking ? "some" : this.shareModeOf(mine);
+    for (const [k, b] of Object.entries(this.shareOpts))
+      b.classList.toggle("active", k === mode);
+    this.shareList.innerHTML = "";
+    this.shareList.style.display = mode === "some" ? "" : "none";
+    if (mode !== "some") return;
+    const people = this.sharePeople || [];
+    if (!people.length) {
+      const empty = document.createElement("span");
+      empty.className = "tb-pop-empty";
+      empty.textContent = this.sharePeople ? "Nobody else is in the room right now" : "Looking for people in the room...";
+      this.shareList.appendChild(empty);
+      return;
+    }
+    const chosen = this.shareGuests || new Set(Array.isArray(mine?.guests) ? mine.guests : []);
+    for (const p of people) {
+      const row = document.createElement("label");
+      row.className = "tb-share-person";
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = chosen.has(p.id);
+      box.addEventListener("change", () => this.toggleShareGuest(p.id, box.checked));
+      const name = document.createElement("span");
+      name.textContent = p.name;
+      row.appendChild(box);
+      row.appendChild(name);
+      this.shareList.appendChild(row);
+    }
   }
 
   buildSavePanel(parent) {
@@ -857,6 +982,14 @@ class Talkoboard {
     pop.btn.classList.add("active");
     if (name === "help") this.markIntroSeen();
     if (name === "layers") this.renderLayerRows();
+    if (name === "share") {
+      const mine = this.myClaim();
+      this.sharePicking = this.shareModeOf(mine) === "some";
+      this.shareGuests = new Set(Array.isArray(mine?.guests) ? mine.guests : []);
+      this.sharePeople = null;
+      this.renderSharePanel();
+      this.socket.emit("board people");
+    }
     if (name === "color") {
       this.renderRecentColors();
       this.renderUserColors();
@@ -1642,11 +1775,16 @@ class Talkoboard {
     return { x: c.x - pad, y: c.y - pad, w: c.w + pad * 2, h: c.h + pad * 2 };
   }
 
+  claimAllows(c) {
+    if (c.owner === this.userId || c.open) return true;
+    return Array.isArray(c.guests) && c.guests.includes(this.userId);
+  }
+
   foreignClaimAt(pt, size) {
     if (!pt || this.isStaff) return null;
     const pad = this.claimPad(size);
     for (const c of this.claims) {
-      if (c.owner === this.userId || c.open) continue;
+      if (this.claimAllows(c)) continue;
       const r = this.paddedClaim(c, pad);
       if (pt.x >= r.x && pt.x <= r.x + r.w && pt.y >= r.y && pt.y <= r.y + r.h)
         return c;
@@ -1689,7 +1827,7 @@ class Talkoboard {
     if (this.isStaff) return null;
     const pad = this.claimPad(size);
     for (const c of this.claims) {
-      if (c.owner === this.userId || c.open) continue;
+      if (this.claimAllows(c)) continue;
       if (this.segmentHitsRect(a, b, this.paddedClaim(c, pad))) return c;
     }
     return null;
@@ -1701,26 +1839,22 @@ class Talkoboard {
     if (this.releaseBtn) this.releaseBtn.style.display = mine ? "" : "none";
     if (this.openBtn) {
       this.openBtn.style.display = mine ? "" : "none";
-      const open = !!(mine && mine.open);
-      this.openBtn.classList.toggle("active", open);
+      const mode = this.shareModeOf(mine);
+      const n = mine && Array.isArray(mine.guests) ? mine.guests.length : 0;
+      this.openBtn.classList.toggle("active", mode !== "me");
       const ico = this.openBtn.querySelector("i");
-      if (ico) ico.className = "fas " + (open ? "fa-lock" : "fa-lock-open");
+      if (ico)
+        ico.className =
+          "fas " + (mode === "all" ? "fa-lock-open" : mode === "some" ? "fa-user-group" : "fa-lock");
       const lbl = this.openBtn.querySelector(".tb-btn-label");
-      if (lbl) lbl.textContent = open ? "Close" : "Open";
+      if (lbl)
+        lbl.textContent =
+          mode === "all" ? "Everyone" : mode === "some" ? n + (n === 1 ? " friend" : " friends") : "Only me";
+      if (!mine && this.pops && this.pops.share) this.togglePop("share", false);
+      if (this.pops && this.pops.share && this.pops.share.panel.classList.contains("show"))
+        this.renderSharePanel();
     }
     if (this.isOpen) this.scheduleRedraw();
-  }
-
-  toggleClaimOpen() {
-    const mine = this.claims.find((c) => c.owner === this.userId);
-    if (!mine) return;
-    const open = !mine.open;
-    this.socket.emit("board claim open", { open });
-    this.showHint(
-      open
-        ? "Your area is open: anyone can draw in it until you close it"
-        : "Your area is closed again",
-    );
   }
 
   constrainPoint(a, b, kind, shift) {
@@ -1788,7 +1922,7 @@ class Talkoboard {
       kind === "rect" || kind === "ellipse" || kind === "triangle";
     if (closedShape && this.fillShapes && !this.isStaff) {
       for (const c of this.claims) {
-        if (c.owner === this.userId || c.open) continue;
+        if (this.claimAllows(c)) continue;
         const mid = { x: c.x + c.w / 2, y: c.y + c.h / 2 };
         if (this.pointInFilled({ points: pts }, mid))
           return this.showHint("That is " + (c.name || "someone") + "'s area");
@@ -3212,9 +3346,10 @@ class Talkoboard {
 
     const k = this._rs;
     ctx.save();
-    ctx.setLineDash(c.open ? [(3 / z) * k, (5 / z) * k] : [(8 / z) * k, (6 / z) * k]);
+    const letsMeIn = !mine && this.claimAllows(c);
+    ctx.setLineDash(c.open || letsMeIn ? [(3 / z) * k, (5 / z) * k] : [(8 / z) * k, (6 / z) * k]);
     ctx.lineWidth = (1.5 / z) * k;
-    ctx.strokeStyle = mine ? "#ff9800" : c.open ? "#b8b8b8" : "#8d8d8d";
+    ctx.strokeStyle = mine ? "#ff9800" : c.open || letsMeIn ? "#b8b8b8" : "#8d8d8d";
 
     const far = Math.max(
       Math.abs(c.x - ox),
@@ -3253,9 +3388,16 @@ class Talkoboard {
     ctx.strokeRect((c.x - ox) * k, (c.y - oy) * k, c.w * k, c.h * k);
     ctx.setLineDash([]);
 
+    const guests = Array.isArray(c.guests) ? c.guests : [];
     const label =
       (mine ? "Your area" : (c.name || "Someone") + "'s area") +
-      (c.open ? " (open)" : "") +
+      (c.open
+        ? " (open to all)"
+        : !mine && guests.includes(this.userId)
+          ? " (you can draw here)"
+          : guests.length
+            ? " (open to " + guests.length + ")"
+            : "") +
       (c.away ? " (away)" : "");
     const pad = (4 / z) * k;
     ctx.font = "bold " + (11 / z) * k + "px sans-serif";
@@ -4174,6 +4316,11 @@ class Talkoboard {
 
     // ── Claimed areas ────────────────────────────────────────────────
     this.socket.on("board claims", (d) => this.setClaims(d && d.claims));
+    this.socket.on("board people", (d) => {
+      this.sharePeople = Array.isArray(d && d.people) ? d.people : [];
+      for (const p of this.sharePeople) this.notePeerName(p.id, p.name);
+      this.renderSharePanel();
+    });
 
     this.socket.on("board claim result", (d) => {
       if (!d) return;

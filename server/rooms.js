@@ -276,7 +276,13 @@ function cleanupBoardState(roomId) {
 
 // ── Claimed areas: a patch of board that is yours ───────────────────────────
 const CLAIM_MIN = 120;
-const CLAIM_MAX = 1800;
+const CLAIM_MAX = 3600;
+const CLAIM_GUESTS_MAX = 30;
+
+function claimAllows(c, userId) {
+  if (c.owner === userId || c.open) return true;
+  return Array.isArray(c.guests) && c.guests.includes(userId);
+}
 
 function boardClaims(bs) {
   if (!Array.isArray(bs.claims)) bs.claims = [];
@@ -296,7 +302,7 @@ function paddedClaim(c, pad) {
 function foreignClaimAt(bs, userId, x, y, size) {
   const pad = (Number(size) || 0) / 2;
   for (const c of boardClaims(bs)) {
-    if (c.owner === userId || c.open) continue;
+    if (claimAllows(c, userId)) continue;
     const r = paddedClaim(c, pad);
     if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return c;
   }
@@ -349,7 +355,7 @@ function claimCrossed(socket, bs, x1, y1, x2, y2, size) {
   const userId = socket.handshake.session?.userId;
   const pad = (Number(size) || 0) / 2;
   for (const c of boardClaims(bs)) {
-    if (c.owner === userId || c.open) continue;
+    if (claimAllows(c, userId)) continue;
     if (segmentHitsRect(x1, y1, x2, y2, paddedClaim(c, pad))) return c;
   }
   return null;
@@ -372,6 +378,7 @@ function sendClaims(roomId) {
     h: c.h,
     away: !!c.away,
     open: !!c.open,
+    guests: Array.isArray(c.guests) ? c.guests : [],
   }));
   const room = state.rooms.get(roomId);
   const byId = new Map((room?.users || []).map((u) => [u.id, u]));
@@ -5238,6 +5245,8 @@ function registerSocketHandlers(opts) {
           ts: Date.now(),
         };
         if (prev && prev.open) next.open = true;
+        if (prev && Array.isArray(prev.guests) && prev.guests.length)
+          next.guests = prev.guests;
         bs.claims = claims.filter((c) => c.owner !== userId).concat([next]);
         sendClaims(socket.roomId);
         socket.emit("board claim result", { ok: true });
@@ -5254,10 +5263,35 @@ function registerSocketHandlers(opts) {
         const mine = bs.claims.find((c) => c.owner === userId);
         if (!mine) return;
         const open = !!(data && data.open);
-        if (!!mine.open === open) return;
+        const guests = [];
+        if (!open && Array.isArray(data?.guests)) {
+          for (const g of data.guests) {
+            if (typeof g !== "string" || g.length > 64 || g === userId) continue;
+            if (!guests.includes(g)) guests.push(g);
+            if (guests.length >= CLAIM_GUESTS_MAX) break;
+          }
+        }
         if (open) mine.open = true;
         else delete mine.open;
+        if (guests.length) mine.guests = guests;
+        else delete mine.guests;
         sendClaims(socket.roomId);
+      }),
+    );
+
+    socket.on(
+      "board people",
+      safe(async () => {
+        const userId = socket.handshake.session?.userId;
+        if (!socket.roomId || !userId) return;
+        const room = state.rooms.get(socket.roomId);
+        const people = [];
+        for (const u of room?.users || []) {
+          if (!u || u.id === userId) continue;
+          if (!canRecipientSeeDevUser(socket, u)) continue;
+          people.push({ id: u.id, name: u.username || "Someone" });
+        }
+        socket.emit("board people", { people });
       }),
     );
 
@@ -5646,7 +5680,7 @@ function registerSocketHandlers(opts) {
             }
           }
           for (const c of boardClaims(bsAdd)) {
-            if (c.owner === userId || c.open) continue;
+            if (claimAllows(c, userId)) continue;
             const mid = { x: c.x + c.w / 2, y: c.y + c.h / 2 };
             if (pointInRings(rings, mid)) return refuse(c);
           }
