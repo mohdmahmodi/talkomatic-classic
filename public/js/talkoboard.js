@@ -1911,7 +1911,7 @@ class Talkoboard {
 
   commitShape(kind, a, b, shift) {
     const end = this.constrainPoint(a, b, kind, shift);
-    if (Math.hypot(end.x - a.x, end.y - a.y) < 2) return;
+    if (Math.hypot(end.x - a.x, end.y - a.y) * this.zoom < 2) return;
     const pts = this.shapePoints(kind, a, end);
     for (let i = 0; i < pts.length; i++) {
       const hit = this.claimCrossed(pts[i], pts[i + 1] || pts[i]);
@@ -1973,31 +1973,63 @@ class Talkoboard {
   // ═══════════════════════════════════════════════════════════════════════════
   // ═══════════════════════════════════════════════════════════════════════════
 
-  bucketFill(screenPt) {
-    const dpr = this.dpr;
-    const W = this.canvas.width;
-    const H = this.canvas.height;
-    if (!W || !H) return;
-    const sx = Math.round(screenPt.x * dpr);
-    const sy = Math.round(screenPt.y * dpr);
-    if (sx < 0 || sy < 0 || sx >= W || sy >= H) return;
+  probeStroke(stroke) {
+    const floor = this._probe.minSize;
+    if (stroke.fill || stroke.size >= floor) return stroke;
+    return Object.assign({}, stroke, { size: floor });
+  }
 
-    this.redraw();
+  paintProbe(worldPt, spread) {
+    const W = this.displayWidth;
+    const H = this.displayHeight;
+    const scale = Math.min(1, Math.sqrt(3e6 / (W * H * this.dpr * this.dpr))) * this.dpr;
+    const w = Math.max(1, Math.round(W * scale));
+    const h = Math.max(1, Math.round(H * scale));
+    const zoom = (this.zoom * scale) / spread;
+    const centre = this.screenToWorld(W / 2, H / 2);
+    const v = { zoom, panX: w / 2 - centre.x * zoom, panY: h / 2 - centre.y * zoom, w, h };
+    if (!this._probeCanvas) this._probeCanvas = document.createElement("canvas");
+    const c = this._probeCanvas;
+    c.width = w;
+    c.height = h;
+    const ctx = c.getContext("2d", { willReadFrequently: true });
+    this._probe = { minSize: 2.5 / zoom };
+    try {
+      this.withView(v, () => this.paint(ctx, 1, w, h, true));
+    } finally {
+      this._probe = null;
+    }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalCompositeOperation = "destination-over";
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, w, h);
+    ctx.globalCompositeOperation = "source-over";
+    return {
+      ctx,
+      w,
+      h,
+      sx: Math.round(worldPt.x * zoom + v.panX),
+      sy: Math.round(worldPt.y * zoom + v.panY),
+      toWorld: (p) => ({ x: (p.x - v.panX) / zoom, y: (p.y - v.panY) / zoom }),
+      zoom,
+    };
+  }
 
+  floodProbe(probe) {
+    const { ctx, w: W, h: H, sx, sy } = probe;
+    if (sx < 0 || sy < 0 || sx >= W || sy >= H) return null;
     let img;
     try {
-      img = this.ctx.getImageData(0, 0, W, H);
+      img = ctx.getImageData(0, 0, W, H);
     } catch (_) {
-      return this.showHint("Cannot read the board to fill it");
+      return null;
     }
     const px = img.data;
-    const at = (x, y) => (y * W + x) * 4;
-    const seed = at(sx, sy);
+    const seed = (sy * W + sx) * 4;
     const sr = px[seed];
     const sg = px[seed + 1];
     const sb = px[seed + 2];
-    const TOL = 32 * 32 * 3;
-
+    const TOL = 40 * 40 * 3;
     const mask = new Uint8Array(W * H);
     const stack = [sx, sy];
     let touchedEdge = false;
@@ -2018,26 +2050,35 @@ class Talkoboard {
       if (x === 0 || y === 0 || x === W - 1 || y === H - 1) touchedEdge = true;
       stack.push(x + 1, y, x - 1, y, x, y + 1, x, y - 1);
     }
+    return { mask, filled, touchedEdge };
+  }
 
-    if (!filled) return;
-    if (touchedEdge)
-      return this.showHint("That area is not closed - the paint would run out");
+  bucketFill(screenPt) {
+    if (!this.displayWidth || !this.displayHeight) return;
+    const worldPt = this.screenToWorld(screenPt.x, screenPt.y);
+    let probe = null;
+    let flood = null;
+    for (const spread of [1, 2, 4, 8]) {
+      probe = this.paintProbe(worldPt, spread);
+      flood = this.floodProbe(probe);
+      if (!flood) return this.showHint("Cannot read the board to fill it");
+      if (!flood.filled) return;
+      if (!flood.touchedEdge) break;
+    }
+    if (flood.touchedEdge)
+      return this.showHint("That area is not closed, or is far bigger than the screen. Close the gap or zoom out");
 
-    const rings = this.traceMask(mask, W, H);
+    const rings = this.traceMask(flood.mask, probe.w, probe.h);
     if (!rings.length) return this.showHint("Nothing to fill there");
 
-    const toWorld = (p) => ({
-      x: (p.x / dpr - this.panX) / this.zoom,
-      y: (p.y / dpr - this.panY) / this.zoom,
-    });
     let out = rings
-      .map((r) => this.simplifyRing(r, 1.2).map(toWorld))
+      .map((r) => this.simplifyRing(r, 0.9).map(probe.toWorld))
       .filter((r) => r.length >= 3);
     if (!out.length) return this.showHint("Nothing to fill there");
     out.sort((a, b) => b.length - a.length);
     let total = out.reduce((n, r) => n + r.length, 0);
     if (total > 1400) {
-      out = out.map((r) => this.simplifyRing(r, 3 / this.zoom));
+      out = out.map((r) => this.simplifyRing(r, 2.5 / probe.zoom));
       total = out.reduce((n, r) => n + r.length, 0);
     }
 
@@ -2865,6 +2906,7 @@ class Talkoboard {
   }
 
   renderStroke(ctx, stroke, view) {
+    if (this._probe) return this.renderStrokeBody(ctx, this.probeStroke(stroke), view);
     const a = this.alphaOf(stroke);
     if (a >= 1) return this.renderStrokeBody(ctx, stroke, view);
     const compound =
