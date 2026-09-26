@@ -3314,7 +3314,7 @@ class Talkoboard {
 
     const view = this.viewWorldRect();
     const buckets = this.layerBuckets();
-    let first = true;
+    let first = !this.tracing() || plain;
     for (let i = 0; i < buckets.length; i++) {
       const list = buckets[i];
       if (!list) continue;
@@ -3381,8 +3381,13 @@ class Talkoboard {
     return sc;
   }
 
+  tracing() {
+    return !!(this.trace && this.trace.visible);
+  }
+
   canDrawLive(stroke) {
     if (this.alphaOf(stroke) < 1) return false;
+    if (stroke.eraser && this.tracing()) return false;
     const L = this.layerOf(stroke);
     if (this.hiddenLayers.has(L)) return false;
     if (this._layersUsed <= 1 && L >= this._layerTop) return true;
