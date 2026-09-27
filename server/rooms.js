@@ -2242,11 +2242,11 @@ function appealRow(a, view, all) {
     const stillBlocked = appealStillBlocked(a);
     const person = persons.resolve(a.deviceId || a.userId || "");
     const ban = a.ban || {};
-    const bar = appeals.barFor({
-      ip: a.ip,
-      deviceId: a.deviceId,
-      userId: a.userId,
-    });
+    const bar =
+      appeals.barFor({ ip: a.ip, deviceId: a.deviceId, userId: a.userId }) ||
+      appeals.barForKeys(
+        personblocks.keysFor({ ip: a.ip, deviceId: a.deviceId, userId: a.userId }),
+      );
     const shownName = a.name || knownName(a);
     return {
       id: a.id,
@@ -9890,6 +9890,11 @@ function registerSocketHandlers(opts) {
                 ip: a.ip,
                 deviceId: a.deviceId,
                 userId: a.userId,
+                keys: personblocks.keysFor({
+                  ip: a.ip,
+                  deviceId: a.deviceId,
+                  userId: a.userId,
+                }),
                 name: a.name,
                 by: socket.staffLabel || null,
                 byRole: socket.isDev ? "dev" : "mod",

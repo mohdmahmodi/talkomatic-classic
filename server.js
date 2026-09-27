@@ -1258,7 +1258,7 @@ function appealForBrowser(req) {
         ip,
         deviceId,
         userId: req.session?.userId || null,
-      }) || [...keys.deviceIds].some((id) => appeals.isBarred({ deviceId: id })),
+      }) || appeals.isBarredKeys(keys),
     appeal: appeals.forPerson(keys, eff ? eff.since : null, banKey),
   };
 }

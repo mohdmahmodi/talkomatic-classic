@@ -66,28 +66,84 @@ function saveBarsSync() {
 }
 
 function barFor({ ip, deviceId, userId } = {}) {
+  const did = deviceId ? String(deviceId).toLowerCase() : null;
   return (
     bars.find(
       (b) =>
-        (deviceId && b.deviceId && b.deviceId === deviceId) ||
-        (userId && b.userId && b.userId === userId) ||
-        (ip && b.ip && b.ip === ip),
+        (did &&
+          ((b.deviceId && String(b.deviceId).toLowerCase() === did) ||
+            (b.deviceIds || []).includes(did))) ||
+        (userId &&
+          ((b.userId && b.userId === userId) ||
+            (b.userIds || []).includes(userId))) ||
+        (ip && ((b.ip && b.ip === ip) || (b.ips || []).includes(ip))),
     ) || null
   );
+}
+
+function barForKeys(keys) {
+  if (!keys) return null;
+  const ips = keys.ips ? [...keys.ips] : [];
+  if (keys.ip && !ips.includes(keys.ip)) ips.push(keys.ip);
+  for (const ip of ips) {
+    const b = barFor({ ip });
+    if (b) return b;
+  }
+  for (const id of keys.deviceIds || []) {
+    const b = barFor({ deviceId: id });
+    if (b) return b;
+  }
+  for (const uid of keys.userIds || []) {
+    const b = barFor({ userId: uid });
+    if (b) return b;
+  }
+  return null;
 }
 
 function isBarred(who) {
   return !!barFor(who);
 }
 
-function addBar({ ip, deviceId, userId, name, by, byRole, reason }) {
-  const already = barFor({ ip, deviceId, userId });
-  if (already) return already;
+function isBarredKeys(keys) {
+  return !!barForKeys(keys);
+}
+
+function addBar({ ip, deviceId, userId, name, by, byRole, reason, keys }) {
+  const already = barFor({ ip, deviceId, userId }) || barForKeys(keys);
+  const ips = new Set(ip ? [ip] : []);
+  const deviceIds = new Set(deviceId ? [String(deviceId).toLowerCase()] : []);
+  const userIds = new Set(userId ? [userId] : []);
+  if (keys) {
+    for (const x of keys.ips || []) if (x) ips.add(x);
+    if (keys.ip) ips.add(keys.ip);
+    for (const x of keys.deviceIds || []) if (x) deviceIds.add(String(x).toLowerCase());
+    for (const x of keys.userIds || []) if (x) userIds.add(x);
+  }
+  if (already) {
+    let grew = false;
+    const merge = (field, set) => {
+      const cur = new Set(already[field] || []);
+      for (const v of set)
+        if (!cur.has(v)) {
+          cur.add(v);
+          grew = true;
+        }
+      already[field] = [...cur];
+    };
+    merge("ips", ips);
+    merge("deviceIds", deviceIds);
+    merge("userIds", userIds);
+    if (grew) saveBarsSoon();
+    return already;
+  }
   const rec = {
     id: ++barSeq,
     ip: ip || null,
     deviceId: deviceId || null,
     userId: userId || null,
+    ips: [...ips],
+    deviceIds: [...deviceIds],
+    userIds: [...userIds],
     name: name || null,
     by: by || null,
     byRole: byRole || null,
@@ -243,8 +299,7 @@ function submit({ ip, deviceId, userId, name, message, ban, keys, spell }) {
     deviceIds: new Set(deviceId ? [deviceId] : []),
     userIds: new Set(userId ? [userId] : []),
   };
-  for (const id of k.deviceIds)
-    if (barFor({ deviceId: id })) return { ok: false, code: "barred" };
+  if (barForKeys(k)) return { ok: false, code: "barred" };
   const open = openForKeys(k);
   if (open) return { ok: false, code: "already", id: open.id };
   const decided = appeals.find(
@@ -561,6 +616,8 @@ load();
 loadBars();
 
 module.exports = {
+  barForKeys,
+  isBarredKeys,
   submit,
   get,
   banKeyOf,
