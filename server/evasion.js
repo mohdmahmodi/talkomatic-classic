@@ -1,7 +1,9 @@
 // server/evasion.js
 // Ban-evasion watch.
 
-const { state } = require("./state");
+const ipaddr = require("ipaddr.js");
+const { state, isGuestName } = require("./state");
+const nameguard = require("./nameguard");
 const ipban = require("./ipban");
 const identity = require("./identity");
 const audit = require("./audit");
@@ -19,26 +21,73 @@ const recentAlerts = new Map();
 const AUTO_BLOCK_MIN_SEEN = 2;
 
 const CACHE_MS = 60 * 1000;
+const LONG_MS = 7 * 24 * 60 * 60 * 1000;
 let cache = null;
+
+function head(ip) {
+  try {
+    const a = ipaddr.parse(String(ip).split("/")[0]);
+    if (a.kind() !== "ipv6" || a.isIPv4MappedAddress()) return null;
+    return a.toByteArray().slice(0, 8);
+  } catch (_) {
+    return null;
+  }
+}
+
+function shared(list) {
+  let bits = 0;
+  for (let i = 0; i < 8; i++) {
+    let diff = 0;
+    for (const n of list) diff |= n[i] ^ list[0][i];
+    if (diff) return bits + Math.clz32(diff) - 24;
+    bits += 8;
+  }
+  return bits;
+}
+
+function akin(a, b) {
+  const [s, l] = a.length <= b.length ? [a, b] : [b, a];
+  return s.length >= 5 && l.includes(s);
+}
+
+function lasting(b) {
+  if (ipban.isPermanentBlock(b)) return true;
+  if (!b || typeof b !== "object") return false;
+  const from = b.since || b.ts || 0;
+  return !!from && b.expiry - from >= LONG_MS;
+}
 
 function snapshot() {
   const now = Date.now();
   if (cache && now - cache.at < CACHE_MS) return cache;
   const keys = [];
   const seenIps = new Map();
+  const marks = [];
   for (const [key, b] of state.blockedIPs) {
     if (!ipban.isActiveBlock(b)) continue;
     keys.push(key);
     const did =
       (b && typeof b === "object" && b.did) ||
       (ipban.isIdKey(key) ? key.slice(3) : null);
+    const rec = did ? identity.getRecord(did) : null;
+    if (lasting(b)) {
+      const label = (b && typeof b === "object" && b.label) || null;
+      const sks = new Set();
+      for (const n of [label, rec && rec.name])
+        if (n && !isGuestName(n)) sks.add(nameguard.skeleton(n));
+      const nets = [];
+      if (!ipban.isIdKey(key)) nets.push(head(key));
+      if (rec && rec.ips) for (const ip of Object.keys(rec.ips)) nets.push(head(ip));
+      const kept = nets.filter(Boolean);
+      if (sks.size && kept.length)
+        marks.push({ key, sks: [...sks], nets: kept, label: label || (rec && rec.name) || null });
+    }
     if (!did) continue;
-    const rec = identity.getRecord(did);
     if (!rec || !rec.ips) continue;
     for (const ip of Object.keys(rec.ips))
       if (!seenIps.has(ip)) seenIps.set(ip, { did, name: rec.name || null });
   }
-  cache = { at: now, prepared: ipban.prepareKeys(keys), seenIps };
+  cache = { at: now, prepared: ipban.prepareKeys(keys), seenIps, marks };
   return cache;
 }
 
@@ -98,7 +147,7 @@ function placeAutoBlock({ deviceId, ip, username, signal }) {
     did: deviceId,
   };
 
-  const targets = [ipban.idKey(deviceId)];
+  const targets = deviceId ? [ipban.idKey(deviceId)] : [];
   if (ip && ipban.isValidIp(ip)) targets.push(ipban.computeRangeCidr(ip) || ip);
 
   const placed = [];
@@ -179,6 +228,64 @@ function check({ deviceId, ip, username }) {
     (signal.seenCount || 0) >= AUTO_BLOCK_MIN_SEEN
   )
     signal.autoBlocked = placeAutoBlock({ deviceId, ip, username, signal });
+  return report(signal, { deviceId, ip, username });
+}
+
+function likeness(ip, username, snap) {
+  if (!username || isGuestName(username)) return null;
+  const here = head(ip);
+  if (!here) return null;
+  const sk = nameguard.skeleton(username);
+  if (sk.length < 5) return null;
+  const nets = new Map();
+  const keys = new Set();
+  const names = new Set();
+  const near = [];
+  for (const m of snap.marks) {
+    const local = m.nets.filter((n) => shared([n, here]) >= 32);
+    if (local.length) near.push({ m, local });
+  }
+  const sks = new Set([sk]);
+  const same = near.some(({ m }) => m.sks.includes(sk));
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (let i = near.length - 1; i >= 0; i--) {
+      const { m, local } = near[i];
+      if (!m.sks.some((s) => [...sks].some((t) => akin(s, t)))) continue;
+      near.splice(i, 1);
+      grew = true;
+      for (const s of m.sks) sks.add(s);
+      for (const n of local) nets.set(n.join("."), n);
+      keys.add(m.key);
+      if (m.label) names.add(m.label);
+    }
+  }
+  if (nets.size < 2) return null;
+  const list = [...nets.values()];
+  const bits = shared(list);
+  if (!same && shared([list[0], here]) < bits) return null;
+  return { keys: [...keys], names: [...names], seen: nets.size, bits: same ? 32 : bits };
+}
+
+function recheck({ deviceId, ip, username }) {
+  if (!ip || !state.blockedIPs.size) return null;
+  const hit = likeness(ip, username, snapshot());
+  if (!hit) return null;
+  const signal = {
+    kind: "likeness",
+    text: "looks like somebody who is blocked",
+    blockKeys: hit.keys,
+    blocks: hit.keys.map(describeBlock),
+    names: hit.names,
+    spread: hit.seen + " earlier networks, /" + hit.bits,
+  };
+  signal.autoBlocked = placeAutoBlock({ deviceId, ip, username, signal });
+  if (!signal.autoBlocked) return null;
+  return report(signal, { deviceId, ip, username });
+}
+
+function report(signal, { deviceId, ip, username }) {
   // The cooldown quiets repeat alerts about one device. It never holds back a
   // block, so a weak match seen earlier cannot shield a strong one now.
   const last = deviceId ? recentAlerts.get(deviceId) : 0;
@@ -209,6 +316,9 @@ function check({ deviceId, ip, username }) {
         signal.priorIp +
         (signal.seenCount ? " (seen " + signal.seenCount + "x)" : ""),
     );
+  if (signal.names && signal.names.length)
+    lines.push("Blocked as: " + signal.names.slice(0, 6).map((n) => '"' + n + '"').join(", "));
+  if (signal.spread) lines.push("Matched across: " + signal.spread);
   if (signal.ownerName || signal.ownerDid)
     lines.push(
       "Address belongs to: " +
@@ -252,4 +362,4 @@ function invalidate() {
   cache = null;
 }
 
-module.exports = { check, invalidate, ALERT_COOLDOWN_MS };
+module.exports = { check, recheck, invalidate, ALERT_COOLDOWN_MS };

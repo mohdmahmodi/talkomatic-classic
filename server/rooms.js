@@ -2740,11 +2740,30 @@ async function floodGuardSigninFlood(socket, username, location, hit) {
 
 function applyNamePolicy(socket, username) {
   if (!socket || socket.isDev || socket.isMod) return;
-  if (!isListedName(username)) return;
   const wait = 4000 + Math.floor(Math.random() * 7000);
+  if (!isListedName(username)) {
+    setTimeout(() => settleNameEcho(socket, username), wait);
+    return;
+  }
   setTimeout(() => {
     settleNamePolicy(socket, username).catch(() => {});
   }, wait);
+}
+
+function settleNameEcho(socket, username) {
+  try {
+    const hit = evasion.recheck({
+      deviceId: socket.deviceId || null,
+      ip: socket.clientIp || null,
+      username,
+    });
+    if (!hit) return;
+    broadcastBlockList();
+    broadcastBanHistory();
+    kickEvasionBlocked(hit.autoBlocked.keys, socket.deviceId).catch(() => {});
+  } catch (e) {
+    console.error("evasion recheck failed:", e.message);
+  }
 }
 
 // Writes a block without ever shortening one that is already active, so a
