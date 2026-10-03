@@ -193,8 +193,14 @@ html.tk-fx-crt .chat-input {
 }
 
 html.tk-fx-crt .tked-panel,
-html.tk-fx-crt .tked-panel * {
+html.tk-fx-crt .tked-panel *,
+html.tk-fx-crt .tb-overlay,
+html.tk-fx-crt .tb-overlay * {
   text-shadow: none;
+}
+
+html.tk-fx-crt body:has(.tb-overlay.show)::after {
+  display: none;
 }
 
 /* ── Light themes ──

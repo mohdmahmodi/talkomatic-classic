@@ -198,7 +198,7 @@ function check({ deviceId, ip, username }) {
     if (best)
       signal = {
         kind: "history",
-        text: "has connected before from an address that is blocked now",
+        text: "is on a browser that connected before from an IP address that is blocked now",
         priorIp: best.seen,
         blockKeys: best.covering,
         blocks: best.covering.map(describeBlock),
@@ -212,7 +212,7 @@ function check({ deviceId, ip, username }) {
       signal = {
         kind: "address",
         text:
-          "is on an address last used by " +
+          "is on an IP address last used by " +
           (owner.name ? `"${owner.name}"` : "somebody") +
           ", who is blocked",
         ownerName: owner.name || null,
@@ -285,6 +285,15 @@ function recheck({ deviceId, ip, username }) {
   return report(signal, { deviceId, ip, username });
 }
 
+const MEANING = {
+  history:
+    "the same browser as before, on a new IP address. This is the strongest sign: the device id matches one that connected from an IP address that is blocked.",
+  address:
+    "a different browser on the same IP address as a blocked user. It can be the same person on a new browser or device, or somebody else sharing that network (family, school, mobile carrier).",
+  likeness:
+    "this sign-in resembles a user who is blocked.",
+};
+
 function report(signal, { deviceId, ip, username }) {
   // The cooldown quiets repeat alerts about one device. It never holds back a
   // block, so a weak match seen earlier cannot shield a strong one now.
@@ -298,44 +307,51 @@ function report(signal, { deviceId, ip, username }) {
   if (recentAlerts.size > 5000) recentAlerts.clear();
 
   const who = username ? `"${username}"` : "A new connection";
+  const quoted = (list) => list.map((n) => '"' + n + '"').join(", ");
   const lines = [`${who} ${signal.text}.`];
-  lines.push("Now on: " + (ip || "unknown address"));
-  if (deviceId) lines.push("Client id: " + deviceId);
+  lines.push("What this means: " + MEANING[signal.kind]);
+  lines.push(
+    "Action taken: " +
+      (signal.autoBlocked
+        ? "blocked automatically" +
+          (signal.autoBlocked.permanent
+            ? ", permanently"
+            : " for " + shortAgo(signal.autoBlocked.expiry - Date.now())) +
+          " (" + signal.autoBlocked.keys.join(", ") + ")"
+        : "none. Nothing was blocked, this is for a moderator to judge."),
+  );
+  lines.push("Name used now: " + (username ? '"' + username + '"' : "none yet"));
+  lines.push("IP address now: " + (ip || "unknown"));
+  if (deviceId) lines.push("Device id (their browser): " + deviceId);
   const rec = deviceId ? identity.getRecord(deviceId) : null;
   if (rec) {
-    if (rec.name && rec.name !== username) lines.push('Known before as: "' + rec.name + '"');
+    if (rec.name && rec.name !== username)
+      lines.push('Name this browser used before: "' + rec.name + '"');
     const all = rec.ips ? Object.keys(rec.ips) : [];
     if (all.length > 1)
       lines.push(
-        "This client has used " + all.length + " addresses: " + all.slice(0, 8).join(", "),
+        "IP addresses this browser has used (" + all.length + "): " +
+          all.slice(0, 12).join(", ") +
+          (all.length > 12 ? ", and " + (all.length - 12) + " more" : ""),
       );
   }
   if (signal.priorIp)
     lines.push(
-      "Matched on an earlier address: " +
+      "Blocked IP address this browser used before: " +
         signal.priorIp +
-        (signal.seenCount ? " (seen " + signal.seenCount + "x)" : ""),
+        (signal.seenCount ? " (seen there " + signal.seenCount + " times)" : ""),
     );
-  if (signal.names && signal.names.length)
-    lines.push("Blocked as: " + signal.names.slice(0, 6).map((n) => '"' + n + '"').join(", "));
-  if (signal.spread) lines.push("Matched across: " + signal.spread);
   if (signal.ownerName || signal.ownerDid)
     lines.push(
-      "Address belongs to: " +
-        (signal.ownerName ? '"' + signal.ownerName + '"' : "unknown") +
-        (signal.ownerDid ? " (id " + signal.ownerDid + ")" : ""),
+      "Blocked user who used this IP address: " +
+        (signal.ownerName ? '"' + signal.ownerName + '"' : "name unknown") +
+        (signal.ownerDid ? ", device id " + signal.ownerDid : ""),
     );
+  if (signal.names && signal.names.length)
+    lines.push("Blocked names it resembles: " + quoted(signal.names.slice(0, 6)));
+  if (signal.spread) lines.push("Networks matched: " + signal.spread);
   if (signal.blocks && signal.blocks.length)
-    for (const b of signal.blocks) lines.push("Block: " + b);
-
-  if (signal.autoBlocked)
-    lines.push(
-      "Auto-block placed: " +
-        signal.autoBlocked.keys.join(", ") +
-        (signal.autoBlocked.permanent
-          ? " (permanent)"
-          : " (for " + shortAgo(signal.autoBlocked.expiry - Date.now()) + ")"),
-    );
+    for (const blk of signal.blocks) lines.push("Block on file: " + blk);
 
   audit.recordNotification({
     kind: "evasion",

@@ -2118,6 +2118,7 @@
     abuse: "fa-triangle-exclamation",
     key: "fa-key",
     floodguard: "fa-shield-halved",
+    proxyguard: "fa-shield-halved",
     evasion: "fa-user-secret",
   };
   const QNAME = {
@@ -2128,6 +2129,7 @@
     abuse: "Worth a look",
     key: "Staff key",
     floodguard: "Flood guard",
+    proxyguard: "Proxy guard",
     evasion: "Ban evasion",
   };
 
@@ -2167,6 +2169,7 @@
     if (kind === "key")
       return (c.target || "A moderator") + " asked for a new staff key";
     if (kind === "floodguard") return (c.target || "Somebody") + " was blocked for a sign-in flood";
+    if (kind === "proxyguard") return (c.target || "Somebody") + " was refused by the proxy guard";
     if (kind === "evasion") return (c.target || "Somebody") + " may be getting around a block";
     return c.by || "";
   }
@@ -2286,7 +2289,12 @@
       return b;
     }
 
-    if (m.text) b.appendChild(qField("", m.text));
+    for (const line of String(m.text || "").split("\n")) {
+      if (!line.trim()) continue;
+      const cut = line.indexOf(": ");
+      if (cut > 0 && cut < 60) b.appendChild(qField(line.slice(0, cut), line.slice(cut + 2)));
+      else b.appendChild(qField("", line));
+    }
     return b;
   }
 
@@ -5924,8 +5932,8 @@
 .dk-q.q-application{border-left-color: #c08bff;}
 .dk-q.q-suggestion{border-left-color: #57d9a3;}
 .dk-q.q-abuse{border-left-color: #ff5468;}
-.dk-q.q-floodguard{border-left-color: #ffb454;}
-.q-floodguard .dk-q-ico{color: #ffb454;background:rgba(255,180,84,.12);}
+.dk-q.q-floodguard,.dk-q.q-proxyguard{border-left-color: #ffb454;}
+.q-floodguard .dk-q-ico,.q-proxyguard .dk-q-ico{color: #ffb454;background:rgba(255,180,84,.12);}
 .dk-q.is-done{opacity:.62;}
 .dk-q-h{display:flex;align-items:flex-start;gap:9px;min-width:0;}
 .dk-q-ico{flex:none;width:24px;height:24px;border-radius:5px;background: #252525;display:flex;

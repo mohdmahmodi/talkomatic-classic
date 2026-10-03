@@ -234,15 +234,21 @@ html {
   padding-bottom: calc(24px + env(safe-area-inset-bottom));
   overflow-y: auto; /* Enable vertical scrolling */
   overflow-x: hidden; /* Disable horizontal scrolling */
-  scrollbar-width: none; /* Hide scrollbar in Firefox */
-  -ms-overflow-style: none; /* Hide scrollbar in Internet Explorer */
+  scrollbar-width: thin;
+  scrollbar-color: var(--tk-accent) transparent;
 }
 
-/* Hide scrollbar in WebKit browsers (Chrome, Safari) */
 .left-panel::-webkit-scrollbar {
-  width: 0;
-  height: 0;
+  width: 8px;
+}
+
+.left-panel::-webkit-scrollbar-track {
   background: transparent;
+}
+
+.left-panel::-webkit-scrollbar-thumb {
+  background: var(--tk-accent);
+  border-radius: 4px;
 }
 
 /* Ensure all children of the left panel fit within the padding */

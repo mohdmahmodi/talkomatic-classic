@@ -96,6 +96,10 @@
   bottom: 12px;
   left: 256px;
 }
+.tb-find {
+  bottom: 12px;
+  left: 348px;
+}
 
 .tb-btn {
   position: relative;
@@ -967,6 +971,10 @@
     right: 10px;
     bottom: calc(66px + env(safe-area-inset-bottom));
   }
+  .tb-find {
+    left: 10px;
+    bottom: calc(66px + env(safe-area-inset-bottom));
+  }
   .tb-pop {
     top: auto;
     bottom: calc(66px + env(safe-area-inset-bottom));
@@ -1144,7 +1152,8 @@
     min-width: 52px;
     height: 46px;
   }
-  .tb-history {
+  .tb-history,
+  .tb-find {
     bottom: calc(76px + env(safe-area-inset-bottom));
   }
   .tb-pop {

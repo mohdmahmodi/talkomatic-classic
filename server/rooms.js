@@ -755,6 +755,40 @@ function isSeasonedDevice(did) {
   return !!(rec && rec.days && rec.days.length >= SEASONED_DAYS);
 }
 
+function reportProxyHit(socket, { username, location, type, at }) {
+  const ip = socket.clientIp || null;
+  const did = socket.deviceId || null;
+  if (!proxyguard.shouldReport((did || "") + "|" + (ip || ""))) return;
+  const userId = socket.handshake?.session?.userId || null;
+  const kind = type || "proxy";
+  const refused = at === "room join" ? "Room join" : "Sign-in";
+  audit.recordNotification({
+    kind: "proxyguard",
+    minLevel: 1,
+    text: [
+      "Proxy guard stopped " + (username ? '"' + username + '"' : "somebody") + " at " + at + ".",
+      "What happened: they connected through a " + kind + " address. VPNs, proxies and hosting networks are not allowed.",
+      "Action taken: " + refused + " refused. No block was placed, they can come back with it turned off.",
+      "Name: " + (username ? '"' + username + '"' : "none"),
+      "Location they typed: " + (location ? '"' + location + '"' : "none"),
+      "Network type: " + kind,
+      "IP address: " + (ip || "unknown"),
+      "Device id (their browser): " + (did || "unknown"),
+      "User id: " + (userId || "none yet, they were not signed in"),
+    ].join("\n"),
+    target: username || null,
+    targetUserId: userId,
+    ip,
+    card: {
+      ids: did ? [did] : [],
+      target: username || "(no name)",
+      deviceId: did,
+      category: kind + " connection, refused automatically",
+      reason: refused + " refused by the proxy guard",
+    },
+  });
+}
+
 function freshSameNetworkInRoom(room, roomId, socket, userId) {
   const key = signinNetKey(socket.clientIp);
   if (!key || !io()) return 0;
@@ -4088,7 +4122,13 @@ function joinRoom(socket, roomId, userId) {
       !socket.isBot &&
       !isSeasonedDevice(socket.deviceId) &&
       proxyguard.cached(clientIp)?.flagged
-    )
+    ) {
+      reportProxyHit(socket, {
+        username,
+        location,
+        type: proxyguard.cached(clientIp).type,
+        at: "room join",
+      });
       return socket.emit(
         "error",
         createErrorResponse(
@@ -4098,6 +4138,7 @@ function joinRoom(socket, roomId, userId) {
           true,
         ),
       );
+    }
     if (CONFIG.FEATURES.ENABLE_BOT_PROTECTION) {
       if (isBlacklisted(userId, clientIp))
         return socket.emit(
@@ -5045,24 +5086,7 @@ function registerSocketHandlers(opts) {
         if (!staff && !socket.isBot && !isSeasonedDevice(socket.deviceId)) {
           const net = await proxyguard.check(socket.clientIp);
           if (net && net.flagged) {
-            if (net.fresh)
-              audit.recordNotification({
-                kind: "floodguard",
-                minLevel: 1,
-                text:
-                  "\"" + username + "\" tried to sign in from a " + net.type +
-                  " address (location \"" + (location || "") + "\"). Refused.",
-                target: username || null,
-                targetUserId: null,
-                ip: socket.clientIp || null,
-                card: {
-                  ids: socket.deviceId ? [socket.deviceId] : [],
-                  target: username || "(no name)",
-                  deviceId: socket.deviceId || null,
-                  category: "VPN or proxy sign-in, refused automatically",
-                  reason: net.type,
-                },
-              });
+            reportProxyHit(socket, { username, location, type: net.type, at: "sign-in" });
             return socket.emit(
               "error",
               createErrorResponse(
@@ -10352,15 +10376,12 @@ function registerSocketHandlers(opts) {
         let text = sanitizeMessage(
           typeof data?.text === "string" ? data.text : "",
         ).slice(0, 600);
-        text = wordFilter.filterText(text);
         text = linkfilter.redact(text);
         if (text.trim().length < 8) return fail("Please write a little more.");
-        let title = wordFilter
-          .filterText(
-            sanitizeMessage(
-              typeof data?.title === "string" ? data.title : "",
-            ).slice(0, 80),
-          )
+        let title = sanitizeMessage(
+          typeof data?.title === "string" ? data.title : "",
+        )
+          .slice(0, 80)
           .trim();
         if (title.length < 3) return fail("Please add a short title.");
         const kind = data?.kind === "bug" ? "bug" : "idea";
@@ -10421,7 +10442,6 @@ function registerSocketHandlers(opts) {
         let text = sanitizeMessage(
           typeof data?.text === "string" ? data.text : "",
         ).slice(0, 300);
-        text = wordFilter.filterText(text);
         text = linkfilter.redact(text);
         if (text.trim().length < 2) return fail("Please write a little more.");
         const r = suggestions.reply({
@@ -10547,7 +10567,6 @@ function registerSocketHandlers(opts) {
         let text = sanitizeMessage(
           typeof data?.text === "string" ? data.text : "",
         ).slice(0, replyId ? 300 : 600);
-        text = wordFilter.filterText(text);
         text = linkfilter.redact(text);
         if (text.trim().length < (replyId ? 2 : 8))
           return fail("Please write a little more.");

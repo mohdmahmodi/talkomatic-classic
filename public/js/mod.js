@@ -433,7 +433,13 @@
                 ? "feature suggestion"
                 : e.kind === "key"
                   ? "staff key request"
-                  : "user report",
+                  : e.kind === "proxyguard"
+                    ? "VPN or proxy refused"
+                    : e.kind === "floodguard"
+                      ? "sign-in flood blocked"
+                      : e.kind === "evasion"
+                        ? "possible ban evasion"
+                        : "user report",
         ),
       );
     } else {

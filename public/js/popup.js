@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  var VERSION = "6.1";
+  var VERSION = "6.2";
   var SHOW_AFTER_MS = 90000;
   var RETRY_MS = 30000;
   var REPEAT_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
@@ -10,8 +10,43 @@
 
   var SECTIONS = [
     {
+      title: "Safechat",
+      items: [
+        {
+          icon: "fa-shield-halved",
+          tag: "new",
+          title: "Normal words stay normal",
+          text: "Safechat no longer stars everyday words. Cook, classes, passes, treatment, glasses, amusement and plain numbers all come through now, and so do sentences like \"the chef is typing\" and \"who are you\".",
+        },
+        {
+          icon: "fa-user-shield",
+          tag: "new",
+          title: "Harder to dodge",
+          text: "Spelling a word out with spaces, stretching it, doubling letters or swapping in numbers and symbols is caught far more reliably than before.",
+        },
+        {
+          icon: "fa-keyboard",
+          tag: "new",
+          title: "Off means off everywhere",
+          text: "If you turn Safechat off with the shield in a room, it now stays off on the Talkoboard chat, in games and on the Ideas & Bugs board too. Leave it on and everything stays filtered for you, same as before.",
+        },
+        {
+          icon: "fa-keyboard",
+          tag: "new",
+          title: "No more flicker in your own box",
+          text: "The word you are typing is left alone for a second, so stars no longer jump in and out while you finish it. Everyone else still sees it filtered right away.",
+        },
+      ],
+    },
+    {
       title: "On the Talkoboard",
       items: [
+        {
+          icon: "fa-location-crosshairs",
+          tag: "new",
+          title: "Find your way back",
+          text: "Two new buttons at the bottom of the board: one jumps to the last thing you drew, the other takes you back to the start. Press M or 0 on a keyboard.",
+        },
         {
           icon: "fa-layer-group",
           tag: "new",
@@ -20,19 +55,16 @@
         },
         {
           icon: "fa-droplet",
-          tag: "new",
           title: "Opacity",
           text: "Make any color see-through from the Opacity slider in the Color panel. Works with the pen, shapes, the bucket and the eraser.",
         },
         {
           icon: "fa-image",
-          tag: "new",
           title: "Trace a picture",
           text: "Put any picture from your device under the board and draw over it. Move it, resize it, flip it, fade it. Only you can see it: it never leaves your browser and it is not in saved images.",
         },
         {
           icon: "fa-lock-open",
-          tag: "new",
           title: "Share your area",
           text: "Protect still keeps a patch of the board yours, and the box you can take is now twice as wide. Next to it, choose who may draw inside: only you, everyone, or the friends you tick off a list.",
         },
@@ -43,7 +75,6 @@
       items: [
         {
           icon: "fa-heart",
-          tag: "new",
           title: "Favorite themes",
           text: "Tap the heart on any theme on the Themes page and it goes in your Favorites tab, ready to apply without searching. Favorites stay yours even if the theme is later taken down.",
         },

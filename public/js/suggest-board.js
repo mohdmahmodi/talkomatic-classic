@@ -125,6 +125,33 @@
     }
   }
 
+  var filter = null;
+  var filterPending = false;
+
+  function loadFilter() {
+    if (!window.ClientWordFilter) return;
+    var f = new window.ClientWordFilter();
+    filterPending = true;
+    f.init().then(function () {
+      filterPending = false;
+      if (f.ready) filter = f;
+      if (built && isOpen) render();
+    });
+  }
+
+  function masked(text) {
+    var t = String(text == null ? "" : text);
+    if (!t || lsGet("wordFilterEnabled") === "false") return t;
+    if (!filter) return filterPending ? "…" : t;
+    var ranges = filter.checkText(t).offensiveRanges;
+    for (var i = ranges.length - 1; i >= 0; i--) {
+      var a = ranges[i][0];
+      var b = ranges[i][1];
+      t = t.slice(0, a) + t.slice(a, b).replace(/\S/g, "•") + t.slice(b);
+    }
+    return t;
+  }
+
   function el(tag, className, text) {
     var n = document.createElement(tag);
     if (className) n.className = className;
@@ -171,8 +198,8 @@
   }
 
   function titleOf(p) {
-    if (p.title) return p.title;
-    var flat = plain(p.text);
+    if (p.title) return masked(p.title);
+    var flat = plain(masked(p.text));
     return flat.length > 70 ? flat.slice(0, 70) + "…" : flat || "(no title)";
   }
 
@@ -873,13 +900,13 @@
     var openIt = function () {
       openThread(p.id);
     };
-    if (p.title) top.appendChild(button("sb-row-title", esc(p.title), openIt));
+    if (p.title) top.appendChild(button("sb-row-title", esc(masked(p.title)), openIt));
     top.appendChild(statusPill(p));
     body.appendChild(top);
 
     // Older posts have no title: the text itself is the headline, so it goes
     // in full (clamped by CSS) rather than chopped into a fake title.
-    var text = plain(p.text);
+    var text = plain(masked(p.text));
     if (text) {
       var excerpt = el("p", p.title ? "sb-row-snippet" : "sb-row-text", text);
       body.appendChild(excerpt);
@@ -972,11 +999,11 @@
     }
     post.appendChild(head);
 
-    if (p.title) post.appendChild(el("h2", "sb-post-title", p.title));
+    if (p.title) post.appendChild(el("h2", "sb-post-title", masked(p.title)));
     if (isEditing) post.appendChild(editorFor(p, null));
     else {
       var body = el("div", "sb-text" + (p.title ? "" : " sb-text-lead"));
-      body.innerHTML = renderRich(p.text);
+      body.innerHTML = renderRich(masked(p.text));
       post.appendChild(body);
     }
 
@@ -1084,7 +1111,7 @@
     if (editingReply) body.appendChild(editorFor(p, r));
     else {
       var text = el("div", "sb-text sb-reply-text");
-      text.innerHTML = renderRich(r.text);
+      text.innerHTML = renderRich(masked(r.text));
       body.appendChild(text);
     }
     row.appendChild(body);
@@ -1520,6 +1547,7 @@
     sessionSince = lastSeen();
     view = { name: "list", id: null };
     isOpen = true;
+    if (!filter && !filterPending) loadFilter();
     overlay.classList.add("show");
     document.body.style.overflow = "hidden";
     socket.emit("board open");

@@ -5,6 +5,7 @@
 // "f\nu\nc\nk" no longer bypasses the filter.
 
 const fs = require("fs");
+const path = require("path");
 
 // ── Trie ────────────────────────────────────────────────────────────────────
 
@@ -46,7 +47,8 @@ class Trie {
 // ── WordFilter ──────────────────────────────────────────────────────────────
 
 class WordFilter {
-  constructor(wordsFilePath, substitutionsFilePath) {
+  constructor(wordsFilePath, substitutionsFilePath, dictionaryFilePath) {
+    this.wholeWordMax = 4;
     try {
       const data = JSON.parse(fs.readFileSync(wordsFilePath, "utf8"));
       if (
@@ -58,12 +60,6 @@ class WordFilter {
         );
       }
 
-      this.buildTries(data.offensive_words, data.whitelisted_words);
-
-      console.log(
-        `Loaded ${data.offensive_words.length} offensive words and ${data.whitelisted_words.length} whitelisted words`,
-      );
-
       this.cache = new Map();
       this.cacheSize = 1000;
       this.lineCache = new Map();
@@ -73,6 +69,30 @@ class WordFilter {
 
       this.obfuscationMap = this.buildComprehensiveObfuscationMap(
         substitutionsFilePath,
+      );
+
+      let dictionary = [];
+      try {
+        dictionary = JSON.parse(
+          fs.readFileSync(
+            dictionaryFilePath ||
+              path.join(path.dirname(wordsFilePath), "dictionary_words.json"),
+            "utf8",
+          ),
+        );
+      } catch (error) {
+        console.warn("Could not load dictionary_words.json:", error.message);
+      }
+
+      this.buildTries(
+        data.offensive_words,
+        data.whitelisted_words,
+        data.common_words,
+        dictionary,
+      );
+
+      console.log(
+        `Loaded ${data.offensive_words.length} offensive words and ${data.whitelisted_words.length} whitelisted words`,
       );
 
       console.log(
@@ -86,28 +106,6 @@ class WordFilter {
     }
   }
 
-  buildTries(offensiveWords, whitelistedWords) {
-    this.offensiveTrie = new Trie();
-    this.whitelistTrie = new Trie();
-    this.offensiveTrieCollapsed = new Trie();
-    this.whitelistTrieCollapsed = new Trie();
-
-    offensiveWords.forEach((word) => {
-      const w = word.toLowerCase();
-      this.offensiveTrie.insert(w);
-      this.offensiveTrieCollapsed.insert(this.collapseRuns(w));
-    });
-    whitelistedWords.forEach((word) => {
-      const w = word.toLowerCase();
-      this.whitelistTrie.insert(w);
-      this.whitelistTrieCollapsed.insert(this.collapseRuns(w));
-    });
-  }
-
-  collapseRuns(str) {
-    return str.replace(/(.)\1+/g, "$1");
-  }
-
   buildComprehensiveObfuscationMap(substitutionsFilePath) {
     let mappings = {};
 
@@ -115,7 +113,7 @@ class WordFilter {
       const fileSubstitutions = JSON.parse(
         fs.readFileSync(substitutionsFilePath, "utf8"),
       );
-      mappings = { ...fileSubstitutions };
+      mappings = this.cleanSubstitutions(fileSubstitutions);
       console.log(
         `Loaded ${
           Object.keys(fileSubstitutions).length
@@ -676,46 +674,142 @@ class WordFilter {
 
   // ── Normalization with index mapping ──────────────────────────────────────
 
-  buildNormalizedWithMap(text, options = {}) {
-    const dropDigits = options.dropDigits === true;
-    const maxRun = options.maxRun || 2;
+  buildTries(offensiveWords, whitelistedWords, commonWords, dictionaryWords) {
+    this.offensiveTrie = new Trie();
+    this.whitelistTrie = new Trie();
+    this.listedPhrases = new Set();
+    this.allowedPhrases = new Set();
+    this.commonWords = new Set();
+    this.dictionary = new Set();
+    this.dictionaryStarts = new Set();
+    this.literals = [];
+    const literals = new Set();
+    const raw = new Set();
 
-    let normalized = "";
-    const map = [];
-    let codeUnitIndex = 0;
-    let lastChar = "";
-    let runLength = 0;
+    for (const word of offensiveWords) {
+      const w = String(word).toLowerCase().trim();
+      if (!w) continue;
+      raw.add(w);
+      if (/^\.|:\/\/|^www\.|^mailto:|^[a-z0-9-]+\.[a-z]{2,}$/.test(w)) continue;
+      const n = this.normalize(w);
+      const length = n.count.reduce((a, b) => a + b, 0);
+      if (!/\s/.test(w)) {
+        if (length && /^\p{L}+$/u.test(w)) this.addEntry(this.offensiveTrie, n, true);
+        else literals.add(w);
+        continue;
+      }
+      if (!length) continue;
+      const spelled = this.phraseKey(n, 0, n.chars.length)
+        .split(" ")
+        .every((piece) => piece.length === 1);
+      this.listedPhrases.add(this.phraseKey(n, 0, n.chars.length));
+      this.addEntry(this.offensiveTrie, this.normalize(w.replace(/\s+/g, "")), !spelled);
+    }
+    this.literals = [...literals];
+
+    for (const word of whitelistedWords) {
+      const w = String(word).toLowerCase().trim();
+      if (!w) continue;
+      const n = this.normalize(w);
+      if (/\s/.test(w)) this.allowedPhrases.add(this.phraseKey(n, 0, n.chars.length));
+      else {
+        this.addEntry(this.whitelistTrie, n, true);
+        this.dictionary.add(w);
+      }
+    }
+
+    for (const word of commonWords || []) {
+      const w = String(word).toLowerCase().trim();
+      if (w && !raw.has(w)) this.commonWords.add(w);
+    }
+    for (const word of [...this.commonWords, ...(dictionaryWords || [])]) {
+      const w = String(word).toLowerCase().trim();
+      if (!w || raw.has(w)) continue;
+      this.dictionary.add(w);
+      for (let k = 1; k <= w.length; k++) this.dictionaryStarts.add(w.slice(0, k));
+    }
+  }
+
+  addEntry(trie, n, word) {
+    if (!n.chars) return;
+    let node = trie.root;
+    for (const ch of n.chars) {
+      if (!node.children[ch]) node.children[ch] = new TrieNode();
+      node = node.children[ch];
+    }
+    node.isEndOfWord = true;
+    if (!node.entries) node.entries = [];
+    const runs = n.count.slice();
+    const same = node.entries.find((e) => e.runs.join() === runs.join());
+    if (same) same.word = same.word || word;
+    else node.entries.push({ runs, len: runs.reduce((a, b) => a + b, 0), word });
+  }
+
+  cleanSubstitutions(file) {
+    const out = {};
+    for (const [from, to] of Object.entries(file || {}))
+      if (typeof to === "string" && /^[a-z0-9]*$/.test(to)) out[from] = to;
+    return out;
+  }
+
+  normalize(text, options = {}) {
+    let chars = "";
+    const count = [];
+    const start = [];
+    const end = [];
+    const gaps = [];
+    let at = 0;
+    let last = "";
+    let broke = false;
 
     for (const char of text) {
-      const unitLen = char.length;
+      const from = at;
+      at += char.length;
+      if (options.dropDigits && /[0-9]/.test(char)) continue;
 
-      let lowerChar = char.toLowerCase();
-      lowerChar = lowerChar.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const lower = char
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[̀-ͯ]/g, "");
+      let mapped = this.obfuscationMap[char];
+      if (mapped === undefined) mapped = this.obfuscationMap[lower];
+      if (mapped === undefined) mapped = lower;
+      if (options.alt && char === "1") mapped = "i";
 
-      const mapped =
-        this.obfuscationMap[char] ||
-        this.obfuscationMap[lowerChar] ||
-        lowerChar;
+      if (mapped !== "" && /^\s+$/.test(char)) {
+        broke = true;
+        last = "";
+        continue;
+      }
 
       for (const out of mapped) {
         if (!/[a-z0-9]/.test(out)) continue;
-        if (dropDigits && /[0-9]/.test(out)) continue;
-
-        if (out === lastChar) {
-          runLength++;
-          if (runLength > maxRun) continue;
-        } else {
-          lastChar = out;
-          runLength = 1;
+        if (out === last) {
+          count[count.length - 1]++;
+          end[end.length - 1] = at;
+          continue;
         }
-
-        normalized += out;
-        map.push(codeUnitIndex);
+        gaps.push((gaps.length ? gaps[gaps.length - 1] : 0) + (broke && chars ? 1 : 0));
+        chars += out;
+        count.push(1);
+        start.push(from);
+        end.push(at);
+        last = out;
+        broke = false;
       }
-
-      codeUnitIndex += unitLen;
     }
+    return { chars, count, start, end, gaps };
+  }
 
+  buildNormalizedWithMap(text, options = {}) {
+    const n = this.normalize(text, options);
+    let normalized = "";
+    const map = [];
+    for (let k = 0; k < n.chars.length; k++)
+      for (let c = 0; c < Math.min(n.count[k], options.maxRun || 2); c++) {
+        normalized += n.chars[k];
+        map.push(n.start[k]);
+      }
     return { normalized, map };
   }
 
@@ -724,115 +818,140 @@ class WordFilter {
     return this.buildNormalizedWithMap(text).normalized;
   }
 
-  // ── Scanning ───────────────────────────────────────────────────────────────
+  phraseKey(n, i, j) {
+    let key = "";
+    for (let k = i; k < j; k++) {
+      if (k > i && n.gaps[k] > n.gaps[k - 1]) key += " ";
+      key += n.chars[k];
+    }
+    return key;
+  }
 
-  // Allowed words shield whatever sits inside them, wherever they start, so
-  // "therapist" covers the "rapist" in it. Short offensive stems (up to four
-  // letters) only count as whole words; longer ones match anywhere, so a
-  // compound does not slip past by gluing words together.
-  scanNormalized(normalized, offensiveTrie, whitelistTrie, edges) {
-    const n = normalized.length;
-    const cover = new Array(n + 1).fill(0);
+  entriesAt(trie, n, i) {
+    const size = n.chars.length;
+    const found = [];
+    const walk = (node, j, counts) => {
+      const ch = n.chars[j];
+      const child = j < size ? node.children[ch] : null;
+      if (!child) return;
+      let total = 0;
+      let k = j;
+      do {
+        const had = total;
+        total += n.count[k];
+        k++;
+        const seen = counts.concat([[total, had]]);
+        for (const entry of child.entries || [])
+          if (
+            entry.runs.every(
+              (need, x) =>
+                seen[x][0] >= need &&
+                (seen[x][1] < need || (x > 0 && x < entry.runs.length - 1)),
+            )
+          )
+            found.push([k, entry]);
+        walk(child, k, seen);
+      } while (k < size && n.chars[k] === ch && k - j < 12);
+    };
+    walk(trie.root, i, []);
+    return found.sort((a, b) => b[0] - a[0]);
+  }
+
+  isValidOffensiveMatch(text, n, i, j, entry, options) {
+    if (entry.len <= 2) return false;
+    const a = n.start[i];
+    const b = n.end[j - 1];
+    const span = text.slice(a, b);
+    const letter = /\p{L}/u;
+    if (!letter.test(span)) return false;
+    if (options.dropDigits && !/[0-9]/.test(span)) return false;
+    if (options.alt && !span.includes("1")) return false;
+
+    const before = letter.test(text[a - 1] || "");
+    const after = letter.test(text[b] || "");
+    if (entry.len <= this.wholeWordMax && (before || after)) return false;
+
+    if (n.gaps[j - 1] === n.gaps[i]) return entry.word;
+
+    if (before || after) {
+      if (!entry.word) return false;
+      let s = a;
+      let e = b;
+      while (s > 0 && !/\s/.test(text[s - 1])) s--;
+      while (e < text.length && !/\s/.test(text[e])) e++;
+      const words = text
+        .slice(s, e)
+        .toLowerCase()
+        .split(/\s+/)
+        .map((p) => p.replace(/[^\p{L}\p{N}]/gu, ""))
+        .filter(Boolean);
+      const last = words.length - 1;
+      return !words.every(
+        (w, k) =>
+          this.dictionary.has(w) ||
+          (k === last && e === text.length && this.dictionaryStarts.has(w)),
+      );
+    }
+    const key = this.phraseKey(n, i, j);
+    if (this.allowedPhrases.has(key)) return false;
+    if (this.listedPhrases.has(key)) return true;
+    if (!entry.word) return false;
+    const pieces = span
+      .toLowerCase()
+      .split(/\s+/)
+      .map((p) => p.replace(/[^\p{L}\p{N}]/gu, ""))
+      .filter(Boolean);
+    if (pieces[pieces.length - 1].length === 1) pieces.pop();
+    return !pieces.every((p) => this.commonWords.has(p));
+  }
+
+  scan(text, options = {}) {
+    const n = this.normalize(text, options);
+    const size = n.chars.length;
+    if (!size) return [];
+
+    const cover = new Array(size).fill(0);
     let reach = 0;
-    for (let i = 0; i < n; i++) {
-      let node = whitelistTrie.root;
-      let j = i;
-      while (j < n && node.children[normalized[j]]) {
-        node = node.children[normalized[j]];
-        j++;
-        if (node.isEndOfWord && j > reach) reach = j;
+    for (let i = 0; i < size; i++) {
+      for (const [j] of this.entriesAt(this.whitelistTrie, n, i)) {
+        if (n.gaps[j - 1] !== n.gaps[i]) continue;
+        if (j > reach) reach = j;
+        break;
       }
       cover[i] = reach;
     }
 
-    const matches = [];
-    let i = 0;
-    while (i < n) {
-      let node = offensiveTrie.root;
-      let j = i;
-      let len = 0;
-      while (j < n && node.children[normalized[j]]) {
-        node = node.children[normalized[j]];
-        j++;
-        if (node.isEndOfWord) len = j - i;
-      }
-      if (
-        len > 0 &&
-        cover[i] < i + len &&
-        this.isValidOffensiveMatch(normalized, i, i + len, edges)
-      ) {
-        matches.push([i, i + len]);
-        i += len;
-      } else i++;
-    }
-    return matches;
-  }
-
-  // A stem of four letters or fewer only counts on its own: "grape", "cockatoo"
-  // and "Dickens" are words, not swearing. `edges` looks at the original
-  // text, where spaces still exist, so "what the fuck man" is four whole words.
-  isValidOffensiveMatch(normalizedText, startPos, endPos, edges) {
-    const matchLength = endPos - startPos;
-    if (matchLength <= 2) return false;
-    if (matchLength <= 4) {
-      const [before, after] = edges
-        ? edges(startPos, endPos)
-        : [
-            /[a-z0-9]/.test(normalizedText[startPos - 1] || ""),
-            /[a-z0-9]/.test(normalizedText[endPos] || ""),
-          ];
-      if (before || after) return false;
-    }
-    return true;
-  }
-
-  scanVariant(text, options, offensiveTrie, whitelistTrie, gate) {
-    const { normalized, map } = this.buildNormalizedWithMap(text, options);
-    if (normalized.length === 0) return [];
-
-    const letter = /\p{L}/u;
-    const edges = (s, e) => [
-      letter.test(text[map[s] - 1] || ""),
-      letter.test(text[map[e - 1] + 1] || ""),
-    ];
-    const matches = this.scanNormalized(
-      normalized,
-      offensiveTrie,
-      whitelistTrie,
-      edges,
-    );
     const ranges = [];
-
-    for (const [start, end] of matches) {
-      const origStart = map[start];
-      let origEnd = end < map.length ? map[end] : text.length;
-      if (gate && origEnd - origStart <= end - start) continue;
-      // Stop at the last matched letter, not at the next word.
-      while (origEnd > origStart + 1 && !letter.test(text[origEnd - 1])) origEnd--;
-      ranges.push([origStart, origEnd]);
+    let i = 0;
+    while (i < size) {
+      let next = i + 1;
+      for (const [j, entry] of this.entriesAt(this.offensiveTrie, n, i)) {
+        if (cover[i] >= j) continue;
+        if (!this.isValidOffensiveMatch(text, n, i, j, entry, options)) continue;
+        ranges.push([n.start[i], n.end[j - 1]]);
+        next = j;
+        break;
+      }
+      i = next;
     }
     return ranges;
   }
 
-  checkLine(line) {
-    if (this.lineCache.has(line)) {
-      this.cacheHits++;
-      return this.lineCache.get(line);
-    }
-    this.cacheMisses++;
-
-    const ranges = this.scanVariant(
-      line,
-      {},
-      this.offensiveTrie,
-      this.whitelistTrie,
-      false,
-    );
-
-    this.lineCache.set(line, ranges);
-    if (this.lineCache.size > this.lineCacheSize) {
-      const oldestKey = this.lineCache.keys().next().value;
-      this.lineCache.delete(oldestKey);
+  literalRanges(text) {
+    const lower = text.toLowerCase();
+    if (lower.length !== text.length) return [];
+    const ranges = [];
+    const edge = /[\p{L}\p{N}]/u;
+    for (const lit of this.literals) {
+      let at = lower.indexOf(lit);
+      while (at !== -1) {
+        const b = at + lit.length;
+        const glued =
+          (edge.test(lit[0]) && edge.test(lower[at - 1] || "")) ||
+          (edge.test(lit[lit.length - 1]) && edge.test(lower[b] || ""));
+        if (!glued) ranges.push([at, b]);
+        at = lower.indexOf(lit, at + 1);
+      }
     }
     return ranges;
   }
@@ -865,52 +984,11 @@ class WordFilter {
     }
     this.cacheMisses++;
 
-    let ranges = [];
-
-    const lines = text.split(/\r?\n/);
-    let offset = 0;
-    for (const line of lines) {
-      const lineRanges = this.checkLine(line);
-      for (const [s, e] of lineRanges) {
-        ranges.push([s + offset, e + offset]);
-      }
-      offset += line.length + 1;
-    }
-
-    if (lines.length > 1) {
-      ranges.push(
-        ...this.scanVariant(
-          text,
-          {},
-          this.offensiveTrie,
-          this.whitelistTrie,
-          true,
-        ),
-      );
-    }
-
+    let ranges = this.scan(text).concat(this.literalRanges(text));
     if (/[0-9]/.test(text)) {
-      ranges.push(
-        ...this.scanVariant(
-          text,
-          { dropDigits: true },
-          this.offensiveTrie,
-          this.whitelistTrie,
-          true,
-        ),
-      );
+      ranges.push(...this.scan(text, { dropDigits: true }));
+      if (text.includes("1")) ranges.push(...this.scan(text, { alt: true }));
     }
-
-    ranges.push(
-      ...this.scanVariant(
-        text,
-        { maxRun: 1 },
-        this.offensiveTrieCollapsed,
-        this.whitelistTrieCollapsed,
-        true,
-      ),
-    );
-
     ranges = this.mergeRanges(ranges);
 
     const result = {
@@ -936,8 +1014,7 @@ class WordFilter {
 
     for (const [start, end] of offensiveRanges) {
       filteredText += text.slice(lastIndex, start);
-      const offensiveLength = end - start;
-      filteredText += "*".repeat(Math.max(1, offensiveLength));
+      filteredText += text.slice(start, end).replace(/\S/g, "*") || "*";
       lastIndex = end;
     }
 
@@ -1016,12 +1093,6 @@ class WordFilter {
       wordLists: {
         offensive: this.offensiveTrie ? "loaded" : "not loaded",
         whitelist: this.whitelistTrie ? "loaded" : "not loaded",
-        offensiveCollapsed: this.offensiveTrieCollapsed
-          ? "loaded"
-          : "not loaded",
-        whitelistCollapsed: this.whitelistTrieCollapsed
-          ? "loaded"
-          : "not loaded",
       },
       hardening: {
         crossNewlineScan: true,
@@ -1040,8 +1111,6 @@ class WordFilter {
 
     if (!this.offensiveTrie) issues.push("Offensive trie not initialized");
     if (!this.whitelistTrie) warnings.push("Whitelist trie not initialized");
-    if (!this.offensiveTrieCollapsed)
-      issues.push("Collapsed offensive trie not initialized");
     if (Object.keys(this.obfuscationMap).length === 0)
       issues.push("No character mappings loaded");
 

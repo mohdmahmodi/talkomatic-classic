@@ -8,8 +8,11 @@ const RETRY_MS = 5 * 60 * 1000;
 const TIMEOUT_MS = 2500;
 const MAX_ENTRIES = 20000;
 
+const REPORT_GAP_MS = 10 * 60 * 1000;
+
 const cache = new Map();
 const pending = new Map();
+const reported = new Map();
 
 function publicIp(ip) {
   try {
@@ -78,4 +81,13 @@ async function check(rawIp) {
   return out;
 }
 
-module.exports = { check, cached };
+function shouldReport(key) {
+  const now = Date.now();
+  const last = reported.get(key);
+  if (last && now - last < REPORT_GAP_MS) return false;
+  if (reported.size >= MAX_ENTRIES) reported.clear();
+  reported.set(key, now);
+  return true;
+}
+
+module.exports = { check, cached, shouldReport };

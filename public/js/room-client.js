@@ -127,7 +127,7 @@ function offensiveSpans(text) {
 function maskSpans(text, spans) {
   let out = text;
   for (const [s, e] of spans)
-    out = out.slice(0, s) + "*".repeat(e - s) + out.slice(e);
+    out = out.slice(0, s) + out.slice(s, e).replace(/\S/g, "*") + out.slice(e);
   return out;
 }
 
@@ -1276,9 +1276,15 @@ function renderChatInputFromRaw() {
 // The filter on your own box: a word is starred the moment it matches, as it
 // is typed. Star runs keep the word's length, so a position in the box is
 // the same position in the raw text.
-function maskSelf(raw) {
+function maskSelf(raw, caret) {
   if (!wordFilterEnabled || !clientWordFilter?.ready || !raw) return raw;
-  return filterTextPreservingEmotes(raw);
+  const masked = filterTextPreservingEmotes(raw);
+  if (caret == null || caret < 0 || masked.length !== raw.length) return masked;
+  let s = Math.min(caret, raw.length);
+  let e = s;
+  while (s > 0 && !/\s/.test(raw[s - 1])) s--;
+  while (e < raw.length && !/\s/.test(raw[e])) e++;
+  return masked.slice(0, s) + raw.slice(s, e) + masked.slice(e);
 }
 
 function renderSelfBox(display, cursor) {
@@ -1315,7 +1321,7 @@ function updateSentMessage() {
       lastSentMessage = selfRawText;
     }
 
-    applySelfFilter();
+    applySelfFilter(true);
   } catch (err) {
     console.error("updateSentMessage error:", err);
   }
@@ -1369,14 +1375,20 @@ function reconstructRawText(prevFiltered, currentDisplay, prevRaw, caret) {
   return prevRaw.slice(0, start) + inserted + prevRaw.slice(prevEnd + 1);
 }
 
-function applySelfFilter() {
+let selfMaskTimer = null;
+
+function applySelfFilter(typing) {
   if (!chatInput) return;
+  clearTimeout(selfMaskTimer);
   if (!(wordFilterEnabled && clientWordFilter?.ready)) {
     selfIsFiltered = false;
     selfDisplay = selfRawText;
     return;
   }
-  const display = maskSelf(selfRawText);
+  const settled = maskSelf(selfRawText);
+  const display =
+    typing === true ? maskSelf(selfRawText, getCursorPosition(chatInput)) : settled;
+  if (display !== settled) selfMaskTimer = setTimeout(applySelfFilter, 1000);
   if (display !== getPlainText(chatInput))
     renderSelfBox(display, getCursorPosition(chatInput));
   else {

@@ -548,10 +548,18 @@ class Talkoboard {
 
     this.watchHide = drawTools.concat([history]);
 
+    const find = panel("tb-find");
+    const mineBtn = this.makeBtn("tb-btn", this.icon("fa-location-crosshairs"), "Go to my last drawing (M)");
+    const homeBtn = this.makeBtn("tb-btn", this.icon("fa-house"), "Back to the start (0)");
+    mineBtn.addEventListener("click", () => this.goToMine());
+    homeBtn.addEventListener("click", () => this.resetView());
+    find.appendChild(mineBtn);
+    find.appendChild(homeBtn);
+
     this.hintEl = document.createElement("div");
     this.hintEl.className = "tb-hint";
 
-    for (const el of [stage, brand, tools, actions, view, history, this.hintEl])
+    for (const el of [stage, brand, tools, actions, view, history, find, this.hintEl])
       this.modal.appendChild(el);
     this.pops = {};
     this.buildColorPanel(this.modal);
@@ -1886,6 +1894,7 @@ class Talkoboard {
       else if (k === "y") this.togglePop("layers");
       else if (k === "i") this.togglePop("trace");
       else if (k === "f") this.fitToView();
+      else if (k === "m") this.goToMine();
       else if (k === "=" || k === "+") this.adjustZoom(0.15);
       else if (k === "-") this.adjustZoom(-0.15);
       else if (k === "0") this.resetView();
@@ -3241,10 +3250,24 @@ class Talkoboard {
   }
 
   fitToView() {
-    this.stopZoom();
     const bb = this.boundsOf(this.allStrokes());
     if (!bb) return this.showHint("Nothing to fit yet");
-    const pad = 60;
+    this.fitBounds(bb, 60);
+  }
+
+  goToMine() {
+    let last = null;
+    for (let i = this.strokes.length - 1; i >= 0 && !last; i--) {
+      const s = this.strokes[i];
+      if (s.owner === this.userId && !s.eraser) last = s;
+    }
+    const bb = last && this.boundsOf([last]);
+    if (!bb) return this.showHint("You have not drawn anything yet");
+    this.fitBounds(bb, Math.min(this.displayWidth, this.displayHeight) / 3);
+  }
+
+  fitBounds(bb, pad) {
+    this.stopZoom();
     const z = Math.min(
       this.MAX_ZOOM,
       Math.max(
@@ -4855,6 +4878,16 @@ class Talkoboard {
     return b;
   }
 
+  masked(text) {
+    const f = window.TalkomaticFilter;
+    return f && f.apply ? f.apply(text) : text;
+  }
+
+  refilterChat() {
+    for (const node of this.chatLog.querySelectorAll(".tb-msg-text"))
+      if (node.dataset.raw !== undefined) node.textContent = this.masked(node.dataset.raw);
+  }
+
   addSystemChat(text) {
     const msg = document.createElement("div");
     msg.className = "tb-msg system";
@@ -4891,7 +4924,8 @@ class Talkoboard {
     head.appendChild(time);
     const text = document.createElement("div");
     text.className = "tb-msg-text";
-    text.textContent = data.text;
+    text.dataset.raw = data.text;
+    text.textContent = this.masked(data.text);
     body.appendChild(head);
     body.appendChild(text);
     msg.appendChild(body);
@@ -5056,6 +5090,8 @@ class Talkoboard {
     });
 
     // ── Chat ─────────────────────────────────────────────────────────
+    if (window.TalkomaticFilter && window.TalkomaticFilter.onChange)
+      window.TalkomaticFilter.onChange(() => this.refilterChat());
     this.socket.on("board chat", (data) => {
       this.addChatMessage(data);
     });
