@@ -236,6 +236,13 @@
         background: var(--line);
         border-radius: 0.1875rem;
       }
+      .nav-export {
+        margin: 0.75rem;
+        white-space: nowrap;
+      }
+      .nav-export[hidden] {
+        display: none;
+      }
       .nav-item {
         appearance: none;
         background: transparent;
@@ -4702,6 +4709,9 @@
           <button class="nav-item" data-tab="guide">
             <i class="fas fa-circle-question"></i> Guide
           </button>
+          <button id="exportDataBtn" class="btn sm nav-export" hidden>
+            <i class="fas fa-file-zipper"></i> Export data
+          </button>
         </div>
       </nav>
 
@@ -5683,7 +5693,7 @@
     <script src="js/notify.js?v=1.0.0"></script>
     <script src="js/staff-ui.js?v=1.11.1"></script>
     <script src="js/desk.js?v=1.1.1"></script>
-    <script src="js/mod.js?v=4.23.1"></script>
+    <script src="js/mod.js?v=4.23.2"></script>
       <script src="js/warning.js?v=1.1.0"></script>
       <script src="js/staff-key.js?v=1.0.0"></script>
   </body>

@@ -72,4 +72,13 @@ function forget(userId) {
   settleTimers.delete(userId);
 }
 
-module.exports = { noteChange, remember, recent, lastSeen, forget, MAX_CHARS };
+function snapshot() {
+  const out = {};
+  for (const userId of [...trails.keys()]) {
+    const lines = recent(userId);
+    if (lines.length) out[userId] = lines;
+  }
+  return out;
+}
+
+module.exports = { noteChange, remember, recent, lastSeen, forget, snapshot, MAX_CHARS };

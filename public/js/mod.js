@@ -5860,6 +5860,7 @@
   }
 
   function applyRoleGating() {
+    $("exportDataBtn").hidden = !viewerIsOps();
     document.querySelectorAll(".nav-item[data-dev]").forEach((n) => {
       n.style.display = viewerIsDev() ? "" : "none";
     });
@@ -6055,6 +6056,27 @@
   });
 
   socket.on("staff mod history", (h) => renderModHistory(h));
+
+  $("exportDataBtn").addEventListener("click", () => {
+    $("exportDataBtn").disabled = true;
+    socket.emit("dev export data");
+  });
+
+  socket.on("dev export data", (d) => {
+    $("exportDataBtn").disabled = false;
+    if (!d || d.error || !d.zip) {
+      if (window.StaffUI) StaffUI.toast((d && d.error) || "Export failed.", { type: "error" });
+      return;
+    }
+    const url = URL.createObjectURL(new Blob([d.zip], { type: "application/zip" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = d.name || "talkomatic-export.zip";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  });
 
   socket.on("staff record export", (d) => {
     if (!d || !d.record) return;

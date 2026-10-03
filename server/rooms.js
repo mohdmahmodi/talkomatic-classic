@@ -54,6 +54,7 @@ const blocklist = require("./blocklist");
 const ipban = require("./ipban");
 const evasion = require("./evasion");
 const proxyguard = require("./proxyguard");
+const dataexport = require("./dataexport");
 const diag = require("./diag");
 const gamesFloor = require("./games");
 const gamesSocket = require("./games/socket");
@@ -9651,6 +9652,20 @@ function registerSocketHandlers(opts) {
           role,
           record: record.exportRecord(label, role, roles.viewFor(socket)),
         });
+      }),
+    );
+
+    socket.on(
+      "dev export data",
+      safe(async () => {
+        if (!socket.isMainDev) return;
+        const now = Date.now();
+        if (now - (socket._lastDataExport || 0) < 60000)
+          return socket.emit("dev export data", { error: "Wait a minute between exports." });
+        socket._lastDataExport = now;
+        const bundle = dataexport.build();
+        logStaff(socket, "export site data", null, "-", bundle.files + " files");
+        socket.emit("dev export data", { name: bundle.name, zip: bundle.zip });
       }),
     );
 
