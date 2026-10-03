@@ -1237,8 +1237,8 @@
         ],
         [
           "Megaphone (this room)",
-          "dev",
-          "Shows an announcement banner to everyone in the room.",
+          "mod",
+          "Shows an announcement banner to everyone in the room you are in.",
         ],
         ["Party mode", "dev", "Confetti + party horn for the whole room."],
         [

@@ -7948,20 +7948,37 @@ function registerSocketHandlers(opts) {
       }),
     );
 
-    // ── Megaphone: announcement banner to one room or all (dev) ─────────
+    // ── Megaphone: banner to one room (L2+, own room) or all (dev) ──────
     socket.on(
       "staff megaphone",
       safe(async (data) => {
-        if (!requireDev(socket)) return;
+        const roomScope = data?.scope === "room";
+        if (roomScope) {
+          if (!requireStaff(socket)) return;
+          if (!requireModLevel(socket, 2)) return;
+        } else if (!requireDev(socket)) return;
+        if (!socket.isDev) {
+          const now = Date.now();
+          if (now - (socket._lastMegaphone || 0) < 10000)
+            return socket.emit(
+              "error",
+              createErrorResponse(
+                ERROR_CODES.RATE_LIMITED,
+                "Wait a few seconds before announcing again.",
+              ),
+            );
+        }
         const message = sanitizeMessage(
           typeof data?.message === "string" ? data.message : "",
-        ).slice(0, 300);
+        )
+          .slice(0, 300)
+          .trim();
         if (!message)
           return socket.emit(
             "error",
             createErrorResponse(ERROR_CODES.BAD_REQUEST, "Message required."),
           );
-        const scope = data?.scope === "room" ? "room" : "all";
+        const scope = roomScope ? "room" : "all";
         const payload = { message, scope };
         if (scope === "room") {
           const roomId = data?.roomId || socket.roomId;
@@ -7970,6 +7987,15 @@ function registerSocketHandlers(opts) {
               "error",
               createErrorResponse(ERROR_CODES.NOT_FOUND, "Room not found."),
             );
+          if (!socket.isDev && roomId !== socket.roomId)
+            return socket.emit(
+              "error",
+              createErrorResponse(
+                ERROR_CODES.FORBIDDEN,
+                "You can only announce to the room you are in.",
+              ),
+            );
+          socket._lastMegaphone = Date.now();
           io().to(roomId).emit("megaphone", payload);
           logStaff(
             socket,

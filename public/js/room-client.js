@@ -4694,37 +4694,41 @@ function openStaffPanel() {
   }
   groups.push({ title: "How you appear", items: appearanceItems });
 
+  const megaphoneItem = {
+    icon: '<i class="fas fa-tower-broadcast"></i>',
+    label: "Megaphone this room...",
+    desc: "Announcement banner to this room",
+    onClick: async () => {
+      const m = await StaffUI.prompt({
+        title: "Megaphone (this room)",
+        icon: '<i class="fas fa-tower-broadcast"></i>',
+        fields: [
+          {
+            name: "value",
+            label: "Announcement",
+            type: "textarea",
+            maxLength: 300,
+            required: true,
+          },
+        ],
+        confirmText: "Broadcast",
+      });
+      if (m)
+        socket.emit("staff megaphone", {
+          scope: "room",
+          roomId: rid,
+          message: m,
+        });
+    },
+  };
+  if (isFullMod && !currentUserIsDev)
+    groups.push({ title: "Announce to this room", items: [megaphoneItem] });
+
   if (currentUserIsDev) {
     groups.push({
       title: "Announce to this room",
       items: [
-        {
-          icon: '<i class="fas fa-tower-broadcast"></i>',
-          label: "Megaphone this room...",
-          desc: "Announcement banner to this room",
-          onClick: async () => {
-            const m = await StaffUI.prompt({
-              title: "Megaphone (this room)",
-              icon: '<i class="fas fa-tower-broadcast"></i>',
-              fields: [
-                {
-                  name: "value",
-                  label: "Announcement",
-                  type: "textarea",
-                  maxLength: 300,
-                  required: true,
-                },
-              ],
-              confirmText: "Broadcast",
-            });
-            if (m)
-              socket.emit("staff megaphone", {
-                scope: "room",
-                roomId: rid,
-                message: m,
-              });
-          },
-        },
+        megaphoneItem,
         {
           icon: '<i class="fas fa-champagne-glasses"></i>',
           label: "Party mode",
