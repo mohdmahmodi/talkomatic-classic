@@ -28,6 +28,7 @@
     },
   });
   window.socket = socket;
+  if (window.TalkomaticIdentity && window.TalkomaticIdentity.report) window.TalkomaticIdentity.report(socket);
 
   // ── Page state ────────────────────────────────────────────────────────────
 

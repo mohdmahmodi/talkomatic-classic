@@ -434,7 +434,7 @@
                 : e.kind === "key"
                   ? "staff key request"
                   : e.kind === "proxyguard"
-                    ? "VPN or proxy refused"
+                    ? "VPN, proxy or hosting flagged"
                     : e.kind === "floodguard"
                       ? "sign-in flood blocked"
                       : e.kind === "evasion"

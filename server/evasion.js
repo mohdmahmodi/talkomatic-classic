@@ -1,8 +1,10 @@
 // server/evasion.js
 // Ban-evasion watch.
 
+const fs = require("fs");
+const path = require("path");
 const ipaddr = require("ipaddr.js");
-const { state, isGuestName } = require("./state");
+const { state, isGuestName, tuned } = require("./state");
 const nameguard = require("./nameguard");
 const ipban = require("./ipban");
 const identity = require("./identity");
@@ -22,7 +24,15 @@ const AUTO_BLOCK_MIN_SEEN = 2;
 
 const CACHE_MS = 60 * 1000;
 const LONG_MS = 7 * 24 * 60 * 60 * 1000;
+const POOL_OTHERS = tuned("GUARD_POOL_OTHERS", 5);
+const PLACE_OTHERS = tuned("GUARD_PLACE_OTHERS", 1);
+const PLACE_MIN = tuned("GUARD_PLACE_MIN", 10);
+const NAME_MIN = tuned("GUARD_NAME_MIN", 6);
+const WORDS_FILE = path.join(__dirname, "..", "public", "js", "dictionary_words.json");
+let words = null;
+const CENSUS_MS = 5 * 60 * 1000;
 let cache = null;
+let counted = null;
 
 function head(ip) {
   try {
@@ -50,11 +60,90 @@ function akin(a, b) {
   return s.length >= 5 && l.includes(s);
 }
 
+function pool(net) {
+  return net.slice(0, 4).join(".");
+}
+
+function plain(name) {
+  if (!words) {
+    try {
+      words = new Set(JSON.parse(fs.readFileSync(WORDS_FILE, "utf8")));
+    } catch (_) {
+      words = new Set();
+    }
+  }
+  const text = String(name || "");
+  if ((text.match(/[\p{L}\p{N}]/gu) || []).length < NAME_MIN) return true;
+  const parts = text.toLowerCase().split(/[^\p{L}]+/u).filter(Boolean);
+  return parts.length === 1 && words.has(parts[0]);
+}
+
+function half(ip) {
+  const m = /^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}(\/\d+)?$/.exec(String(ip || ""));
+  return m ? m[1] + "." + m[2] : null;
+}
+
+function near(a, b) {
+  if (!a || !b || a.length < PLACE_MIN || b.length < PLACE_MIN) return false;
+  if (a === b) return true;
+  let same = 0;
+  while (same < a.length && same < b.length && a[same] === b[same]) same++;
+  if (same >= PLACE_MIN) return true;
+  if (Math.abs(a.length - b.length) > 1) return false;
+  let prev = [];
+  for (let j = 0; j <= b.length; j++) prev.push(j);
+  for (let i = 1; i <= a.length; i++) {
+    const row = [i];
+    for (let j = 1; j <= b.length; j++)
+      row.push(Math.min(prev[j] + 1, row[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)));
+    prev = row;
+  }
+  return prev[b.length] <= 1;
+}
+
+function others(list, sks) {
+  let n = 0;
+  for (const s of list || []) if (!s || ![...sks].some((t) => akin(s, t))) n++;
+  return n;
+}
+
 function lasting(b) {
   if (ipban.isPermanentBlock(b)) return true;
   if (!b || typeof b !== "object") return false;
   const from = b.since || b.ts || 0;
   return !!from && b.expiry - from >= LONG_MS;
+}
+
+function census() {
+  const now = Date.now();
+  if (counted && now - counted.at < CENSUS_MS) return counted;
+  const pools = new Map();
+  const places = new Map();
+  const people = [];
+  for (const rec of Object.values(identity.allRecords())) {
+    if (!rec) continue;
+    const sk = rec.name && !isGuestName(rec.name) ? nameguard.skeleton(rec.name) : "";
+    const loc = rec.loc ? nameguard.skeleton(rec.loc) : "";
+    if (loc) {
+      if (places.has(loc)) places.get(loc).push(sk);
+      else places.set(loc, [sk]);
+    }
+    const mine = new Set();
+    const v6 = [];
+    for (const ip of Object.keys(rec.ips || {})) {
+      const net = head(ip);
+      if (!net) continue;
+      mine.add(pool(net));
+      v6.push(ip);
+    }
+    if (sk && v6.length) people.push({ sk, name: rec.name, ips: v6 });
+    for (const p of mine) {
+      if (pools.has(p)) pools.get(p).push(sk);
+      else pools.set(p, [sk]);
+    }
+  }
+  counted = { at: now, pools, places, people };
+  return counted;
 }
 
 function snapshot() {
@@ -63,6 +152,20 @@ function snapshot() {
   const keys = [];
   const seenIps = new Map();
   const marks = [];
+  const { pools, places, people } = census();
+  const bare = [];
+  for (const [key, b] of state.blockedIPs)
+    if (ipban.isActiveBlock(b) && lasting(b) && !ipban.isIdKey(key) && head(key) && !(b && typeof b === "object" && (b.label || b.did)))
+      bare.push(key);
+  const bareKeys = bare.length ? ipban.prepareKeys(bare) : null;
+  const bareNames = new Map();
+  if (bareKeys)
+    for (const p of people)
+      for (const ip of p.ips)
+        for (const k of ipban.keysCovering(ip, bareKeys)) {
+          if (!bareNames.has(k)) bareNames.set(k, new Map());
+          bareNames.get(k).set(p.sk, p.name);
+        }
   for (const [key, b] of state.blockedIPs) {
     if (!ipban.isActiveBlock(b)) continue;
     keys.push(key);
@@ -73,21 +176,35 @@ function snapshot() {
     if (lasting(b)) {
       const label = (b && typeof b === "object" && b.label) || null;
       const sks = new Set();
-      for (const n of [label, rec && rec.name])
+      const stored = b && typeof b === "object" && Array.isArray(b.names) ? b.names : [];
+      const found = bareNames.get(key);
+      const kept = new Set(stored.filter((n) => n && !isGuestName(n)).map((n) => nameguard.skeleton(n)));
+      const only = label || did ? [] : found ? (found.size === 1 ? [...found.values()] : []) : kept.size === 1 ? stored.slice(0, 1) : [];
+      const derived = only;
+      for (const n of [label, rec && rec.name, ...only])
         if (n && !isGuestName(n)) sks.add(nameguard.skeleton(n));
+      const locs = rec && rec.loc ? [nameguard.skeleton(rec.loc)] : [];
       const nets = [];
-      if (!ipban.isIdKey(key)) nets.push(head(key));
-      if (rec && rec.ips) for (const ip of Object.keys(rec.ips)) nets.push(head(ip));
-      const kept = nets.filter(Boolean);
-      if (sks.size && kept.length)
-        marks.push({ key, sks: [...sks], nets: kept, label: label || (rec && rec.name) || null });
+      const halves = new Set();
+      if (!ipban.isIdKey(key)) {
+        nets.push(head(key));
+        if (half(key)) halves.add(half(key));
+      }
+      if (rec && rec.ips)
+        for (const ip of Object.keys(rec.ips)) {
+          nets.push(head(ip));
+          if (half(ip)) halves.add(half(ip));
+        }
+      const v6 = nets.filter(Boolean);
+      if (sks.size && (v6.length || halves.size))
+        marks.push({ key, sks: [...sks], nets: v6, halves: [...halves], locs, label: label || (rec && rec.name) || derived[0] || null });
     }
     if (!did) continue;
     if (!rec || !rec.ips) continue;
     for (const ip of Object.keys(rec.ips))
       if (!seenIps.has(ip)) seenIps.set(ip, { did, name: rec.name || null });
   }
-  cache = { at: now, prepared: ipban.prepareKeys(keys), seenIps, marks };
+  cache = { at: now, prepared: ipban.prepareKeys(keys), seenIps, marks, pools, places };
   return cache;
 }
 
@@ -231,7 +348,16 @@ function check({ deviceId, ip, username }) {
   return report(signal, { deviceId, ip, username });
 }
 
-function likeness(ip, username, snap) {
+function settled(loc, fam, sks, snap) {
+  if (!loc) return false;
+  for (const m of fam)
+    for (const l of m.locs)
+      if (near(l, loc) && others(snap.places.get(l), sks) <= PLACE_OTHERS && others(snap.places.get(loc), sks) <= PLACE_OTHERS)
+        return true;
+  return false;
+}
+
+function likeness(ip, username, snap, location) {
   if (!username || isGuestName(username)) return null;
   const here = head(ip);
   if (!here) return null;
@@ -240,37 +366,60 @@ function likeness(ip, username, snap) {
   const nets = new Map();
   const keys = new Set();
   const names = new Set();
-  const near = [];
+  const fam = [];
+  const around = [];
   for (const m of snap.marks) {
     const local = m.nets.filter((n) => shared([n, here]) >= 32);
-    if (local.length) near.push({ m, local });
+    if (local.length) around.push({ m, local });
   }
   const sks = new Set([sk]);
-  const same = near.some(({ m }) => m.sks.includes(sk));
+  const same = around.some(({ m }) => m.sks.includes(sk));
   let grew = true;
   while (grew) {
     grew = false;
-    for (let i = near.length - 1; i >= 0; i--) {
-      const { m, local } = near[i];
+    for (let i = around.length - 1; i >= 0; i--) {
+      const { m, local } = around[i];
       if (!m.sks.some((s) => [...sks].some((t) => akin(s, t)))) continue;
-      near.splice(i, 1);
+      around.splice(i, 1);
       grew = true;
       for (const s of m.sks) sks.add(s);
       for (const n of local) nets.set(n.join("."), n);
+      fam.push(m);
       keys.add(m.key);
       if (m.label) names.add(m.label);
     }
   }
-  if (nets.size < 2) return null;
+  if (!nets.size) return null;
+  const loc = location ? nameguard.skeleton(location) : "";
+  if (nets.size < 2) {
+    const quiet = same && !plain(username) && others(snap.pools.get(pool(here)), sks) <= POOL_OTHERS;
+    if (!quiet && !settled(loc, fam, sks, snap)) return null;
+    return { keys: [...keys], names: [...names], seen: 1, bits: 32 };
+  }
   const list = [...nets.values()];
   const bits = shared(list);
-  if (!same && shared([list[0], here]) < bits) return null;
+  if (!same && shared([list[0], here]) < bits && !settled(loc, fam, sks, snap)) return null;
   return { keys: [...keys], names: [...names], seen: nets.size, bits: same ? 32 : bits };
 }
 
-function recheck({ deviceId, ip, username }) {
+function agrees({ ip, username, location }) {
+  if (!username || isGuestName(username) || !state.blockedIPs.size) return true;
+  const snap = snapshot();
+  const sk = nameguard.skeleton(username);
+  const fam = snap.marks.filter((m) => m.sks.some((s) => akin(s, sk)));
+  if (!fam.length) return true;
+  const sks = new Set([sk]);
+  for (const m of fam) for (const s of m.sks) sks.add(s);
+  const here = ip ? head(ip) : null;
+  if (here && fam.some((m) => m.nets.some((n) => shared([n, here]) >= 32))) return true;
+  const mine = ip ? half(ip) : null;
+  if (mine && fam.some((m) => m.halves.includes(mine))) return true;
+  return settled(location ? nameguard.skeleton(location) : "", fam, sks, snap);
+}
+
+function recheck({ deviceId, ip, username, location }) {
   if (!ip || !state.blockedIPs.size) return null;
-  const hit = likeness(ip, username, snapshot());
+  const hit = likeness(ip, username, snapshot(), location);
   if (!hit) return null;
   const signal = {
     kind: "likeness",
@@ -278,7 +427,7 @@ function recheck({ deviceId, ip, username }) {
     blockKeys: hit.keys,
     blocks: hit.keys.map(describeBlock),
     names: hit.names,
-    spread: hit.seen + " earlier networks, /" + hit.bits,
+    spread: hit.seen + (hit.seen === 1 ? " earlier network, /" : " earlier networks, /") + hit.bits,
   };
   signal.autoBlocked = placeAutoBlock({ deviceId, ip, username, signal });
   if (!signal.autoBlocked) return null;
@@ -374,8 +523,9 @@ function report(signal, { deviceId, ip, username }) {
   return signal;
 }
 
-function invalidate() {
+function invalidate(all) {
   cache = null;
+  if (all) counted = null;
 }
 
-module.exports = { check, recheck, invalidate, ALERT_COOLDOWN_MS };
+module.exports = { check, recheck, agrees, invalidate, ALERT_COOLDOWN_MS };

@@ -50,6 +50,7 @@ const appeals = require("./server/appeals");
 const ipban = require("./server/ipban");
 const personblocks = require("./server/personblocks");
 const devicetoken = require("./server/devicetoken");
+const proxyguard = require("./server/proxyguard");
 const ipredact = require("./server/ipredact");
 const identity = require("./server/identity");
 const audit = require("./server/audit");
@@ -105,6 +106,9 @@ function gracefulFlush() {
   } catch (e) {}
   try {
     require("./server/warnings").flushSync();
+  } catch (e) {}
+  try {
+    require("./server/automod").flushSync();
   } catch (e) {}
   try {
     rooms.saveBoardSync(); // persist Talkoboard strokes across the restart
@@ -420,6 +424,28 @@ function requester(req) {
   };
 }
 
+io.use((socket, next) => {
+  const auth = socket.handshake.auth || {};
+  const keyed =
+    auth.devKey ||
+    auth.modKey ||
+    devicetoken.cookieValue(socket.handshake.headers.cookie, devicetoken.STAFF_COOKIE);
+  if (!keyed) return next();
+  const ip = getClientIP({
+    headers: socket.handshake.headers,
+    socket: { remoteAddress: socket.handshake.address },
+  });
+  proxyguard
+    .check(ip, proxyguard.WAIT_MS)
+    .then(
+      (net) => {
+        if (net && net.flagged) socket.staffProxy = net;
+      },
+      () => {},
+    )
+    .then(() => next());
+});
+
 // Socket.IO security middleware: IP blocks, dev key validation, antibot,
 // connection caps, and per-socket event rate limiting
 io.use((socket, next) => {
@@ -519,7 +545,7 @@ io.use((socket, next) => {
 
     // Dev mode: validate devKey by hash against the configured dev keys
     // (.env DEV_KEY_HASH supports multiple labeled keys). Owner-only.
-    const devKey = socket.handshake.auth.devKey;
+    const devKey = socket.staffProxy ? null : socket.handshake.auth.devKey;
     const devMatch = devKey ? roles.getDevKey(devKey) : null;
     if (devMatch) {
       socket.isDev = true;
@@ -547,7 +573,7 @@ io.use((socket, next) => {
 
     // Mod mode: validate modKey by hash against mod-keys.json. Dev outranks mod,
     // so only check when the connection is not already a dev.
-    if (!socket.isDev) {
+    if (!socket.isDev && !socket.staffProxy) {
       const pasted = socket.handshake.auth.modKey;
       const cookieToken = devicetoken.cookieValue(
         socket.handshake.headers.cookie,

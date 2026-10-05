@@ -304,6 +304,20 @@ function getRecord(id) {
   return store[id] || null;
 }
 
+function setClient(id, info) {
+  if (!validId(id) || !store[id] || !info) return false;
+  store[id].cl = info;
+  saveSoon();
+  return true;
+}
+
+function noteScript(id) {
+  if (!validId(id) || !store[id]) return;
+  const had = store[id].script || { n: 0 };
+  store[id].script = { at: Date.now(), n: had.n + 1 };
+  saveSoon();
+}
+
 function devicesMatching(pred, limit = 25) {
   const out = [];
   for (const id of Object.keys(store)) {
@@ -395,6 +409,8 @@ module.exports = {
   isActive,
   summary,
   getRecord,
+  setClient,
+  noteScript,
   devicesMatching,
   devicesByKeys,
   noteEvasion,

@@ -1018,6 +1018,8 @@
       if (panelOpen && mode === "search") renderSearch();
     });
 
+    wireAutomod();
+
     socket.on("desk roster", (d) => {
       roster = (d && d.staff) || [];
       learnAvatars(roster);
@@ -1748,6 +1750,7 @@
     if (mode === "appeal") return renderAppeal();
     if (mode === "help") return renderHelp();
     if (mode === "playbook") return renderPlaybook();
+    if (view.kind === "channel" && view.key === "automod") return renderAutomod();
     const main = els.main;
     main.textContent = "";
 
@@ -2309,6 +2312,10 @@
       });
       bar.appendChild(b);
     };
+
+    const whoKey = c.targetUserId || c.deviceId || (c.ids || [])[0];
+    if (whoKey && kind !== "key" && kind !== "abuse" && kind !== "application")
+      add("Who is this?", "fa-id-card", "", () => openAutomod(whoKey));
 
     if (kind === "report" && c.targetUserId) {
       add("Warn", "fa-triangle-exclamation", "", () =>
@@ -3008,7 +3015,7 @@
     if (m.kind === "announce") return announceRow(m);
     if (m.kind === "ping") return pingCard(m);
     if (m.kind === "system") {
-      if (m.card) return queueCard(m);
+      if (m.card) return m.qkind === "automod" ? automodCard(m) : queueCard(m);
       const r = el("div", "dk-sys" + (m.qkind ? " card q-" + m.qkind : ""));
       r.dataset.id = m.id;
       r.appendChild(icon(QICON[m.qkind] || "fa-circle-info"));
@@ -4637,6 +4644,828 @@
     return box;
   }
 
+  const am = { q: "", results: null, card: null, tab: "feed", mine: null, stats: null, busy: false, filter: "all" };
+  const onAutomod = () => view.kind === "channel" && view.key === "automod" && mode === "chat";
+
+  function openAutomod(key) {
+    if (typeof key === "string" && key) {
+      am.tab = "find";
+      am.busy = true;
+      am.card = null;
+      socket.emit("automod card", { key });
+    }
+    socket.emit("automod mine");
+    if (onAutomod()) return renderAutomod();
+    openView({ kind: "channel", key: "automod" });
+  }
+
+  function amSearch(q) {
+    const text = String(q || "").trim();
+    if (text.length < 2) return toast("Type at least 2 letters.");
+    am.q = text;
+    am.tab = "find";
+    am.card = null;
+    am.results = null;
+    am.busy = true;
+    socket.emit("automod search", { q: text });
+    if (onAutomod()) renderAutomod();
+    else openView({ kind: "channel", key: "automod" });
+  }
+
+  function amWhen(ts) {
+    if (!ts) return "never";
+    const r = relTime(ts);
+    return r === "now" ? "just now" : r + " ago";
+  }
+
+  function amChip(text, tone, fa) {
+    const s = el("span", "dk-am-chip" + (tone ? " " + tone : ""));
+    if (fa) s.appendChild(icon(fa));
+    s.appendChild(document.createTextNode(text));
+    return s;
+  }
+
+  function amSection(title, note) {
+    const s = el("section", "dk-am-sec");
+    const h = el("div", "dk-am-sec-h");
+    h.appendChild(el("h3", "dk-am-h", title));
+    if (note) h.appendChild(el("span", "dk-am-note", note));
+    s.appendChild(h);
+    return s;
+  }
+
+  function amStatus(c) {
+    const f = c.file || {};
+    if (f.block) return [f.block.permanent ? "Blocked, permanent" : "Blocked till " + new Date(f.block.expiry).toLocaleDateString(), "red"];
+    if (f.evader) return ["Dodged a block", "amber"];
+    const n = f.counts || {};
+    if (n.blocks) return ["Blocked before", "amber"];
+    if (n.actions) return ["Warned before", "amber"];
+    return ["Clean", "green"];
+  }
+
+  const AM_STRENGTH = {
+    main: ["Main", ""],
+    confirmed: ["Staff confirmed", "green"],
+    strong: ["Strong link", "blue"],
+    medium: ["Medium link", "amber"],
+  };
+
+  const AM_BAND = { likely: "Likely", possible: "Possible", unlikely: "Unlikely", standing: "Old permanent block", device: "Same device" };
+
+  const AM_FILTERS = [
+    ["all", "All", () => true],
+    ["staff", "Staff", (e) => e.kind !== "identity" && e.kind !== "report"],
+    ["report", "Reports", (e) => e.kind === "report"],
+    ["identity", "Names", (e) => e.kind === "identity"],
+  ];
+
+  function amActions(c) {
+    const bar = el("div", "dk-am-acts");
+    const name = (c.file && c.file.name) || "them";
+    const add = (label, fa, cls, fn) => {
+      const b = btn("dk-minib" + (cls ? " " + cls : ""), label, fa);
+      b.addEventListener("click", () => {
+        lastCommandAt = Date.now();
+        fn();
+      });
+      bar.appendChild(b);
+      return b;
+    };
+    if (c.can.warn)
+      add("Warn", "fa-triangle-exclamation", "", () =>
+        ask(
+          {
+            title: "Warn " + name,
+            icon: '<i class="fas fa-triangle-exclamation"></i>',
+            message: c.online ? "They see it right away." : "They are offline. They see it next time they sign in.",
+            label: "Message",
+            placeholder: "Please stop spamming the room.",
+            max: 300,
+          },
+          (message) => socket.emit("staff warn user", { targetUserId: c.key, message }),
+        ),
+      );
+    if (c.can.room) {
+      add("Wipe", "fa-eraser", "", () => socket.emit("staff wipe buffer", { targetUserId: c.key }));
+      add("Kick", "fa-right-from-bracket", "", () => socket.emit("staff kick", { targetUserId: c.key, ban: false }));
+    }
+    if (c.can.block)
+      add("Block", "fa-ban", "danger", async () => {
+        const res = await StaffUI.blockDialog({
+          title: "Block " + name,
+          message: "Blocks them from the whole site. Pick the shortest time that works.",
+          socket,
+        });
+        if (res) socket.emit("staff ip block", { targetUserId: c.key, duration: res.duration, reason: res.reason });
+      });
+    add(c.watch ? "Unwatch" : "Watch", c.watch ? "fa-eye-slash" : "fa-eye", "", () =>
+      socket.emit("automod watch", { key: c.key, on: !c.watch }),
+    );
+    add("Share", "fa-share", "", () => {
+      socket.emit("automod share", { key: c.key });
+      toast("Shared in the feed.");
+    });
+    return bar;
+  }
+
+  function amVote(c, m, same) {
+    const send = (reason) => socket.emit("automod vote", { a: c.key, b: m.key, same, reason });
+    if (!c.can.confirm) return send("");
+    ask(
+      {
+        title: same ? "Same user?" : "Not the same user?",
+        icon: '<i class="fas fa-link"></i>',
+        message: same
+          ? "This joins the two accounts. A block on one will follow the other."
+          : "This keeps the two accounts apart.",
+        label: "Why",
+        placeholder: same ? "Same name, same phrases, back an hour after the block" : "Both were online at the same time",
+        max: 300,
+      },
+      send,
+    );
+  }
+
+  function amTiles(pairs) {
+    const tiles = el("div", "dk-am-tiles");
+    for (const [k, v] of pairs) {
+      const d = el("div", "dk-am-tile");
+      d.appendChild(el("span", "dk-am-tile-v", String(v)));
+      d.appendChild(el("span", "dk-am-tile-k", k));
+      tiles.appendChild(d);
+    }
+    return tiles;
+  }
+
+  function amPerson(c) {
+    const box = el("div", "dk-am-person");
+    if (c.hidden) {
+      box.appendChild(el("p", "dk-am-empty", "Staff are not shown here."));
+      return box;
+    }
+    const f = c.file || {};
+    const n = f.counts || {};
+    const t = f.tenure || {};
+
+    const head = el("div", "dk-am-head");
+    const title = el("div", "dk-am-title");
+    title.appendChild(el("span", "dk-am-name", f.name || "(no name)"));
+    const [status, tone] = amStatus(c);
+    title.appendChild(amChip(status, tone));
+    title.appendChild(
+      c.online
+        ? amChip(c.room ? "Online in " + c.room : "Online", "green", "fa-circle")
+        : amChip("Offline, seen " + amWhen(t.last), "", "fa-moon"),
+    );
+    if (c.watch) title.appendChild(amChip("Watching", "blue", "fa-eye"));
+    if (c.script) title.appendChild(amChip("No browser", "amber", "fa-robot"));
+    head.appendChild(title);
+    const other = (f.names || []).filter((x) => x && x !== f.name);
+    if (other.length) head.appendChild(el("div", "dk-am-aka", "Other names: " + other.slice(0, 6).join(", ")));
+    if (f.block && f.block.reason) head.appendChild(el("div", "dk-am-aka", "Blocked for: " + f.block.reason));
+    box.appendChild(head);
+
+    if (c.flagged) {
+      const fl = el("div", "dk-am-flag");
+      fl.appendChild(icon("fa-user-secret"));
+      const txt = el("div", "dk-am-flag-b");
+      txt.appendChild(
+        el(
+          "div",
+          "dk-am-flag-h",
+          c.flagged.band === "device"
+            ? 'Same device details as blocked user "' + c.flagged.label + '".'
+            : c.flagged.band === "standing"
+            ? 'Has the name of blocked user "' + c.flagged.label + '".'
+            : c.flagged.percent + '% chance this is blocked user "' + c.flagged.label + '".',
+        ),
+      );
+      txt.appendChild(el("div", "dk-am-flag-p", "Why: " + c.flagged.why.join(", ") + "."));
+      fl.appendChild(txt);
+      if (c.can.vote) {
+        const no = btn("dk-minib", "Not them", "fa-xmark");
+        no.addEventListener("click", () => socket.emit("automod not them", { id: c.flagged.id }));
+        fl.appendChild(no);
+      }
+      box.appendChild(fl);
+    }
+
+    box.appendChild(
+      amTiles([
+        ["warns + kicks", n.actions || 0],
+        ["blocks", n.blocks || 0],
+        ["reports", n.reports || 0],
+        ["appeals", n.appeals || 0],
+        ["days seen", t.days || 0],
+        ["first seen", t.since ? amWhen(t.since) : "today"],
+      ]),
+    );
+
+    box.appendChild(amActions(c));
+    if (c.level < 2) box.appendChild(el("p", "dk-am-hint", "Need a block? Ask a full mod in #help."));
+
+    if (c.accounts && c.accounts.length > 1) {
+      const sec = amSection("Other accounts", c.accounts.length + " browsers, one user");
+      for (const a of c.accounts) {
+        const r = el("div", "dk-am-row");
+        const top = el("div", "dk-am-row-t");
+        top.appendChild(el("span", "dk-am-row-n", a.name));
+        const [label, tn] = AM_STRENGTH[a.strength] || AM_STRENGTH.medium;
+        top.appendChild(amChip(label, tn));
+        if (a.evader) top.appendChild(amChip("dodged a block", "amber"));
+        top.appendChild(el("span", "dk-am-row-s", "seen " + amWhen(a.last)));
+        r.appendChild(top);
+        if (a.why) r.appendChild(el("div", "dk-am-row-w", "Why: " + a.why + "."));
+        if (a.linkedBy) r.appendChild(el("div", "dk-am-row-w", "Confirmed by " + a.linkedBy + ", " + amWhen(a.linkedAt) + "."));
+        sec.appendChild(r);
+      }
+      box.appendChild(sec);
+    }
+
+    if (c.matches && c.matches.length) {
+      const sec = amSection("Maybe the same user", "Same name only. Not linked.");
+      for (const m of c.matches) {
+        const r = el("div", "dk-am-row");
+        const top = el("div", "dk-am-row-t");
+        const open = el("button", "dk-am-link", m.name);
+        open.type = "button";
+        open.addEventListener("click", () => openAutomod(m.key));
+        top.appendChild(open);
+        top.appendChild(amChip(m.percent + "% " + AM_BAND[m.band].toLowerCase(), m.band === "likely" ? "red" : m.band === "possible" ? "amber" : ""));
+        if (m.blocked) top.appendChild(amChip("blocked", "red"));
+        if (m.online) top.appendChild(amChip("online", "green"));
+        top.appendChild(el("span", "dk-am-row-s", "seen " + amWhen(m.last)));
+        r.appendChild(top);
+        r.appendChild(el("div", "dk-am-row-w", "Why: " + m.why.join(", ") + "."));
+        if (m.votes.same || m.votes.different)
+          r.appendChild(el("div", "dk-am-row-w", "Staff votes: " + m.votes.same + " same, " + m.votes.different + " not same."));
+        const acts = el("div", "dk-am-acts");
+        const yes = btn("dk-minib", "Same user", "fa-check");
+        yes.addEventListener("click", () => amVote(c, m, true));
+        const no = btn("dk-minib", "Not same", "fa-xmark");
+        no.addEventListener("click", () => amVote(c, m, false));
+        acts.appendChild(yes);
+        acts.appendChild(no);
+        r.appendChild(acts);
+        sec.appendChild(r);
+      }
+      box.appendChild(sec);
+    }
+
+    const events = (f.events || []).filter((AM_FILTERS.find((x) => x[0] === am.filter) || AM_FILTERS[0])[2]);
+    const sec = amSection("History", "Newest first");
+    const chips = el("div", "dk-am-filters");
+    for (const [key, label] of AM_FILTERS) {
+      const b = el("button", "dk-am-filter" + (am.filter === key ? " on" : ""), label);
+      b.type = "button";
+      b.addEventListener("click", () => {
+        am.filter = key;
+        renderAutomod();
+      });
+      chips.appendChild(b);
+    }
+    sec.appendChild(chips);
+    if (!events.length) sec.appendChild(el("p", "dk-am-empty", "Nothing here."));
+    for (const e of events.slice(0, 60)) {
+      const r = el("div", "dk-am-ev");
+      const top = el("div", "dk-am-ev-t");
+      top.appendChild(el("span", "dk-am-ev-a", e.action || e.base || "event"));
+      if (e.by) top.appendChild(el("span", "dk-am-ev-by", "by " + e.by));
+      top.appendChild(el("span", "dk-am-row-s", new Date(e.at).toLocaleString()));
+      r.appendChild(top);
+      if (e.reason) r.appendChild(el("div", "dk-am-row-w", e.reason));
+      if (e.quote) {
+        const q = el("div", "dk-am-quote");
+        q.appendChild(
+          el(
+            "span",
+            "dk-am-quote-k",
+            /appeal/.test(e.base || e.action || "") ? "They wrote" : e.kind === "report" ? "Their box" : "They typed",
+          ),
+        );
+        q.appendChild(el("span", "dk-am-quote-v", e.quote));
+        r.appendChild(q);
+      }
+      sec.appendChild(r);
+    }
+    box.appendChild(sec);
+    return box;
+  }
+
+  function amResults() {
+    const box = el("div", "dk-am-results");
+    if (am.busy) {
+      box.appendChild(el("p", "dk-am-empty", "Searching..."));
+      return box;
+    }
+    if (!am.results) {
+      box.appendChild(el("p", "dk-am-empty", "Type a name above. Part of a name works. Offline users too."));
+      return box;
+    }
+    if (!am.results.length) {
+      box.appendChild(el("p", "dk-am-empty", 'No one found for "' + am.q + '". Try fewer letters.'));
+      return box;
+    }
+    box.appendChild(el("div", "dk-am-count", am.results.length + ' found for "' + am.q + '"'));
+    for (const r of am.results) {
+      const b = el("button", "dk-am-res");
+      b.type = "button";
+      const top = el("div", "dk-am-row-t");
+      top.appendChild(el("span", "dk-am-row-n", r.name));
+      if (r.blocked) top.appendChild(amChip("blocked", "red"));
+      if (r.evader) top.appendChild(amChip("dodged a block", "amber"));
+      top.appendChild(r.online ? amChip("online", "green") : amChip("offline"));
+      if (r.accounts > 1) top.appendChild(amChip(r.accounts + " accounts"));
+      top.appendChild(el("span", "dk-am-row-s", "seen " + amWhen(r.last)));
+      b.appendChild(top);
+      const other = (r.names || []).filter((x) => x !== r.name);
+      if (other.length) b.appendChild(el("div", "dk-am-row-w", "Other names: " + other.slice(0, 4).join(", ")));
+      b.addEventListener("click", () => openAutomod(r.key));
+      box.appendChild(b);
+    }
+    return box;
+  }
+
+  function amWatching() {
+    const box = el("div", "dk-am-results");
+    const list = am.mine || [];
+    if (!list.length) {
+      box.appendChild(el("p", "dk-am-empty", "No watches. Open a user and press Watch. You get a note when they sign in."));
+      return box;
+    }
+    for (const w of list) {
+      const r = el("div", "dk-am-row");
+      const top = el("div", "dk-am-row-t");
+      const open = el("button", "dk-am-link", w.name);
+      open.type = "button";
+      open.addEventListener("click", () => openAutomod(w.key));
+      top.appendChild(open);
+      top.appendChild(w.online ? amChip("online", "green") : amChip("offline"));
+      if (w.hit && w.hit.blocked) top.appendChild(amChip("now blocked", "red"));
+      top.appendChild(el("span", "dk-am-row-s", "ends " + new Date(w.until).toLocaleDateString()));
+      const stop = btn("dk-minib", "Unwatch", "fa-eye-slash");
+      stop.addEventListener("click", () => socket.emit("automod watch", { key: w.key, on: false }));
+      top.appendChild(stop);
+      r.appendChild(top);
+      r.appendChild(
+        el(
+          "div",
+          "dk-am-row-w",
+          w.hit
+            ? "Signed in " + amWhen(w.hit.at) + (w.hit.sure ? "." : ' as "' + w.hit.name + '" on a new browser. Could be someone else.')
+            : "Has not signed in since you started watching.",
+        ),
+      );
+      box.appendChild(r);
+    }
+    return box;
+  }
+
+  const AM_GUIDE = [
+    {
+      icon: "fa-id-card",
+      tone: "orange",
+      h: "What it is",
+      lines: [
+        "One page per user: warnings, blocks, what they typed, and their other accounts.",
+        "It never acts by itself. You press the buttons, and they work the same as everywhere else.",
+      ],
+    },
+    {
+      icon: "fa-magnifying-glass",
+      tone: "blue",
+      h: "Find a user",
+      lines: [
+        "Type part of a name and press Enter.",
+        "Or paste a user id.",
+        "Or press \"Who is this?\" on a report or an appeal.",
+        "From any channel: `/who name`",
+        "Works for offline users. If many match, pick from the list.",
+      ],
+    },
+    {
+      icon: "fa-tag",
+      tone: "green",
+      h: "The tags at the top",
+      rows: [
+        [["Clean", "green"], "Nothing on record."],
+        [["Warned before", "amber"], "Staff warned or kicked them."],
+        [["Blocked before", "amber"], "Was blocked. Not blocked now."],
+        [["Blocked", "red"], "Blocked right now. Shows until when."],
+        [["Dodged a block", "amber"], "Came back while they were blocked."],
+        [["Online", "green"], "On the site now. Shows the room if it is public."],
+        [["Watching", "blue"], "You asked to be told when they sign in."],
+        [["No browser", "amber"], "Signed in without the details a browser sends. Could be a script."],
+      ],
+    },
+    {
+      icon: "fa-hashtag",
+      tone: "amber",
+      h: "The six numbers",
+      rows: [
+        ["warns + kicks", "Times staff warned or kicked them."],
+        ["blocks", "Times they were blocked from the site."],
+        ["reports", "Times other users reported them."],
+        ["appeals", "Times they asked for a block to be lifted."],
+        ["days seen", "Days they showed up."],
+        ["first seen", "How long ago they first came."],
+      ],
+    },
+    {
+      icon: "fa-hand-pointer",
+      tone: "orange",
+      h: "The buttons",
+      rows: [
+        ["Warn", "Sends a warning. If they are offline, they see it next sign-in."],
+        ["Wipe", "Clears their box. Only shows when they are in a room."],
+        ["Kick", "Removes them from the room. Only shows when they are in a room."],
+        ["Block", "Blocks them from the whole site. Full mods and up."],
+        ["Watch", "You get a private note when they sign in, or when someone signs in with their name or a longer version of it. It shows in your Watching tab. Lasts 7 days. You can watch 20 users."],
+        ["Share", "Posts their page in the feed so other staff can open it."],
+      ],
+    },
+    {
+      icon: "fa-users",
+      tone: "blue",
+      h: "Other accounts",
+      lines: ["Other browsers that are the same user. Full mods and up see this. Each one says why it is linked."],
+      rows: [
+        [["Staff confirmed", "green"], "A leader checked it."],
+        [["Strong link", "blue"], "Same name on the same connection, or they swapped browsers right after a kick."],
+        [["Medium link", "amber"], "Same network and another sign, like the same name."],
+      ],
+    },
+    {
+      icon: "fa-user-secret",
+      tone: "amber",
+      h: "Maybe the same user",
+      lines: [
+        "Accounts with the same name that are not linked.",
+        "The % is a guess based on real past cases on Talkomatic.",
+        "It goes up for: the exact same name, coming back soon after a block, the same location text, and a user who was blocked more than once.",
+        "A name that only starts the same, like Sam and Sam2, counts too, but scores lower.",
+        "Common names like Alex match strangers. Read what they type before you act.",
+      ],
+      rows: [
+        [["50% and up, likely", "red"], "About 3 in 5 of these were the same user."],
+        [["25 to 50%, possible", "amber"], "About 2 in 5 were."],
+        [["Under 25%", ""], "About 1 in 8 were. Automod stays quiet."],
+      ],
+    },
+    {
+      icon: "fa-link",
+      tone: "green",
+      h: "Same user or not",
+      rows: [
+        ["Full mod", "Your pick is a vote. It changes nothing yet, but leaders see it."],
+        ["Leader", "Your pick is final. \"Same user\" joins the accounts, so a block on one follows the other."],
+      ],
+      lines: ["If a link later helps catch someone, the feed says who made it."],
+      after: true,
+    },
+    {
+      icon: "fa-bell",
+      tone: "blue",
+      h: "The feed",
+      lines: ["Automod posts here by itself. Press Open on a card to see the user."],
+      rows: [
+        [["Maybe back", "amber"], "Someone signed in with a blocked user's name, or on a device that looks like theirs."],
+        [["No browser", "amber"], "Someone signed in without the details a browser sends. Could be a script, or an old tab."],
+        [["Needs a leader", "purple"], "Two mods voted that two accounts are the same user."],
+        [["Caught", "green"], "Staff blocked a user Automod had flagged."],
+        [["Not them", ""], "Staff checked a flag. It was a different user."],
+        [["Shared", ""], "A staff member shared a user's page."],
+      ],
+    },
+    {
+      icon: "fa-user-shield",
+      tone: "purple",
+      h: "Who can do what",
+      rows: [
+        ["Junior mod", "Find, read, warn, kick, wipe, watch."],
+        ["Full mod", "All that, plus other accounts, the maybe list, votes, and block."],
+        ["Leader", "All that, plus final say on links, and the Stats tab."],
+      ],
+    },
+    {
+      icon: "fa-circle-info",
+      tone: "",
+      h: "Good to know",
+      lines: [
+        "Searching is not counted as work.",
+        "Leaders can see which mods looked up whom. Only look up users you have a reason to.",
+        "Staff do not show up in search.",
+        "Your watches are private. Other staff do not see them.",
+        "No addresses are shown at any mod level.",
+        "Device details are a hint, never proof. Two phones of the same model look the same, so they are not counted.",
+      ],
+    },
+  ];
+
+  function amGuide() {
+    const box = el("div", "dk-am-guide");
+    for (const g of AM_GUIDE) {
+      const s = el("section", "dk-am-g");
+      const h = el("div", "dk-am-g-h");
+      const ico = el("span", "dk-am-ico" + (g.tone ? " " + g.tone : ""));
+      ico.appendChild(icon(g.icon));
+      h.appendChild(ico);
+      h.appendChild(el("h3", "dk-am-h", g.h));
+      s.appendChild(h);
+      const lines = (list) => {
+        const ul = el("ul", "dk-am-ul");
+        for (const line of list) {
+          const li = el("li", "dk-am-li");
+          inlineInto(li, line);
+          ul.appendChild(li);
+        }
+        s.appendChild(ul);
+      };
+      if (g.lines && !g.after) lines(g.lines);
+      if (g.rows) {
+        const l = el("div", "dk-am-kv");
+        for (const [k, v] of g.rows) {
+          const r = el("div", "dk-am-kv-r");
+          const key = el("span", "dk-am-kv-k");
+          if (Array.isArray(k)) key.appendChild(amChip(k[0], k[1]));
+          else key.textContent = k;
+          r.appendChild(key);
+          const val = el("span", "dk-am-kv-v");
+          inlineInto(val, v);
+          r.appendChild(val);
+          l.appendChild(r);
+        }
+        s.appendChild(l);
+      }
+      if (g.lines && g.after) lines(g.lines);
+      box.appendChild(s);
+    }
+    return box;
+  }
+
+  function amStats() {
+    const box = el("div", "dk-am-guide");
+    const st = am.stats;
+    if (!st) {
+      box.appendChild(el("p", "dk-am-empty", "Loading..."));
+      return box;
+    }
+    const a = amSection("How right it was", "Users flagged as maybe back");
+    a.appendChild(
+      amTiles([
+        ["flagged", st.flagged],
+        ["blocked after", st.blocked],
+        ["not them", st.cleared],
+        ["links made", st.links],
+        ["votes", st.votes],
+        ["watches on", st.watching],
+      ]),
+    );
+    for (const [band, b] of Object.entries(st.bands || {}))
+      a.appendChild(
+        el("div", "dk-am-row-w", (band === "unlikely" ? "Under 25%, not posted" : AM_BAND[band] || band) + ": " + b.flagged + " flagged, " + b.blocked + " blocked, " + b.cleared + " not them, " + b.open + " open."),
+      );
+    box.appendChild(a);
+
+    if (st.device) {
+      const dv = st.device;
+      const g = amSection("Device details", "Only you see this");
+      g.appendChild(
+        amTiles([
+          ["devices seen", dv.total],
+          ["usable", dv.strong],
+          ["different", dv.distinct],
+          ["shared", dv.shared],
+          ["no browser", dv.scripts],
+          ["days", Math.max(0, Math.floor((Date.now() - dv.since) / 864e5))],
+        ]),
+      );
+      const share = dv.strong ? Math.round((100 * dv.shared) / dv.strong) : 0;
+      g.appendChild(el("div", "dk-am-row-w", share + "% of usable devices look the same as another user's. Biggest groups: " + (dv.biggest.join(", ") || "none") + "."));
+      g.appendChild(el("div", "dk-am-row-w", "By system: " + (Object.entries(dv.os).map(([k, n]) => k + " " + n).join(", ") || "none yet") + "."));
+      g.appendChild(
+        el(
+          "div",
+          "dk-am-row-w",
+          dv.on
+            ? "Shown to mods as a hint. Needs " + dv.needed + " usable devices before any match counts."
+            : "Collecting only. Mods do not see it yet. Turn it on when the shared number looks low.",
+        ),
+      );
+      const sw = btn("dk-minib", dv.on ? "Stop showing to mods" : "Show to mods as a hint", dv.on ? "fa-eye-slash" : "fa-eye");
+      sw.addEventListener("click", () => socket.emit("automod device", { on: !dv.on }));
+      const acts = el("div", "dk-am-acts");
+      acts.appendChild(sw);
+      g.appendChild(acts);
+      box.appendChild(g);
+    }
+
+    const u = amSection("Use per week", "Pages opened by each mod");
+    if (!(st.weeks || []).some((w) => w.staff.length)) u.appendChild(el("p", "dk-am-empty", "No use yet."));
+    for (const w of [...(st.weeks || [])].reverse()) {
+      if (!w.staff.length) continue;
+      u.appendChild(el("div", "dk-am-week", "Week of " + w.week));
+      for (const s of w.staff) {
+        const r = el("div", "dk-am-kv-r");
+        r.appendChild(el("span", "dk-am-kv-k", s.who + " (" + (s.level >= 4 ? "admin" : "L" + s.level) + ")"));
+        r.appendChild(el("span", "dk-am-kv-v", s.opens + " pages, " + s.searches + " searches, " + s.watches + " watches, " + s.votes + " votes"));
+        u.appendChild(r);
+      }
+    }
+    box.appendChild(u);
+
+    const l = amSection("Recent lookups", "Who opened whose page");
+    if (!(st.recent || []).length) l.appendChild(el("p", "dk-am-empty", "None yet."));
+    for (const x of st.recent || []) {
+      const r = el("div", "dk-am-kv-r");
+      r.appendChild(el("span", "dk-am-kv-k", x.by));
+      r.appendChild(el("span", "dk-am-kv-v", (x.name || "(no name)") + ", " + amWhen(x.at)));
+      l.appendChild(r);
+    }
+    box.appendChild(l);
+    return box;
+  }
+
+  function renderAutomod() {
+    const main = els.main;
+    if (!main) return;
+    main.textContent = "";
+    if (els.headSub) els.headSub.textContent = "#automod";
+    els.replyBar = null;
+    els.palette = null;
+    els.emotes = null;
+    els.emoteBtn = null;
+    els.composer = null;
+    els.sizeTa = null;
+    els.announceForm = null;
+    els.jump = el("div", "dk-jump");
+    els.jump.style.display = "none";
+    els.jumpText = el("span", "dk-jump-t", "");
+    els.list = el("div", "dk-am-feed");
+
+    const top = el("div", "dk-am-top");
+    const form = el("form", "dk-am-search");
+    const input = el("input", "dk-am-in");
+    input.type = "text";
+    input.placeholder = "Name or user id";
+    input.maxLength = 60;
+    input.value = am.q || "";
+    input.setAttribute("aria-label", "Find a user");
+    const go = btn("dk-minib primary", "Search", "fa-magnifying-glass");
+    go.type = "submit";
+    form.appendChild(input);
+    form.appendChild(go);
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      amSearch(input.value);
+    });
+    top.appendChild(form);
+
+    const tabs = el("div", "dk-am-tabs");
+    const tab = (key, label) => {
+      const b = el("button", "dk-am-tab" + (am.tab === key ? " on" : ""), label);
+      b.type = "button";
+      b.addEventListener("click", () => {
+        am.tab = key;
+        if (key === "watching") socket.emit("automod mine");
+        if (key === "stats") socket.emit("automod stats");
+        renderAutomod();
+      });
+      tabs.appendChild(b);
+    };
+    tab("feed", "Feed");
+    if (am.card || am.results || am.busy || am.tab === "find")
+      tab("find", am.card && am.card.file ? am.card.file.name || "User" : "Results");
+    tab("watching", "Watching" + ((am.mine || []).length ? " (" + am.mine.length + ")" : ""));
+    tab("help", "Help");
+    if (isLeader()) tab("stats", "Stats");
+    top.appendChild(tabs);
+    main.appendChild(top);
+
+    const body = el("div", "dk-msgs dk-am");
+    if (am.tab === "watching") body.appendChild(amWatching());
+    else if (am.tab === "help") body.appendChild(amGuide());
+    else if (am.tab === "stats") body.appendChild(amStats());
+    else if (am.tab === "find") {
+      if (am.card && !am.busy) {
+        if (am.results && am.results.length > 1) {
+          const back = el("button", "dk-am-link", "Back to " + am.results.length + " results");
+          back.type = "button";
+          back.addEventListener("click", () => {
+            am.card = null;
+            renderAutomod();
+          });
+          body.appendChild(back);
+        }
+        body.appendChild(amPerson(am.card));
+      } else body.appendChild(amResults());
+    } else {
+      body.appendChild(el("p", "dk-am-empty", "Automod posts here when a blocked or watched user signs in."));
+      body.appendChild(els.list);
+      renderMessages();
+    }
+    main.appendChild(body);
+  }
+
+  const AM_KIND = {
+    return: ["Maybe back", "fa-user-secret", "amber"],
+    "return confirmed": ["Caught", "fa-circle-check", "green"],
+    "return cleared": ["Not them", "fa-circle-xmark", ""],
+    watch: ["Watched user online", "fa-eye", "blue"],
+    confirm: ["Needs a leader", "fa-link", "purple"],
+    shared: ["Shared", "fa-share", ""],
+    caught: ["Caught", "fa-circle-check", "green"],
+    script: ["No browser", "fa-robot", "amber"],
+  };
+
+  function automodCard(m) {
+    const c = m.card || {};
+    const [kind, fa, tone] = AM_KIND[c.category] || ["Automod", "fa-robot", ""];
+    const r = el("div", "dk-am-card");
+    r.dataset.id = m.id;
+    const head = el("div", "dk-am-card-h");
+    const ico = el("span", "dk-am-ico" + (tone ? " " + tone : ""));
+    ico.appendChild(icon(fa));
+    head.appendChild(ico);
+    const who = el("div", "dk-am-card-w");
+    who.appendChild(el("span", "dk-am-card-k", kind));
+    who.appendChild(el("span", "dk-am-card-t", m.text || ""));
+    head.appendChild(who);
+    head.appendChild(el("span", "dk-q-t", clockTime(m.ts)));
+    r.appendChild(head);
+    if (c.reason) r.appendChild(el("div", "dk-am-row-w", c.reason));
+    if (c.category === "return" && c.lines && c.lines.length) r.appendChild(el("div", "dk-am-row-w", "Why: " + c.lines.join(", ") + "."));
+    if (c.category === "return cleared" && c.by) r.appendChild(el("div", "dk-am-row-w", "Checked by " + c.by + "."));
+    const acts = el("div", "dk-am-acts");
+    if (c.targetUserId) {
+      const open = btn("dk-minib primary", "Open", "fa-id-card");
+      open.addEventListener("click", () => openAutomod(c.targetUserId));
+      acts.appendChild(open);
+    }
+    if (c.category === "return" && isFullMod()) {
+      const no = btn("dk-minib", "Not them", "fa-xmark");
+      no.addEventListener("click", () => socket.emit("automod not them", { id: m.id }));
+      acts.appendChild(no);
+    }
+    if (acts.childNodes.length) r.appendChild(acts);
+    return r;
+  }
+
+  function wireAutomod() {
+    const redraw = (tab) => {
+      if (panelOpen && onAutomod() && (!tab || am.tab === tab)) renderAutomod();
+    };
+    socket.on("automod results", (d) => {
+      am.busy = false;
+      am.results = (d && d.results) || [];
+      am.card = null;
+      if (am.results.length === 1) {
+        am.busy = true;
+        socket.emit("automod card", { key: am.results[0].key });
+      }
+      redraw();
+    });
+    socket.on("automod card", (d) => {
+      am.busy = false;
+      am.card = (d && d.card) || null;
+      am.filter = "all";
+      redraw();
+    });
+    socket.on("automod watch", (d) => {
+      if (d && d.error) return toast(d.error);
+      am.mine = (d && d.watches) || [];
+      if (am.card && d && am.card.key === d.key) am.card.watch = d.on ? { until: Date.now() + 7 * 864e5 } : null;
+      toast(d && d.on ? "Watching. You get a note when they sign in." : "Stopped watching.");
+      redraw();
+    });
+    socket.on("automod mine", (d) => {
+      am.mine = (d && d.watches) || [];
+      redraw("watching");
+    });
+    socket.on("automod vote", (d) => {
+      if (d && d.error) return toast(d.error);
+      toast(d && d.confirmed ? "Saved. That is final." : "Vote saved.");
+      if (am.card) socket.emit("automod card", { key: am.card.key });
+    });
+    socket.on("automod not them", (d) => {
+      toast(d && d.ok ? "Marked as not them." : "Already settled.");
+      if (am.card && am.card.flagged) socket.emit("automod card", { key: am.card.key });
+    });
+    socket.on("automod stats", (d) => {
+      am.stats = d || null;
+      redraw("stats");
+    });
+    socket.on("automod ping", (d) => {
+      if (!d) return;
+      toast(
+        '"' + d.name + '" ' +
+          (d.blocked ? "signed in, now blocked." : "signed in. " + (d.sure ? "Same browser you are watching." : "New browser with that name.")),
+      );
+      socket.emit("automod mine");
+    });
+  }
+
   function openHelp() {
     mode = "help";
     if (els.panel) els.panel.classList.remove("rail-open", "side-open");
@@ -4935,6 +5764,7 @@
     },
     { name: "thread", usage: "/thread <title>", what: "Start a thread" },
     { name: "find", usage: "/find <text>", what: "Search staff chat" },
+    { name: "who", usage: "/who <name or id>", what: "Find a user in #automod" },
     { name: "help", usage: "/help", what: "Show this list" },
   ];
   const durationKeys = () =>
@@ -5041,6 +5871,9 @@
         if (rest) askBot(rest);
         else openHelp();
         return;
+      case "who":
+        if (!rest) return openAutomod();
+        return amSearch(rest);
       case "warn": {
         const u = await targetUser(target);
         if (!u) return;
@@ -6282,6 +7115,109 @@
    Sections as cards with their own icon, rather than one long wall of
    headings. Each tone is one colour used in three places: the icon, its
    backing, and the strip down the left. */
+.dk-am-top{flex:none;padding:12px 16px 0;display:flex;flex-direction:column;gap:8px;border-bottom:1px solid #2a2a2a;}
+.dk-am{padding:14px 16px 24px;gap:12px;}
+.dk-am-feed{display:flex;flex-direction:column;gap:2px;}
+.dk-am-search{display:flex;gap:8px;}
+.dk-am-in{flex:1;min-width:0;background: #000;border:1px solid #3a3a3a;border-radius:5px;color: #fff;
+  font:inherit;font-size:13.5px;padding:9px 11px;}
+.dk-am-in:focus{outline:none;border-color: #ff9800;}
+.dk-am-tabs{display:flex;gap:4px;flex-wrap:wrap;}
+.dk-am-tab{background:none;border:0;border-bottom:2px solid transparent;color: #8d8d8d;font:inherit;font-size:12.5px;
+  font-weight:bold;padding:7px 10px;cursor:pointer;max-width:14rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.dk-am-tab:hover{color: #fff;}
+.dk-am-tab.on{color: #fff;border-bottom-color: #ff9800;}
+.dk-am-results,.dk-am-guide,.dk-am-person{display:flex;flex-direction:column;gap:10px;}
+.dk-am-count{font-size:11.5px;color: #8d8d8d;}
+.dk-am-empty,.dk-am-hint{font-size:12.5px;color: #8d8d8d;line-height:1.55;margin:0;}
+.dk-am-res{display:flex;flex-direction:column;gap:5px;text-align:left;background: #1b1b1b;border:1px solid #2a2a2a;
+  border-radius:6px;padding:10px 12px;color:inherit;font:inherit;cursor:pointer;}
+.dk-am-res:hover{border-color: #ff9800;}
+.dk-am-row{display:flex;flex-direction:column;gap:5px;background: #171717;border:1px solid #2a2a2a;border-radius:6px;
+  padding:9px 11px;}
+.dk-am-row-t{display:flex;align-items:center;gap:7px;flex-wrap:wrap;}
+.dk-am-row-n{font-size:13.5px;font-weight:bold;color: #fff;word-break:break-word;}
+.dk-am-row-s{font-size:11px;color: #6f6f6f;margin-left:auto;}
+.dk-am-row-w{font-size:12px;color: #c3c3c3;line-height:1.5;word-break:break-word;}
+.dk-am-link{background:none;border:0;padding:0;color: #ff9800;font:inherit;font-size:13.5px;font-weight:bold;
+  cursor:pointer;text-align:left;}
+.dk-am-link:hover{text-decoration:underline;}
+.dk-am-chip{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:bold;color: #c3c3c3;
+  background: #252525;border-radius:10px;padding:2px 9px;white-space:nowrap;}
+.dk-am-chip i{font-size:8px;}
+.dk-am-chip.red{color: #ff5468;background:rgba(255,84,104,.12);}
+.dk-am-chip.amber{color: #ffb454;background:rgba(255,180,84,.12);}
+.dk-am-chip.green{color: #57d9a3;background:rgba(87,217,163,.12);}
+.dk-am-chip.blue{color: #5aa9ff;background:rgba(90,169,255,.12);}
+.dk-am-head{background: #1b1b1b;border:1px solid #2a2a2a;border-radius:6px;padding:12px 14px;display:flex;
+  flex-direction:column;gap:6px;}
+.dk-am-title{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.dk-am-name{font-size:17px;font-weight:bold;color: #fff;word-break:break-word;}
+.dk-am-aka{font-size:12px;color: #c3c3c3;line-height:1.5;}
+.dk-am-flag{display:flex;align-items:flex-start;gap:10px;background:rgba(255,180,84,.08);border:1px solid rgba(255,180,84,.4);
+  border-radius:6px;padding:10px 12px;}
+.dk-am-flag > i{color: #ffb454;margin-top:2px;}
+.dk-am-flag-b{flex:1;min-width:0;}
+.dk-am-flag-h{font-size:13px;font-weight:bold;color: #fff;line-height:1.45;}
+.dk-am-flag-p{font-size:12px;color: #c3c3c3;line-height:1.5;margin-top:2px;}
+.dk-am-tiles{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:7px;}
+.dk-am-tile{background: #141414;border:1px solid #2a2a2a;border-radius:6px;padding:9px 10px;display:flex;
+  flex-direction:column;gap:2px;}
+.dk-am-tile-v{font-size:16px;font-weight:bold;color: #fff;}
+.dk-am-tile-k{font-size:10.5px;color: #8d8d8d;}
+.dk-am-acts{display:flex;flex-wrap:wrap;gap:6px;}
+.dk-am-sec{display:flex;flex-direction:column;gap:7px;}
+.dk-am-sec-h{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-top:6px;}
+.dk-am-h{font-size:13.5px;font-weight:bold;color: #fff;margin:0;}
+.dk-am-note{font-size:11.5px;color: #8d8d8d;}
+.dk-am-filters{display:flex;gap:5px;flex-wrap:wrap;}
+.dk-am-filter{background: #1b1b1b;border:1px solid #333;border-radius:11px;color: #c3c3c3;font:inherit;font-size:11.5px;
+  padding:3px 10px;cursor:pointer;}
+.dk-am-filter.on{background: #ff9800;border-color: #ff9800;color: #000;font-weight:bold;}
+.dk-am-ev{display:flex;flex-direction:column;gap:4px;padding:8px 0;border-bottom:1px solid #2a2a2a;}
+.dk-am-ev:last-child{border-bottom:0;}
+.dk-am-ev-t{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;}
+.dk-am-ev-a{font-size:12.5px;font-weight:bold;color: #fff;}
+.dk-am-ev-by{font-size:11.5px;color: #8d8d8d;}
+.dk-am-quote{background: #000;border-radius:5px;padding:7px 10px;display:flex;flex-direction:column;gap:3px;}
+.dk-am-quote-k{font-size:9.5px;font-weight:bold;letter-spacing:.6px;text-transform:uppercase;color: #6f6f6f;}
+.dk-am-quote-v{font-size:12px;color: #c3c3c3;line-height:1.5;white-space:pre-wrap;word-break:break-word;
+  max-height:110px;overflow:auto;}
+.dk-am-g{background: #1b1b1b;border:1px solid #2a2a2a;border-radius:8px;padding:12px 14px;display:flex;
+  flex-direction:column;gap:9px;}
+.dk-am-g-h{display:flex;align-items:center;gap:9px;}
+.dk-am-g .dk-am-h{font-size:14px;}
+.dk-am-ul{margin:0;padding:0 0 0 2px;list-style:none;display:flex;flex-direction:column;gap:5px;}
+.dk-am-li{position:relative;padding-left:14px;font-size:12.5px;color: #dedede;line-height:1.55;}
+.dk-am-li::before{content:"";position:absolute;left:0;top:.62em;width:5px;height:5px;border-radius:50%;background: #ff9800;}
+.dk-am-li code,.dk-am-kv-v code{font-family:"Courier New",monospace;color: #ff9800;background: #000;border-radius:3px;padding:1px 5px;}
+.dk-am-kv{display:flex;flex-direction:column;gap:4px;}
+.dk-am-kv-r{display:flex;gap:12px;align-items:baseline;background: #141414;border-radius:5px;padding:7px 10px;}
+.dk-am-kv-k{flex:none;width:10.5rem;max-width:44%;font-size:12.5px;font-weight:bold;color: #fff;}
+.dk-am-kv-v{flex:1;min-width:0;font-size:12.5px;color: #c3c3c3;line-height:1.55;}
+.dk-am-week{font-size:11px;font-weight:bold;letter-spacing:.5px;text-transform:uppercase;color: #8d8d8d;margin-top:4px;}
+.dk-am-card{margin-top:10px;background: #1b1b1b;border:1px solid #2a2a2a;border-radius:6px;padding:10px 12px;
+  display:flex;flex-direction:column;gap:7px;}
+.dk-am-card-h{display:flex;align-items:flex-start;gap:9px;}
+.dk-am-card-w{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;}
+.dk-am-card-k{font-size:9.5px;font-weight:bold;letter-spacing:.7px;text-transform:uppercase;color: #8d8d8d;}
+.dk-am-card-t{font-size:13.5px;font-weight:bold;color: #fff;line-height:1.45;word-break:break-word;}
+.dk-am-ico{flex:none;width:26px;height:26px;border-radius:13px;background: #252525;color: #8d8d8d;display:flex;
+  align-items:center;justify-content:center;font-size:11px;}
+.dk-am-ico.amber{color: #ffb454;background:rgba(255,180,84,.12);}
+.dk-am-ico.green{color: #57d9a3;background:rgba(87,217,163,.12);}
+.dk-am-ico.blue{color: #5aa9ff;background:rgba(90,169,255,.12);}
+.dk-am-ico.orange{color: #ff9800;background:rgba(255,152,0,.12);}
+.dk-am-ico.purple{color: #c08bff;background:rgba(192,139,255,.12);}
+@media (max-width:760px){
+  .dk-am-top{padding:10px 12px 0;}
+  .dk-am{padding:12px 12px 20px;}
+  .dk-am-in{font-size:16px;}
+  .dk-am-tiles{grid-template-columns:repeat(3,minmax(0,1fr));}
+  .dk-am-row-s{margin-left:0;width:100%;}
+  .dk-am-kv-r{flex-direction:column;gap:3px;}
+  .dk-am-kv-k{width:auto;max-width:none;}
+}
 .dk-help{padding:16px 18px 24px;display:flex;flex-direction:column;gap:12px;}
 .dk-help-hero{display:flex;gap:12px;align-items:flex-start;background: #1b1b1b;
   border:1px solid #3a3126;border-left:3px solid #ff9800;padding:13px 15px;}

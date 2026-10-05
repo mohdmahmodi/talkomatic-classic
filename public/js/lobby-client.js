@@ -82,6 +82,17 @@
     });
   };
 
+  window.showProxyModal = function (message, onReport) {
+    showModal("Connection not allowed", message, {
+      confirmText: "OK",
+      cancelText: "Report a mistake",
+      showCancel: !!onReport,
+      callback: (confirmed) => {
+        if (!confirmed && onReport) onReport();
+      },
+    });
+  };
+
   window.showInfoModal = function (message) {
     showModal("Information", message, {
       showCancel: false,
@@ -398,6 +409,7 @@ const socket = io({
   },
 });
 if (window.TalkomaticConnection) window.TalkomaticConnection.attach(socket);
+if (window.TalkomaticIdentity && window.TalkomaticIdentity.report) window.TalkomaticIdentity.report(socket);
 if (window.TalkoDesk) window.TalkoDesk.init(socket);
 
 // ============================================================================
@@ -1891,8 +1903,17 @@ socket.on("lobby update", (rooms) => {
   updateLobby(rooms);
 });
 
+socket.on("proxy report result", (d) => {
+  if (d && d.message) window.showInfoModal(d.message);
+});
+
 socket.on("error", (error) => {
   console.log(error);
+  const details = error && error.error && error.error.details;
+  if (details && details.proxy && window.showProxyModal) {
+    window.showProxyModal(error.error.message, details.canReport ? () => socket.emit("proxy report") : null);
+    return;
+  }
   window.showErrorModal(
     (error.error.replaceDefaultText ? "" : `An error occurred: `) +
       error.error.message,

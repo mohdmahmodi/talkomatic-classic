@@ -55,6 +55,8 @@ const ipban = require("./ipban");
 const evasion = require("./evasion");
 const proxyguard = require("./proxyguard");
 const dataexport = require("./dataexport");
+const automod = require("./automod");
+const clientdetails = require("./clientdetails");
 const diag = require("./diag");
 const gamesFloor = require("./games");
 const gamesSocket = require("./games/socket");
@@ -756,26 +758,36 @@ function isSeasonedDevice(did) {
   return !!(rec && rec.days && rec.days.length >= SEASONED_DAYS);
 }
 
-function reportProxyHit(socket, { username, location, type, at }) {
+function reportProxyHit(socket, { username, location, type, provider, network, school, at }) {
   const ip = socket.clientIp || null;
   const did = socket.deviceId || null;
   if (!proxyguard.shouldReport((did || "") + "|" + (ip || ""))) return;
-  const userId = socket.handshake?.session?.userId || null;
-  const kind = type || "proxy";
-  const refused = at === "room join" ? "Room join" : "Sign-in";
+  const userId = socket.handshake?.session?.userId || socket.stableUserId || null;
+  const kind = school && (!type || type === "school") ? "school network" : type || "proxy";
+  const refused =
+    at === "room join"
+      ? "Room join refused"
+      : at === "while on the site"
+        ? "Signed out and taken out of their room"
+        : at === "returning visit"
+          ? "Signed out"
+          : "Sign-in refused";
   audit.recordNotification({
     kind: "proxyguard",
     minLevel: 1,
     text: [
-      "Proxy guard stopped " + (username ? '"' + username + '"' : "somebody") + " at " + at + ".",
-      "What happened: they connected through a " + kind + " address. VPNs, proxies and hosting networks are not allowed.",
-      "Action taken: " + refused + " refused. No block was placed, they can come back with it turned off.",
+      (username ? '"' + username + '"' : "Somebody") + " was flagged at " + at + ": " + kind + " detected.",
+      "What happened: they connected through a " + kind + " address. VPNs, proxies, hosting and school networks are not allowed.",
+      "Action taken: " + refused + ". No block was placed, they can come back with it turned off.",
       "Name: " + (username ? '"' + username + '"' : "none"),
       "Location they typed: " + (location ? '"' + location + '"' : "none"),
-      "Network type: " + kind,
+      "Client id (their browser): " + (did || "unknown"),
+      "User id: " + (userId || "unknown"),
       "IP address: " + (ip || "unknown"),
-      "Device id (their browser): " + (did || "unknown"),
-      "User id: " + (userId || "none yet, they were not signed in"),
+      "Network type: " + kind,
+      "Provider: " + (provider || "unknown"),
+      "Network: " + (network || "unknown") + (school ? " (school network)" : ""),
+      ...(socket.staffProxy ? ["Staff key: carried one, not used on this connection."] : []),
     ].join("\n"),
     target: username || null,
     targetUserId: userId,
@@ -785,9 +797,120 @@ function reportProxyHit(socket, { username, location, type, at }) {
       target: username || "(no name)",
       deviceId: did,
       category: kind + " connection, refused automatically",
-      reason: refused + " refused by the proxy guard",
+      reason: refused + " by the proxy guard",
     },
   });
+}
+
+function proxyExempt(socket) {
+  return !!(socket.isBot || socket.isModLog);
+}
+
+function proxyRefusal(net, socket, username, location) {
+  if (socket) socket.proxyRefused = { net, at: Date.now(), username: username || null, location: location || null };
+  return createErrorResponse(
+    ERROR_CODES.FORBIDDEN,
+    proxyguard.messageFor(net),
+    { proxy: net.type || "proxy", canReport: proxyguard.canReport(net) },
+    true,
+  );
+}
+
+const PROXY_REPORT_REPLY = {
+  sent:
+    "Thanks. Your connection has been sent for review. If it was flagged by mistake, you'll be able to sign in once it's corrected, usually within a day. Turning off any VPN or proxy lets you in straight away.",
+  fixed: "Thanks, that has been corrected. Reload the page and sign in again.",
+  "already-sent": "This connection has already been sent for review. You'll be able to sign in once it's checked.",
+  rejected: "This connection was reviewed and it is a VPN, proxy or hosting network. Turn it off, then reload the page.",
+  busy: "The report couldn't be sent right now. Please try again later.",
+  "not-allowed": "This connection can't be sent for review.",
+};
+
+function noteProxyReport(socket, refusal, outcome) {
+  const ip = socket.clientIp || null;
+  const did = socket.deviceId || null;
+  const userId = socket.handshake?.session?.userId || socket.stableUserId || null;
+  const name = refusal.username;
+  audit.recordNotification({
+    kind: "proxyguard",
+    minLevel: 1,
+    text: [
+      (name ? '"' + name + '"' : "Somebody") + " says the proxy guard refused them by mistake.",
+      "What happened: they were refused for a " + (refusal.net.type || "proxy") + " address and asked for a review.",
+      "Action taken: " +
+        (outcome === "fixed"
+          ? "the address was corrected, they can sign in."
+          : "sent for review. They stay refused until it is checked."),
+      "Name: " + (name ? '"' + name + '"' : "none"),
+      "Client id (their browser): " + (did || "unknown"),
+      "User id: " + (userId || "unknown"),
+      "IP address: " + (ip || "unknown"),
+      "Network: " + (refusal.net.network || "unknown"),
+    ].join("\n"),
+    target: name || null,
+    targetUserId: userId,
+    ip,
+    card: {
+      ids: did ? [did] : [],
+      target: name || "(no name)",
+      deviceId: did,
+      category: "proxy guard review requested",
+      reason: "Says the proxy guard refused them by mistake",
+    },
+  });
+}
+
+async function proxyTurnAway(s, net, at) {
+  const sess = s.handshake?.session;
+  const uid = sess?.userId || null;
+  const inRoom = !!s.roomId;
+  const name = sess?.username || null;
+  const place = sess?.location || null;
+  reportProxyHit(s, { username: name, location: place, type: net.type, provider: net.provider, network: net.network, school: net.school, at });
+  try {
+    if (inRoom && uid) await leaveRoom(s, uid);
+  } catch (_) {}
+  if (sess && sess.username) {
+    sess.username = null;
+    sess.location = null;
+    await promisifySessionSave(sess).catch(() => {});
+  }
+  if (uid) state.users.delete(uid);
+  try {
+    s.leave("lobby");
+  } catch (_) {}
+  if (inRoom) s.emit("kicked", { message: proxyguard.messageFor(net) });
+  else {
+    s.emit("error", proxyRefusal(net, s, name, place));
+    s.emit("signin status", { isSignedIn: false });
+  }
+  updateLobby();
+}
+
+function proxyFollowUp(ip, net) {
+  if (!io()) return;
+  for (const [, s] of io().sockets.sockets) {
+    if (s.isBot || proxyguard.publicIp(s.clientIp) !== ip) continue;
+    const staff = !!(s.isDev || s.isMod);
+    if (staff && s.isModLog) {
+      s.disconnect(true);
+      continue;
+    }
+    if (s.isModLog) continue;
+    if (!staff && !s.handshake?.session?.username && !s.roomId) continue;
+    proxyTurnAway(s, net, "while on the site")
+      .catch(() => {})
+      .then(() => {
+        if (staff) s.disconnect(true);
+      });
+  }
+}
+
+function proxyLive(ip) {
+  if (!io()) return false;
+  for (const [, s] of io().sockets.sockets)
+    if (!proxyExempt(s) && proxyguard.publicIp(s.clientIp) === ip) return true;
+  return false;
 }
 
 function freshSameNetworkInRoom(room, roomId, socket, userId) {
@@ -1523,6 +1646,9 @@ function logStaff(socket, action, target, room, details, extra) {
   });
   try {
     staffchat.noteStaffAction(label, action, targetStr, roomTag, roleTag);
+  } catch (_) {}
+  try {
+    automod.noteAction(label, action, targetStr, roleTag);
   } catch (_) {}
   if (socket?.isMod && !socket?.isDev)
     modwatch.record({
@@ -2382,7 +2508,7 @@ function broadcastSuggestionsList(also) {
 }
 
 // ── Community suggestion board ──────────────────────────────────────────────
-const WARNING_OPEN_EVENTS = new Set(["warning ack", "get rooms"]);
+const WARNING_OPEN_EVENTS = new Set(["warning ack", "get rooms", "client details"]);
 
 function boardRole(socket) {
   if (socket.isMainDev) return "user";
@@ -2775,6 +2901,7 @@ async function floodGuardSigninFlood(socket, username, location, hit) {
 
 function applyNamePolicy(socket, username) {
   if (!socket || socket.isDev || socket.isMod) return;
+  automod.noteWatch(socket, username);
   const wait = 4000 + Math.floor(Math.random() * 7000);
   if (!isListedName(username)) {
     setTimeout(() => settleNameEcho(socket, username), wait);
@@ -2791,8 +2918,10 @@ function settleNameEcho(socket, username) {
       deviceId: socket.deviceId || null,
       ip: socket.clientIp || null,
       username,
+      location: socket.handshake?.session?.location || null,
     });
-    if (!hit) return;
+    if (!hit) return automod.noteSignin(socket, username);
+    automod.noteWatch(socket, username, true);
     broadcastBlockList();
     broadcastBanHistory();
     kickEvasionBlocked(hit.autoBlocked.keys, socket.deviceId).catch(() => {});
@@ -2816,6 +2945,20 @@ function placeBlock(key, entry) {
   state.blockedIPs.set(key, entry);
 }
 
+function namesSeenOn(key) {
+  const prepared = ipban.prepareKeys([key]);
+  const found = new Map();
+  for (const rec of Object.values(identity.allRecords())) {
+    if (!rec || !rec.name || isGuestName(rec.name) || !rec.ips) continue;
+    if (!Object.keys(rec.ips).some((ip) => ipban.keysCovering(ip, prepared).length)) continue;
+    const sk = nameguard.skeleton(rec.name);
+    const had = found.get(sk);
+    found.set(sk, { name: rec.name, n: (had ? had.n : 0) + 1 });
+  }
+  if (!found.size || found.size > 3) return [];
+  return [...found.values()].sort((a, b) => b.n - a.n).map((x) => x.name);
+}
+
 function settlePersonBlocks(who) {
   let changed = [];
   try {
@@ -2831,6 +2974,8 @@ async function settleNamePolicy(socket, username) {
   const ip = socket.clientIp || null;
   const did = socket.deviceId || null;
   if (!ip && !did) return;
+  if (!evasion.agrees({ ip, username, location: socket.handshake?.session?.location || null }))
+    return settleNameEcho(socket, username);
 
   const entry = {
     expiry: Number.MAX_SAFE_INTEGER,
@@ -4118,27 +4263,18 @@ function joinRoom(socket, roomId, userId) {
     if (!location) location = "";
 
     const clientIp = socket.clientIp || socket.handshake.address;
-    if (
-      !isStaff &&
-      !socket.isBot &&
-      !isSeasonedDevice(socket.deviceId) &&
-      proxyguard.cached(clientIp)?.flagged
-    ) {
+    const flaggedNet = !proxyExempt(socket) ? proxyguard.cached(clientIp) : null;
+    if (flaggedNet && flaggedNet.flagged) {
       reportProxyHit(socket, {
         username,
         location,
-        type: proxyguard.cached(clientIp).type,
+        type: flaggedNet.type,
+        provider: flaggedNet.provider,
+        network: flaggedNet.network,
+        school: flaggedNet.school,
         at: "room join",
       });
-      return socket.emit(
-        "error",
-        createErrorResponse(
-          ERROR_CODES.FORBIDDEN,
-          "VPNs, proxies and hosting networks can't be used on Talkomatic. Turn it off, reload the page and sign in again.",
-          null,
-          true,
-        ),
-      );
+      return socket.emit("error", proxyRefusal(flaggedNet, socket, username, location));
     }
     if (CONFIG.FEATURES.ENABLE_BOT_PROTECTION) {
       if (isBlacklisted(userId, clientIp))
@@ -4415,6 +4551,15 @@ function registerSocketHandlers(opts) {
     banHistory: buildBanHistory,
     announcements,
   });
+  proxyguard.init({ onFlag: proxyFollowUp, isLive: proxyLive });
+  automod.init({
+    io,
+    staffchat,
+    buildQuickFile,
+    presenceByUser,
+    getUserStaffRole,
+    logStaff,
+  });
   gamesFloor.init({
     socketsInRoom(roomId) {
       const out = [];
@@ -4578,6 +4723,8 @@ function registerSocketHandlers(opts) {
     );
 
     noteLastSeen(socket);
+
+    if (!proxyExempt(socket)) proxyguard.check(clientIp).catch(() => {});
 
     try {
       if (socket.deviceId) {
@@ -4829,6 +4976,28 @@ function registerSocketHandlers(opts) {
       simReply(diag.simStop(d || {}));
     });
 
+    socket.on(
+      "proxy report",
+      safe(async () => {
+        const refusal = socket.proxyRefused;
+        const reply = (outcome) =>
+          socket.emit("proxy report result", { outcome, message: PROXY_REPORT_REPLY[outcome] || PROXY_REPORT_REPLY.busy });
+        if (
+          !refusal ||
+          Date.now() - refusal.at > 30 * 60 * 1000 ||
+          socket.proxyReportedAt ||
+          !proxyguard.canReport(refusal.net)
+        )
+          return reply("not-allowed");
+        const now = proxyguard.cached(socket.clientIp);
+        if (now && !now.flagged) return reply("fixed");
+        socket.proxyReportedAt = Date.now();
+        const { outcome } = await proxyguard.report(socket.clientIp, refusal.net);
+        if (outcome === "sent" || outcome === "fixed") noteProxyReport(socket, refusal, outcome);
+        reply(outcome);
+      }),
+    );
+
     // ── Check Sign-In Status ────────────────────────────────────────────
     socket.on(
       "check signin status",
@@ -4843,6 +5012,10 @@ function registerSocketHandlers(opts) {
         if (keyHash && !username) {
           const profile = roles.getProfile(keyHash);
           if (profile) socket.emit("staff profile", profile);
+        }
+        if (username && location && userId && !proxyExempt(socket)) {
+          const net = await proxyguard.check(socket.clientIp, proxyguard.WAIT_MS);
+          if (net && net.flagged) return proxyTurnAway(socket, net, "returning visit");
         }
         if (username && location && userId) {
           if (socket.isDev) {
@@ -5084,19 +5257,11 @@ function registerSocketHandlers(opts) {
           );
         }
 
-        if (!staff && !socket.isBot && !isSeasonedDevice(socket.deviceId)) {
-          const net = await proxyguard.check(socket.clientIp);
+        if (!proxyExempt(socket)) {
+          const net = await proxyguard.check(socket.clientIp, proxyguard.WAIT_MS);
           if (net && net.flagged) {
-            reportProxyHit(socket, { username, location, type: net.type, at: "sign-in" });
-            return socket.emit(
-              "error",
-              createErrorResponse(
-                ERROR_CODES.FORBIDDEN,
-                "VPNs, proxies and hosting networks can't be used on Talkomatic. Turn it off, reload the page and sign in again.",
-                null,
-                true,
-              ),
-            );
+            reportProxyHit(socket, { username, location, type: net.type, provider: net.provider, network: net.network, school: net.school, at: "sign-in" });
+            return socket.emit("error", proxyRefusal(net, socket, username, location));
           }
         }
 
@@ -5189,6 +5354,8 @@ function registerSocketHandlers(opts) {
 
     // ── The Desk: staff chat, pings, presence, inspector ────────────────
     staffchat.register(socket, safe);
+    automod.register(socket, safe);
+    clientdetails.register(socket, safe);
 
     // ── Bot Creator: saved bots, deploys, staff bot controls ────────────
     bots.register(socket, safe);
@@ -6237,6 +6404,7 @@ function registerSocketHandlers(opts) {
             );
           }
         }
+        if (!proxyExempt(socket)) await proxyguard.check(socket.clientIp, proxyguard.WAIT_MS);
         joinRoom(socket, data.roomId, userId);
       }),
     );
@@ -7145,11 +7313,13 @@ function registerSocketHandlers(opts) {
               `${entry} is already covered by a permanent block. Only an admin can change that block.`,
             );
           const idRec = did ? identity.getRecord(did) : null;
+          const seenNames = !did && key.includes(":") ? namesSeenOn(key) : [];
           targets.push({
             key,
             did,
             range,
             name: (idRec && idRec.name) || null,
+            names: seenNames,
           });
           // A device block also covers the network the device was last seen
           // on, the same way an in-room block does. A fresh browser profile
@@ -7183,6 +7353,7 @@ function registerSocketHandlers(opts) {
             ts: Date.now(),
             reason,
             did: t.did || null,
+            ...(t.names && t.names.length ? { names: t.names } : {}),
           });
           banhistory.record({
             ip: t.key,

@@ -59,6 +59,9 @@ former-mods.json
 device-secret.json
 persons.json
 persons.json.tmp
+automod.json
+automod.json.tmp
+automod.json.bad-*
 case-notes.json
 case-notes.json.tmp
 pending-writeups.json

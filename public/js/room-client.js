@@ -18,6 +18,7 @@ const socket = io({
 });
 
 window.socket = socket;
+if (window.TalkomaticIdentity && window.TalkomaticIdentity.report) window.TalkomaticIdentity.report(socket);
 if (window.TalkomaticConnection)
   window.TalkomaticConnection.attach(socket, { rejoinInPlace: true });
 if (window.TalkoDesk) window.TalkoDesk.init(socket);

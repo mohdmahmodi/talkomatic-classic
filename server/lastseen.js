@@ -95,6 +95,15 @@ function get(userId) {
   return { ...r };
 }
 
+function staffDevices() {
+  const out = new Map();
+  const now = Date.now();
+  for (const r of Object.values(byUser))
+    if (r && r.role && r.deviceId && now - r.at <= KEEP_MS && out.get(r.deviceId) !== "dev")
+      out.set(r.deviceId, r.role);
+  return out;
+}
+
 load();
 
-module.exports = { record, get, flushSync };
+module.exports = { record, get, staffDevices, flushSync };

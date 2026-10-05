@@ -75,6 +75,14 @@ function userIdFor(id) {
     .slice(0, 32);
 }
 
+function seal(text) {
+  return crypto
+    .createHmac("sha256", KEY)
+    .update("seal:" + text)
+    .digest("base64url")
+    .slice(0, 16);
+}
+
 function cookieValue(header, name) {
   if (typeof header !== "string" || !header) return null;
   for (const part of header.split(";")) {
@@ -116,5 +124,6 @@ module.exports = {
   issue,
   verify,
   userIdFor,
+  seal,
   idFromCookieHeader,
 };

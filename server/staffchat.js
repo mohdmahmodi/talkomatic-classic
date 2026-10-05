@@ -14,6 +14,7 @@ const CHANNELS = [
   { key: "floor", name: "floor", desc: "Day to day. The default." },
   { key: "help", name: "help", desc: "Live calls for backup from rooms." },
   { key: "queues", name: "queues", desc: "Incoming reports, appeals, applications. Cards show at your level." },
+  { key: "automod", name: "automod", desc: "Find a user. See who came back.", readonly: true },
   { key: "l2", name: "l2", desc: "Bans, blocks, escalations.", access: "l2" },
   { key: "leads", name: "leads", desc: "Applications, promotions, the team.", access: "l3" },
   { key: "devs", name: "admins", desc: "Keys, promotions, mod abuse.", access: "dev" },
@@ -512,6 +513,24 @@ function systemQueues(qkind, text, opts) {
     opsOnly: !!(opts && opts.opsOnly),
     ...(card ? { card } : {}),
   });
+}
+
+function post(key, qkind, text, opts) {
+  const card = opts && opts.card ? sanitizeCard(qkind, opts.card) : null;
+  return system(key, text, {
+    qkind,
+    minLevel: (opts && opts.minLevel) || null,
+    ...(card ? { card } : {}),
+  });
+}
+
+function amend(id, change) {
+  const hit = byId.get(id);
+  if (!hit) return false;
+  change(hit.msg);
+  scheduleSave();
+  broadcast(hit.key, hit.msg, true);
+  return true;
 }
 
 function cut(v, n) {
@@ -1646,6 +1665,8 @@ module.exports = {
   onRoomText,
   noteStaffAction,
   systemQueues,
+  post,
+  amend,
   pushActivity,
   dropActivity,
   pushBans,

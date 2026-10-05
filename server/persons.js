@@ -305,7 +305,7 @@ function standalone(id, name) {
 // Accepts a device id, a user id, or the audit log's "user:name(id)" tag. A
 // user id that was never derived from a device still resolves through the
 // last connection that carried both.
-function resolve(key) {
+function peek(key) {
   const s = String(key || "");
   const tag = /^user:(.*)\(([^)]*)\)$/.exec(s);
   const id = tag ? tag[2] : s;
@@ -316,7 +316,12 @@ function resolve(key) {
     if (seen && seen.deviceId && c.byDevice.has(seen.deviceId)) did = seen.deviceId;
   }
   if (!did) return standalone(id, tag ? tag[1] : null);
-  return withStatus(c.persons.get(c.byDevice.get(did)));
+  return c.persons.get(c.byDevice.get(did));
+}
+
+function resolve(key) {
+  const p = peek(key);
+  return p.standalone ? p : withStatus(p);
 }
 
 function sameNetwork(person, limit = 10) {
@@ -352,6 +357,7 @@ loadPins();
 
 module.exports = {
   resolve,
+  peek,
   sameNetwork,
   pinsFor,
   pin,
