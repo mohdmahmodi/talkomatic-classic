@@ -763,7 +763,7 @@ function reportProxyHit(socket, { username, location, type, provider, network, s
   const did = socket.deviceId || null;
   if (!proxyguard.shouldReport((did || "") + "|" + (ip || ""))) return;
   const userId = socket.handshake?.session?.userId || socket.stableUserId || null;
-  const kind = school && (!type || type === "school") ? "school network" : type || "proxy";
+  const kind = type || "proxy";
   const refused =
     at === "room join"
       ? "Room join refused"
@@ -775,9 +775,10 @@ function reportProxyHit(socket, { username, location, type, provider, network, s
   audit.recordNotification({
     kind: "proxyguard",
     minLevel: 1,
+    opsOnly: proxyKeyed(socket),
     text: [
       (username ? '"' + username + '"' : "Somebody") + " was flagged at " + at + ": " + kind + " detected.",
-      "What happened: they connected through a " + kind + " address. VPNs, proxies, hosting and school networks are not allowed.",
+      "What happened: they connected through a " + kind + " address. VPNs, proxies and hosting networks are not allowed.",
       "Action taken: " + refused + ". No block was placed, they can come back with it turned off.",
       "Name: " + (username ? '"' + username + '"' : "none"),
       "Location they typed: " + (location ? '"' + location + '"' : "none"),
@@ -800,6 +801,10 @@ function reportProxyHit(socket, { username, location, type, provider, network, s
       reason: refused + " by the proxy guard",
     },
   });
+}
+
+function proxyKeyed(socket) {
+  return !!(socket && (socket.isDev || socket.isMod || socket.staffProxy));
 }
 
 function proxyExempt(socket) {
@@ -834,6 +839,7 @@ function noteProxyReport(socket, refusal, outcome) {
   audit.recordNotification({
     kind: "proxyguard",
     minLevel: 1,
+    opsOnly: proxyKeyed(socket),
     text: [
       (name ? '"' + name + '"' : "Somebody") + " says the proxy guard refused them by mistake.",
       "What happened: they were refused for a " + (refusal.net.type || "proxy") + " address and asked for a review.",
@@ -5319,6 +5325,7 @@ function registerSocketHandlers(opts) {
           username,
           location,
           ip: socket.clientIp || null,
+          opsOnly: !!socket.isMainDev,
         });
 
         if (socket.deviceId)

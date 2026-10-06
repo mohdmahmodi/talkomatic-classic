@@ -62,6 +62,8 @@ persons.json.tmp
 automod.json
 automod.json.tmp
 automod.json.bad-*
+emote-sets.json
+emote-sets.json.tmp
 case-notes.json
 case-notes.json.tmp
 pending-writeups.json

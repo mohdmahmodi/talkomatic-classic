@@ -438,13 +438,16 @@
   }
 
   // ── Emotes ────────────────────────────────────────────────────────────────
-  const EMOTE_BASE =
-    "https://raw.githubusercontent.com/ZackiBoiz/Multiplayer-Piano-Optimizations/refs/heads/main/emotes";
+  const EMOTE_SOURCES = [
+    "https://raw.githubusercontent.com/ZackiBoiz/Multiplayer-Piano-Optimizations/refs/heads/main/emotes",
+    "https://cdn.jsdelivr.net/gh/ZackiBoiz/Multiplayer-Piano-Optimizations@main/emotes",
+  ];
   const EMOTE_EXT = /^(?:png|gif|webp|jpe?g|avif|bmp|svg)$/i;
   let emotes = {};
+  let emotePreview = {};
   let emotesAsked = false;
 
-  function parseEmoteMeta(src) {
+  function parseEmoteMeta(src, base) {
     const out = {};
     const body = String(src).replace(/\/\*[\s\S]*?\*\//g, "");
     for (const raw of body.split("\n")) {
@@ -460,7 +463,7 @@
       const line = cut === -1 ? raw : raw.slice(0, cut);
       const m = /"([A-Za-z0-9_.-]+)"\s*:\s*"([A-Za-z0-9]+)"/.exec(line);
       if (m && EMOTE_EXT.test(m[2]))
-        out[m[1]] = EMOTE_BASE + "/assets/" + m[1] + "." + m[2];
+        out[m[1]] = base + "/assets/" + m[1] + "." + m[2];
     }
     return out;
   }
@@ -468,27 +471,58 @@
   async function loadEmotes() {
     if (emotesAsked) return;
     emotesAsked = true;
-    try {
-      const resp = await fetch(EMOTE_BASE + "/meta.jsonc?_=" + Date.now(), {
-        referrerPolicy: "no-referrer",
-        signal: AbortSignal.timeout(8000),
-      });
-      if (!resp.ok) throw new Error("HTTP " + resp.status);
-      const next = parseEmoteMeta(await resp.text());
-      if (!Object.keys(next).length) return;
-      emotes = next;
-      if (panelOpen && mode === "chat") renderMessages(true);
-    } catch (_) {
+    const extra = fetch("/api/v1/emotes/extra", { signal: AbortSignal.timeout(6000) })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((b) => (b && Array.isArray(b.emotes) ? b.emotes : []))
+      .catch(() => []);
+    let next = {};
+    for (const base of EMOTE_SOURCES) {
+      try {
+        const resp = await fetch(base + "/meta.jsonc?_=" + Date.now(), {
+          referrerPolicy: "no-referrer",
+          signal: AbortSignal.timeout(6000),
+        });
+        if (!resp.ok) continue;
+        const found = parseEmoteMeta(await resp.text(), base);
+        if (!Object.keys(found).length) continue;
+        next = found;
+        break;
+      } catch (_) {}
     }
+    const taken = new Set(Object.keys(next).map((c) => c.toLowerCase()));
+    const preview = {};
+    for (const row of await extra) {
+      const [name, id, animated] = Array.isArray(row) ? row : [];
+      if (!/^[A-Za-z0-9_.-]{1,40}$/.test(name || "") || !/^[0-9A-Za-z]{20,32}$/.test(id || "")) continue;
+      if (taken.has(name.toLowerCase())) continue;
+      taken.add(name.toLowerCase());
+      const base = "https://cdn.7tv.app/emote/" + id + "/";
+      if (!animated) {
+        next[name] = base + "2x.webp";
+        continue;
+      }
+      next[name] = base + "1x.webp";
+      preview[name] = base + "2x_static.webp";
+    }
+    if (!Object.keys(next).length) return;
+    emotes = next;
+    emotePreview = preview;
+    if (panelOpen && mode === "chat") renderMessages(true);
   }
 
-  function emoteImg(code, cls) {
+  function emoteImg(code, cls, small) {
     const img = document.createElement("img");
     img.className = "dk-emote" + (cls ? " " + cls : "");
-    img.src = emotes[code];
+    const still = small && emotePreview[code];
+    img.src = still || emotes[code];
     img.alt = ":" + code + ":";
     img.title = ":" + code + ":";
     img.addEventListener("error", () => {
+      if (still && img.src === still) {
+        img.dataset.full = "1";
+        img.src = emotes[code];
+        return;
+      }
       if (img.parentNode) img.replaceWith(document.createTextNode(img.alt));
     });
     img.decoding = "async";
@@ -498,14 +532,28 @@
 
   // ── Markdown, the small useful half of it ─────────────────────────────────
   const MD_SRC =
-    "(`+)([\\s\\S]+?)\\1" +
+    "\\\\([\\\\`*_~|>#-])" +
+    "|(`+)([\\s\\S]+?)\\2" +
     "|\\*\\*([\\s\\S]+?)\\*\\*" +
     "|__([\\s\\S]+?)__" +
     "|~~([\\s\\S]+?)~~" +
+    "|\\|\\|([\\s\\S]+?)\\|\\|" +
     "|\\*([^*\\n]+?)\\*" +
     "|_([^_\\n]+?)_" +
     "|(https?:\\/\\/[^\\s<>]+)" +
     "|:([A-Za-z0-9_.-]{1,40}):";
+
+  function mdPlain(text) {
+    return String(text == null ? "" : text)
+      .replace(/```[\w+#.-]*\n?/g, "")
+      .replace(/\\([\\`*_~|>#-])/g, "$1")
+      .replace(/(\*\*|__|~~|\|\||`+)([\s\S]+?)\1/g, "$2")
+      .replace(/(^|[^\w*])\*([^*\n]+?)\*/g, "$1$2")
+      .replace(/(^|\W)_([^_\n]+?)_(?=\W|$)/g, "$1$2")
+      .replace(/^\s*(?:>\s?|#{1,3}\s+)/gm, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
 
   function trimUrl(u) {
     let end = u.length;
@@ -639,34 +687,52 @@
     while ((m = re.exec(text))) {
       const at = m.index;
       const before = at > 0 ? text[at - 1] : "";
+      if (m[3] != null && (before === "`" || text[re.lastIndex] === "`" || /^`|`$/.test(m[3]))) {
+        re.lastIndex = at + m[2].length;
+        continue;
+      }
       if (
-        m[7] != null &&
+        m[9] != null &&
         (/\w/.test(before) || /\w/.test(text[re.lastIndex] || ""))
       )
         continue;
       if (at > last) namesInto(parent, text.slice(last, at));
       last = at + m[0].length;
-      if (m[2] != null) {
-        parent.appendChild(el("code", "dk-code-in", m[2]));
-      } else if (m[3] != null || m[4] != null) {
-        const b = el("strong", "dk-b");
-        inlineInto(b, m[3] != null ? m[3] : m[4]);
+      if (m[1] != null) {
+        parent.appendChild(document.createTextNode(m[1]));
+      } else if (m[3] != null) {
+        parent.appendChild(el("code", "dk-code-in", m[3]));
+      } else if (m[4] != null || m[5] != null) {
+        const b = el("strong", "dk-strong");
+        inlineInto(b, m[4] != null ? m[4] : m[5]);
         parent.appendChild(b);
-      } else if (m[5] != null) {
+      } else if (m[6] != null) {
         const s = el("s", "dk-s");
-        inlineInto(s, m[5]);
+        inlineInto(s, m[6]);
         parent.appendChild(s);
-      } else if (m[6] != null || m[7] != null) {
+      } else if (m[7] != null) {
+        const sp = el("span", "dk-spoil");
+        sp.title = "Spoiler, click to show";
+        inlineInto(sp, m[7]);
+        sp.addEventListener("click", (e) => {
+          if (sp.classList.contains("open")) return;
+          e.preventDefault();
+          e.stopPropagation();
+          sp.classList.add("open");
+          sp.removeAttribute("title");
+        });
+        parent.appendChild(sp);
+      } else if (m[8] != null || m[9] != null) {
         const i = el("em", "dk-i");
-        inlineInto(i, m[6] != null ? m[6] : m[7]);
+        inlineInto(i, m[8] != null ? m[8] : m[9]);
         parent.appendChild(i);
-      } else if (m[8] != null) {
-        const url = trimUrl(m[8]);
+      } else if (m[10] != null) {
+        const url = trimUrl(m[10]);
         parent.appendChild(linkEl(url));
         last = at + url.length;
         re.lastIndex = last;
-      } else if (m[9] != null) {
-        if (emotes[m[9]]) parent.appendChild(emoteImg(m[9]));
+      } else if (m[11] != null) {
+        if (emotes[m[11]]) parent.appendChild(emoteImg(m[11]));
         else parent.appendChild(document.createTextNode(m[0]));
       }
     }
@@ -688,19 +754,65 @@
       wrap.appendChild(p);
       para = [];
     };
+    const codeBlock = (body) => {
+      const pre = el("pre", "dk-code-bl");
+      pre.textContent = body;
+      wrap.appendChild(pre);
+    };
     let i = 0;
     while (i < lines.length) {
       const line = lines[i];
-      if (/^\s*```/.test(line)) {
+      const one = /^\s*```([\s\S]*?\S[\s\S]*?)```\s*$/.exec(line);
+      if (one) {
         flush();
-        const buf = [];
+        codeBlock(one[1].trim());
         i++;
-        while (i < lines.length && !/^\s*```/.test(lines[i]))
-          buf.push(lines[i++]);
+        continue;
+      }
+      const open = /^\s*```(.*)$/.exec(line);
+      if (open) {
+        let end = -1;
+        for (let j = i + 1; j < lines.length; j++)
+          if (/```\s*$/.test(lines[j])) {
+            end = j;
+            break;
+          }
+        if (end !== -1) {
+          const rest = open[1].trim();
+          const buf = [];
+          if (rest && !/^[\w+#.-]{1,20}$/.test(rest)) buf.push(rest);
+          for (let j = i + 1; j < end; j++) buf.push(lines[j]);
+          const tail = lines[end].replace(/```\s*$/, "");
+          if (tail.trim()) buf.push(tail);
+          const body = buf.join("\n").replace(/^\n+|\n+$/g, "");
+          if (body.trim()) {
+            flush();
+            codeBlock(body);
+            i = end + 1;
+            continue;
+          }
+        }
+      }
+      const head = /^\s{0,3}(#{1,3})\s+(\S.*)$/.exec(line);
+      if (head) {
+        flush();
+        const h = el("span", "dk-h dk-h" + head[1].length);
+        inlineInto(h, head[2]);
+        wrap.appendChild(h);
         i++;
-        const pre = el("pre", "dk-code-bl");
-        pre.textContent = buf.join("\n");
-        wrap.appendChild(pre);
+        continue;
+      }
+      if (/^\s*>(\s|$)/.test(line)) {
+        flush();
+        const bq = el("span", "dk-bq");
+        let first = true;
+        while (i < lines.length && /^\s*>(\s|$)/.test(lines[i])) {
+          if (!first) bq.appendChild(document.createElement("br"));
+          first = false;
+          inlineInto(bq, lines[i].replace(/^\s*>\s?/, ""));
+          i++;
+        }
+        wrap.appendChild(bq);
         continue;
       }
       if (/^\s*[-*+]\s+\S/.test(line)) {
@@ -713,6 +825,20 @@
           i++;
         }
         wrap.appendChild(ul);
+        continue;
+      }
+      const num = /^\s*(\d{1,3})[.)]\s+\S/.exec(line);
+      if (num) {
+        flush();
+        const ol = el("ol", "dk-ul dk-ol");
+        if (num[1] !== "1") ol.start = Number(num[1]);
+        while (i < lines.length && /^\s*\d{1,3}[.)]\s+\S/.test(lines[i])) {
+          const li = document.createElement("li");
+          inlineInto(li, lines[i].replace(/^\s*\d{1,3}[.)]\s+/, ""));
+          ol.appendChild(li);
+          i++;
+        }
+        wrap.appendChild(ol);
         continue;
       }
       para.push(line);
@@ -3054,7 +3180,7 @@
       q.title = "Go to the original message";
       q.appendChild(icon("fa-reply"));
       q.appendChild(el("span", "dk-quote-w", m.reply.label));
-      q.appendChild(el("span", "dk-quote-t", m.reply.text || "(removed)"));
+      q.appendChild(el("span", "dk-quote-t", mdPlain(m.reply.text) || "(removed)"));
       q.addEventListener("click", () => {
         const c = cacheFor(viewKey());
         const there = c.messages.some((x) => x.id === m.reply.id);
@@ -5550,7 +5676,7 @@
       tone: "blue",
       h: "Writing a message",
       p: [
-        "Links are clickable. **bold**, *italic*, ~~strike~~ and `code` all work, three backticks on their own line open a code block, and lines starting with - become a list.",
+        "Links are clickable. **bold**, *italic*, ~~strike~~, `code` and ||spoiler|| all work. Wrap text in three backticks for a code block. Start a line with > for a quote, # for a heading, and - or 1. for a list. Put \\ before a symbol to show it as it is.",
         "Emotes are the same ones the rooms have, written the same way: a colon, the code, a colon. Type a colon and two letters and the list narrows as you go, or press the face next to the send button to browse them.",
         "A link to a picture shows the picture, and clicking it opens it full size. Only here, and only https links ending in a real image: an SVG, or anything a banned user writes in an appeal, stays a link you choose to open.",
         "Shift+Enter starts a new line without sending. Clicking a message replies to it, and the quote above your reply links back to the original. Selecting text to copy it does not count as a click.",
@@ -6265,7 +6391,7 @@
       const node = el("button", "dk-pick");
       node.type = "button";
       const face = el("span", "dk-pick-em");
-      face.appendChild(emoteImg(c));
+      face.appendChild(emoteImg(c, null, true));
       node.appendChild(face);
       const mid = el("span", "dk-pick-mid");
       mid.appendChild(el("span", "dk-pick-n", ":" + c + ":"));
@@ -6289,13 +6415,50 @@
     applyToken(box, at, to, ":" + code + ": ");
   }
 
+  function emoteWatcher(grid) {
+    if (grid.emoteWatcher) grid.emoteWatcher.disconnect();
+    grid.emoteWatcher =
+      "IntersectionObserver" in window
+        ? new IntersectionObserver(
+            (seen) => {
+              for (const e of seen) {
+                if (!e.isIntersecting) continue;
+                const img = e.target;
+                grid.emoteWatcher.unobserve(img);
+                if (img.dataset.src) {
+                  img.src = img.dataset.src;
+                  delete img.dataset.src;
+                }
+              }
+            },
+            { rootMargin: "160px" },
+          )
+        : null;
+    return grid.emoteWatcher;
+  }
+
+  function lazyEmoteImg(code, watcher) {
+    const img = emoteImg(code, null, true);
+    if (!watcher) return img;
+    img.dataset.src = img.src;
+    img.src = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+    watcher.observe(img);
+    return img;
+  }
+
   function paintEmoteGrid(grid, q, pick) {
     grid.textContent = "";
+    const watcher = emoteWatcher(grid);
     const want = String(q || "").toLowerCase();
-    const codes = Object.keys(emotes)
-      .filter((c) => !want || c.toLowerCase().includes(want))
-      .sort()
-      .slice(0, 300);
+    const codes = Object.keys(emotes).filter((c) => !want || c.toLowerCase().includes(want));
+    if (want)
+      codes.sort(
+        (a, b) =>
+          (a.toLowerCase().startsWith(want) ? 0 : 1) - (b.toLowerCase().startsWith(want) ? 0 : 1) ||
+          a.length - b.length ||
+          a.localeCompare(b),
+      );
+    else codes.sort();
     if (!codes.length) {
       grid.appendChild(
         el(
@@ -6308,18 +6471,54 @@
       );
       return;
     }
-    for (const c of codes) {
-      const b = el("button", "dk-emb");
-      b.type = "button";
-      b.title = ":" + c + ":";
-      b.appendChild(emoteImg(c));
-      b.addEventListener("click", () => {
-        if (pick) return pick(c);
-        insertEmote(c);
-        toggleEmotePicker(false);
-      });
-      grid.appendChild(b);
+    const PAGE = 150;
+    let shown = 0;
+    const sentinel = el("div", "dk-emmore");
+    const more = () => {
+      if (shown >= codes.length) return;
+      const end = Math.min(codes.length, shown + PAGE);
+      const frag = document.createDocumentFragment();
+      for (; shown < end; shown++) {
+        const c = codes[shown];
+        const b = el("button", "dk-emb");
+        b.type = "button";
+        b.title = ":" + c + ":";
+        const img = lazyEmoteImg(c, watcher);
+        b.appendChild(img);
+        if (emotePreview[c]) {
+          b.addEventListener("mouseenter", () => {
+            if (!img.dataset.src && img.src === emotePreview[c]) img.src = emotes[c];
+          });
+          b.addEventListener("mouseleave", () => {
+            if (!img.dataset.src && !img.dataset.full && img.src === emotes[c]) img.src = emotePreview[c];
+          });
+        }
+        b.addEventListener("click", () => {
+          if (pick) return pick(c);
+          insertEmote(c);
+          toggleEmotePicker(false);
+        });
+        frag.appendChild(b);
+      }
+      grid.insertBefore(frag, sentinel);
+      if (shown >= codes.length) sentinel.remove();
+    };
+    grid.appendChild(sentinel);
+    if ("IntersectionObserver" in window) {
+      const pager = new IntersectionObserver(
+        (seen) => {
+          if (!sentinel.isConnected) return pager.disconnect();
+          if (seen.some((e) => e.isIntersecting)) more();
+        },
+        { rootMargin: "240px" },
+      );
+      pager.observe(sentinel);
+    } else {
+      grid.onscroll = () => {
+        if (grid.scrollTop + grid.clientHeight > grid.scrollHeight - 300) more();
+      };
     }
+    more();
   }
 
   function toggleEmotePicker(on) {
@@ -6940,9 +7139,20 @@
 .dk-link{color: #5aa9ff;text-decoration:underline;text-underline-offset:2px;word-break:break-all;}
 .dk-link:hover{color: #8cc4ff;}
 .dk-p{display:block;}
-.dk-p + .dk-p,.dk-mtext .dk-ul,.dk-mtext .dk-code-bl{margin-top:5px;}
-.dk-b{font-weight:bold;color: #fff;}
+.dk-mtext > * + *{margin-top:5px;}
+.dk-strong{font-weight:bold;color: #fff;}
 .dk-i{font-style:italic;}
+.dk-spoil{background: #000;color:transparent;border-radius:3px;padding:0 3px;cursor:pointer;
+  transition:background .15s,color .15s;}
+.dk-spoil:not(.open) *{visibility:hidden;}
+.dk-spoil:not(.open):hover{background: #111;}
+.dk-spoil.open{background: #2a2a2a;color:inherit;cursor:auto;}
+.dk-h{display:block;font-weight:bold;color: #fff;line-height:1.3;}
+.dk-h1{font-size:18px;}
+.dk-h2{font-size:16px;}
+.dk-h3{font-size:14.5px;}
+.dk-bq{display:block;border-left:3px solid #4a4a4a;padding:1px 0 1px 10px;color: #c3c3c3;}
+.dk-ol{padding-left:22px;}
 .dk-s{text-decoration:line-through;color: #8d8d8d;}
 .dk-code-in{font-family:"Courier New",monospace;font-size:12px;background: #000;border:1px solid #333;
   border-radius:3px;padding:0 4px;color: #ffb454;word-break:break-word;}
@@ -7039,6 +7249,7 @@
 .dk-emb:hover{background: #2a2a2a;border-color: #ff9800;}
 .dk-emb .dk-emote{height:28px;max-width:34px;vertical-align:middle;}
 .dk-emnone{grid-column:1/-1;color: #8d8d8d;font-size:12px;padding:8px 2px;}
+.dk-emmore{grid-column:1/-1;height:1px;}
 .dk-side{background: #1b1b1b;border-left:1px solid #333;overflow-y:auto;padding:10px;}
 .dk-side-h{font-size:10.5px;font-weight:bold;letter-spacing:.6px;text-transform:uppercase;color: #8d8d8d;
   padding:10px 4px 6px;}

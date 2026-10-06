@@ -8,7 +8,6 @@ const TTL_MS = tuned("GUARD_PROXY_HOURS", 24) * HOUR;
 const WAIT_MS = tuned("GUARD_PROXY_WAIT_SEC", 4) * 1000;
 const BASE = String(process.env.GUARD_PROXY_URL || "").replace(/\/+$/, "");
 const HOSTING = process.env.GUARD_PROXY_HOSTING !== "0";
-const SCHOOLS = process.env.GUARD_PROXY_SCHOOLS !== "0";
 const FIELDS = "status,message,proxy,proxyType,provider,hosting,mobile,risk,isp,org,networkClass";
 const SCHOOL = /\b(schools?|universit\w*|college|colegio|escola|escuela|k-?12|isd|school district|board of education|department of education|education service district|educational service)\b/i;
 const REPORTABLE = new Set(["hosting", "vpn", "proxy", "public", "residential"]);
@@ -68,8 +67,8 @@ function fromOwl(row) {
   const hosting = row.hosting === true;
   const net = named(row.networkClass, row.isp, row.org !== row.isp ? row.org : null);
   return {
-    flagged: proxy || (HOSTING && hosting) || (SCHOOLS && net.school),
-    type: proxy ? row.proxyType || "proxy" : hosting ? "hosting" : net.school ? "school" : null,
+    flagged: proxy || (HOSTING && hosting),
+    type: proxy ? row.proxyType || "proxy" : hosting ? "hosting" : null,
     provider: typeof row.provider === "string" && row.provider ? row.provider.slice(0, 60) : null,
     ...net,
     mobile: row.mobile === true,
@@ -279,7 +278,7 @@ async function drain() {
 }
 
 function canReport(net) {
-  return !!(BASE && net && net.flagged && net.source === "owl" && !net.school && REPORTABLE.has(net.type));
+  return !!(BASE && net && net.flagged && net.source === "owl" && REPORTABLE.has(net.type));
 }
 
 async function report(rawIp, net) {

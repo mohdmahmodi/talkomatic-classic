@@ -512,6 +512,7 @@ function getDiff(oldStr, newStr) {
 const ANIMATED_AVIF_PROBE = "data:image/avif;base64,AAAALGZ0eXBhdmlzAAAAAGF2aXNhdmlmbXNmMWlzbzhtaWYxbWlhZk1BMUIAAAD5bWV0YQAAAAAAAAAvaGRscgAAAAAAAAAAcGljdAAAAAAAAAAAAAAAAFBpY3R1cmVIYW5kbGVyAAAAAA5waXRtAAAAAAABAAAAHmlsb2MAAAAARAAAAQABAAAAAQAAA+gAAAAbAAAAKGlpbmYAAAAAAAEAAAAaaW5mZQIAAAAAAQAAYXYwMUNvbG9yAAAAAGppcHJwAAAAS2lwY28AAAAUaXNwZQAAAAAAAAACAAAAAgAAABBwaXhpAAAAAAMICAgAAAAMYXYxQ4EADAAAAAATY29scm5jbHgAAgACAAIAAAAAF2lwbWEAAAAAAAAAAQABBAECgwQAAAK7bW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAAGQAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAkd0cmFrAAAAaHRraGQBAAADAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAf/////////8AAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAIAAAACAAAAAAAkZWR0cwAAABxlbHN0AAAAAQAAAAEAAABkAAAAAAABAAAAAAGzbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAAAoAAAABABVxAAAAAAAL2hkbHIAAAAAAAAAAHBpY3QAAAAAAAAAAAAAAABQaWN0dXJlSGFuZGxlcgAAAAFcbWluZgAAABR2bWhkAAAAAQAAAAAAAAAAAAAAJGRpbmYAAAAcZHJlZgAAAAAAAAABAAAADHVybCAAAAABAAABHHN0YmwAAACcc3RzZAAAAAAAAAABAAAAjGF2MDEAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAgACAEgAAABIAAAAAAAAAAEXTGF2YzYyLjMuMTAxIGxpYmFvbS1hdjEAAAAAAAAAAAAY//8AAAAMYXYxQ4EADAAAAAAKZmllbAEAAAAAEHBhc3AAAAABAAAAAQAAABBjY3N0AAAAAHwAAAAAAAAYc3R0cwAAAAAAAAABAAAAAgAAAgAAAAAUc3RzcwAAAAAAAAABAAAAAQAAABxzdHNjAAAAAAAAAAEAAAABAAAAAgAAAAEAAAAcc3RzegAAAAAAAAAAAAAAAgAAABsAAAAUAAAAFHN0Y28AAAAAAAAAAQAAA+gAAAA3bWRhdAoJAAAAAAZtfMAgMg4QAPsAAALAAAAArKZ5QDISMAPAgAAABv+AAALAAACAAJGQ";
 
 let emoteList = {};
+let emotePreview = {};
 let emoteAutocomplete = null;
 let autocompleteActive = false;
 let selectedEmoteIndex = -1;
@@ -530,38 +531,80 @@ function canDisplay(src) {
   });
 }
 
-async function loadEmotes() {
-  const BASE =
-    "https://raw.githubusercontent.com/ZackiBoiz/Multiplayer-Piano-Optimizations/refs/heads/main/emotes";
-  try {
-    const [resp, avifOk] = await Promise.all([
-      fetch(`${BASE}/meta.jsonc?_=${Date.now()}`, {
+const EMOTE_SOURCES = [
+  "https://raw.githubusercontent.com/ZackiBoiz/Multiplayer-Piano-Optimizations/refs/heads/main/emotes",
+  "https://cdn.jsdelivr.net/gh/ZackiBoiz/Multiplayer-Piano-Optimizations@main/emotes",
+];
+
+async function fetchEmoteMeta() {
+  for (const base of EMOTE_SOURCES) {
+    try {
+      const resp = await fetch(`${base}/meta.jsonc?_=${Date.now()}`, {
         referrerPolicy: "no-referrer",
-        signal: AbortSignal.timeout(8000),
-      }),
-      canDisplay(ANIMATED_AVIF_PROBE),
-    ]);
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const pairs = parseJSONC(await resp.text());
-    const validCode = /^[A-Za-z0-9_.-]+$/;
-    const validExt = avifOk
-      ? /^(?:png|gif|webp|jpe?g|avif|bmp|svg)$/i
-      : /^(?:png|gif|webp|jpe?g|bmp|svg)$/i;
-    const next = Object.fromEntries(
-      Object.entries(pairs)
-        .filter(([name, ext]) =>
-          validCode.test(name) &&
-          typeof ext === "string" &&
-          validExt.test(ext)
-        )
-        .map(([name, ext]) => [name, `${BASE}/assets/${name}.${ext}`]),
-    );
-    if (Object.keys(next).length) emoteList = next;
-    if (!avifOk) console.warn("Emotes: this browser cannot show AVIF, skipping those.");
-    console.log("Emotes loaded:", Object.keys(emoteList).length);
-  } catch (err) {
-    console.error("Error loading emotes:", err);
+        signal: AbortSignal.timeout(6000),
+      });
+      if (resp.ok) return { base, text: await resp.text() };
+    } catch (_) {}
   }
+  throw new Error("no emote source answered");
+}
+
+async function fetchExtraEmotes() {
+  try {
+    const resp = await fetch("/api/v1/emotes/extra", { signal: AbortSignal.timeout(6000) });
+    if (!resp.ok) return [];
+    const body = await resp.json();
+    return body && Array.isArray(body.emotes) ? body.emotes : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+async function loadEmotes() {
+  const validCode = /^[A-Za-z0-9_.-]{1,40}$/;
+  const [meta, avifOk, extra] = await Promise.all([
+    fetchEmoteMeta().catch((err) => {
+      console.error("Error loading emotes:", err);
+      return null;
+    }),
+    canDisplay(ANIMATED_AVIF_PROBE),
+    fetchExtraEmotes(),
+  ]);
+  const next = {};
+  try {
+    if (meta) {
+      const pairs = parseJSONC(meta.text);
+      const validExt = avifOk
+        ? /^(?:png|gif|webp|jpe?g|avif|bmp|svg)$/i
+        : /^(?:png|gif|webp|jpe?g|bmp|svg)$/i;
+      for (const [name, ext] of Object.entries(pairs))
+        if (validCode.test(name) && typeof ext === "string" && validExt.test(ext))
+          next[name] = `${meta.base}/assets/${name}.${ext}`;
+    }
+  } catch (err) {
+    console.error("Error reading emotes:", err);
+  }
+  const taken = new Set(Object.keys(next).map((c) => c.toLowerCase()));
+  const preview = {};
+  for (const row of extra) {
+    const [name, id, animated] = Array.isArray(row) ? row : [];
+    if (!validCode.test(name || "") || !/^[0-9A-Za-z]{20,32}$/.test(id || "")) continue;
+    if (taken.has(name.toLowerCase())) continue;
+    taken.add(name.toLowerCase());
+    const base = `https://cdn.7tv.app/emote/${id}/`;
+    if (!animated) {
+      next[name] = base + "2x.webp";
+      continue;
+    }
+    next[name] = base + (avifOk ? "1x.avif" : "1x.webp");
+    preview[name] = base + "2x_static.webp";
+  }
+  if (Object.keys(next).length) {
+    emoteList = next;
+    emotePreview = preview;
+  }
+  if (!avifOk) console.warn("Emotes: this browser cannot show AVIF, skipping those.");
+  console.log("Emotes loaded:", Object.keys(emoteList).length);
 }
 
 function parseJSONC(input, filteredTags = ["*"]) {
@@ -961,7 +1004,7 @@ function showAutocomplete(prefix) {
     return;
   }
 
-  filteredEmotes = matches;
+  filteredEmotes = matches.slice(0, 40);
   currentEmoteInfo = findEmoteAtCursor();
 
   if (!emoteAutocomplete) {
@@ -1036,17 +1079,17 @@ function emoteThumb(code) {
   img = document.createElement("img");
   img.referrerPolicy = "no-referrer";
   img.src = EMOTE_IMAGE_PLACEHOLDER;
-  img.dataset.src = emoteList[code];
+  img.dataset.src = emotePreview[code] || emoteList[code];
   img.alt = `:${code}:`;
   img.decoding = "async";
-  img.addEventListener(
-    "error",
-    () => {
-      emoteThumbs.delete(code);
-      img.remove();
-    },
-    { once: true },
-  );
+  img.addEventListener("error", () => {
+    if (emotePreview[code] && img.src === emotePreview[code]) {
+      img.src = emoteList[code];
+      return;
+    }
+    emoteThumbs.delete(code);
+    img.remove();
+  });
   emoteThumbs.set(code, img);
   return img;
 }
@@ -1470,44 +1513,130 @@ function createEmotesDropdown() {
   header.appendChild(toggleLabel);
   dropdown.appendChild(header);
 
+  const search = document.createElement("input");
+  search.type = "search";
+  search.className = "emotes-dropdown-search";
+  search.placeholder = "Search emotes";
+  search.setAttribute("aria-label", "Search emotes");
+  search.autocomplete = "off";
+  search.spellcheck = false;
+  dropdown.appendChild(search);
+
   const list = document.createElement("div");
   list.className = "emotes-dropdown-list";
+  const sentinel = document.createElement("div");
+  sentinel.className = "emotes-dropdown-more";
 
-  const fillList = () => {
-    list.textContent = "";
-    Object.entries(emoteList).forEach(([code, url]) => {
-      const item = document.createElement("div");
-      item.className = "emote-item";
-      const img = document.createElement("img");
-      img.referrerPolicy = "no-referrer";
-      img.src = EMOTE_IMAGE_PLACEHOLDER;
-      img.dataset.src = url;
-      img.alt = `:${code}:`;
-      img.decoding = "async";
-      dropOnError(img);
-      const name = document.createElement("span");
-      name.textContent = code;
-      item.appendChild(img);
-      item.appendChild(name);
-      item.addEventListener("mousedown", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        dropdown.style.display = "none";
-        setTimeout(() => {
-          if (chatInput) {
-            chatInput.focus();
-            insertEmote(code, null, { overlay: useOverlayEmotes });
-          }
-        }, 0);
+  const PAGE = 120;
+  let codes = [];
+  let shown = 0;
+  let builtFor = null;
+
+  const makeItem = (code) => {
+    const item = document.createElement("div");
+    item.className = "emote-item";
+    const img = document.createElement("img");
+    img.referrerPolicy = "no-referrer";
+    img.src = EMOTE_IMAGE_PLACEHOLDER;
+    let still = emotePreview[code];
+    img.dataset.src = still || emoteList[code];
+    img.alt = `:${code}:`;
+    img.decoding = "async";
+    if (still) {
+      img.addEventListener("error", () => {
+        if (still && img.src === still) {
+          still = null;
+          img.src = emoteList[code];
+        } else img.remove();
       });
-      list.appendChild(item);
+      item.addEventListener("mouseenter", () => {
+        if (still && !img.dataset.src && img.src === still) img.src = emoteList[code];
+      });
+      item.addEventListener("mouseleave", () => {
+        if (still && !img.dataset.src && img.src === emoteList[code]) img.src = still;
+      });
+    } else {
+      dropOnError(img);
+    }
+    const name = document.createElement("span");
+    name.textContent = code;
+    item.appendChild(img);
+    item.appendChild(name);
+    item.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropdown.style.display = "none";
+      setTimeout(() => {
+        if (chatInput) {
+          chatInput.focus();
+          insertEmote(code, null, { overlay: useOverlayEmotes });
+        }
+      }, 0);
     });
+    return item;
   };
-  fillList();
 
   const loadVisibleImages = () => hydrateVisibleEmoteImages(list);
-  list.addEventListener("scroll", loadVisibleImages, { passive: true });
+
+  const more = () => {
+    if (shown >= codes.length) return;
+    const end = Math.min(codes.length, shown + PAGE);
+    const frag = document.createDocumentFragment();
+    for (; shown < end; shown++) frag.appendChild(makeItem(codes[shown]));
+    list.insertBefore(frag, sentinel);
+    requestAnimationFrame(loadVisibleImages);
+  };
+
+  const fillList = () => {
+    const q = search.value.trim().toLowerCase();
+    codes = Object.keys(emoteList).filter((c) => !q || c.toLowerCase().includes(q));
+    if (q)
+      codes.sort(
+        (a, b) =>
+          (a.toLowerCase().startsWith(q) ? 0 : 1) - (b.toLowerCase().startsWith(q) ? 0 : 1) ||
+          a.length - b.length,
+      );
+    builtFor = emoteList;
+    shown = 0;
+    list.textContent = "";
+    if (!codes.length) {
+      const none = document.createElement("div");
+      none.className = "emotes-dropdown-empty";
+      none.textContent = Object.keys(emoteList).length ? "No emotes match that." : "Emotes are still loading.";
+      list.appendChild(none);
+    }
+    list.appendChild(sentinel);
+    list.scrollTop = 0;
+    more();
+  };
+
+  if ("IntersectionObserver" in window) {
+    new IntersectionObserver(
+      (seen) => {
+        if (seen.some((e) => e.isIntersecting)) more();
+      },
+      { root: list, rootMargin: "240px" },
+    ).observe(sentinel);
+  }
+  list.addEventListener(
+    "scroll",
+    () => {
+      loadVisibleImages();
+      if (list.scrollTop + list.clientHeight > list.scrollHeight - 300) more();
+    },
+    { passive: true },
+  );
   window.addEventListener("resize", loadVisibleImages, { passive: true });
+
+  let searchTimer = null;
+  search.addEventListener("input", () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(fillList, 150);
+  });
+  search.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Escape") dropdown.style.display = "none";
+  });
 
   dropdown.appendChild(list);
 
@@ -1519,7 +1648,7 @@ function createEmotesDropdown() {
       .querySelectorAll(".emotes-dropdown")
       .forEach((d) => (d.style.display = "none"));
     if (!visible) {
-      if (list.children.length !== Object.keys(emoteList).length) fillList();
+      if (builtFor !== emoteList) fillList();
       const rect = button.getBoundingClientRect();
       dropdown.style.top = `${rect.bottom + window.scrollY + 5}px`;
       dropdown.style.left = `${rect.left + window.scrollX}px`;
@@ -2974,11 +3103,15 @@ function injectStyles() {
     .votes-dropdown-item { color:#fff; font-size:13px; padding:4px 6px; border-radius:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .votes-dropdown-item:hover { background:#333; }
     .emotes-button { padding:5px 10px; background:#444; color:white; border:none; border-radius:4px; cursor:pointer; }
-    .emotes-dropdown { background:#333; border:1px solid #555; border-radius:4px; padding:8px; max-width:320px; max-height:340px; overflow:hidden; display:flex; flex-direction:column; gap:8px; }
+    .emotes-dropdown { background:#333; border:1px solid #555; border-radius:4px; padding:8px; max-width:320px; max-height:390px; overflow:hidden; display:flex; flex-direction:column; gap:8px; }
     .emotes-dropdown-header { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:2px 4px 6px; border-bottom:1px solid #555; color:#eee; }
     .emotes-dropdown-toggle { display:inline-flex; align-items:center; gap:8px; font-size:12px; color:#fff; cursor:pointer; user-select:none; }
     .emotes-dropdown-toggle input { accent-color:#ff9800; }
     .emotes-dropdown-list { display:flex; flex-wrap:wrap; gap:5px; overflow-y:auto; max-height:260px; padding-top:2px; }
+    .emotes-dropdown-search { width:100%; box-sizing:border-box; flex:none; background:#222; border:1px solid #555; border-radius:4px; color:#fff; padding:6px 8px; font-size:13px; outline:none; }
+    .emotes-dropdown-search:focus { border-color:#ff9800; }
+    .emotes-dropdown-more { width:100%; height:1px; flex:none; }
+    .emotes-dropdown-empty { width:100%; color:#aaa; font-size:12px; padding:6px 2px; }
     .emote-item { display:flex; flex-direction:column; align-items:center; justify-content:center; padding:5px; cursor:pointer; border-radius:4px; background:#444; width:60px; height:60px; transition:background-color 0.2s ease; }
     .emote-item:hover { background-color:#555; }
     .emote-item img { width:30px; height:auto; }

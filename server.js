@@ -241,6 +241,7 @@ const helmetMiddleware = helmet({
         "'self'",
         "https://classic.talkomatic.co",
         "https://raw.githubusercontent.com",
+        "https://cdn.jsdelivr.net",
         // Discord avatar lookups (pfp feature) are made from the browser
         "https://pfpgrab.com",
       ],
@@ -1451,6 +1452,10 @@ app.post(`${API}/ban-acknowledge`, (req, res) => {
   });
   res.json({ ok: true });
 });
+
+const emotesets = require("./server/emotesets");
+emotesets.init();
+app.get("/api/v1/emotes/extra", emotesets.route);
 
 // Emoji list, cached in memory for an hour
 const emojiCache = { data: null, ts: 0 };

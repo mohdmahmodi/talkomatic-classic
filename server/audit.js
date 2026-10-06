@@ -206,7 +206,7 @@ function recordAction({
   return entry;
 }
 
-function recordIdentity({ userId, username, location, ip }) {
+function recordIdentity({ userId, username, location, ip, opsOnly }) {
   if (!userId || !username) return;
   const prev = lastIdentity.get(userId);
   let event = "signin";
@@ -223,6 +223,7 @@ function recordIdentity({ userId, username, location, ip }) {
     ts: Date.now(),
     type: "identity",
     event,
+    ...(opsOnly ? { opsOnly: true } : {}),
     userId,
     username,
     location: location || null,

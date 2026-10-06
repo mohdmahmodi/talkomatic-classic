@@ -497,7 +497,7 @@ function system(key, text, extra) {
     ts: Date.now(),
     kind: "system",
     author: null,
-    text: String(text || "").slice(0, 500),
+    text: String(text || "").slice(0, 2000),
     ...(extra || {}),
   });
   if (msg) broadcast(key, msg);
