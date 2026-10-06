@@ -34,11 +34,12 @@ const durations = require("./durations");
 
 const HIDDEN = "[ip hidden]";
 
-const NETWORK_LINE = /^Network: [^\n]*(?:\n|$)/gm;
+const PROXY_ALERT = /^Network type: |proxy guard refused them/m;
+const NETWORK_LINE = /^(?:Network|Provider): [^\n]*(?:\n|$)/gm;
 
 function maskIps(value) {
   const out = ipredact.redact(value, HIDDEN);
-  if (typeof out !== "string" || !out.includes("Network type: ")) return out;
+  if (typeof out !== "string" || !PROXY_ALERT.test(out)) return out;
   return out.replace(NETWORK_LINE, "").replace(/\n+$/, "");
 }
 

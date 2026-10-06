@@ -855,7 +855,9 @@ function noteProxyReport(socket, refusal, outcome) {
     opsOnly: proxyKeyed(socket),
     text: [
       (name ? '"' + name + '"' : "Somebody") + " says the proxy guard refused them by mistake.",
-      "What happened: they were refused for a " + (refusal.net.type || "proxy") + " address and asked for a review.",
+      "What happened: they were refused for using " +
+        (PROXY_KINDS[refusal.net.type || "proxy"] || "a " + refusal.net.type + " connection") +
+        " and asked for a review.",
       "Action taken: " +
         (outcome === "fixed"
           ? "the address was corrected, they can sign in."
@@ -2849,9 +2851,69 @@ function sweepSigninFlood() {
   }
 }
 
+function clientLines(socket) {
+  const headers = socket.handshake?.headers || {};
+  let from = "no web page (a script or app)";
+  let ours = false;
+  if (headers.origin) {
+    let host = String(headers.origin);
+    try {
+      host = new URL(headers.origin).host;
+    } catch (_) {}
+    ours = host === headers.host;
+    from = ours ? "the Talkomatic site" : "another website, " + host;
+  }
+  const cookies = !!socket.stableUserId;
+  const raw = String(headers["user-agent"] || "");
+  const app = /Edg\//.test(raw)
+    ? "Edge"
+    : /OPR\/|Opera/.test(raw)
+      ? "Opera"
+      : /Firefox\//.test(raw)
+        ? "Firefox"
+        : /Chrome\/|CriOS/.test(raw)
+          ? "Chrome"
+          : /Safari\//.test(raw)
+            ? "Safari"
+            : null;
+  const os = /iPhone|iPad|iPod/.test(raw)
+    ? "iOS"
+    : /Android/.test(raw)
+      ? "Android"
+      : /CrOS/.test(raw)
+        ? "ChromeOS"
+        : /Windows/.test(raw)
+          ? "Windows"
+          : /Mac OS X|Macintosh/.test(raw)
+            ? "Mac"
+            : /Linux/.test(raw)
+              ? "Linux"
+              : null;
+  const ua = !raw
+    ? "none sent"
+    : app
+      ? app + (os ? " on " + os : "")
+      : "not a known browser (" + raw.replace(/[\d.]+/g, "").slice(0, 40).trim() + ")";
+  return [
+    "Looks like: " +
+      (socket.isBot
+        ? "a registered bot"
+        : !ours
+          ? "a homemade bot, script or app, not the Talkomatic site"
+          : cookies
+            ? "a normal browser on the Talkomatic site"
+            : "the Talkomatic site with cookies blocked or cleared every time, possibly a script"),
+    "Bot token: " + (socket.isBot ? "yes" : "none"),
+    "Connected from: " + from,
+    "Cookies: " + (cookies ? "kept, like a normal browser" : "none sent, so every visit looked like a new person"),
+    "Browser: " + ua,
+  ];
+}
+
 async function floodGuardSigninFlood(socket, username, location, hit) {
   const ip = socket.clientIp || null;
   const did = socket.deviceId || null;
+  const netKey = hit.key || signinNetKey(ip);
   const expiry = durations.expiryFor(SIGNIN_FLOOD_BLOCK);
   const reason =
     "Flood guard: signed in " + hit.count + " times in " + hit.seconds +
@@ -2866,15 +2928,15 @@ async function floodGuardSigninFlood(socket, username, location, hit) {
     reason,
     did,
   };
-  if (hit.key) placeBlock(hit.key, { ...entry });
+  if (netKey) placeBlock(netKey, { ...entry });
   const dids = new Set(hit.entries.map((e) => e.did).filter(Boolean));
   if (did) dids.add(did);
   for (const d of dids) placeBlock(ipban.idKey(d), { ...entry, did: d });
-  settlePersonBlocks({ deviceId: did, ip: hit.key ? ip : null });
+  settlePersonBlocks({ deviceId: did, ip: netKey ? ip : null });
   blocklist.saveSoon();
   evasion.invalidate();
   banhistory.record({
-    ip: hit.key || (did ? ipban.idKey(did) : null),
+    ip: netKey || (did ? ipban.idKey(did) : null),
     name: username || null,
     action: "ban",
     reason,
@@ -2885,11 +2947,13 @@ async function floodGuardSigninFlood(socket, username, location, hit) {
   audit.recordNotification({
     kind: "floodguard",
     minLevel: 1,
-    text:
+    text: [
       (username ? "\"" + username + "\"" : "Somebody") +
-      " signed in " + hit.count + " times with a new id each time in " + hit.seconds +
-      " seconds" + (location ? " (location \"" + location + "\")" : "") +
-      ". Blocked for " + durations.labelFor(SIGNIN_FLOOD_BLOCK).toLowerCase() + " by the flood guard.",
+        " signed in " + hit.count + " times with a new id each time in " + hit.seconds +
+        " seconds" + (location ? " (location \"" + location + "\")" : "") +
+        ". Blocked for " + durations.labelFor(SIGNIN_FLOOD_BLOCK).toLowerCase() + " by the flood guard.",
+      ...clientLines(socket),
+    ].join("\n"),
     target: username || null,
     targetUserId: socket.handshake?.session?.userId || null,
     ip,
@@ -2904,7 +2968,7 @@ async function floodGuardSigninFlood(socket, username, location, hit) {
   const affected = new Set();
   for (const [, s] of io().sockets.sockets) {
     if (s.isDev || s.isMod) continue;
-    if ((hit.key && s.clientIp && ipban.matchesKey(s.clientIp, hit.key)) || (s.deviceId && dids.has(s.deviceId)))
+    if ((netKey && s.clientIp && ipban.matchesKey(s.clientIp, netKey)) || (s.deviceId && dids.has(s.deviceId)))
       affected.add(s);
   }
   affected.add(socket);
