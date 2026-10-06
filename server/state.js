@@ -93,7 +93,16 @@ const CONFIG = {
     BOT_TOKEN_CLEANUP_INTERVAL: 86400000,
   },
 
-  RESERVED_NAMES: ["mohd", "talkomatic", "admin", "mod", "dev"],
+  RESERVED_NAMES: [
+    "talkomatic",
+    "admin",
+    "mod",
+    "dev",
+    ...String(process.env.RESERVED_NAMES || "")
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
+  ],
   VERSIONS: {
     API: "v1",
     SERVER: "5.5.0",

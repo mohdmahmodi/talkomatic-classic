@@ -297,7 +297,7 @@ function overturnedFlag(label, decisions, undos, team) {
       "A temporary block lifted early as a courtesy counts here too. Read who lifted it and what they wrote.",
     evidence: list
       .slice(-12)
-      .map((o) => evidence(o.d, "undone by " + o.by, o.at - o.d.ts)),
+      .map((o) => evidence(o.d, "undone by " + roles.systemLabel(o.by, null), o.at - o.d.ts)),
   };
 }
 
@@ -356,7 +356,7 @@ function bouncedFlag(label, acts, idx) {
     evidence: bounced
       .slice(-12)
       .map((b) =>
-        evidence(b.d, b.later.base + " by " + b.later.label, b.later.ts - b.d.ts),
+        evidence(b.d, b.later.base + " by " + roles.systemLabel(b.later.label, b.later.role), b.later.ts - b.d.ts),
       ),
   };
 }
@@ -508,7 +508,12 @@ function build(label, role, opts = {}, view = {}) {
 
   const flags = settleFollowing(h.flags || [], decisions)
     .concat(extraFlags(label, role, acts, decisions, team, who))
-    .sort((a, b) => b.score - a.score);
+    .sort((a, b) => b.score - a.score)
+    .map((f) =>
+      f.reviewed && !view.ip
+        ? { ...f, reviewed: { ...f.reviewed, by: roles.systemLabel(f.reviewed.by, null) } }
+        : f,
+    );
 
   const all = cases.casesInvolving(label, role);
   const filter = CASE_FILTERS.has(opts.caseFilter) ? opts.caseFilter : "all";

@@ -2097,7 +2097,7 @@
       help: {
         title: "Say without erasing",
         text: "Writes on a new line UNDER what the bot already said, instead of replacing its box. A greeter can stack arrivals; a game can keep its board up.",
-        ex: "hello mohd welcome!\nxyerv just left!",
+        ex: "hello sam welcome!\nxyerv just left!",
       },
     },
     {

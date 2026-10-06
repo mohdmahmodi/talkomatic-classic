@@ -1183,8 +1183,9 @@ app.get(`${API}/config`, (req, res) => {
   const cached = state.apiCache.get("config");
   if (cached && Date.now() - cached.timestamp < state.API_CACHE_TTL)
     return res.json(cached.data);
+  const { MAX_SAME_NETWORK_PER_ROOM, MAX_BOT_CONNECTIONS_PER_NETWORK, ...limits } = CONFIG.LIMITS;
   const data = {
-    limits: CONFIG.LIMITS,
+    limits,
     features: CONFIG.FEATURES,
     versions: CONFIG.VERSIONS,
     roomStatistics: rooms.getRoomStatistics(),
@@ -1361,7 +1362,12 @@ function appealPayload(a, ctx) {
       // What staff wrote gets the address treatment; what the appellant wrote
       // comes back exactly as they wrote it, the same rule their own textbox
       // follows. Rewriting somebody's own words back at them helps nobody.
-      text: (m.from === "staff" ? ipredact.redact(m.text) : m.text) || "",
+      text:
+        (m.from === "staff"
+          ? ipredact.redact(m.text)
+          : m.from === "system"
+            ? ipredact.redact(roles.stripStaffNames(m.text || "", null))
+            : m.text) || "",
       // A quoted staff line carries the author and the words it was written
       // under, so it gets the same treatment as the line itself.
       reply: m.reply

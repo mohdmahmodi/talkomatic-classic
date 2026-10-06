@@ -46,12 +46,12 @@ function votesAgainst(room, userId) {
 }
 
 function roomFacts(room, now) {
-  const users = room.users || [];
+  const users = (room.users || []).filter((u) => !u.isVanished);
   return {
     id: room.id,
     name: room.name,
     occupants: users.length,
-    staff: users.filter((u) => u.isMod || u.isDev).length,
+    staff: users.filter((u) => (u.isMod || u.isDev) && !u.isHidden).length,
     joins5m: (room.recentJoins || []).filter((t) => now - t <= JOINS_WINDOW_MS)
       .length,
   };

@@ -897,7 +897,7 @@ function onRoomText(socket, roomId, text) {
 
   const room = ctx.state.rooms.get(roomId);
   if (!room) return;
-  const users = room.users || [];
+  const users = (room.users || []).filter((u) => !u.isVanished && !u.isHidden && !isOps(u));
   const staffThere = users
     .filter((u) => u.isDev || u.isMod)
     .map((u) => u.username);
@@ -912,7 +912,7 @@ function onRoomText(socket, roomId, text) {
       roomId,
       roomName: room.name || "?",
       byLabel: w.label,
-      byUserId: socket.handshake?.session?.userId || null,
+      byUserId: socket.isMainDev ? null : socket.handshake?.session?.userId || null,
       status: "open",
       count: users.length,
       staffThere,
@@ -1262,7 +1262,8 @@ function register(socket, safe) {
       const seen = new Map();
       const consider = (id, username, roomId, exact) => {
         if (!id || seen.has(id)) return;
-        const room = roomId ? ctx.state.rooms.get(roomId) : null;
+        const found = roomId ? ctx.state.rooms.get(roomId) : null;
+        const room = found && (found.type === "public" || socket.isMainDev) ? found : null;
         seen.set(id, {
           id,
           username: username || "?",
@@ -1273,6 +1274,8 @@ function register(socket, safe) {
       };
       for (const [, s] of io().sockets.sockets) {
         if (!s.connected) continue;
+        if (s.isMainDev && !socket.isMainDev) continue;
+        if ((s.isVanished || s.isHidden) && !socket.isDev) continue;
         const id = s.handshake?.session?.userId;
         const name = s.handshake?.session?.username || "";
         if (!id) continue;

@@ -33,8 +33,15 @@ function isIpv6(token) {
   }
   const groups = body.split(":");
   const filled = groups.filter((g) => g !== "").length;
-  if (body.includes("::")) return filled >= 2;
-  return groups.length >= 5;
+  const cidr = /\/\d{1,3}/.test(token);
+  if (body.includes("::")) return filled >= 2 || (cidr && filled >= 1);
+  if (groups.length >= 5) return true;
+  return (
+    groups.length === 4 &&
+    groups.every((g) => /^[0-9a-f]{1,4}$/i.test(g)) &&
+    /^[23][0-9a-f]{3}$/i.test(groups[0]) &&
+    (cidr || groups.some((g) => /[a-f]/i.test(g)))
+  );
 }
 
 function looksLikeIp(value) {

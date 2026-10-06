@@ -413,6 +413,33 @@ function claimBlocking(socket, bs, x, y, size) {
   return foreignClaimAt(bs, socket.handshake.session?.userId, x, y, size);
 }
 
+function boardHiddenFor(viewer, roomId) {
+  const hidden = new Set();
+  const room = state.rooms.get(roomId);
+  for (const u of room?.users || []) if (!canRecipientSeeDevUser(viewer, u)) hidden.add(u.id);
+  if (io() && !viewer.isMainDev)
+    for (const [, s] of io().sockets.sockets) {
+      const uid = s.isMainDev && s.handshake?.session?.userId;
+      if (uid && uid !== viewer.handshake?.session?.userId) hidden.add(uid);
+    }
+  return hidden;
+}
+
+function boardSnapshotFor(viewer, bs) {
+  const hidden = boardHiddenFor(viewer, viewer.roomId);
+  return {
+    strokes: hidden.size
+      ? bs.strokes.map((st) => (hidden.has(st.owner) ? { ...st, owner: null } : st))
+      : bs.strokes,
+    claims: boardClaims(bs).filter((c) => !hidden.has(c.owner)),
+  };
+}
+
+function shownClaimName(viewer, c) {
+  if (!c) return "Someone";
+  return boardHiddenFor(viewer, viewer.roomId).has(c.owner) ? "Someone" : c.name || "Someone";
+}
+
 function sendClaims(roomId) {
   const bs = boardState.get(roomId);
   if (!io() || !bs) return;
@@ -1563,7 +1590,7 @@ function sendModKeyLists(socket) {
   const now = Date.now();
   socket.emit(
     "dev mod keys",
-    roles.listModKeys(view).map((k) => {
+    roles.listModKeys(view).filter((k) => view.ip || !roles.isMainDevActor(k.label, null)).map((k) => {
       const online = liveHashes.has(k.hash);
       return {
         ...k,
@@ -1581,6 +1608,7 @@ function sendModKeyLists(socket) {
     "dev former mods",
     roles
       .listFormerMods(view)
+      .filter((f) => view.ip || !roles.isMainDevActor(f.label, null))
       .map((f) => ({ ...f, hash: rosterHashFor(socket, f) })),
   );
 }
@@ -1700,9 +1728,9 @@ function writeupPayload(entry) {
     entryId: entry.id,
     at: entry.ts,
     action: entry.action,
-    target: targetNameOf(entry),
+    target: audit.maskIps(targetNameOf(entry)),
     rule: r ? r.reason.rule : receipts.parseReason(entry.details).rule,
-    quote: r ? receipts.quote(r) : null,
+    quote: r ? audit.maskIps(receipts.quote(r)) : null,
   };
 }
 
@@ -1775,7 +1803,17 @@ function writeupOf(auditId, view) {
   const entry = auditId ? audit.getEntry(auditId) : null;
   const j = entry && entry.justify;
   if (!j || !j.at) return null;
-  return { ...j, by: roles.teamLabel(j.by, "mod", view) };
+  if (view && view.ip) return j;
+  return {
+    ...j,
+    by: roles.teamLabel(j.by, "mod", view),
+    fields: j.fields
+      ? Object.fromEntries(
+          Object.entries(j.fields).map(([k, v]) => [k, typeof v === "string" ? audit.maskIps(v) : v]),
+        )
+      : j.fields,
+    addenda: (j.addenda || []).map((x) => ({ ...x, text: audit.maskIps(x.text) })),
+  };
 }
 
 const WRITEUP_AMEND_MS = 24 * 60 * 60 * 1000;
@@ -1840,7 +1878,12 @@ function buildPerson(key, socket) {
       addresses: d.ips.length,
       networks: d.nets.length,
     })),
-    edges: person.edges.map((e) => ({ ...e, a: shortId(e.a), b: shortId(e.b) })),
+    edges: person.edges.map((e) => ({
+      ...e,
+      a: shortId(e.a),
+      b: shortId(e.b),
+      why: view.ip ? e.why : audit.maskIps(String(e.why || "").replace(/\s*\([^)]*[.:/][^)]*\)/g, "")),
+    })),
     pins: {
       together: persons.pinsFor(person).together.map((p) => p.map(shortId)),
       apart: persons.pinsFor(person).apart.map((p) => p.map(shortId)),
@@ -2195,6 +2238,7 @@ function buildQuickFile(targetUserId, socket) {
     },
     since,
     QUICK_FILE_MAX,
+    !!view.ip,
   )) {
     if (e.event === "forced-rename") continue;
     let action;
@@ -2497,7 +2541,7 @@ function buildReportsList(view) {
         .reverse()
         .map((r) => ({
           category: r.category,
-          reason: r.reason,
+          reason: showIp ? r.reason : audit.maskIps(r.reason),
           by: r.byName,
           at: r.at,
           targetText: showIp
@@ -2582,7 +2626,7 @@ function appealRow(a, view, all) {
       userId: a.userId || null,
       deviceId: a.deviceId || null,
       ip: showIp ? a.ip : undefined,
-      message: a.message || "",
+      message: (showIp ? a.message : audit.maskIps(a.message)) || "",
       at: a.at,
       status: a.status,
       resolution: a.resolution || null,
@@ -2632,10 +2676,9 @@ function appealRow(a, view, all) {
           role: m.role || null,
           level: named ? (m.level == null ? null : m.level) : null,
           avatar: named ? m.avatar || null : null,
-          text:
-            !showIp && m.from === "system"
-              ? roles.stripStaffNames(m.text || "", view)
-              : m.text || "",
+          text: showIp
+            ? m.text || ""
+            : audit.maskIps(m.from === "system" ? roles.stripStaffNames(m.text || "", view) : m.text || ""),
           reply:
             m.reply && !showIp && m.reply.from === "staff"
               ? { ...m.reply, by: roles.teamReviewer(m.reply.by, view) }
@@ -2851,7 +2894,11 @@ function sendAppsList(s) {
     applications.list().map((a) => ({
       id: a.id,
       username: a.username,
-      answers: a.answers,
+      answers: showIp
+        ? a.answers
+        : Object.fromEntries(
+            Object.entries(a.answers || {}).map(([k, v]) => [k, typeof v === "string" ? audit.maskIps(v) : v]),
+          ),
       submittedAt: a.submittedAt,
       status: a.status,
       reviewedBy: showIp
@@ -3939,6 +3986,7 @@ function getDevRoomContext(roomId, raw) {
     const userId = s.handshake.session.userId;
     const roomUser = roomUsers.get(userId);
     if (roomUser?.isHidden) continue;
+    if (!raw && s.isMainDev) continue;
     ctx[userId] = { d: raw ? s.clientIp || "unknown" : userId };
   }
   return ctx;
@@ -4329,6 +4377,8 @@ function notifyRoomMentions(socket, userId, text) {
 
   const before = mentionEdge.get(socket) || new Set();
   mentionEdge.set(socket, named);
+  if (socket.silenced) return;
+  const speakerUser = (room.users || []).find((u) => u.id === userId);
 
   for (const targetId of named) {
     if (before.has(targetId)) continue;
@@ -4337,6 +4387,7 @@ function notifyRoomMentions(socket, userId, text) {
     mentionCooldown.set(key, now);
     for (const s of findSocketsByUserId(targetId)) {
       if (s.roomId !== roomId) continue;
+      if (speakerUser && !canRecipientSeeDevUser(s, speakerUser)) continue;
       s.emit("room mention", { by: speaker, roomId });
     }
   }
@@ -5632,7 +5683,7 @@ function registerSocketHandlers(opts) {
           const u = (room.users || []).find((x) => x.id === userId);
           if (u && u.avatar !== avatar) {
             u.avatar = avatar;
-            emitRoomSnapshot(room);
+            emitRoomSnapshot(room.id);
           }
         }
 
@@ -5703,7 +5754,7 @@ function registerSocketHandlers(opts) {
         if (u && !canRecipientSeeDevUser(viewer, u)) continue;
         active[uid] = stroke;
       }
-      return { strokes: bs.strokes, active, claims: boardClaims(bs) };
+      return { ...boardSnapshotFor(viewer, bs), active };
     };
 
     socket.on(
@@ -5731,9 +5782,8 @@ function registerSocketHandlers(opts) {
           activeObj[uid] = stroke;
         }
         socket.emit("board state", {
-          strokes: bs.strokes,
+          ...boardSnapshotFor(socket, bs),
           active: activeObj,
-          claims: boardClaims(bs),
         });
 
         emitSubAppEvent(
@@ -5769,7 +5819,10 @@ function registerSocketHandlers(opts) {
 
         const room = state.rooms.get(socket.roomId);
         const user = room?.users?.find((u) => u.id === stroke.owner);
-        if (user && !canRecipientSeeDevUser(socket, user))
+        if (
+          (user && !canRecipientSeeDevUser(socket, user)) ||
+          boardHiddenFor(socket, socket.roomId).has(stroke.owner)
+        )
           return socket.emit("board stroke author", { id, unknown: true });
 
         socket.emit("board stroke author", {
@@ -5814,7 +5867,7 @@ function registerSocketHandlers(opts) {
           if (c.owner !== userId && claimsOverlap(c, want))
             return socket.emit("board claim result", {
               ok: false,
-              message: "That overlaps " + (c.name || "someone") + "'s area",
+              message: "That overlaps " + shownClaimName(socket, c) + "'s area",
             });
 
         const room = state.rooms.get(socket.roomId);
@@ -6031,7 +6084,7 @@ function registerSocketHandlers(opts) {
         );
         if (blocked)
           return socket.emit("board blocked", {
-            name: blocked.name || "Someone",
+            name: shownClaimName(socket, blocked),
           });
 
         // Brush sizes are world units and zoom-relative on the client
@@ -6120,7 +6173,7 @@ function registerSocketHandlers(opts) {
           }
           finalizeBoardUserStroke(socket.roomId, userId);
           emitSubAppEvent(socket, "board stroke end", { userId }, false);
-          socket.emit("board blocked", { name: stoppedBy.name || "Someone" });
+          socket.emit("board blocked", { name: shownClaimName(socket, stoppedBy) });
           return;
         }
 
@@ -6236,7 +6289,7 @@ function registerSocketHandlers(opts) {
         const refuse = (c) =>
           socket.emit("board blocked", {
             id: s.id,
-            name: c.name || "Someone",
+            name: shownClaimName(socket, c),
           });
         const addSize = Math.min(Math.max(Number(s.size) || 3, 1e-9), 5000);
         for (let i = 0; i < points.length; i++) {
@@ -7905,7 +7958,7 @@ function registerSocketHandlers(opts) {
           action: "wipe buffer",
           ok: true,
           targetUserId,
-          text: receipt.text || null,
+          text: (socket.isMainDev ? receipt.text : audit.maskIps(receipt.text)) || null,
           textWiped: receipt.textWiped,
         });
       }),
@@ -7996,6 +8049,7 @@ function registerSocketHandlers(opts) {
           target: name,
           room: room ? `room:${room.name}(${room.id})` : null,
           by: entry.by || null,
+          byRole: roles.isMainDevActor(entry.by, null) ? "dev" : "mod",
           targetUserId: socket.handshake.session?.userId || null,
           minLevel: 1,
         });
@@ -9015,7 +9069,9 @@ function registerSocketHandlers(opts) {
           soloTTL: stats.currentSoloTTL,
           boards: boardState.size,
           tokens: state.botTokens.size,
-          devs: state.devUsers.size,
+          devs: socket.isMainDev
+            ? state.devUsers.size
+            : [...state.devUsers].filter((uid) => !findSocketsByUserId(uid).some((x) => x.isMainDev)).length,
         });
       }),
     );
@@ -9135,11 +9191,15 @@ function registerSocketHandlers(opts) {
           g.count += 1;
         }
         const showIp = !!socket.isMainDev;
+        const view = roles.viewFor(socket);
         const mine = (g) =>
-          leader
+          (showIp || !roles.isMainDevActor(g.label, g.role)) &&
+          (leader
             ? g.role !== "dev" ||
               (!!socket.isDev && (showIp || !roles.isMainDevHash(g.hash)))
-            : g.hash === socket.modKeyHash;
+            : g.hash === socket.modKeyHash);
+        const removedFor = (r) =>
+          r && !showIp ? { ...r, by: roles.teamLabel(r.by || null, null, view) } : r;
         const sessions = [...byKey.values()]
           .filter(mine)
           .map((g) => ({
@@ -9177,7 +9237,7 @@ function registerSocketHandlers(opts) {
             lastSeen: (h.ips || []).reduce((m, x) => Math.max(m, x.last || 0), 0),
             level: h.role === "mod" ? keyLevel(h.hash) : undefined,
             network: keyNetworkView(h.hash, showIp),
-            removed: h.role === "mod" ? keyRemoved(h.hash) : null,
+            removed: h.role === "mod" ? removedFor(keyRemoved(h.hash)) : null,
             // Full hash only where this viewer may remove the key.
             actHash:
               h.role === "mod" && roles.modKeyByHash(h.hash)
@@ -9187,7 +9247,8 @@ function registerSocketHandlers(opts) {
         // Removed keys that were never used still belong on the record.
         if (leader) {
           const known = new Set(history.map((h) => h.hash));
-          for (const f of roles.listFormerMods(roles.viewFor(socket))) {
+          for (const f of roles.listFormerMods(view)) {
+            if (!showIp && roles.isMainDevActor(f.label, null)) continue;
             const hash = showIp ? f.hash : String(f.hash || "").slice(0, 8);
             if (!f.hash || known.has(hash)) continue;
             known.add(hash);
@@ -10100,7 +10161,10 @@ function registerSocketHandlers(opts) {
         const targetUserId =
           typeof data?.targetUserId === "string" ? data.targetUserId.slice(0, 120) : "";
         if (!targetUserId) return;
-        if (getUserStaffRole(targetUserId) === "dev" && !socket.isDev) {
+        if (
+          (getUserStaffRole(targetUserId) === "dev" && !socket.isDev) ||
+          (!socket.isMainDev && findSocketsByUserId(targetUserId).some((x) => x.isMainDev))
+        ) {
           const t = findSocketsByUserId(targetUserId)[0];
           const r = getUserCurrentRoom(targetUserId);
           const u = r ? state.rooms.get(r)?.users.find((x) => x.id === targetUserId) : null;
@@ -10150,7 +10214,10 @@ function registerSocketHandlers(opts) {
         const targetUserId =
           typeof data?.targetUserId === "string" ? data.targetUserId.slice(0, 120) : "";
         if (!targetUserId) return;
-        if (getUserStaffRole(targetUserId) === "dev" && !socket.isDev)
+        if (
+          (getUserStaffRole(targetUserId) === "dev" && !socket.isDev) ||
+          (!socket.isMainDev && findSocketsByUserId(targetUserId).some((x) => x.isMainDev))
+        )
           return socket.emit("staff past bans", { targetUserId, total: 0, last: null });
         socket.emit("staff past bans", {
           targetUserId,
@@ -10983,13 +11050,14 @@ function registerSocketHandlers(opts) {
         let text = sanitizeMessage(
           typeof data?.text === "string" ? data.text : "",
         ).slice(0, 600);
-        text = linkfilter.redact(text);
+        text = ipredact.redact(linkfilter.redact(text), "[ip hidden]");
         if (text.trim().length < 8) return fail("Please write a little more.");
         let title = sanitizeMessage(
           typeof data?.title === "string" ? data.title : "",
         )
           .slice(0, 80)
           .trim();
+        title = ipredact.redact(linkfilter.redact(title), "[ip hidden]");
         if (title.length < 3) return fail("Please add a short title.");
         const kind = data?.kind === "bug" ? "bug" : "idea";
         const r = suggestions.post({
@@ -11049,7 +11117,7 @@ function registerSocketHandlers(opts) {
         let text = sanitizeMessage(
           typeof data?.text === "string" ? data.text : "",
         ).slice(0, 300);
-        text = linkfilter.redact(text);
+        text = ipredact.redact(linkfilter.redact(text), "[ip hidden]");
         if (text.trim().length < 2) return fail("Please write a little more.");
         const r = suggestions.reply({
           id: Number(data?.id),
@@ -11174,7 +11242,7 @@ function registerSocketHandlers(opts) {
         let text = sanitizeMessage(
           typeof data?.text === "string" ? data.text : "",
         ).slice(0, replyId ? 300 : 600);
-        text = linkfilter.redact(text);
+        text = ipredact.redact(linkfilter.redact(text), "[ip hidden]");
         if (text.trim().length < (replyId ? 2 : 8))
           return fail("Please write a little more.");
         const r = suggestions.editPost({

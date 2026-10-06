@@ -43,7 +43,7 @@ function maskIps(value) {
   return out.replace(NETWORK_LINE, "").replace(/\n+$/, "");
 }
 
-const MASKED_FIELDS = ["target", "details", "text"];
+const MASKED_FIELDS = ["target", "details", "detail", "text"];
 
 // A receipt carries the target's address and whatever they typed. The address
 // goes; the text is masked the same way details are.
@@ -53,7 +53,17 @@ function redactReceipt(r) {
     text: r.text != null ? maskIps(r.text) : r.text,
     trail: (r.trail || []).map((t) => ({ ...t, text: maskIps(t.text) })),
     opened: r.opened ? { ...r.opened, text: maskIps(r.opened.text) } : r.opened,
-    target: r.target ? { ...r.target, ip: undefined } : r.target,
+    target: r.target ? { ...r.target, ip: undefined, net: undefined } : r.target,
+    reason: r.reason && typeof r.reason === "object" ? { ...r.reason, text: maskIps(r.reason.text) } : r.reason,
+    prior: Array.isArray(r.prior)
+      ? r.prior.map((p) => ({
+          ...p,
+          by: roles.systemLabel(p.by, p.role),
+          quote: maskIps(p.quote),
+          opened: p.opened ? { ...p.opened, text: maskIps(p.opened.text) } : p.opened,
+          details: maskIps(p.details),
+        }))
+      : r.prior,
   };
 }
 
@@ -77,14 +87,34 @@ function redactEntry(entry, view) {
   delete copy.targetIp;
   for (const f of MASKED_FIELDS)
     if (copy[f] != null) copy[f] = maskIps(copy[f]);
-  if (copy.tgt) copy.tgt = { ...copy.tgt, ip: undefined };
+  if (copy.tgt) copy.tgt = { ...copy.tgt, ip: undefined, net: undefined };
+  if (copy.card && typeof copy.card === "object") {
+    const card = {};
+    for (const [k, v] of Object.entries(copy.card))
+      card[k] = Array.isArray(v) ? v.map((x) => (typeof x === "string" ? maskIps(x) : x)) : typeof v === "string" ? maskIps(v) : v;
+    copy.card = card;
+  }
   if (copy.receipt) copy.receipt = redactReceipt(copy.receipt);
+  if (copy.justify && typeof copy.justify === "object")
+    copy.justify = {
+      ...copy.justify,
+      by: roles.systemLabel(copy.justify.by, null),
+      fields: copy.justify.fields
+        ? Object.fromEntries(
+            Object.entries(copy.justify.fields).map(([k, v]) => [k, typeof v === "string" ? maskIps(v) : v]),
+          )
+        : copy.justify.fields,
+      addenda: Array.isArray(copy.justify.addenda)
+        ? copy.justify.addenda.map((x) => ({ ...x, text: maskIps(x.text) }))
+        : copy.justify.addenda,
+    };
   if (copy.label)
     copy.label =
       copy.type === "comment"
         ? roles.systemLabel(copy.label, copy.role)
         : roles.teamLabel(copy.label, copy.role, view);
-  if (copy.byRole === "mod" || copy.byRole === "dev")
+  if (/^(dev|mod):/.test(String(copy.by || ""))) copy.by = roles.teamReviewer(copy.by, view);
+  else if (copy.byRole === "mod" || copy.byRole === "dev")
     copy.by = roles.systemLabel(copy.by, copy.byRole);
   return copy;
 }
@@ -1480,7 +1510,7 @@ function actionsOn(who, since, limit = 10) {
   return out;
 }
 
-function identityOn(who, since, limit = 40) {
+function identityOn(who, since, limit = 40, includeOps = false) {
   const keys = personKeys(who);
   const ips = new Set(who.ips || []);
   const out = [];
@@ -1488,6 +1518,7 @@ function identityOn(who, since, limit = 40) {
     const e = entries[i];
     if ((e.ts || 0) < since) break;
     if (e.type !== "identity") continue;
+    if (e.opsOnly && !includeOps) continue;
     if (
       !(e.userId && keys.userIds.has(e.userId)) &&
       !(e.deviceId && keys.deviceIds.has(e.deviceId)) &&
