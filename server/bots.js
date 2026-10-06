@@ -160,12 +160,22 @@ function adopt(from, to) {
   const rec = store.owners[from];
   if (rec) {
     ownerRecord(to, true).bots.push(...rec.bots);
+    if (rec.shared) {
+      const dest = sharedMemoryOf(to);
+      for (const [k, v] of Object.entries(rec.shared)) if (dest[k] == null) dest[k] = v;
+    }
     delete store.owners[from];
   }
   for (const r of Object.values(store.owners))
     for (const b of r.bots)
       for (const m of b.managers || []) if (m.did === from) m.did = to;
   saveSoon();
+}
+
+function sharedMemoryOf(ownerKey) {
+  const rec = ownerRecord(ownerKey, true);
+  if (!rec.shared || typeof rec.shared !== "object") rec.shared = {};
+  return rec.shared;
 }
 
 function ownerRecord(ownerKey, create) {
@@ -273,7 +283,7 @@ function snapshotVersion(bot) {
 const TRIGGERS = ["command", "says", "mention", "join", "leave", "timer", "arrive"];
 const PREFIX_RE = /^[!?.,;:~#$%^&*+=/\\<>@|-]{1,2}$/;
 const ACTIONS = ["say", "append", "wait", "set", "add", "random", "repeat", "clear", "leave"];
-const OPS = ["is", "not", "gt", "lt", "has"];
+const OPS = ["is", "not", "gt", "lt", "has", "empty", "filled"];
 const MATH_OPS = ["add", "sub", "mul", "div"];
 
 const VAR_NAME = /^[a-z0-9_]{1,20}$/i;
@@ -421,7 +431,7 @@ function validateConfig(input, existingId) {
               "Memory names are 1-20 letters, digits or _, and may include a placeholder like {word1}.",
           };
         act.var = name0.toLowerCase();
-        act.per = a.per === "user" ? "user" : "bot";
+        act.per = a.per === "user" || a.per === "shared" ? a.per : "bot";
         if (a.type === "set") act.value = cleanTemplate(a.value, 500);
         else if (a.type === "add") {
           act.amount = cleanTemplate(a.amount, 40) || "1";
@@ -552,6 +562,8 @@ function readVar(rt, ctx, per, body) {
   if (per === "user") {
     const row = ctx.userId ? rt.bot.uvars[ctx.userId] : null;
     v = row ? row[n] : undefined;
+  } else if (per === "shared") {
+    v = rt.shared ? rt.shared[n] : undefined;
   } else {
     v = rt.bot.vars[n];
   }
@@ -593,6 +605,7 @@ function resolveToken(rt, body, ctx) {
   if (low.startsWith("memory:")) return readVar(rt, ctx, "bot", key.slice(7));
   if (low.startsWith("mymemory:"))
     return readVar(rt, ctx, "user", key.slice(9));
+  if (low.startsWith("shared:")) return readVar(rt, ctx, "shared", key.slice(7));
   if (low.startsWith("var:")) return readVar(rt, ctx, "bot", key.slice(4));
   if (low.startsWith("uvar:")) return readVar(rt, ctx, "user", key.slice(5));
   if (low === "bot") return rt.name;
@@ -675,6 +688,8 @@ function evalConds(rt, conds, ctx) {
       case "gt": pass = numeric && an > bn; break;
       case "lt": pass = numeric && an < bn; break;
       case "has": pass = a.toLowerCase().includes(b.toLowerCase()); break;
+      case "empty": pass = a === ""; break;
+      case "filled": pass = a !== ""; break;
       default: pass = false;
     }
     if (!pass) return false;
@@ -714,6 +729,18 @@ function setVar(rt, act, ctx, value) {
     }
     if (Object.keys(row).length >= 64 && row[name] == null) return;
     row[name] = v;
+  } else if (act.per === "shared") {
+    const box = rt.shared;
+    if (!box) return;
+    if (v === "") {
+      if (box[name] != null) {
+        delete box[name];
+        rt.varsDirty = true;
+      }
+      return;
+    }
+    if (Object.keys(box).length >= LIMITS.MAX_VARS && box[name] == null) return;
+    box[name] = v;
   } else {
     if (v === "") {
       if (rt.bot.vars[name] != null) {
@@ -736,6 +763,7 @@ function getVar(rt, act, ctx) {
     const row = ctx.userId ? rt.bot.uvars[ctx.userId] : null;
     return row ? row[name] : undefined;
   }
+  if (act.per === "shared") return rt.shared ? rt.shared[name] : undefined;
   return rt.bot.vars[name];
 }
 
@@ -1009,6 +1037,7 @@ function deploy(socket, bot, room, ownerKey) {
     name: bot.name,
     bot,
     ownerKey,
+    shared: sharedMemoryOf(ownerKey),
     actorKey: ownerKeyOf(socket),
     ownerId,
     ownerName,
@@ -1842,6 +1871,10 @@ function register(socket, safe) {
         v.bot.uvars = old.bot.uvars;
       }
       const rt = makeSandbox(v.bot, socket.handshake.session.username);
+      const ownerKey = ownerKeyOf(socket);
+      const real = ownerKey ? ownerRecord(ownerKey, false) : null;
+      rt.shared =
+        old && data?.keepMemory && old.shared ? old.shared : { ...((real && real.shared) || {}) };
       testSessions.set(socket.id, rt);
       socket.emit("bots test ready", { name: v.bot.name });
     }),
@@ -1896,6 +1929,7 @@ function register(socket, safe) {
       if (!rt) return;
       rt.bot.vars = {};
       rt.bot.uvars = {};
+      rt.shared = {};
       rt.queue.length = 0;
       socket.emit("bots test out", {
         about: "reset",
@@ -2079,6 +2113,7 @@ function drainTest(rt) {
     }
   }
   out.memories = rt.bot.vars;
+  out.sharedMemories = rt.shared || {};
   out.myMemories = rt.bot.uvars["tester"] || {};
   out.friendMemories = rt.bot.uvars["friend"] || {};
   return out;

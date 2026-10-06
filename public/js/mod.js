@@ -1565,7 +1565,27 @@
           ps.appendChild(line);
         });
       }
+      if (me && me.mainDev && e.action === "ban" && e.status !== "active" && e.status !== "permanent") {
+        const foot = divc("bl-foot");
+        foot.appendChild(textBtn("Remove from history", "danger", () => confirmHistoryRemove(e)));
+        detail.appendChild(foot);
+      }
     };
+  }
+
+  async function confirmHistoryRemove(e) {
+    const ok = window.StaffUI
+      ? await StaffUI.confirm({
+          title: "Remove from history",
+          message:
+            "Delete this ban" +
+            (e.name ? " on " + e.name : "") +
+            " and the unban that ended it from the ban history? It cannot be brought back.",
+          danger: true,
+          confirmText: "Remove",
+        })
+      : true;
+    if (ok) socket.emit("staff ban history remove", { eventId: e.id });
   }
 
   function buildEventRow(e, showIp) {

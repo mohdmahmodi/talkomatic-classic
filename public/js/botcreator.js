@@ -626,6 +626,8 @@
     { v: "gt", label: "is bigger than" },
     { v: "lt", label: "is smaller than" },
     { v: "has", label: "contains" },
+    { v: "empty", label: "is empty" },
+    { v: "filled", label: "is not empty" },
   ];
 
   const MATH_OPTIONS = [
@@ -643,6 +645,7 @@
     { tok: "{words2}", desc: "everything from the 2nd word on (up to {words8})" },
     { tok: "{memory:coins}", desc: "the room's shared memory (any name)" },
     { tok: "{mymemory:coins}", desc: "that person's own memory (any name)" },
+    { tok: "{shared:coins}", desc: "a memory every bot you own can use (any name)" },
     {
       tok: "{memory:note_{word1}}",
       desc: "a memory picked by name at runtime, from what they typed",
@@ -701,7 +704,7 @@
         )
           found.set(
             String(a.var).toLowerCase(),
-            a.per === "user" ? "user" : "bot",
+            a.per === "user" || a.per === "shared" ? a.per : "bot",
           );
         if (a.text) texts.push(a.text);
         if (a.value) texts.push(a.value);
@@ -710,12 +713,13 @@
       }
       for (const c of r.if || []) texts.push(c.a || "", c.b || "");
       for (const t of texts) {
-        const re = /\{(memory|mymemory):([a-z0-9_]{1,20})\}/gi;
+        const re = /\{(memory|mymemory|shared):([a-z0-9_]{1,20})\}/gi;
         let m;
         while ((m = re.exec(t))) {
           const nm = m[2].toLowerCase();
+          const kind = m[1].toLowerCase();
           if (!found.has(nm))
-            found.set(nm, m[1].toLowerCase() === "mymemory" ? "user" : "bot");
+            found.set(nm, kind === "mymemory" ? "user" : kind === "shared" ? "shared" : "bot");
         }
       }
     }
@@ -723,11 +727,11 @@
   }
 
   function memToken(m) {
-    return (m.per === "user" ? "{mymemory:" : "{memory:") + m.name + "}";
+    return (m.per === "user" ? "{mymemory:" : m.per === "shared" ? "{shared:" : "{memory:") + m.name + "}";
   }
 
   function memKindLabel(per) {
-    return per === "user" ? "each person's own" : "everyone's";
+    return per === "user" ? "each person's own" : per === "shared" ? "all your bots'" : "everyone's";
   }
 
   function insertIntoField(tok) {
@@ -792,6 +796,11 @@
       "bot",
       "One for everyone",
       "A single box the whole room shares. For a quiz answer or a group total.",
+    );
+    mkKind(
+      "shared",
+      "Shared by all my bots",
+      "One box every bot you own can read and change. For a balance two of your bots both use.",
     );
     box.appendChild(kinds);
     const btns = document.createElement("div");
@@ -2942,16 +2951,27 @@
       row.appendChild(aInput);
       row.appendChild(mkMagicButton(aInput));
       row.appendChild(
-        mkSelect(OP_OPTIONS, cond.op, (v) => (cond.op = v), "w-per"),
+        mkSelect(
+          OP_OPTIONS,
+          cond.op,
+          (v) => {
+            const was = cond.op === "empty" || cond.op === "filled";
+            cond.op = v;
+            if (was !== (v === "empty" || v === "filled")) renderRules();
+          },
+          "w-per",
+        ),
       );
-      const bInput = mkInput(
-        cond.b,
-        "what it should be",
-        (v) => (cond.b = v),
-        "w-val",
-      );
-      row.appendChild(bInput);
-      row.appendChild(mkMagicButton(bInput));
+      if (cond.op !== "empty" && cond.op !== "filled") {
+        const bInput = mkInput(
+          cond.b,
+          "what it should be",
+          (v) => (cond.b = v),
+          "w-val",
+        );
+        row.appendChild(bInput);
+        row.appendChild(mkMagicButton(bInput));
+      }
       row.appendChild(
         mkRowButtons([
           mkIconButton("Remove this check", "fa-xmark", () => {
@@ -3034,11 +3054,12 @@
         [
           { v: "bot", label: "shared by everyone" },
           { v: "user", label: "each person their own" },
+          { v: "shared", label: "shared by all my bots" },
         ],
         a.per || "bot",
         (v) => (a.per = v),
         "w-per",
-        "One box for the whole room, or one box per person",
+        "One box for the whole room, one box per person, or one box all your bots use",
       );
 
     if (act.type === "say" || act.type === "append") {
@@ -3596,6 +3617,8 @@
       parts.push("Yours: " + fmt(d.myMemories));
     if (d.friendMemories && Object.keys(d.friendMemories).length)
       parts.push("TestBot's: " + fmt(d.friendMemories));
+    if (d.sharedMemories && Object.keys(d.sharedMemories).length)
+      parts.push("All your bots: " + fmt(d.sharedMemories));
     body.innerHTML = parts.length ? parts.join("<br/>") : "Nothing yet.";
   }
 
@@ -3880,8 +3903,10 @@
 
   // ── What's new ────────────────────────────────────────────────────────────
 
-  const NEWS_VERSION = 9;
+  const NEWS_VERSION = 10;
   const NEWS = [
+    'Memory shared by all your bots: pick "shared by all my bots" on a memory block and read it with {shared:coins}. One bot can pay into a bank and another can spend from it, and it stays put between deploys. Only your own bots can see it.',
+    'New checks "is empty" and "is not empty": ONLY IF {word1} is empty catches !calc typed with nothing after it, so your bot can reply with how to use it instead of doing maths on nothing.',
     'Share a bot with friends: the new share button in the editor makes a code. Anyone who enters it under "Add a shared bot" becomes a manager - they can edit the bot, send it to rooms, and use its admin-only commands in rooms, exactly like you. Only you can delete the bot, remove managers, or hand ownership over. The clock button shows the bot\'s history (who made it, who saved what), the last 5 versions are kept with one-click restore for the owner, and nobody can accidentally overwrite anyone else\'s save.',
     "Custom command prefixes: the little box next to your bot's name sets the symbol people type before commands. Keep ! or pick ? . ~ >> or any 1-2 symbols. {commands} lists them with the right prefix, and {prefix} says what it is.",
     'Bots now say hello: when a bot lands in a room it introduces itself and lists its public commands, so people know it exists. Want your own greeting? Add a rule with the new "the bot arrives in the room" trigger and it replaces the built-in hello completely. Want silence? Make an arrive rule with only a wait block. Preview it with the "Bot arrives" button in the Test room.',
@@ -3897,6 +3922,26 @@
   ];
 
   const CHANGELOG = [
+    {
+      title: "Memory for all your bots",
+      icon: "fa-brain",
+      items: [
+        'Memory blocks have a third choice, "shared by all my bots": one box that every bot you own reads and changes.',
+        "Read it anywhere with {shared:name}, like {shared:coins}, with an optional fallback: {shared:coins|nothing yet}.",
+        "It belongs to you, not to one bot: it is saved with your account, survives deploys, and any of your bots picks it up where the last one left off.",
+        "Other people's bots never see it. Bots shared with you as a manager use their owner's shared memory, not yours.",
+        "In the Test room it starts from your real shared memory but changes there are never saved, so testing cannot spend your real balance.",
+      ],
+    },
+    {
+      title: "Empty checks",
+      icon: "fa-filter",
+      items: [
+        'Two new comparisons in ONLY IF: "is empty" and "is not empty". They only look at the left side, so the second box disappears.',
+        "{word1} is empty means the command was typed with nothing after it. Pair it with a second rule using is not empty for the real work.",
+        'An unset memory reads as 0, so to ask "has this person never set it" add an empty fallback: {mymemory:name|} is empty.',
+      ],
+    },
     {
       title: "Sharing your bot",
       icon: "fa-user-group",

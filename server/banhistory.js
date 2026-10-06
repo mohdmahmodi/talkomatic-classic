@@ -100,4 +100,14 @@ function recent(limit) {
 
 load();
 
-module.exports = { record, countBans, recent, flushSync };
+function remove(ids) {
+  const want = new Set(ids);
+  const before = events.length;
+  events = events.filter((e) => !want.has(e.id));
+  if (events.length === before) return 0;
+  banCounts = null;
+  saveSoon();
+  return before - events.length;
+}
+
+module.exports = { record, countBans, recent, flushSync, remove };

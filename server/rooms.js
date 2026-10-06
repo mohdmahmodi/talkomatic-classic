@@ -10208,6 +10208,38 @@ function registerSocketHandlers(opts) {
     );
 
     socket.on(
+      "staff ban history remove",
+      safe(async (data) => {
+        if (!socket.isMainDev) return;
+        const eventId = Number(data?.eventId) || 0;
+        const all = banhistory.recent(5000);
+        const e = all.find((x) => x.id === eventId && x.action === "ban");
+        if (!e) return socket.emit("staff action result", { action: "remove ban history", ok: false });
+        const spell = all.filter(
+          (x) =>
+            x.action === "ban" &&
+            Math.abs(x.at - e.at) < 5000 &&
+            (x.by || "") === (e.by || "") &&
+            (e.name ? x.name === e.name : x.id === e.id),
+        );
+        const st = banstatus.statuses(all);
+        if (spell.some((x) => ["active", "permanent"].includes((st.get(x.id) || {}).status)))
+          return socket.emit("error", createErrorResponse(ERROR_CODES.FORBIDDEN, "That ban is still active. Unban it first."));
+        const ids = new Set(spell.map((x) => x.id));
+        const asc = all.slice().reverse();
+        for (const x of spell) {
+          const next = asc.find((y) => y.ip === x.ip && y.at > x.at && y.id !== x.id);
+          if (next && next.action === "unban") ids.add(next.id);
+        }
+        const removed = banhistory.remove([...ids]);
+        logStaff(socket, "remove ban history", e.name || "-", "-", removed + " entries");
+        broadcastBanHistory();
+        broadcastBlockList();
+        socket.emit("staff action result", { action: "remove ban history", ok: true, removed });
+      }),
+    );
+
+    socket.on(
       "staff past bans",
       safe(async (data) => {
         if (!requireStaff(socket)) return;

@@ -560,6 +560,12 @@
                 >That person's OWN "coins" memory. Sara's coins, when Sara
                 asked. See Memory below.</span
               >
+              <code>{shared:coins}</code>
+              <span
+                >A "coins" memory that every bot you own reads and changes, so
+                one bot can pay out what another bot counts. Only your bots
+                can see it.</span
+              >
               <code>{rand:1-6}</code>
               <span
                 >A fresh random number from 1 to 6, different every time. Any
@@ -621,7 +627,7 @@
           <div class="bc-card-body bc-doc">
             <p>
               A memory is a little labelled box the bot keeps. You invent the
-              label. There are two kinds, and the difference matters:
+              label. There are three kinds, and the difference matters:
             </p>
             <div class="bc-chip-table">
               <code>shared by everyone</code>
@@ -636,6 +642,13 @@
                 "coins" and Omar's "coins" are different boxes. Good for:
                 points, coins, personal bests, "have I welcomed this person
                 before".
+              </span>
+              <code>shared by all my bots</code>
+              <span>
+                ONE box that every bot you own reads and changes, wherever it
+                runs. Good for: a bank one bot pays into and another spends
+                from. Use it with <code>{shared:coins}</code>. Other people's
+                bots never see it.
               </span>
             </div>
             <p>
@@ -662,7 +675,11 @@
               Checks make bots smart. A rule only runs when EVERY check
               passes. Each check compares two things:
               <b>is exactly</b>, <b>is not</b>, <b>is bigger than</b>,
-              <b>is smaller than</b>, or <b>contains</b>.
+              <b>is smaller than</b>, or <b>contains</b>. Two more only look
+              at the left side: <b>is empty</b> and <b>is not empty</b>.
+              <code>{word1}</code> is empty means they typed the command with
+              nothing after it, so you can answer "Usage: !calc 5 + 3"
+              instead of doing maths on nothing.
             </p>
             <p>
               "Is exactly" means <i>exactly</i> (capital letters don't matter,
