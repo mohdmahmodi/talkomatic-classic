@@ -3412,10 +3412,10 @@ function historyLoc(e) {
   return (rec && rec.loc) || null;
 }
 
-function buildBanHistory(view) {
+function buildBanHistory(view, limit = 5000) {
   const showIp = !!(view && view.ip);
   const st = banstatus.statuses(banhistory.recent(5000));
-  return banhistory.recent(200).map((e) => {
+  return banhistory.recent(limit).map((e) => {
     const s = (e.action === "ban" && st.get(e.id)) || {};
     return {
     id: e.id,
@@ -4879,7 +4879,7 @@ function registerSocketHandlers(opts) {
     roomCapacity,
     roles,
     audit,
-    banHistory: buildBanHistory,
+    banHistory: (view) => buildBanHistory(view, 200),
     announcements,
   });
   proxyguard.init({ onFlag: proxyFollowUp, isLive: proxyLive });

@@ -1445,11 +1445,10 @@
   }
 
   function endedRows() {
-    const weekAgo = Date.now() - 7 * 86400000;
     const seen = new Set();
     return banHistory
       .filter((e) => {
-        if (e.action !== "ban" || !e.endedAt || e.endedAt < weekAgo) return false;
+        if (e.action !== "ban" || !e.endedAt) return false;
         if (e.status !== "served" && e.status !== "lifted") return false;
         const k = (e.name || "") + "|" + Math.floor(e.at / 5000);
         if (seen.has(k)) return false;
@@ -1880,7 +1879,7 @@
           : banView === "ended"
             ? q || f !== "all"
               ? "Nothing matches that."
-              : "No bans ended in the last 7 days."
+              : "No bans have ended yet."
             : "No history matches that.";
       wrap.appendChild(
         emptyBox(
