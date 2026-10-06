@@ -4648,7 +4648,7 @@ async function openIpBlockPicker(user) {
   const res = await StaffUI.blockDialog({
     title: "Block " + (user.username || "this user"),
     subtitle: "They are disconnected the moment it is placed",
-    notice: StaffUI.pastBanText && StaffUI.pastBanText(past),
+    notice: (StaffUI.pastBanBox && StaffUI.pastBanBox(past)) || null,
     message:
       "The block covers their device and the network their address sits on (IPv6 /64, IPv4 /24). Pick the rule first; it suggests the usual length.",
     allowPermanent:

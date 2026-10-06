@@ -2108,10 +2108,11 @@ function pastBansOf(targetUserId, view) {
       endsAt: sp.endsAt || null,
       endedAt: sp.endedAt || null,
       duration: sp.duration,
+      liftedBy: sp.liftedBy ? roles.enforcedLabel(sp.liftedBy, sp.liftedByRole, view) : null,
       by: sp.by ? roles.enforcedLabel(sp.by, sp.byRole, view) : banstatus.AUTOMOD,
       reason: (view && view.ip ? (x) => x : audit.maskIps)(banstatus.shownReason(sp.by, sp.reason)),
     };
-  return { ...sum, last: shape(sum.last) };
+  return { ...sum, last: shape(sum.last), earlier: spells.slice(1, 4).map(shape) };
 }
 
 function buildQuickFile(targetUserId, socket) {

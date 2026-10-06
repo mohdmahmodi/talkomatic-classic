@@ -272,8 +272,31 @@
   .tk-pop-row.k-unblock .tk-pop-what{color:#57d9a3;}
   .tk-pop-row.k-ended .tk-pop-dot{background:rgba(90,169,255,.15);color:#5aa9ff;}
   .tk-pop-row.k-ended .tk-pop-what{color:#8cc4ff;}
-  .tk-pop-past{margin:10px 12px 0;padding:8px 11px;border-radius:4px;background:#2a2112;
-    color:#e8e8e8;font-size:12px;line-height:1.45;}
+  .tk-past{padding:10px 12px;border-radius:6px;background:#241d10;color:#f2f2f2;font-size:12.5px;line-height:1.4;
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;}
+  .tk-past.live{background:#2c1418;}
+  .tk-past.in-pop{margin:10px 12px 0;}
+  .tk-form > .tk-past{margin:0 0 12px;}
+  .tk-past-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:4px 10px;margin-bottom:8px;}
+  .tk-past-title{font-weight:700;font-size:13px;color:#ffc46b;}
+  .tk-past.live .tk-past-title{color:#ff8a8e;}
+  .tk-past-counts{color:#d0d0d0;font-weight:600;font-size:11.5px;}
+  .tk-past-row{display:grid;grid-template-columns:78px 1fr;align-items:start;gap:8px;margin-top:5px;}
+  .tk-past-k{color:#a8a8a8;font-weight:600;font-size:11.5px;padding-top:3px;}
+  .tk-past-chips{display:flex;flex-wrap:wrap;align-items:center;gap:5px;min-width:0;}
+  .tk-past-chip{padding:2px 8px;border-radius:4px;background:rgba(255,255,255,.09);color:#f5f5f5;font-weight:600;font-size:12px;}
+  .tk-past-chip.small{font-size:11.5px;}
+  .tk-past-chip.red{background:rgba(255,84,104,.2);color:#ffbcc2;}
+  .tk-past-chip.green{background:rgba(87,217,163,.17);color:#9ef3cd;}
+  .tk-past-chip.blue{background:rgba(90,169,255,.18);color:#b5d8ff;}
+  .tk-past-chip.gray{background:rgba(255,255,255,.09);color:#d6d6d6;}
+  .tk-past-note{color:#c4c4c4;font-weight:500;font-size:11.5px;}
+  .tk-past-foot{margin-top:8px;}
+  .tk-past-toggle{appearance:none;border:none;background:rgba(255,255,255,.08);color:#f0f0f0;font:inherit;font-weight:600;
+    font-size:11.5px;padding:3px 9px;border-radius:4px;cursor:pointer;}
+  .tk-past-toggle:hover{background:rgba(255,255,255,.14);}
+  .tk-past-reason{margin-top:6px;padding:7px 9px;border-radius:4px;background:rgba(0,0,0,.28);color:#f0f0f0;font-weight:500;
+    white-space:pre-wrap;word-break:break-word;}
   .tk-pop-why{color:#c9c9c9;font-size:12px;margin-top:1px;word-break:break-word;}
   .tk-pop-quote{margin-top:3px;padding:3px 8px;border-left:2px solid #444;color:#a9a9a9;font-size:11.5px;
     font-style:italic;white-space:pre-wrap;word-break:break-word;max-height:54px;overflow:hidden;}
@@ -535,7 +558,8 @@
     ];
     return new Promise((res) => {
       const form = el("form", { class: "tk-form" });
-      if (o.notice) form.appendChild(el("div", { class: "tk-notice", text: o.notice }));
+      if (o.notice && o.notice.nodeType) form.appendChild(o.notice);
+      else if (o.notice) form.appendChild(el("div", { class: "tk-notice", text: o.notice }));
       if (o.message) form.appendChild(el("p", { text: o.message }));
       const inputs = {};
       const helps = {};
@@ -2071,8 +2095,11 @@
       ]);
       wrap.appendChild(now);
     } else if (d.pastBans && d.pastBans.total) {
-      const t = pastBanText(d.pastBans);
-      if (t) wrap.appendChild(el("div", { class: "tk-pop-past", text: t }));
+      const box = pastBanBox(d.pastBans);
+      if (box) {
+        box.classList.add("in-pop");
+        wrap.appendChild(box);
+      }
     }
 
     const list = el("div", { class: "tk-pop-list" });
@@ -2144,22 +2171,146 @@
     if (o.status === "replaced") return { cls: "replaced", text: "Replaced by a later ban" };
     return { cls: "ended", text: "Ended" };
   }
-  function pastBanText(p) {
+  function durationMs(value) {
+    const m = /^(\d+)([hd])$/.exec(String(value || ""));
+    return m ? Number(m[1]) * (m[2] === "h" ? 3600000 : 86400000) : 0;
+  }
+  function whenText(ts) {
+    if (!ts) return "";
+    const d = new Date(ts);
+    const o = { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" };
+    if (d.getFullYear() !== new Date().getFullYear()) o.year = "numeric";
+    return d.toLocaleString(undefined, o);
+  }
+  function banEnding(l) {
+    if (l.status === "permanent") return { cls: "red", text: "Still banned · permanent" };
+    if (l.status === "active") {
+      const ms = durationMs(l.duration);
+      const stretched = ms && l.endsAt && l.at + ms < l.endsAt - 300000;
+      return {
+        cls: "red",
+        text: "Still banned · ends in " + inWords((l.endsAt || 0) - Date.now()),
+        title: "Ends " + whenText(l.endsAt),
+        note: stretched ? "Stretched to match a longer ban on them" : null,
+      };
+    }
+    if (l.status === "served")
+      return { cls: "green", text: "Timer ran out · " + agoText(l.endedAt), title: "Ended " + whenText(l.endedAt) };
+    if (l.status === "lifted")
+      return {
+        cls: "blue",
+        text: "Lifted early by " + (l.liftedBy || "Automod") + " · " + agoText(l.endedAt),
+        title: "Lifted " + whenText(l.endedAt),
+        note: l.endedAt && l.at ? "It lasted " + inWords(l.endedAt - l.at) + " of " + (l.duration ? durationLabel(l.duration).toLowerCase() : "the ban") : null,
+      };
+    if (l.status === "replaced")
+      return { cls: "gray", text: "Replaced by a newer ban · " + agoText(l.endedAt), title: whenText(l.endedAt) };
+    return { cls: "gray", text: "Ended" };
+  }
+  function banEndingShort(l) {
+    if (l.status === "permanent") return { cls: "red", text: "permanent" };
+    if (l.status === "active") return { cls: "red", text: "still running" };
+    if (l.status === "served") return { cls: "green", text: "ran out" };
+    if (l.status === "lifted") return { cls: "blue", text: "lifted by " + (l.liftedBy || "Automod") };
+    if (l.status === "replaced") return { cls: "gray", text: "replaced" };
+    return { cls: "gray", text: "ended" };
+  }
+  function pastBanParts(p) {
     if (!p || !p.total || !p.last) return null;
     const l = p.last;
-    const out = banOutcome(l);
-    const what =
-      (l.duration ? durationLabel(l.duration).toLowerCase() + " ban" : "ban") +
-      (l.reason ? ' for "' + l.reason + '"' : "") +
-      (l.by ? " by " + l.by : "");
-    const more = p.total > 1 ? " Banned " + p.total + " times in total, " + p.served + " expired." : "";
-    return "Banned before: " + what + ". " + (out ? out.text + "." : "") + more;
+    const live = l.status === "active" || l.status === "permanent";
+    const counts = [p.total + (p.total === 1 ? " ban" : " bans")];
+    if (p.served) counts.push(p.served + " ran out");
+    if (p.lifted) counts.push(p.lifted + " lifted early");
+    const earlier = (p.earlier || []).filter(Boolean).map((e) => {
+      const end = banEndingShort(e);
+      return {
+        cls: end.cls,
+        text:
+          (e.duration ? durationLabel(e.duration) : "Ban") +
+          " · " +
+          (e.by || "Automod") +
+          " · " +
+          end.text +
+          (e.at ? " · " + agoText(e.at) : ""),
+        title: e.at ? "Placed " + whenText(e.at) : null,
+      };
+    });
+    return {
+      live,
+      title: live ? "Banned right now" : "Banned before",
+      counts: p.total > 1 ? counts.join(" · ") : null,
+      label: live ? "Current ban" : "Last ban",
+      facts: [
+        { text: l.duration ? durationLabel(l.duration) : "Unknown length" },
+        { text: "by " + (l.by || "Automod") },
+        { text: "placed " + agoText(l.at), title: whenText(l.at) },
+      ],
+      ending: banEnding(l),
+      reason: l.reason || null,
+      earlier,
+      more: Math.max(0, p.total - 1 - earlier.length),
+    };
+  }
+  function pastBanText(p) {
+    const b = pastBanParts(p);
+    if (!b) return null;
+    return [
+      b.title + (b.counts ? " (" + b.counts + ")" : ""),
+      b.label + ": " + b.facts.map((f) => f.text).join(", "),
+      "Outcome: " + b.ending.text + (b.ending.note ? ". " + b.ending.note : ""),
+      b.reason ? "Reason: " + b.reason : null,
+      b.earlier.length ? "Earlier: " + b.earlier.map((e) => e.text).join("; ") : null,
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+  function pastBanBox(p) {
+    const b = pastBanParts(p);
+    if (!b) return null;
+    const chip = (c, extra) =>
+      el("span", { class: "tk-past-chip" + (extra ? " " + extra : ""), text: c.text, title: c.title || null });
+    const row = (label, kids) =>
+      el("div", { class: "tk-past-row" }, [
+        el("span", { class: "tk-past-k", text: label }),
+        el("div", { class: "tk-past-chips" }, kids),
+      ]);
+    const kids = [
+      el("div", { class: "tk-past-head" }, [
+        el("span", { class: "tk-past-title", text: b.title }),
+        b.counts ? el("span", { class: "tk-past-counts", text: b.counts }) : null,
+      ]),
+      row(b.label, b.facts.map((f) => chip(f))),
+      row("Outcome", [
+        chip(b.ending, "end " + b.ending.cls),
+        b.ending.note ? el("span", { class: "tk-past-note", text: b.ending.note }) : null,
+      ]),
+    ];
+    if (b.earlier.length) {
+      const list = b.earlier.map((e) => chip(e, "small " + e.cls));
+      if (b.more) list.push(el("span", { class: "tk-past-note", text: "+" + b.more + " more" }));
+      kids.push(row("Earlier", list));
+    }
+    if (b.reason) {
+      const text = el("div", { class: "tk-past-reason", text: b.reason });
+      text.hidden = true;
+      const btn = el("button", { type: "button", class: "tk-past-toggle", text: "Show reason" });
+      btn.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        text.hidden = !text.hidden;
+        btn.textContent = text.hidden ? "Show reason" : "Hide reason";
+      });
+      kids.push(el("div", { class: "tk-past-foot" }, [btn]), text);
+    }
+    return el("div", { class: "tk-past" + (b.live ? " live" : "") }, kids);
   }
 
   window.StaffUI = {
     rank,
     banOutcome,
     pastBanText,
+    pastBanBox,
     escape,
     el,
     modal,

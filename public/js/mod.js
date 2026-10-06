@@ -1005,13 +1005,10 @@
   const banFilter = { now: "all", ended: "all", history: "all" };
   const banPage = { now: 0, ended: 0, history: 0 };
   const banOutcome = (o) => StaffUI.banOutcome(o);
-  const pastBanText = (p) => StaffUI.pastBanText(p);
   function pastBanNotice(p) {
-    const t = pastBanText(p);
-    if (!t) return document.createComment("no past bans");
-    const box = divc("pastban");
-    box.appendChild(icon("fa-clock-rotate-left"));
-    box.appendChild(span(null, t));
+    const box = StaffUI.pastBanBox(p);
+    if (!box) return document.createComment("no past bans");
+    box.classList.add("pastban");
     return box;
   }
   function fmtRemaining(b) {
