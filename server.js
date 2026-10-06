@@ -179,10 +179,22 @@ const corsOptions = {
 
 // ── Middleware (order matters) ──────────────────────────────────────────────
 
+const ASSET_PATH = /\.(?:js|css|png|jpe?g|gif|ico|svg|webp|avif|ttf|otf|woff2?|mp3|wav|ogg|map)$/i;
+const isAsset = (req) =>
+  (req.method === "GET" || req.method === "HEAD") &&
+  ASSET_PATH.test(req.path) &&
+  !req.path.startsWith("/api/");
+const unlessAsset = (mw) => (req, res, next) => (isAsset(req) ? next() : mw(req, res, next));
+const corsMiddleware = cors(corsOptions);
+
 app.use(express.json({ limit: "100kb" }));
-app.use(cors(corsOptions));
+app.use((req, res, next) => {
+  if (!isAsset(req)) return corsMiddleware(req, res, next);
+  res.set("Access-Control-Allow-Origin", "*");
+  next();
+});
 app.use(cookieParser());
-app.use(devicetoken.middleware);
+app.use(unlessAsset(devicetoken.middleware));
 
 app.use((req, res, next) => {
   const m = req.method;
@@ -357,7 +369,7 @@ function enhancedSessionMiddleware(req, res, next) {
     next();
   });
 }
-app.use(enhancedSessionMiddleware);
+app.use(unlessAsset(enhancedSessionMiddleware));
 
 // ── Socket.IO ───────────────────────────────────────────────────────────────
 
@@ -753,6 +765,14 @@ io.use((socket, next) => {
 
 // ── Static Files (after session so HTML pages get session cookies) ──────────
 
+const PUBLIC_DIR = path.join(__dirname, "public");
+function assetCaching(req, filePath) {
+  const v = req && typeof req.query.v === "string" ? req.query.v : "";
+  if (!/^[0-9a-f]{10}$/.test(v)) return "public, max-age=3600";
+  const rel = path.relative(PUBLIC_DIR, filePath).split(path.sep).join("/");
+  return assetTag(rel) === v ? "public, max-age=31536000, immutable" : "private, no-store";
+}
+
 app.use(
   express.static(path.join(__dirname, "public"), {
     setHeaders: (res, filePath) => {
@@ -763,19 +783,21 @@ app.use(
         // (and its old ?v=) sticks until a manual hard refresh. ETag still
         // yields a cheap 304 when nothing changed.
         res.setHeader("Cache-Control", "no-cache, must-revalidate");
-      } else if (filePath.endsWith(".js")) {
-        res.setHeader("Content-Type", "application/javascript; charset=utf-8");
-        // Versioned by ?v=, so the URL itself changes on update - safe to cache
-        // hard and skip revalidation entirely (immutable).
-        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
-      } else if (filePath.endsWith(".css"))
-        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
-      else if (filePath.match(/\.(jpg|jpeg|png|gif|ico|svg)$/))
-        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      } else if (filePath.match(/\.(js|css|jpg|jpeg|png|gif|ico|svg|webp|avif|mp3|wav|ogg|map)$/)) {
+        if (filePath.endsWith(".js"))
+          res.setHeader("Content-Type", "application/javascript; charset=utf-8");
+        res.setHeader("Cache-Control", assetCaching(res.req, filePath));
+      } else if (filePath.match(/\.(ttf|otf|woff2?)$/))
+        res.setHeader("Cache-Control", "public, max-age=86400");
       if (filePath.endsWith(".ttf")) res.setHeader("Content-Type", "font/ttf");
     },
   }),
 );
+
+app.use((req, res, next) => {
+  if (isAsset(req)) res.set("Cache-Control", "private, no-store");
+  next();
+});
 
 // ── Pages ───────────────────────────────────────────────────────────────────
 // The HTML pages live in public/pages/ but are served at their original
