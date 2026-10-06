@@ -758,12 +758,25 @@ function isSeasonedDevice(did) {
   return !!(rec && rec.days && rec.days.length >= SEASONED_DAYS);
 }
 
+const PROXY_KINDS = {
+  vpn: "a VPN",
+  tor: "Tor",
+  relay: "a privacy relay",
+  residential: "a residential proxy",
+  public: "a public proxy",
+  web: "a web proxy",
+  proxy: "a proxy",
+  hosting: "a hosting network",
+};
+
 function reportProxyHit(socket, { username, location, type, provider, network, school, at }) {
   const ip = socket.clientIp || null;
   const did = socket.deviceId || null;
   if (!proxyguard.shouldReport((did || "") + "|" + (ip || ""))) return;
   const userId = socket.handshake?.session?.userId || socket.stableUserId || null;
   const kind = type || "proxy";
+  const through = PROXY_KINDS[kind] || "a " + kind + " connection";
+  const label = through.replace(/^an? /, "");
   const refused =
     at === "room join"
       ? "Room join refused"
@@ -777,15 +790,15 @@ function reportProxyHit(socket, { username, location, type, provider, network, s
     minLevel: 1,
     opsOnly: proxyKeyed(socket),
     text: [
-      (username ? '"' + username + '"' : "Somebody") + " was flagged at " + at + ": " + kind + " detected.",
-      "What happened: they connected through a " + kind + " address. VPNs, proxies and hosting networks are not allowed.",
+      (username ? '"' + username + '"' : "Somebody") + " was flagged at " + at + ": " + label + " detected.",
+      "What happened: they connected through " + through + ". VPNs, proxies and hosting networks are not allowed.",
       "Action taken: " + refused + ". No block was placed, they can come back with it turned off.",
       "Name: " + (username ? '"' + username + '"' : "none"),
       "Location they typed: " + (location ? '"' + location + '"' : "none"),
       "Client id (their browser): " + (did || "unknown"),
       "User id: " + (userId || "unknown"),
       "IP address: " + (ip || "unknown"),
-      "Network type: " + kind,
+      "Network type: " + label,
       "Provider: " + (provider || "unknown"),
       "Network: " + (network || "unknown") + (school ? " (school network)" : ""),
       ...(socket.staffProxy ? ["Staff key: carried one, not used on this connection."] : []),
@@ -797,7 +810,7 @@ function reportProxyHit(socket, { username, location, type, provider, network, s
       ids: did ? [did] : [],
       target: username || "(no name)",
       deviceId: did,
-      category: kind + " connection, refused automatically",
+      category: label + " connection, refused automatically",
       reason: refused + " by the proxy guard",
     },
   });

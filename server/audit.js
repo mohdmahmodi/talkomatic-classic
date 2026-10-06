@@ -34,8 +34,12 @@ const durations = require("./durations");
 
 const HIDDEN = "[ip hidden]";
 
+const NETWORK_LINE = /^Network: [^\n]*(?:\n|$)/gm;
+
 function maskIps(value) {
-  return ipredact.redact(value, HIDDEN);
+  const out = ipredact.redact(value, HIDDEN);
+  if (typeof out !== "string" || !out.includes("Network type: ")) return out;
+  return out.replace(NETWORK_LINE, "").replace(/\n+$/, "");
 }
 
 const MASKED_FIELDS = ["target", "details", "text"];

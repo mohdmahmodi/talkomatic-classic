@@ -1631,20 +1631,19 @@ function register(socket, safe) {
           const m = list[i];
           if (m.deletedAt || !m.text) continue;
           if (!canSeeMessage(socket, key, m)) continue;
-          if (
-            m.text.toLowerCase().includes(q) ||
-            (m.author && m.author.label.toLowerCase().includes(q))
-          )
+          const text = socket.isMainDev ? m.text : maskIps(m.text);
+          const author = m.author
+            ? socket.isMainDev
+              ? m.author.label
+              : veil(m.author.label, m.author.role)
+            : null;
+          if (text.toLowerCase().includes(q) || (author && author.toLowerCase().includes(q)))
             hits.push({
               key,
               title: (socket.isMainDev ? title : maskIps(title)) || null,
               ts: m.ts,
-              author: m.author
-                ? socket.isMainDev
-                  ? m.author.label
-                  : veil(m.author.label, m.author.role)
-                : null,
-              text: (socket.isMainDev ? m.text : maskIps(m.text)).slice(0, 200),
+              author,
+              text: text.slice(0, 200),
             });
         }
       };
