@@ -2182,115 +2182,120 @@
     if (d.getFullYear() !== new Date().getFullYear()) o.year = "numeric";
     return d.toLocaleString(undefined, o);
   }
-  function banEnding(l) {
-    if (l.status === "permanent") return { cls: "red", text: "Still banned · permanent" };
-    if (l.status === "active") {
-      const ms = durationMs(l.duration);
-      const stretched = ms && l.endsAt && l.at + ms < l.endsAt - 300000;
-      return {
-        cls: "red",
-        text: "Still banned · ends in " + inWords((l.endsAt || 0) - Date.now()),
-        title: "Ends " + whenText(l.endsAt),
-        note: stretched ? "Stretched to match a longer ban on them" : null,
-      };
-    }
-    if (l.status === "served")
-      return { cls: "green", text: "Timer ran out · " + agoText(l.endedAt), title: "Ended " + whenText(l.endedAt) };
-    if (l.status === "lifted")
+  function banLive(b, now) {
+    if (!b) return false;
+    if (b.status === "active" || b.status === "permanent") return true;
+    if (b.status !== "replaced") return false;
+    if (b.duration === "permanent") return true;
+    const ms = durationMs(b.duration);
+    return !!ms && b.at + ms > now;
+  }
+  function banChip(b, extra) {
+    return {
+      text: [b.duration ? durationLabel(b.duration) : "Ban", b.by || "Automod", agoText(b.at)].join(" · "),
+      title: "Placed " + whenText(b.at),
+      cls: extra || "",
+    };
+  }
+  function banEnded(b) {
+    if (b.status === "served") return { cls: "green", text: "Expired " + agoText(b.endedAt), title: whenText(b.endedAt) };
+    if (b.status === "lifted")
       return {
         cls: "blue",
-        text: "Lifted early by " + (l.liftedBy || "Automod") + " · " + agoText(l.endedAt),
-        title: "Lifted " + whenText(l.endedAt),
-        note: l.endedAt && l.at ? "It lasted " + inWords(l.endedAt - l.at) + " of " + (l.duration ? durationLabel(l.duration).toLowerCase() : "the ban") : null,
+        text:
+          "Lifted by " +
+          (b.liftedBy || "Automod") +
+          (b.endedAt && b.at ? " after " + inWords(b.endedAt - b.at) : ""),
+        title: "Lifted " + whenText(b.endedAt),
       };
-    if (l.status === "replaced")
-      return { cls: "gray", text: "Replaced by a newer ban · " + agoText(l.endedAt), title: whenText(l.endedAt) };
+    if (b.status === "replaced") return { cls: "gray", text: "Replaced by a newer ban", title: whenText(b.endedAt) };
     return { cls: "gray", text: "Ended" };
   }
-  function banEndingShort(l) {
-    if (l.status === "permanent") return { cls: "red", text: "permanent" };
-    if (l.status === "active") return { cls: "red", text: "still running" };
-    if (l.status === "served") return { cls: "green", text: "ran out" };
-    if (l.status === "lifted") return { cls: "blue", text: "lifted by " + (l.liftedBy || "Automod") };
-    if (l.status === "replaced") return { cls: "gray", text: "replaced" };
-    return { cls: "gray", text: "ended" };
+  function banShortEnd(b) {
+    if (b.status === "served") return "expired";
+    if (b.status === "lifted") return "lifted by " + (b.liftedBy || "Automod");
+    if (b.status === "replaced") return "replaced";
+    if (b.status === "permanent") return "permanent";
+    if (b.status === "active") return "active";
+    return "ended";
   }
   function pastBanParts(p) {
     if (!p || !p.total || !p.last) return null;
+    const now = Date.now();
     const l = p.last;
+    const all = [l].concat((p.earlier || []).filter(Boolean));
     const live = l.status === "active" || l.status === "permanent";
-    const counts = [p.total + (p.total === 1 ? " ban" : " bans")];
-    if (p.served) counts.push(p.served + " ran out");
-    if (p.lifted) counts.push(p.lifted + " lifted early");
-    const earlier = (p.earlier || []).filter(Boolean).map((e) => {
-      const end = banEndingShort(e);
+    const running = live ? all.filter((b) => banLive(b, now)) : [];
+    const older = all.filter((b) => b !== l && running.indexOf(b) === -1);
+    const counts = p.total > 1 ? p.total + " bans" : null;
+    const reason = l.reason || null;
+    const olderChips = older.map((b) => ({
+      text:
+        [b.duration ? durationLabel(b.duration) : "Ban", b.by || "Automod", banShortEnd(b), agoText(b.at)].join(" · "),
+      title: "Placed " + whenText(b.at),
+      cls: b.status === "served" ? "green" : b.status === "lifted" ? "blue" : "gray",
+    }));
+    const more = Math.max(0, p.total - all.length);
+    if (live) {
+      const ends =
+        l.status === "permanent" || running.some((b) => b.duration === "permanent")
+          ? "permanent"
+          : "ends in " + inWords((l.endsAt || 0) - now);
       return {
-        cls: end.cls,
-        text:
-          (e.duration ? durationLabel(e.duration) : "Ban") +
-          " · " +
-          (e.by || "Automod") +
-          " · " +
-          end.text +
-          (e.at ? " · " + agoText(e.at) : ""),
-        title: e.at ? "Placed " + whenText(e.at) : null,
+        live,
+        title: "Currently banned · " + ends,
+        titleTip: l.endsAt ? "Ends " + whenText(l.endsAt) : null,
+        counts,
+        rows: [
+          [running.length > 1 ? "Bans" : "Ban", running.map((b) => banChip(b)), running.length > 1 ? "The longest ban applies." : null],
+          olderChips.length ? ["Earlier", olderChips, more ? "+" + more + " more" : null] : null,
+        ].filter(Boolean),
+        reason,
       };
-    });
+    }
     return {
       live,
-      title: live ? "Banned right now" : "Banned before",
-      counts: p.total > 1 ? counts.join(" · ") : null,
-      label: live ? "Current ban" : "Last ban",
-      facts: [
-        { text: l.duration ? durationLabel(l.duration) : "Unknown length" },
-        { text: "by " + (l.by || "Automod") },
-        { text: "placed " + agoText(l.at), title: whenText(l.at) },
-      ],
-      ending: banEnding(l),
-      reason: l.reason || null,
-      earlier,
-      more: Math.max(0, p.total - 1 - earlier.length),
+      title: "Banned before",
+      counts,
+      rows: [
+        ["Last ban", [banChip(l)]],
+        ["Ended", [banEnded(l)]],
+        olderChips.length ? ["Earlier", olderChips, more ? "+" + more + " more" : null] : null,
+      ].filter(Boolean),
+      reason,
     };
   }
   function pastBanText(p) {
     const b = pastBanParts(p);
     if (!b) return null;
-    return [
-      b.title + (b.counts ? " (" + b.counts + ")" : ""),
-      b.label + ": " + b.facts.map((f) => f.text).join(", "),
-      "Outcome: " + b.ending.text + (b.ending.note ? ". " + b.ending.note : ""),
-      b.reason ? "Reason: " + b.reason : null,
-      b.earlier.length ? "Earlier: " + b.earlier.map((e) => e.text).join("; ") : null,
-    ]
-      .filter(Boolean)
+    return [b.title + (b.counts ? " (" + b.counts + ")" : "")]
+      .concat(b.rows.map((r) => r[0] + ": " + r[1].map((c) => c.text).join(", ") + (r[2] ? ". " + r[2] : "")))
+      .concat(b.reason ? ["Reason: " + b.reason] : [])
       .join("\n");
+  }
+  function pastBanHandled(p, reportedAt) {
+    const l = p && p.last;
+    if (!l || !(l.status === "active" || l.status === "permanent")) return null;
+    if (reportedAt && l.at < reportedAt) return null;
+    return "Handled: banned by " + (l.by || "Automod") + " " + agoText(l.at) + ". You can discard this report.";
   }
   function pastBanBox(p) {
     const b = pastBanParts(p);
     if (!b) return null;
-    const chip = (c, extra) =>
-      el("span", { class: "tk-past-chip" + (extra ? " " + extra : ""), text: c.text, title: c.title || null });
-    const row = (label, kids) =>
-      el("div", { class: "tk-past-row" }, [
-        el("span", { class: "tk-past-k", text: label }),
-        el("div", { class: "tk-past-chips" }, kids),
-      ]);
     const kids = [
       el("div", { class: "tk-past-head" }, [
-        el("span", { class: "tk-past-title", text: b.title }),
+        el("span", { class: "tk-past-title", text: b.title, title: b.titleTip || null }),
         b.counts ? el("span", { class: "tk-past-counts", text: b.counts }) : null,
       ]),
-      row(b.label, b.facts.map((f) => chip(f))),
-      row("Outcome", [
-        chip(b.ending, "end " + b.ending.cls),
-        b.ending.note ? el("span", { class: "tk-past-note", text: b.ending.note }) : null,
-      ]),
     ];
-    if (b.earlier.length) {
-      const list = b.earlier.map((e) => chip(e, "small " + e.cls));
-      if (b.more) list.push(el("span", { class: "tk-past-note", text: "+" + b.more + " more" }));
-      kids.push(row("Earlier", list));
-    }
+    b.rows.forEach(([label, chips, note]) => {
+      const box = el("div", { class: "tk-past-chips" });
+      chips.forEach((c) =>
+        box.appendChild(el("span", { class: "tk-past-chip " + (c.cls || ""), text: c.text, title: c.title || null })),
+      );
+      if (note) box.appendChild(el("span", { class: "tk-past-note", text: note }));
+      kids.push(el("div", { class: "tk-past-row" }, [el("span", { class: "tk-past-k", text: label }), box]));
+    });
     if (b.reason) {
       const text = el("div", { class: "tk-past-reason", text: b.reason });
       text.hidden = true;
@@ -2311,6 +2316,7 @@
     banOutcome,
     pastBanText,
     pastBanBox,
+    pastBanHandled,
     escape,
     el,
     modal,

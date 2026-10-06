@@ -4404,6 +4404,13 @@
       }
       head.appendChild(idCol);
       card.appendChild(head);
+      const handled = r.pastBans && StaffUI.pastBanHandled(r.pastBans, r.first);
+      if (handled) {
+        const h = divc("rc-handled");
+        h.appendChild(icon("fa-circle-check"));
+        h.appendChild(span(null, handled));
+        card.appendChild(h);
+      }
 
       const catEntries = Object.entries(r.categories || {}).sort(
         (a, b) => b[1] - a[1],
