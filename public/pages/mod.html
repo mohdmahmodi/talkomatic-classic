@@ -936,6 +936,58 @@
         white-space: pre-wrap;
         word-break: break-word;
       }
+      .entry .detail.dl {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        white-space: normal;
+      }
+      .dl-sum {
+        font-weight: 600;
+        line-height: 1.4;
+      }
+      .dl-row {
+        display: flex;
+        flex-direction: column;
+        gap: 0.125rem;
+        padding-top: 0.4375rem;
+        border-top: 1px solid var(--line-soft);
+      }
+      .dl-sum + .dl-row {
+        border-top: 0;
+        padding-top: 0;
+      }
+      .dl-k {
+        color: var(--dim2);
+        font-size: 0.6875rem;
+        font-weight: bold;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+      }
+      .dl-v {
+        line-height: 1.4;
+        overflow-wrap: anywhere;
+      }
+      .dl-ip,
+      .dl-id {
+        font-family: "Courier New", monospace;
+        font-size: 0.7813rem;
+      }
+      .dl-ip {
+        color: var(--amber);
+      }
+      .dl-id {
+        color: var(--dim);
+      }
+      .dl-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.0625rem;
+      }
+      body.compact .dl-ip,
+      body.compact .dl-id {
+        font-size: 0.875rem;
+      }
       /* ── Compact mode ──
          One column of full records, read straight down, at a width you can
          actually read a line of text at. Compact means fewer lines and larger
@@ -3515,460 +3567,546 @@
         text-align: center;
       }
 
-      /* ── Ban list: a table, not cards ──────────────────────────────────
-         One person is one fixed-height row, so somebody with thirty blocks
-         takes no more room than somebody with one, and 20+ bans stay
-         scannable. Their blocks open in a detail panel underneath. */
-      /* Square: every row wears a duration strip on its left edge. */
-      .bantable {
-        border: 1px solid var(--line-soft);
-        border-radius: 0;
-        overflow: hidden;
+      /* ── Ban list ── */
+      .bl-views {
+        display: flex;
+        gap: 0.25rem;
+        margin: 0 0 0.875rem;
+        overflow-x: auto;
+        scrollbar-width: none;
       }
-      .banhead,
-      .banrow {
-        display: grid;
-        grid-template-columns: 1.625rem 2.5rem minmax(0, 1fr) minmax(0, 13.125rem)
-          6.875rem 5.125rem 8rem;
-        align-items: center;
-        gap: 0.625rem;
-      }
-      .banhead {
-        padding: 0.5625rem 0.875rem;
-        background: var(--tile);
-        font-size: 0.6563rem;
-        font-weight: bold;
-        letter-spacing: 0.6px;
-        text-transform: uppercase;
-        color: var(--dim2);
-      }
-      .banrow {
-        width: 100%;
-        text-align: left;
+      .bl-views button {
         appearance: none;
-        background: var(--card);
+        background: transparent;
         border: none;
-        border-top: 1px solid var(--line-soft);
-        border-left: 3px solid var(--amber);
-        color: var(--txt);
-        font-family: inherit;
-        padding: 0.625rem 0.875rem 0.625rem 0.6875rem;
-        cursor: pointer;
-        transition: background-color 0.12s ease;
-      }
-      .banrow.perm {
-        border-left-color: var(--red);
-      }
-      .banrow:hover {
-        background: var(--tile);
-      }
-      .banrow.open {
-        background: var(--tile);
-      }
-      .br-chev {
+        border-bottom: 2px solid transparent;
         color: var(--dim2);
-        font-size: 0.6875rem;
-        transition: transform 0.15s ease;
+        font-family: inherit;
+        font-size: 0.875rem;
+        font-weight: bold;
+        padding: 0.5rem 0.75rem 0.5625rem;
+        cursor: pointer;
+        white-space: nowrap;
       }
-      .banrow.open .br-chev {
-        transform: rotate(90deg);
+      .bl-views button:hover {
+        color: var(--txt);
+      }
+      .bl-views button.on {
+        color: var(--txt);
+        border-bottom-color: var(--orange);
+      }
+      .bl-n {
+        margin-left: 0.25rem;
+        color: var(--dim2);
+        font-weight: normal;
+        font-variant-numeric: tabular-nums;
+      }
+      .bl-tools {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.5rem 0.75rem;
+        margin-bottom: 0.75rem;
+      }
+      .bl-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.25rem;
+      }
+      .bl-chip {
+        appearance: none;
+        background: var(--tile);
+        border: none;
+        border-radius: 0.25rem;
+        color: var(--dim);
+        font-family: inherit;
+        font-size: 0.8125rem;
+        padding: 0.4375rem 0.75rem;
+        cursor: pointer;
+      }
+      .bl-chip:hover {
+        color: var(--txt);
+        background: var(--tile-hover);
+      }
+      .bl-chip.on {
+        background: #3a2a10;
         color: var(--orange);
       }
-      .br-av {
-        width: 2.125rem;
-        height: 2.125rem;
-        font-size: 0.875rem;
-        border-radius: 0.3125rem;
+      .bl-sort {
+        background: var(--tile);
+        border: none;
+        border-radius: 0.25rem;
+        color: var(--dim);
+        font-family: inherit;
+        font-size: 0.8125rem;
+        padding: 0.4375rem 0.5rem;
       }
-      .br-who {
-        min-width: 0;
+      .bl-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
       }
-      .br-name {
-        display: block;
-        font-size: 0.9063rem;
-        font-weight: bold;
-        color: var(--txt);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+      .bl-item,
+      .bl-ev {
+        background: var(--card);
       }
-      .br-sub {
-        font-size: 0.7188rem;
-        color: var(--dim2);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .br-blocks {
+      .bl-row,
+      .bl-ev {
         display: flex;
         align-items: center;
-        gap: 0.375rem;
+        gap: 0.5rem 1.25rem;
         flex-wrap: wrap;
+        width: 100%;
+        padding: 0.75rem 1rem;
+        color: var(--txt);
+        text-align: left;
+        font-family: inherit;
+      }
+      .bl-row {
+        appearance: none;
+        background: transparent;
+        border: none;
+        cursor: pointer;
+      }
+      .bl-row:hover {
+        background: #1c1c1c;
+      }
+      .bl-item.open .bl-row {
+        background: #2a2a2a;
+      }
+      .bl-row:focus-visible,
+      .bl-chip:focus-visible,
+      .bl-page:focus-visible,
+      .bl-btn:focus-visible {
+        outline: 2px solid var(--orange);
+        outline-offset: -2px;
+      }
+      .bl-main {
+        flex: 1 1 16rem;
         min-width: 0;
       }
-      .br-count {
+      .bl-name {
         font-size: 0.9375rem;
         font-weight: bold;
-        color: var(--txt);
-        font-variant-numeric: tabular-nums;
+        overflow-wrap: anywhere;
       }
-      .br-unit {
-        font-size: 0.7188rem;
-        color: var(--dim2);
-        margin-right: 0.125rem;
-      }
-      .br-by,
-      .br-when {
-        font-size: 0.7813rem;
-        color: var(--dim);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .br-when {
-        color: var(--dim2);
-        font-variant-numeric: tabular-nums;
-      }
-      .br-ends {
-        justify-self: end;
-      }
-      .bandetail {
-        background: var(--bg);
-        border-top: 1px solid var(--line-soft);
-        padding: 0.75rem 0.875rem 0.375rem 2.5rem;
-      }
-      .bandetail-foot {
-        display: flex;
-        justify-content: flex-end;
-        padding: 0 0 0.625rem;
-      }
-      /* The card-era boxes are reused inside the panel, minus their card gutters */
-      .bandetail .blocks,
-      .bandetail .bc-msg,
-      .bandetail .bc-idline {
-        margin-left: 0;
-        margin-right: 0;
-        padding-left: 0;
-        padding-right: 0;
-      }
-      .bandetail .bc-msg {
-        padding: 0.5625rem 0.75rem;
-      }
-      .bandetail .blocks {
-        max-height: 25rem;
-        overflow-y: auto;
-        padding-bottom: 0;
-      }
-      .bantotal {
-        padding: 0.5625rem 0.875rem;
-        background: var(--tile);
-        border-top: 1px solid var(--line-soft);
-        font-size: 0.75rem;
-        color: var(--dim2);
-        text-align: right;
-      }
-      /* Drop the least useful columns first as space runs out */
-      @media (max-width: 67.5rem) {
-        .banhead,
-        .banrow {
-          grid-template-columns: 1.625rem 2.5rem minmax(0, 1fr) minmax(0, 11.875rem) 5.125rem 8rem;
-        }
-        .banhead > :nth-child(5),
-        .br-by {
-          display: none;
-        }
-      }
-      @media (max-width: 48.75rem) {
-        .banhead {
-          display: none;
-        }
-        .banrow {
-          grid-template-columns: 1.375rem 2.125rem minmax(0, 1fr) auto;
-          gap: 0.5rem;
-        }
-        .br-when {
-          display: none;
-        }
-        .br-blocks {
-          grid-column: 3;
-          grid-row: 2;
-        }
-        .br-ends {
-          grid-row: 1;
-        }
-        .bandetail {
-          padding-left: 0.875rem;
-        }
-      }
-
-      /* ── Ban list (legacy card styles, still used by the detail panel) ── */
-      .bancard {
-        background: var(--card);
-        border: 1px solid var(--line-soft);
-        border-left: 4px solid var(--amber);
-        border-radius: 0;
-        overflow: hidden;
-        transition: border-color 0.15s ease;
-      }
-      .bancard:hover {
-        border-color: var(--orange);
-      }
-      .bancard.perm {
-        border-left-color: var(--red);
-      }
-      .bc-head {
-        display: flex;
-        align-items: flex-start;
-        gap: 0.75rem;
-        padding: 0.8125rem 0.9375rem 0.625rem;
-      }
-      .bc-head .avatar {
-        width: 2.625rem;
-        height: 2.625rem;
-        font-size: 1.0625rem;
-      }
-      .bc-id {
-        display: flex;
-        flex-direction: column;
-        gap: 0.1875rem;
-        min-width: 0;
-        flex: 1;
-      }
-      .bc-name {
-        font-size: 1rem;
-        font-weight: bold;
-        color: var(--txt);
-        word-break: break-word;
-        line-height: 1.25;
-      }
-      .bc-meta {
-        display: flex;
-        align-items: center;
-        gap: 0.3125rem 0.75rem;
-        flex-wrap: wrap;
-        font-size: 0.75rem;
-        color: var(--dim2);
-      }
-      .bc-meta b {
+      .bl-loc {
+        font-weight: normal;
         color: var(--dim);
       }
-      /* One block entry inside a person's ban card */
-      .blocks {
-        display: flex;
-        flex-direction: column;
-        gap: 0.375rem;
-        padding: 0 0.9375rem 0.6875rem;
-      }
-      .blockrow {
-        display: flex;
-        align-items: center;
-        gap: 0.5625rem;
-        flex-wrap: wrap;
-        background: var(--tile);
-        border-radius: 0.3125rem;
-        padding: 0.5rem 0.625rem;
-        font-size: 0.7813rem;
-      }
-      .blockrow .addr {
-        font-family: "Courier New", monospace;
-        color: var(--amber);
-        word-break: break-all;
-        min-width: 0;
-        flex: 1;
-      }
-      .blockrow .addr.dim {
-        color: var(--dim2);
-        font-family: inherit;
-        font-style: italic;
-      }
-      .blockrow .ibtn {
-        background: transparent;
-        border: none;
-        color: var(--dim2);
-        cursor: pointer;
-        padding: 0.25rem 0.375rem;
-        border-radius: 0.25rem;
+      .bl-hint {
+        margin-left: 0.5rem;
         font-size: 0.75rem;
-        transition:
-          color 0.15s ease,
-          background-color 0.15s ease;
+        font-weight: normal;
+        color: var(--dim2);
       }
-      .blockrow .ibtn:hover {
-        background: var(--tile-hover);
-        color: var(--orange);
-      }
-      /* Stands in for the unban button on a block this viewer cannot lift. */
-      .blockrow .ibtn.locked,
-      .blockrow .ibtn.locked:hover {
-        background: transparent;
-        color: var(--dim);
-        cursor: default;
-        opacity: 0.6;
-      }
-      .blockrow .ibtn.danger:hover {
-        color: var(--red);
-      }
-      .btag {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.25rem;
-        font-size: 0.5938rem;
-        font-weight: bold;
-        letter-spacing: 0.5px;
-        padding: 0.125rem 0.4375rem;
-        border-radius: 0.25rem;
-        white-space: nowrap;
-      }
-      .btag.ip {
-        background: rgba(255, 180, 84, 0.16);
-        color: var(--amber);
-      }
-      .btag.range {
-        background: rgba(90, 169, 255, 0.16);
-        color: var(--blue);
-      }
-      .btag.uid {
-        background: rgba(192, 139, 255, 0.16);
-        color: var(--purple);
-      }
-      .bc-repeat {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.3125rem;
-        font-size: 0.6875rem;
-        font-weight: bold;
-        padding: 0.125rem 0.5625rem;
-        border-radius: 1.25rem;
-        white-space: nowrap;
-        background: rgba(255, 84, 104, 0.16);
-        color: var(--red);
-      }
-      .bc-msg {
-        margin: 0 0.9375rem 0.6875rem;
-        padding: 0.5625rem 0.75rem;
-        background: var(--tile);
-        border-radius: 0.3125rem;
-        font-size: 0.8125rem;
-        color: var(--txt);
-        line-height: 1.5;
-        word-break: break-word;
-        white-space: pre-wrap;
-      }
-      .bc-msg .lbl {
+      .bl-why {
         display: block;
-        font-size: 0.625rem;
-        font-weight: bold;
-        letter-spacing: 0.4px;
-        text-transform: uppercase;
-        color: var(--dim2);
-        margin-bottom: 0.25rem;
-        white-space: normal;
+        margin-top: 0.125rem;
+        font-size: 0.8125rem;
+        color: var(--dim);
+        overflow-wrap: anywhere;
       }
-      .bc-msg.none {
+      .bl-why.none {
         color: var(--dim2);
         font-style: italic;
       }
-      .bc-idline {
-        margin: 0 0.9375rem 0.6875rem;
-        font-size: 0.7188rem;
-        color: var(--dim2);
-        word-break: break-all;
-      }
-
-      /* ── Ban & unban history ── */
-      .banhist {
-        display: flex;
-        flex-direction: column;
-        gap: 0;
-        border: 1px solid var(--line-soft);
-        border-radius: 0.3125rem;
-        overflow: hidden;
-      }
-      .bhrow {
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
-        padding: 0.625rem 0.875rem;
-        background: var(--card);
-        border-top: 1px solid var(--line-soft);
-      }
-      .banhist .bhrow:first-child {
-        border-top: none;
-      }
-      .bhrow:hover {
-        background: var(--tile);
-      }
-      .bhrow .bh-ic {
-        width: 1.875rem;
-        height: 1.875rem;
-        flex: none;
-        border-radius: 0.3125rem;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 0.8125rem;
-      }
-      .bhrow.ban .bh-ic {
-        background: rgba(255, 84, 104, 0.16);
-        color: var(--red);
-      }
-      .bhrow.unban .bh-ic {
-        background: rgba(87, 217, 163, 0.16);
-        color: var(--green);
-      }
-      .bhrow .bh-main {
-        flex: 1;
-        min-width: 0;
+      .bl-side {
+        flex: 0 0 auto;
+        text-align: right;
         display: flex;
         flex-direction: column;
         gap: 0.125rem;
       }
-      .bhrow .bh-line {
-        font-size: 0.8438rem;
-        color: var(--txt);
-        word-break: break-word;
+      .bl-left {
+        font-size: 0.875rem;
+        font-weight: bold;
+        color: var(--amber);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
       }
-      .bhrow .bh-line .verb-ban {
+      .bl-left.perm,
+      .bl-left.active,
+      .bl-left.permanent {
         color: var(--red);
-        font-weight: bold;
       }
-      .bhrow .bh-line .verb-unban {
+      .bl-left.served {
         color: var(--green);
-        font-weight: bold;
       }
-      .bhrow .bh-sub {
+      .bl-left.lifted {
+        color: #8cc4ff;
+      }
+      .bl-left.replaced,
+      .bl-left.ended {
+        color: var(--dim2);
+      }
+      .bl-facts {
+        display: grid;
+        grid-template-columns: max-content minmax(0, 1fr);
+        gap: 0.375rem 1rem;
+        padding: 0.625rem 0.75rem;
+        background: var(--card);
+        border-radius: 0.25rem;
+      }
+      .bl-fact {
+        display: contents;
+      }
+      .bl-fact-k {
         font-size: 0.75rem;
         color: var(--dim2);
-        word-break: break-word;
-        display: flex;
-        gap: 0.375rem 0.75rem;
-        flex-wrap: wrap;
-        align-items: center;
+        padding-top: 0.0625rem;
       }
-      .bhrow .bh-sub .ip {
-        color: var(--amber);
+      .bl-fact-v {
+        font-size: 0.8125rem;
+        color: var(--txt);
+        line-height: 1.45;
+        overflow-wrap: anywhere;
+      }
+      .bl-fact-v.mono {
         font-family: "Courier New", monospace;
       }
-      .bhrow .bh-when {
+      .bl-fact-v.active {
+        color: #ff8a96;
+      }
+      .bl-fact-v.served {
+        color: var(--green);
+      }
+      .bl-fact-v.lifted {
+        color: #8cc4ff;
+      }
+      .bl-fact-v.warn {
+        color: var(--amber);
+      }
+      .bl-sec .bl-sec {
+        margin-top: 0.75rem;
+      }
+      @media (max-width: 30rem) {
+        .bl-facts {
+          grid-template-columns: minmax(0, 1fr);
+          gap: 0.125rem;
+        }
+        .bl-fact-v {
+          margin-bottom: 0.375rem;
+        }
+      }
+      .bl-meta {
         font-size: 0.75rem;
         color: var(--dim2);
         white-space: nowrap;
         font-variant-numeric: tabular-nums;
       }
-      .stchip {
+      .bl-detail {
+        display: none;
+        padding: 0.875rem 1rem 1rem;
+        background: #151515;
+      }
+      .bl-item.open .bl-detail {
+        display: grid;
+        gap: 0.875rem;
+      }
+      .bl-sec-title {
+        margin-bottom: 0.375rem;
+        font-size: 0.75rem;
+        font-weight: bold;
+        color: var(--dim2);
+      }
+      .bl-text {
+        font-size: 0.8125rem;
+        color: var(--txt);
+        line-height: 1.45;
+        overflow-wrap: anywhere;
+      }
+      .bl-text.none {
+        color: var(--dim2);
+      }
+      .bl-block {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.375rem 1rem;
+        padding: 0.5rem 0.625rem;
+        background: var(--card);
+      }
+      .bl-block + .bl-block {
+        margin-top: 0.125rem;
+      }
+      .bl-block-what {
+        flex: 1 1 12rem;
+        display: flex;
+        align-items: baseline;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        min-width: 0;
+      }
+      .bl-kind {
+        font-size: 0.8125rem;
+        font-weight: bold;
+      }
+      .bl-val {
+        font-size: 0.8125rem;
+        color: var(--dim2);
+        overflow-wrap: anywhere;
+      }
+      .bl-note {
+        font-size: 0.75rem;
+        color: var(--dim2);
+        font-style: italic;
+      }
+      .bl-acts {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.25rem;
+      }
+      .bl-btn {
+        appearance: none;
+        background: var(--tile);
+        border: none;
+        border-radius: 0.25rem;
+        color: var(--dim);
+        font-family: inherit;
+        font-size: 0.75rem;
+        padding: 0.375rem 0.625rem;
+        cursor: pointer;
+      }
+      .bl-btn:hover {
+        background: var(--tile-hover);
+        color: var(--txt);
+      }
+      .bl-btn.danger {
+        color: #ff8a96;
+      }
+      .bl-btn.danger:hover {
+        background: #3a1418;
+        color: #ffb3bb;
+      }
+      .bl-locked {
+        font-size: 0.75rem;
+        color: var(--dim2);
+      }
+      .bl-past {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.125rem 0.75rem;
+        align-items: baseline;
+        padding: 0.25rem 0;
+      }
+      .bl-past .bl-why {
+        margin: 0;
+      }
+      .bl-out {
+        font-size: 0.75rem;
+        font-weight: bold;
+        white-space: nowrap;
+      }
+      .bl-out.active {
+        color: var(--red);
+      }
+      .bl-out.served {
+        color: var(--green);
+      }
+      .bl-out.lifted {
+        color: var(--blue);
+      }
+      .bl-out.replaced,
+      .bl-out.ended {
+        color: var(--dim2);
+      }
+      .bl-id {
+        font-size: 0.75rem;
+        color: var(--dim2);
+        overflow-wrap: anywhere;
+      }
+      .bl-foot {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 0.75rem;
+      }
+      .bl-evsub {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 0.125rem 0.75rem;
+        margin-top: 0.1875rem;
+      }
+      .bl-evsub .bl-why {
+        margin: 0;
+      }
+      .bl-actor {
+        color: var(--txt);
+      }
+      .bl-verb {
+        margin: 0 0.375rem;
+        font-weight: normal;
+        color: #ff8a96;
+      }
+      .bl-verb.lift {
+        color: var(--green);
+      }
+      .bl-pager {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem;
+        padding: 0.75rem 0.125rem 0;
+      }
+      .bl-pages {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.25rem;
+      }
+      .bl-page {
+        appearance: none;
+        min-width: 2rem;
+        background: var(--tile);
+        border: none;
+        border-radius: 0.25rem;
+        color: var(--dim);
+        font-family: inherit;
+        font-size: 0.8125rem;
+        padding: 0.375rem 0.625rem;
+        cursor: pointer;
+        font-variant-numeric: tabular-nums;
+      }
+      .bl-page:hover:not(:disabled):not(.on) {
+        background: var(--tile-hover);
+        color: var(--txt);
+      }
+      .bl-page.on {
+        background: #3a2a10;
+        color: var(--orange);
+        cursor: default;
+      }
+      .bl-page:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+      @media (max-width: 36rem) {
+        .bl-side {
+          text-align: left;
+          flex-basis: 100%;
+          flex-direction: row;
+          gap: 0.75rem;
+          align-items: baseline;
+        }
+        .bl-row,
+        .bl-ev,
+        .bl-detail {
+          padding-left: 0.75rem;
+          padding-right: 0.75rem;
+        }
+      }
+      .bl-tags {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.25rem;
+        margin-top: 0.375rem;
+      }
+      .bl-tag {
         display: inline-flex;
         align-items: center;
         gap: 0.25rem;
-        font-size: 0.5938rem;
-        font-weight: bold;
-        letter-spacing: 0.5px;
-        padding: 0.125rem 0.4375rem;
+        padding: 0.1875rem 0.5rem;
         border-radius: 0.25rem;
-        white-space: nowrap;
+        background: #1f1f1f;
+        color: var(--dim);
+        font-size: 0.75rem;
+        line-height: 1.35;
+        overflow-wrap: anywhere;
       }
-      .stchip.active {
-        background: rgba(87, 217, 163, 0.16);
+      .bl-detail .bl-tag {
+        background: var(--card);
+      }
+      .bl-tag-n {
+        color: var(--dim2);
+        font-variant-numeric: tabular-nums;
+      }
+      .bl-tag.mono {
+        font-family: "Courier New", monospace;
+      }
+      .bl-tag.warn {
+        color: var(--amber);
+      }
+      .bl-tag.good {
         color: var(--green);
+      }
+      .bl-tag.out {
+        font-weight: bold;
+      }
+      .bl-tag.out.active {
+        background: #2c1216;
+        color: #ff8a96;
+      }
+      .bl-tag.out.served {
+        background: #10261c;
+        color: var(--green);
+      }
+      .bl-tag.out.lifted {
+        background: #10213a;
+        color: #8cc4ff;
+      }
+      .bl-tag.out.replaced,
+      .bl-tag.out.ended {
+        color: var(--dim2);
+      }
+      .bl-why.clamp {
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .bl-quote {
+        margin-top: 0.5rem;
+        padding: 0.625rem 0.75rem;
+        background: var(--card);
+        border-radius: 0.25rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+      }
+      .bl-quote-head {
+        font-size: 0.6875rem;
+        font-weight: bold;
+        color: var(--dim2);
+      }
+      .bl-quote-head:not(:first-child) {
+        margin-top: 0.375rem;
+      }
+      .bl-quote-line {
+        font-family: "Courier New", monospace;
+        font-size: 0.8125rem;
+        color: var(--txt);
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .bl-quote-line.dim {
+        color: var(--dim);
+      }
+      .bl-quote-line.gap + .bl-quote-line.gap {
+        margin-top: 0.5rem;
+      }
+      .bl-quote-line.prose {
+        font-family: inherit;
+        line-height: 1.45;
+      }
+      .pastban {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.5rem;
+        margin: 0 0.8125rem 0.5rem;
+        padding: 0.5rem 0.625rem;
+        background: #2a2112;
+        border-radius: 0.25rem;
+        color: var(--txt);
+        font-size: 0.75rem;
+        line-height: 1.4;
+      }
+      .pastban i {
+        color: var(--amber);
+        margin-top: 0.125rem;
       }
 
       /* ── Sessions ── */
@@ -4908,7 +5046,7 @@
         <section id="tab-bans" class="panel">
           <div class="strip">
             <i class="fas fa-ban lead" style="color: #ff5468"></i> Ban list
-            <span class="sub" id="bansSub">Active blocks placed by staff</span>
+            <span class="sub" id="bansSub">Loading</span>
             <div class="ph-actions">
               <button id="banIpBtn" class="btn sm primary">
                 <i class="fas fa-plus"></i> Ban an IP or range
@@ -4921,45 +5059,35 @@
               </button>
             </div>
           </div>
-          <div class="toolbar">
+          <div class="bl-views" id="banViews" role="tablist">
+            <button type="button" role="tab" data-v="now" class="on">
+              Banned now <span class="bl-n" id="banCountNow">0</span>
+            </button>
+            <button type="button" role="tab" data-v="ended">
+              Ended this week <span class="bl-n" id="banCountEnded">0</span>
+            </button>
+            <button type="button" role="tab" data-v="history">
+              History <span class="bl-n" id="banCountHist">0</span>
+            </button>
+          </div>
+          <div class="bl-tools">
             <div class="search-wrap">
               <i class="fas fa-magnifying-glass"></i>
               <input
                 id="banSearch"
                 class="search"
-                placeholder="Search name, IP, id, staff member, or reason"
+                placeholder="Search a name, reason, staff member or id"
               />
             </div>
-            <div class="seg" id="banSeg">
-              <button class="active" data-b="all">All</button>
-              <button data-b="perm">Permanent</button>
-              <button data-b="temp">Temporary</button>
-              <button data-b="id">ID bans</button>
-            </div>
+            <div class="bl-chips" id="banFilters"></div>
+            <select id="banSort" class="bl-sort" aria-label="Sort">
+              <option value="newest">Newest first</option>
+              <option value="ending">Ending soonest</option>
+              <option value="blocks">Most blocks</option>
+            </select>
           </div>
-          <div id="bansList" class="bantable"></div>
-
-          <div class="strip mini">
-            <i class="fas fa-clock-rotate-left lead ic-orange"></i> Ban &amp;
-            unban history
-            <span class="sub" id="banHistSub">Who banned or unbanned whom</span>
-          </div>
-          <div class="toolbar">
-            <div class="search-wrap">
-              <i class="fas fa-magnifying-glass"></i>
-              <input
-                id="banHistSearch"
-                class="search"
-                placeholder="Search history by name, IP, id, or staff member"
-              />
-            </div>
-            <div class="seg" id="banHistSeg">
-              <button class="active" data-h="all">All</button>
-              <button data-h="ban">Bans</button>
-              <button data-h="unban">Unbans</button>
-            </div>
-          </div>
-          <div id="banHistoryList" class="banhist"></div>
+          <div id="bansList" class="bl-list"></div>
+          <div id="banPager" class="bl-pager"></div>
         </section>
 
         <!-- Mods -->

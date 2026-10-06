@@ -34,6 +34,8 @@ const CENSUS_MS = 5 * 60 * 1000;
 let cache = null;
 let counted = null;
 
+const EVASION_REASON = require("./banstatus").AUTOMOD_EVASION;
+
 function head(ip) {
   try {
     const a = ipaddr.parse(String(ip).split("/")[0]);
@@ -260,7 +262,7 @@ function placeAutoBlock({ deviceId, ip, username, signal }) {
     by: null,
     ts: Date.now(),
     since: since || Date.now(),
-    reason: "Ban evasion.",
+    reason: EVASION_REASON,
     did: deviceId,
   };
 
@@ -288,7 +290,7 @@ function placeAutoBlock({ deviceId, ip, username, signal }) {
     ip: placed.find((k) => !ipban.isIdKey(k)) || placed[0],
     name: entry.label,
     action: "ban",
-    reason: "Ban evasion.",
+    reason: EVASION_REASON,
     duration: permanent ? "permanent" : durations.nearestKey(expiry - Date.now()),
   });
   return { keys: placed, expiry, permanent };

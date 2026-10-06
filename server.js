@@ -52,6 +52,7 @@ const personblocks = require("./server/personblocks");
 const devicetoken = require("./server/devicetoken");
 const proxyguard = require("./server/proxyguard");
 const ipredact = require("./server/ipredact");
+const banstatus = require("./server/banstatus");
 const identity = require("./server/identity");
 const audit = require("./server/audit");
 const communityThemes = require("./server/themes");
@@ -522,14 +523,16 @@ io.use((socket, next) => {
         // Staff wrote this to be read by the person they blocked, and
         // "evading from x.x.x.x" is a natural thing to write. It gets the
         // same treatment on the way out as anything else somebody typed.
-        reason: ipredact.redact((block && block.reason) || null),
+        reason: ipredact.redact(
+          banstatus.shownReason(block && block.by, block && block.reason),
+        ),
         // When it was placed, and who it came from as the user is told it:
         // the team rather than the person, so nobody can be gone after for a
         // decision the team made.
-        by: roles.publicStaffName(
-          (block && block.by) || null,
-          (block && block.byRole) || null,
-        ),
+        by:
+          block && typeof block === "object" && "by" in block
+            ? roles.publicStaffName(block.by, block.byRole || null)
+            : null,
         bannedAt: (block && typeof block === "object" && block.ts) || null,
       };
       if (deviceId) identity.setAckDue(deviceId, true);
@@ -1440,7 +1443,7 @@ app.get(`${API}/ban-status`, (req, res) => {
   const { deviceId, legacyId } = who;
   const banned = !!eff;
   const b = eff ? eff.block : null;
-  const reason = b ? ipredact.redact(b.reason || null) : null;
+  const reason = b ? ipredact.redact(banstatus.shownReason(b.by, b.reason)) : null;
   const rule = /^Rule (\d+)\b/.exec(reason || "");
   res.json({
     banned,
@@ -1448,7 +1451,7 @@ app.get(`${API}/ban-status`, (req, res) => {
     expiry: banned ? eff.expiry : 0,
     reason,
     rule: rule ? Number(rule[1]) : null,
-    by: banned ? roles.publicStaffName(b && b.by, b && b.byRole) : null,
+    by: banned && b && "by" in b ? roles.publicStaffName(b.by, b.byRole) : null,
     bannedAt: (b && b.ts) || null,
     since: banned ? eff.since || null : null,
     file: deviceId ? ownFile(req, deviceId, legacyId) : [],

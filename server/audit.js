@@ -1428,6 +1428,36 @@ function hitsOn(who, since) {
   return out;
 }
 
+function blockEntryAround(at, match, windowMs = 2 * 60 * 1000) {
+  let lo = 0;
+  let hi = entries.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if ((entries[mid].ts || 0) < at - windowMs) lo = mid + 1;
+    else hi = mid;
+  }
+  let best = null;
+  for (let i = lo; i < entries.length; i++) {
+    const e = entries[i];
+    if ((e.ts || 0) > at + windowMs) break;
+    if (e.type !== "action" || !HEAVY.has(baseAction(e.action)) || !match(e)) continue;
+    if (!best || Math.abs(e.ts - at) < Math.abs(best.ts - at)) best = e;
+  }
+  return best;
+}
+
+function blockEntryNear(who, at, by, windowMs = 2 * 60 * 1000) {
+  let best = null;
+  for (const e of hitsOn(who, at - windowMs)) {
+    if (e.type !== "action" || !HEAVY.has(baseAction(e.action))) continue;
+    if (by && e.label !== by) continue;
+    const gap = Math.abs((e.ts || 0) - at);
+    if (gap > windowMs) continue;
+    if (!best || gap < Math.abs((best.ts || 0) - at)) best = e;
+  }
+  return best;
+}
+
 // Everything staff have done to one person since a moment in time, newest
 // first. Any staff member, not just the one asking.
 function actionsOn(who, since, limit = 10) {
@@ -1756,6 +1786,8 @@ module.exports = {
   recordWriteup,
   getEntry,
   actionsOn,
+  blockEntryNear,
+  blockEntryAround,
   identityOn,
   entriesOn,
   actsForLabel,

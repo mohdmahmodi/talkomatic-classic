@@ -311,7 +311,9 @@ function publicList({ deviceId, isDev, isStaff, limit = MAX } = {}) {
         status: s.status,
         statusBy: isStaff
           ? roles.systemLabel(s.statusBy, s.statusRole)
-          : roles.publicStaffName(s.statusBy, s.statusRole),
+          : s.statusBy
+            ? roles.publicStaffName(s.statusBy, s.statusRole)
+            : null,
         statusAt: s.statusAt,
         up,
         down,

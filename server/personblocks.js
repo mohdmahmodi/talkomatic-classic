@@ -96,7 +96,10 @@ function effective(who, keys) {
   for (const c of covering) if (!seen.has(c.key)) all.push(c);
   if (!all.length) return null;
   const top = longest(all);
-  const b = top.block && typeof top.block === "object" ? top.block : null;
+  const told = (x) => x && typeof x === "object" && "by" in x;
+  const b = told(top.block)
+    ? top.block
+    : all.map((a) => a.block).find(told) || (top.block && typeof top.block === "object" ? top.block : null);
   const expiry = expiryOf(top.block);
   let since = 0;
   for (const item of all) {

@@ -307,6 +307,49 @@
     mismatch: "unknown device",
     fingerprint: "browser changed",
   };
+  const DETAIL_LINE = /^([A-Z][^:\n]{1,48}):\s+(.+)$/;
+  const IP_LIKE = /^(\[ip hidden\]|\d{1,3}(\.\d{1,3}){3}(\/\d+)?|[0-9a-f]{0,4}(:[0-9a-f]{0,4}){2,}(\/\d+)?)$/i;
+  const ID_LIKE = /^[0-9a-f]{8}-[0-9a-f-]{20,}$|^[A-Za-z0-9_-]{24,40}$/;
+  function detailValue(label, text) {
+    const v = divc("dl-v");
+    const parts = text.split(/,\s+/);
+    if (parts.length > 1 && parts.every((p) => IP_LIKE.test(p.trim()))) {
+      v.classList.add("dl-list");
+      parts.forEach((p) => v.appendChild(span("dl-ip", p.trim())));
+      return v;
+    }
+    const t = text.trim();
+    if (IP_LIKE.test(t)) v.classList.add("dl-ip");
+    else if (ID_LIKE.test(t)) v.classList.add("dl-id");
+    v.textContent = t;
+    return v;
+  }
+  function detailBlock(text) {
+    const d = divc("detail");
+    const lines = String(text).split("\n").filter((l) => l.trim());
+    const rows = lines.filter((l) => DETAIL_LINE.test(l));
+    if (rows.length < 2) {
+      d.textContent = text;
+      return d;
+    }
+    d.classList.add("dl");
+    for (const line of lines) {
+      const m = DETAIL_LINE.exec(line);
+      if (!m) {
+        const sum = divc("dl-sum");
+        sum.textContent = line.trim();
+        d.appendChild(sum);
+        continue;
+      }
+      const row = divc("dl-row");
+      const k = divc("dl-k");
+      k.textContent = m[1];
+      row.appendChild(k);
+      row.appendChild(detailValue(m[1], m[2]));
+      d.appendChild(row);
+    }
+    return d;
+  }
   function addKv(parent, k, v, vClass, uid) {
     const row = kvRow(k, v, vClass, uid);
     if (row) parent.appendChild(row);
@@ -565,12 +608,7 @@
 
     const detailText =
       e.details || e.detail || (e.type === "notification" ? e.text : null);
-    if (detailText) {
-      const d = document.createElement("div");
-      d.className = "detail";
-      d.textContent = detailText;
-      card.appendChild(d);
-    }
+    if (detailText) card.appendChild(detailBlock(detailText));
 
     const thread = document.createElement("div");
     thread.className = "comments";
@@ -960,10 +998,22 @@
   let banHistory = [];
   let bansTimer = null;
   let bansQuery = "";
-  let bansFilter = "all";
   const openBanKeys = new Set();
-  let banHistQuery = "";
-  let banHistFilter = "all";
+  const BAN_PAGE = 25;
+  let banView = "now";
+  let banSort = "newest";
+  const banFilter = { now: "all", ended: "all", history: "all" };
+  const banPage = { now: 0, ended: 0, history: 0 };
+  const banOutcome = (o) => StaffUI.banOutcome(o);
+  const pastBanText = (p) => StaffUI.pastBanText(p);
+  function pastBanNotice(p) {
+    const t = pastBanText(p);
+    if (!t) return document.createComment("no past bans");
+    const box = divc("pastban");
+    box.appendChild(icon("fa-clock-rotate-left"));
+    box.appendChild(span(null, t));
+    return box;
+  }
   function fmtRemaining(b) {
     if (b.permanent) return null;
     const ms = (b.expiry || 0) - Date.now();
@@ -979,8 +1029,10 @@
     if (d > 0) return d + "d " + pad(h) + ":" + pad(m) + ":" + pad(s) + " left";
     return pad(h) + ":" + pad(m) + ":" + pad(s) + " left";
   }
-  function openBanDurationMenu(b) {
+  function openBanDurationMenu(target) {
     if (!window.StaffUI) return;
+    const list = Array.isArray(target) ? target : [target];
+    const b = list[0];
     const durs = StaffUI.DURATIONS.map((d) => ({
       label: d.label,
       value: d.value,
@@ -993,7 +1045,10 @@
     StaffUI.menu({
       title: "Change ban duration",
       icon: '<i class="fas fa-hourglass-half"></i>',
-      subtitle: (b.label || b.ip || "This block") + " · re-timed from now",
+      subtitle:
+        (b.label || "This ban") +
+        (list.length > 1 ? " · all " + list.length + " blocks" : "") +
+        " · re-timed from now",
       groups: [
         {
           items: durs.map((d) => ({
@@ -1003,7 +1058,7 @@
             danger: d.value === "permanent",
             onClick: () =>
               socket.emit("dev set block duration", {
-                ref: b.ref,
+                refs: list.map((x) => x.ref),
                 duration: d.value,
               }),
           })),
@@ -1012,8 +1067,10 @@
     });
   }
 
-  async function editBanMessage(b) {
+  async function editBanMessage(target) {
     if (!window.StaffUI) return;
+    const list = Array.isArray(target) ? target : [target];
+    const b = list.find((x) => x.reason) || list[0];
     const reason = await StaffUI.prompt({
       title: "Ban message",
       icon: '<i class="fas fa-comment"></i>',
@@ -1033,7 +1090,7 @@
     });
     if (reason == null) return;
     socket.emit("dev set block message", {
-      ref: b.ref,
+      refs: list.map((x) => x.ref),
       reason: String(reason).trim(),
     });
   }
@@ -1057,9 +1114,10 @@
     const byName = new Map();
     const solos = [];
     for (const b of list) {
-      if (b.did) {
-        if (!byDid.has(b.did)) byDid.set(b.did, []);
-        byDid.get(b.did).push(b);
+      const who = b.person || b.did;
+      if (who) {
+        if (!byDid.has(who)) byDid.set(who, []);
+        byDid.get(who).push(b);
       } else if (b.label) {
         const k = b.label.trim().toLowerCase();
         if (!byName.has(k)) byName.set(k, []);
@@ -1084,431 +1142,782 @@
     return groups;
   }
 
-  function buildBlockRow(b, isDev, showIp) {
-    const row = divc("blockrow");
-    const kind = b.kind || "ip";
-    const tag = span("btag " + (kind === "id" ? "uid" : kind));
-    tag.textContent = kind === "id" ? "ID" : kind === "range" ? "RANGE" : "IP";
-    row.appendChild(tag);
-    const addrText = showIp
-      ? kind === "id"
-        ? String(b.ip || "").replace(/^id:/, "")
-        : b.ip
-      : null;
-    const addr = span("addr" + (addrText ? "" : " dim"));
-    addr.textContent =
-      addrText || (kind === "id" ? "client id" : "address hidden");
-    row.appendChild(addr);
-
-    const pill = span("pill " + (b.permanent ? "perm" : "live"));
-    pill.dataset.ref = b.ref || "";
-    pill.textContent = b.permanent
-      ? "Permanent"
-      : fmtRemaining(b) || "expiring";
-    row.appendChild(pill);
-
-    const mkIcon = (fa, titleText, danger, fn) => {
-      const btn = document.createElement("button");
-      btn.className = "ibtn" + (danger ? " danger" : "");
-      btn.title = titleText;
-      btn.appendChild(icon(fa));
-      btn.addEventListener("click", fn);
-      return btn;
-    };
-    if (isDev) {
-      row.appendChild(
-        mkIcon("fa-hourglass-half", "Change duration", false, () =>
-          openBanDurationMenu(b),
-        ),
-      );
-      row.appendChild(
-        mkIcon(
-          "fa-comment",
-          b.reason ? "Edit message" : "Add message",
-          false,
-          () => editBanMessage(b),
-        ),
-      );
-    }
-    if (viewerIsFullMod()) {
-      if (b.permanent && !isDev) {
-        const lock = span("ibtn locked");
-        lock.title = "Permanent: only an admin can lift this";
-        lock.appendChild(icon("fa-lock"));
-        row.appendChild(lock);
-      } else {
-        row.appendChild(
-          mkIcon("fa-unlock", "Unban this one", true, () =>
-            confirmUnban([b], showIp),
-          ),
-        );
-      }
-    }
-    return row;
-  }
-
-  async function confirmUnban(blocks, showIp, name) {
+  async function confirmUnban(blocks, showIp, name, only) {
     const send = () =>
       blocks.forEach((b) =>
-        socket.emit("dev unblock ip", { ip: b.ip, ref: b.ref }),
+        socket.emit("dev unblock ip", { ip: b.ip, ref: b.ref, only: !!only }),
       );
     if (!window.StaffUI) return send();
     const many = blocks.length > 1;
     const who = name || blocks.map((b) => b.label).find(Boolean) || "this user";
     const ok = await StaffUI.confirm({
-      title: many ? "Unban " + blocks.length + " blocks" : "Unban",
+      title: only ? "Lift this block only" : many ? "Unban " + blocks.length + " blocks" : "Unban",
       message: many
         ? "Lift every block covering " +
           who +
           " (" +
           blocks.length +
           " in total)? They can connect again straight away."
-        : "Unblock " +
-          who +
-          (showIp && blocks[0].ip ? " (" + blocks[0].ip + ")" : "") +
-          "?",
+        : only
+          ? "Lift only this " +
+            (BAN_KIND[blocks[0].kind] || "Address").toLowerCase() +
+            " block for " +
+            who +
+            (showIp && blocks[0].ip ? " (" + blocks[0].ip + ")" : "") +
+            "? Their other blocks stay."
+          : "Unblock " +
+            who +
+            (showIp && blocks[0].ip ? " (" + blocks[0].ip + ")" : "") +
+            "?",
       danger: many,
       confirmText: many ? "Unban all" : "Unban",
     });
     if (ok) send();
   }
 
-  function buildBanRow(blocks, isDev, showIp) {
-    const anyPerm = blocks.some((b) => b.permanent);
-    const first = blocks[0];
-    const name = blocks.map((b) => b.label).find(Boolean) || null;
-    const did = blocks.map((b) => b.did).find(Boolean) || null;
-    const maxBans = Math.max(...blocks.map((b) => b.bans || 0));
-    const key = did || name || first.ref;
+  const BAN_KIND = { id: "Browser", ip: "Address", range: "Network" };
+  const BAN_FILTERS = {
+    now: [
+      ["all", "All"],
+      ["perm", "Permanent"],
+      ["temp", "Timed"],
+      ["auto", "By Automod"],
+      ["staff", "By staff"],
+    ],
+    ended: [
+      ["all", "All"],
+      ["served", "Expired"],
+      ["lifted", "Lifted early"],
+    ],
+    history: [
+      ["all", "All"],
+      ["ban", "Bans"],
+      ["unban", "Unbans"],
+    ],
+  };
 
-    const wrap = divc("banrow-wrap");
-    const row = document.createElement("button");
-    row.className = "banrow" + (anyPerm ? " perm" : "");
-    row.type = "button";
-    row.setAttribute("aria-expanded", "false");
+  function timeLeft(expiry) {
+    const ms = (expiry || 0) - Date.now();
+    if (ms <= 0) return "ending now";
+    const m = Math.ceil(ms / 60000);
+    if (m < 60) return m + "m left";
+    const h = Math.floor(m / 60);
+    if (h < 48) return h + "h " + (m % 60) + "m left";
+    return Math.floor(h / 24) + "d " + (h % 24) + "h left";
+  }
 
-    const chev = divc("br-chev");
-    chev.appendChild(icon("fa-chevron-right"));
-    row.appendChild(chev);
-
-    const av = divc("avatar br-av");
-    av.style.background = anyPerm ? "var(--red)" : "var(--amber)";
-    if (name) av.textContent = initialOf(name);
-    else av.appendChild(icon(did ? "fa-fingerprint" : "fa-globe"));
-    row.appendChild(av);
-
-    const whoCell = divc("br-who");
-    whoCell.appendChild(
-      span("br-name", name || (did ? "Unnamed account" : "No account on file")),
-    );
-    const sub = divc("br-sub");
-    if (did) sub.appendChild(span("mono", did.slice(0, 18) + "…"));
-    else if (showIp && first.ip) sub.appendChild(span("mono", first.ip));
-    whoCell.appendChild(sub);
-    row.appendChild(whoCell);
-
-    const blocksCell = divc("br-blocks");
-    const kinds = [...new Set(blocks.map((b) => b.kind || "ip"))];
-    const n = span("br-count", String(blocks.length));
-    blocksCell.appendChild(n);
-    blocksCell.appendChild(
-      span("br-unit", blocks.length === 1 ? "block" : "blocks"),
-    );
-    kinds.forEach((k) => {
-      const t = span("btag " + (k === "id" ? "uid" : k));
-      t.textContent = k === "id" ? "ID" : k === "range" ? "RANGE" : "IP";
-      blocksCell.appendChild(t);
+  function textBtn(label, cls, fn) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "bl-btn" + (cls ? " " + cls : "");
+    b.textContent = label;
+    b.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      fn();
     });
-    if (maxBans >= 2) {
-      const rep = span("bc-repeat");
-      rep.appendChild(icon("fa-rotate-right"));
-      rep.appendChild(document.createTextNode(" " + maxBans + "x"));
-      rep.title = "Banned " + maxBans + " times over the life of this list";
-      blocksCell.appendChild(rep);
-    }
-    row.appendChild(blocksCell);
+    return b;
+  }
 
+  function groupInfo(blocks) {
+    const anyPerm = blocks.some((b) => b.permanent);
+    const label = blocks.map((b) => b.label).find(Boolean) || null;
+    const did = blocks.map((b) => b.did).find(Boolean) || null;
+    const seenNames = [
+      ...new Set(
+        blocks
+          .flatMap((b) => (b.users || []).map((u) => u.name))
+          .filter((n) => n && n !== "Unknown"),
+      ),
+    ];
+    const busy = !label && blocks.every((b) => b.busy);
+    const seenName = seenNames.length === 1 && !busy ? seenNames[0] : null;
+    const name = label || seenName;
+    const shown =
+      name ||
+      (did
+        ? "Unnamed account"
+        : busy
+          ? "Shared network"
+          : seenNames.length
+            ? seenNames.length + " people on this connection"
+            : "No name on file");
+    const hint = busy
+      ? "school or phone network, not linked to one person"
+      : !label && seenName
+        ? "only name seen on this connection"
+        : "";
+    const newest = blocks.reduce((m, b) => ((b.ts || 0) > (m.ts || 0) ? b : m));
+    const longest = blocks.reduce((m, b) => ((b.expiry || 0) > (m.expiry || 0) ? b : m));
     const bys = [...new Set(blocks.map((b) => b.by).filter(Boolean))];
-    row.appendChild(span("br-by", bys.join(", ") || "unknown"));
+    const reason = (blocks.find((b) => b.reason) || {}).reason || null;
+    const loc = name ? blocks.map((b) => b.loc).find(Boolean) || null : null;
+    return { anyPerm, label, did, name, shown, hint, newest, longest, bys, reason, seenNames, loc };
+  }
 
-    const when = span("br-when", first.ts ? relTime(first.ts) : "");
-    if (first.ts) when.title = fmtTime(first.ts);
-    row.appendChild(when);
+  function earlierBans(name) {
+    if (!name) return [];
+    const k = name.trim().toLowerCase();
+    const seen = new Set();
+    return banHistory.filter((e) => {
+      if (e.action !== "ban" || (e.name || "").trim().toLowerCase() !== k) return false;
+      if (e.status === "active" || e.status === "permanent") return false;
+      const s = Math.floor(e.at / 5000);
+      if (seen.has(s)) return false;
+      seen.add(s);
+      return true;
+    });
+  }
 
-    const endCell = span("br-ends");
-    if (anyPerm) {
-      const p = span("pill perm", "Permanent");
-      endCell.appendChild(p);
-    } else {
-      const longest = blocks.reduce((m, b) =>
-        (b.expiry || 0) > (m.expiry || 0) ? b : m,
-      );
-      const p = span("pill live", fmtRemaining(longest) || "expiring");
-      p.dataset.ref = longest.ref || "";
-      endCell.appendChild(p);
+  function buildBlockLine(b, isDev, showIp, many) {
+    const row = divc("bl-block");
+    const kind = b.kind || "ip";
+    const what = divc("bl-block-what");
+    what.appendChild(span("bl-kind", BAN_KIND[kind] || "Address"));
+    const val = showIp
+      ? String(b.ip || "").replace(/^id:/, "")
+      : kind === "id"
+        ? "browser id"
+        : "hidden";
+    what.appendChild(span("bl-val" + (showIp ? " mono" : ""), val));
+    if (b.link === "connection") {
+      const same = span("bl-note", "same connection");
+      same.title =
+        "Placed on an address. Linked here because this person is the only banned account seen on it.";
+      what.appendChild(same);
     }
-    row.appendChild(endCell);
+    row.appendChild(what);
+    const left = span(
+      "bl-left" + (b.permanent ? " perm" : ""),
+      b.permanent ? "Permanent" : timeLeft(b.expiry),
+    );
+    if (!b.permanent) left.dataset.expiry = String(b.expiry || 0);
+    row.appendChild(left);
+    if (isDev && many) {
+      const acts = divc("bl-acts");
+      acts.appendChild(textBtn("Length", null, () => openBanDurationMenu(b)));
+      acts.appendChild(textBtn("Message", null, () => editBanMessage(b)));
+      acts.appendChild(textBtn("Lift", "danger", () => confirmUnban([b], showIp, b.label, true)));
+      row.appendChild(acts);
+    }
+    return row;
+  }
+
+  function buildBanPerson(blocks, isDev, showIp) {
+    const g = groupInfo(blocks);
+    const key = g.did || g.label || blocks[0].ref;
+    const wrap = divc("bl-item" + (openBanKeys.has(key) ? " open" : ""));
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "bl-row";
+    row.setAttribute("aria-expanded", openBanKeys.has(key) ? "true" : "false");
+
+    const main = divc("bl-main");
+    const nameLine = divc("bl-name");
+    nameLine.appendChild(span(null, g.shown));
+    if (g.loc) nameLine.appendChild(span("bl-loc", " / " + g.loc));
+    if (g.hint) nameLine.appendChild(span("bl-hint", g.hint));
+    main.appendChild(nameLine);
+    main.appendChild(
+      span("bl-why" + (g.reason ? "" : " none"), g.reason || "No message written"),
+    );
+    row.appendChild(main);
+
+    const side = divc("bl-side");
+    const left = span(
+      "bl-left" + (g.anyPerm ? " perm" : ""),
+      g.anyPerm ? "Permanent" : timeLeft(g.longest.expiry),
+    );
+    if (!g.anyPerm) left.dataset.expiry = String(g.longest.expiry || 0);
+    side.appendChild(left);
+    const meta = span(
+      "bl-meta",
+      "by " +
+        (g.bys.join(", ") || "Automod") +
+        (g.newest.ts ? " · " + relTime(g.newest.ts) : "") +
+        " · " +
+        blocks.length +
+        (blocks.length === 1 ? " block" : " blocks"),
+    );
+    if (g.newest.ts) meta.title = fmtTime(g.newest.ts);
+    side.appendChild(meta);
+    row.appendChild(side);
     wrap.appendChild(row);
 
-    const detail = divc("bandetail");
-    detail.hidden = true;
-    let built = false;
+    const detail = divc("bl-detail");
     const build = () => {
-      if (built) return;
-      built = true;
-      const rows = divc("blocks");
-      blocks.forEach((b) => rows.appendChild(buildBlockRow(b, isDev, showIp)));
-      detail.appendChild(rows);
-
-      const withMsg = blocks.find((b) => b.reason);
-      const msg = divc("bc-msg" + (withMsg ? "" : " none"));
-      msg.appendChild(span("lbl", "Message shown to them"));
-      msg.appendChild(
-        document.createTextNode(
-          withMsg
-            ? withMsg.reason
-            : "No message set. They see a generic ban screen.",
+      if (detail.childNodes.length) return;
+      const sec = (title) => {
+        const s = divc("bl-sec");
+        const t = divc("bl-sec-title");
+        t.textContent = title;
+        s.appendChild(t);
+        detail.appendChild(s);
+        return s;
+      };
+      sec("What they see").appendChild(
+        span(
+          "bl-text" + (g.reason ? "" : " none"),
+          g.reason || "No message written. They see the standard ban screen.",
         ),
       );
-      detail.appendChild(msg);
-
-      const seen = new Map();
-      blocks.forEach((b) =>
-        (b.users || []).forEach((u) => {
-          const k = u.id || u.name || "?";
-          if (!seen.has(k)) seen.set(k, u);
-        }),
-      );
-      if (seen.size) {
-        const box = divc("bc-msg");
-        box.appendChild(span("lbl", "Seen accounts (" + seen.size + ")"));
-        box.appendChild(
-          document.createTextNode(
-            [...seen.values()]
-              .map((u) => u.name || "Unknown")
-              .slice(0, 12)
-              .join(", "),
-          ),
-        );
-        detail.appendChild(box);
+      const bs = sec(blocks.length === 1 ? "Block" : "Blocks (" + blocks.length + ")");
+      blocks.forEach((b) => bs.appendChild(buildBlockLine(b, isDev, showIp, blocks.length > 1)));
+      const snap = sec("When they were banned");
+      snap.appendChild(span("bl-meta", "Loading the snapshot..."));
+      requestBanDetails((blocks.find((b) => b.did) || blocks[0]).ref, (d) => fillSnapshot(snap, d));
+      if (g.seenNames.length) {
+        const counts = new Map();
+        blocks
+          .flatMap((b) => b.users || [])
+          .forEach((u) => {
+            const n = u.name || "Unknown";
+            counts.set(n, (counts.get(n) || 0) + 1);
+          });
+        const tags = divc("bl-tags");
+        [...counts].slice(0, 20).forEach(([n, c]) => {
+          const t = span("bl-tag", n);
+          if (c > 1) t.appendChild(span("bl-tag-n", "×" + c));
+          tags.appendChild(t);
+        });
+        if (counts.size > 20) tags.appendChild(span("bl-meta", "+" + (counts.size - 20) + " more"));
+        sec("Seen on this connection").appendChild(tags);
       }
-      if (did) {
-        const idLine = divc("bc-idline mono");
-        idLine.textContent = "id: " + did;
-        detail.appendChild(idLine);
+      const past = earlierBans(g.label);
+      if (past.length) {
+        const ps = sec("Earlier bans under this name");
+        past.slice(0, 5).forEach((e) => {
+          const line = divc("bl-past");
+          const o = banOutcome(e);
+          line.appendChild(
+            span("bl-why", [durationLabel(e.duration), e.reason].filter(Boolean).join(" · ")),
+          );
+          if (o) line.appendChild(span("bl-out " + o.cls, o.text));
+          ps.appendChild(line);
+        });
       }
-
+      if (g.did) detail.appendChild(span("bl-id mono", "Browser id " + g.did));
       if (!viewerIsFullMod()) return;
-      const foot = divc("bandetail-foot");
-      const liftable = viewerIsDev()
-        ? blocks
-        : blocks.filter((b) => !b.permanent);
-      const held = blocks.length - liftable.length;
-      if (liftable.length) {
-        const unbanAll = document.createElement("button");
-        unbanAll.className = "btn sm danger";
-        unbanAll.appendChild(icon("fa-unlock"));
-        unbanAll.appendChild(
-          document.createTextNode(
-            liftable.length > 1 ? " Unban all " + liftable.length : " Unban",
-          ),
-        );
-        unbanAll.addEventListener("click", () =>
-          confirmUnban(liftable, showIp, name),
-        );
-        foot.appendChild(unbanAll);
-      }
-      if (held) {
-        const note = span("dim");
-        note.appendChild(icon("fa-lock"));
-        note.appendChild(
-          document.createTextNode(
-            held === 1
-              ? " 1 permanent block, admin-only to lift"
-              : ` ${held} permanent blocks, admin-only to lift`,
-          ),
-        );
-        foot.appendChild(note);
-      }
+      const foot = divc("bl-foot");
+      const locked = g.anyPerm && !isDev;
+      if (!locked)
+        foot.appendChild(textBtn("Change length", null, () => openBanDurationMenu(blocks)));
+      foot.appendChild(
+        textBtn(g.reason ? "Edit message" : "Add message", null, () => editBanMessage(blocks)),
+      );
+      if (locked) foot.appendChild(span("bl-locked", "Permanent, only an admin can unban or change it"));
+      else foot.appendChild(textBtn("Unban", "danger", () => confirmUnban(blocks, showIp, g.name)));
       detail.appendChild(foot);
     };
-
     row.addEventListener("click", () => {
-      const open = detail.hidden;
+      const open = !wrap.classList.contains("open");
       if (open) build();
-      detail.hidden = !open;
-      row.classList.toggle("open", open);
+      wrap.classList.toggle("open", open);
       row.setAttribute("aria-expanded", open ? "true" : "false");
       if (open) openBanKeys.add(key);
       else openBanKeys.delete(key);
     });
-    if (openBanKeys.has(key)) {
-      build();
-      detail.hidden = false;
-      row.classList.add("open");
-      row.setAttribute("aria-expanded", "true");
-    }
+    if (openBanKeys.has(key)) build();
     wrap.appendChild(detail);
     return wrap;
   }
 
+  const OUTCOME_RANK = { active: 5, permanent: 5, lifted: 4, replaced: 3, served: 2, ended: 1 };
+  function historyRows() {
+    const out = [];
+    for (const e of banHistory) {
+      const last = out[out.length - 1];
+      if (
+        last &&
+        last.action === e.action &&
+        (last.name || "") === (e.name || "") &&
+        (last.by || "") === (e.by || "") &&
+        Math.abs(last.at - e.at) < 5000
+      ) {
+        if ((OUTCOME_RANK[e.status] || 0) > (OUTCOME_RANK[last.status] || 0))
+          Object.assign(last, { status: e.status, endsAt: e.endsAt, endedAt: e.endedAt, liftedBy: e.liftedBy });
+        if (!last.reason && e.reason) last.reason = e.reason;
+        if (!last.loc && e.loc) last.loc = e.loc;
+        continue;
+      }
+      out.push({ ...e });
+    }
+    return out;
+  }
+
+  function endedRows() {
+    const weekAgo = Date.now() - 7 * 86400000;
+    const seen = new Set();
+    return banHistory
+      .filter((e) => {
+        if (e.action !== "ban" || !e.endedAt || e.endedAt < weekAgo) return false;
+        if (e.status !== "served" && e.status !== "lifted") return false;
+        const k = (e.name || "") + "|" + Math.floor(e.at / 5000);
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      })
+      .sort((a, b) => b.endedAt - a.endedAt);
+  }
+
+  function tag(text, cls) {
+    return span("bl-tag" + (cls ? " " + cls : ""), text);
+  }
+
+  function clampedWhy(text) {
+    const w = span("bl-why clamp", text);
+    w.title = text;
+    return w;
+  }
+
+  const STATUS_SHORT = {
+    active: "Still banned",
+    permanent: "Still banned",
+    served: "Expired",
+    lifted: "Lifted early",
+    replaced: "Replaced",
+    ended: "Ended",
+  };
+
+  function banRecordRow(o) {
+    const wrap = divc("bl-item" + (openBanKeys.has(o.key) ? " open" : ""));
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "bl-row";
+    row.setAttribute("aria-expanded", openBanKeys.has(o.key) ? "true" : "false");
+    const main = divc("bl-main");
+    const nameLine = divc("bl-name");
+    nameLine.appendChild(span(null, o.name));
+    if (o.loc) nameLine.appendChild(span("bl-loc", " / " + o.loc));
+    if (o.hint) nameLine.appendChild(span("bl-hint", o.hint));
+    main.appendChild(nameLine);
+    main.appendChild(span("bl-why" + (o.reason ? "" : " none"), o.reason || "No message written"));
+    row.appendChild(main);
+    const side = divc("bl-side");
+    side.appendChild(span("bl-left " + (o.statusCls || ""), o.status));
+    const meta = span("bl-meta", o.meta);
+    if (o.metaTitle) meta.title = o.metaTitle;
+    side.appendChild(meta);
+    row.appendChild(side);
+    wrap.appendChild(row);
+    const detail = divc("bl-detail");
+    const build = () => {
+      if (!detail.childNodes.length) o.detail(detail);
+    };
+    row.addEventListener("click", () => {
+      const open = !wrap.classList.contains("open");
+      if (open) build();
+      wrap.classList.toggle("open", open);
+      row.setAttribute("aria-expanded", open ? "true" : "false");
+      if (open) openBanKeys.add(o.key);
+      else openBanKeys.delete(o.key);
+    });
+    if (openBanKeys.has(o.key)) build();
+    wrap.appendChild(detail);
+    return wrap;
+  }
+
+  function section(detail, title) {
+    const sec = divc("bl-sec");
+    const t = divc("bl-sec-title");
+    t.textContent = title;
+    sec.appendChild(t);
+    detail.appendChild(sec);
+    return sec;
+  }
+
+  function factRows(sec, pairs) {
+    const box = divc("bl-facts");
+    pairs
+      .filter(([, v]) => v)
+      .forEach(([k, v, cls]) => {
+        const f = divc("bl-fact");
+        f.appendChild(span("bl-fact-k", k));
+        f.appendChild(span("bl-fact-v" + (cls ? " " + cls : ""), v));
+        box.appendChild(f);
+      });
+    sec.appendChild(box);
+  }
+
+  function banEventDetail(e, showIp) {
+    return (detail) => {
+      section(detail, "What they saw").appendChild(
+        span("bl-text" + (e.reason ? "" : " none"), e.reason || "No message written. They saw the standard ban screen."),
+      );
+      const o = banOutcome(e);
+      factRows(section(detail, "The ban"), [
+        ["Length", durationLabel(e.duration)],
+        ["Placed by", e.by || "Automod"],
+        ["Placed", fmtTime(e.at)],
+        ["Outcome", o && o.text, o && o.cls],
+        ["Covered", e.kind === "id" ? "Their browser" : e.kind === "range" ? "Their network" : "Their address"],
+        ["Key", showIp && e.ip ? String(e.ip).replace(/^id:/, "") : null, "mono"],
+      ]);
+      const snap = section(detail, "When they were banned");
+      snap.appendChild(span("bl-meta", "Loading the snapshot..."));
+      requestBanDetails("e:" + e.id, (d) => fillSnapshot(snap, d), { eventId: e.id });
+      const past = earlierBans(e.name).filter((x) => x.id !== e.id);
+      if (past.length) {
+        const ps = section(detail, "Other bans under this name");
+        past.slice(0, 5).forEach((x) => {
+          const line = divc("bl-past");
+          const oc = banOutcome(x);
+          line.appendChild(span("bl-why", [durationLabel(x.duration), x.reason].filter(Boolean).join(" · ")));
+          if (oc) line.appendChild(span("bl-out " + oc.cls, oc.text));
+          ps.appendChild(line);
+        });
+      }
+    };
+  }
+
+  function buildEventRow(e, showIp) {
+    const isUnban = e.action === "unban";
+    const who = e.name || (showIp && e.ip ? String(e.ip).replace(/^id:/, "") : "Unnamed");
+    if (isUnban)
+      return banRecordRow({
+        key: "h:" + e.id,
+        name: who,
+        hint: "unbanned by " + (e.by || "Automod"),
+        reason: e.reason,
+        status: "Unbanned",
+        statusCls: "lifted",
+        meta: relTime(e.at),
+        metaTitle: fmtTime(e.at),
+        detail: (detail) =>
+          factRows(section(detail, "The unban"), [
+            ["By", e.by || "Automod"],
+            ["When", fmtTime(e.at)],
+            ["Key", showIp && e.ip ? String(e.ip).replace(/^id:/, "") : null, "mono"],
+          ]),
+      });
+    const st = e.status || "ended";
+    return banRecordRow({
+      key: "h:" + e.id,
+      name: who,
+      loc: e.name ? e.loc : null,
+      hint: "banned by " + (e.by || "Automod"),
+      reason: e.reason,
+      status: STATUS_SHORT[st] || "Ended",
+      statusCls: st,
+      meta: [durationLabel(e.duration), relTime(e.at)].join(" · "),
+      metaTitle: fmtTime(e.at),
+      detail: banEventDetail(e, showIp),
+    });
+  }
+
+  function buildEndedRow(e) {
+    const st = e.status || "ended";
+    return banRecordRow({
+      key: "x:" + e.id,
+      name: e.name || "Unnamed",
+      loc: e.name ? e.loc : null,
+      hint: "banned by " + (e.by || "Automod"),
+      reason: e.reason,
+      status: STATUS_SHORT[st] || "Ended",
+      statusCls: st,
+      meta: [durationLabel(e.duration), "ended " + relTime(e.endedAt)].join(" · "),
+      metaTitle: fmtTime(e.endedAt),
+      detail: banEventDetail(e, !!(me && me.mainDev)),
+    });
+  }
+
+  const banDetailWaiters = new Map();
+  const banDetailCache = new Map();
+  function requestBanDetails(ref, fn, payload) {
+    if (!ref) return fn({ found: false });
+    const hit = banDetailCache.get(ref);
+    if (hit && Date.now() - hit.at < 60000) return fn(hit.d);
+    const done = (d) => {
+      if (d && !d.failed) banDetailCache.set(ref, { at: Date.now(), d });
+      fn(d);
+    };
+    banDetailWaiters.set(ref, done);
+    socket.emit("staff ban details", payload || { ref });
+    setTimeout(() => {
+      if (banDetailWaiters.get(ref) !== done) return;
+      banDetailWaiters.delete(ref);
+      fn({ found: false, failed: true });
+    }, 5000);
+  }
+
+  const GRADE_TEXT = {
+    corroborated: "Backed by evidence",
+    reported: "Reported by others",
+    unverifiable: "Nothing on record to back it",
+    contradicted: "No evidence at the time",
+  };
+  const ACTION_TEXT = {
+    warn: "Warned",
+    kick: "Kicked",
+    "kick+ban": "Kicked and room-banned",
+    "wipe buffer": "Text wiped",
+    rename: "Name reset",
+    freeze: "Typing frozen",
+    silence: "Stopped from being read",
+  };
+
+  function fillSnapshot(box, d) {
+    while (box.childNodes.length > 1) box.removeChild(box.lastChild);
+    const r = d && d.receipt;
+    if (d && d.failed) {
+      box.appendChild(span("bl-text none", "Couldn't load the snapshot. Refresh the page and try again."));
+      return;
+    }
+    if (!r)
+      box.appendChild(
+        span("bl-text none", "No snapshot. It was placed automatically, by address, or before snapshots were kept."),
+      );
+    if (!d || !d.found) return;
+    if (r) {
+      const facts = divc("bl-tags");
+      if (r.room)
+        facts.appendChild(
+          tag("In " + r.room.name + ", " + r.room.occupants + (r.room.occupants === 1 ? " person" : " people")),
+        );
+      else facts.appendChild(tag("Banned from outside a room"));
+      if (r.reports && r.reports.hour)
+        facts.appendChild(
+          tag(r.reports.hour + (r.reports.hour === 1 ? " report" : " reports") + " in the hour before", "warn"),
+        );
+      if (r.dislikes) facts.appendChild(tag(r.dislikes + (r.dislikes === 1 ? " dislike" : " dislikes"), "warn"));
+      if (r.flagged && r.flagged.words) facts.appendChild(tag("Word filter hit", "warn"));
+      if (r.flagged && r.flagged.links) facts.appendChild(tag("Posted a link", "warn"));
+      if (r.grade) facts.appendChild(tag(GRADE_TEXT[r.grade] || r.grade, r.grade === "corroborated" ? "good" : ""));
+      box.appendChild(facts);
+
+      const said = divc("bl-quote");
+      const head = divc("bl-quote-head");
+      head.textContent = r.text
+        ? r.textWiped
+          ? "Their box, cleared just before the ban"
+          : "Their box at the moment of the ban"
+        : "Their box was empty";
+      said.appendChild(head);
+      const tidy = (t) => String(t || "").replace(/\n\s*\n(\s*\n)+/g, "\n\n").trim();
+      if (r.text) said.appendChild(divc("bl-quote-line")).textContent = tidy(r.text);
+      const sameStart = (a, b) => !!a && !!b && (a.startsWith(b) || b.startsWith(a));
+      if (r.opened && !sameStart(r.opened, r.text)) {
+        const o = divc("bl-quote-line dim");
+        o.textContent = "When the ban window opened: " + tidy(r.opened);
+        said.appendChild(o);
+      }
+      if (r.trail && r.trail.length) {
+        const t = divc("bl-quote-head");
+        t.textContent = "Earlier lines";
+        said.appendChild(t);
+        r.trail.slice(-3).forEach((line) => {
+          const l = divc("bl-quote-line dim gap");
+          l.textContent = tidy(line);
+          said.appendChild(l);
+        });
+      }
+      box.appendChild(said);
+
+      if (r.prior && r.prior.length) {
+        const pr = divc("bl-tags");
+        pr.appendChild(span("bl-meta", "Before this, in the past day:"));
+        r.prior.forEach((p) =>
+          pr.appendChild(tag((ACTION_TEXT[p.action] || p.action) + " by " + p.by + ", " + relTime(p.at))),
+        );
+        box.appendChild(pr);
+      }
+    }
+    if (d.writeup) {
+      const f = d.writeup.fields || {};
+      const tried =
+        window.StaffUI && StaffUI.triedLabel ? StaffUI.triedLabel(f.tried) : f.tried || "";
+      const w = section(box, "Write-up");
+      factRows(w, [
+        ["What they did", f.did],
+        ["Rule", d.writeup.rule || f.rule ? "Rule " + (d.writeup.rule || f.rule) : null],
+        ["Tried first", [tried, f.why].filter(Boolean).join(". ")],
+        ["Why this length", f.length],
+      ]);
+      (d.writeup.addenda || []).forEach((x) =>
+        factRows(w, [["Added " + relTime(x.at), x.text]]),
+      );
+    }
+    if (d.appeal) {
+      const a = d.appeal;
+      const state =
+        a.status === "resolved"
+          ? a.resolution === "lifted"
+            ? ["Accepted", "served"]
+            : a.resolution === "ended"
+              ? ["Closed when the ban ended", ""]
+              : ["Declined", "active"]
+          : ["Waiting for a reply", "warn"];
+      factRows(section(box, "Appeal"), [
+        ["Status", state[0], state[1]],
+        ["Filed", relTime(a.at)],
+        ["Appeals", a.count > 1 ? String(a.count) : null],
+      ]);
+    }
+  }
+
+  function renderPager(total) {
+    const pager = $("banPager");
+    pager.textContent = "";
+    const pages = Math.ceil(total / BAN_PAGE);
+    const page = Math.min(banPage[banView], Math.max(0, pages - 1));
+    banPage[banView] = page;
+    if (pages <= 1) {
+      if (total) pager.appendChild(span("bl-meta", total + (total === 1 ? " result" : " results")));
+      return;
+    }
+    const from = page * BAN_PAGE + 1;
+    const to = Math.min(total, from + BAN_PAGE - 1);
+    pager.appendChild(span("bl-meta", from + "–" + to + " of " + total));
+    const nav = divc("bl-pages");
+    const go = (p) => {
+      banPage[banView] = p;
+      renderBans();
+      $("tab-bans").scrollIntoView({ block: "start" });
+    };
+    const btn = (label, p, on, disabled) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "bl-page" + (on ? " on" : "");
+      b.textContent = label;
+      b.disabled = !!disabled;
+      if (!disabled && !on) b.addEventListener("click", () => go(p));
+      return b;
+    };
+    nav.appendChild(btn("Previous", page - 1, false, page === 0));
+    const start = Math.max(0, Math.min(page - 2, pages - 5));
+    for (let p = start; p < Math.min(pages, start + 5); p++)
+      nav.appendChild(btn(String(p + 1), p, p === page));
+    nav.appendChild(btn("Next", page + 1, false, page >= pages - 1));
+    pager.appendChild(nav);
+  }
+
+  function renderBanFilters() {
+    const box = $("banFilters");
+    box.textContent = "";
+    for (const [v, label] of BAN_FILTERS[banView]) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "bl-chip" + (banFilter[banView] === v ? " on" : "");
+      b.textContent = label;
+      b.addEventListener("click", () => {
+        banFilter[banView] = v;
+        banPage[banView] = 0;
+        renderBans();
+      });
+      box.appendChild(b);
+    }
+    $("banSort").hidden = banView !== "now";
+    document.querySelectorAll("#banViews button").forEach((b) => {
+      b.classList.toggle("on", b.dataset.v === banView);
+      b.setAttribute("aria-selected", b.dataset.v === banView ? "true" : "false");
+    });
+  }
+
   function renderBans() {
     const wrap = $("bansList");
+    if (!wrap) return;
     const isDev = me && me.role === "dev";
     const showIp = !!(me && me.mainDev);
-    wrap.textContent = "";
-    $("bansBadge").textContent = String(bans.length);
+    const allGroups = groupBans(bans);
+    const ended = endedRows();
+    $("bansBadge").textContent = String(allGroups.length);
     $("bansSub").textContent = bans.length
-      ? bans.length + " active block" + (bans.length === 1 ? "" : "s")
-      : "No active blocks";
-    if (bans.length === 0) {
+      ? allGroups.length +
+        (allGroups.length === 1 ? " person banned, " : " people banned, ") +
+        bans.length +
+        (bans.length === 1 ? " block" : " blocks")
+      : "Nobody is banned right now";
+    $("banCountNow").textContent = String(allGroups.length);
+    $("banCountEnded").textContent = String(ended.length);
+    $("banCountHist").textContent = String(historyRows().length);
+    renderBanFilters();
+    wrap.textContent = "";
+    const q = bansQuery;
+    const f = banFilter[banView];
+    let items = [];
+    let build;
+
+    if (banView === "now") {
+      let groups = allGroups;
+      if (q) groups = groups.filter((g) => g.some((b) => banSearchable(b).includes(q)));
+      if (f === "perm") groups = groups.filter((g) => g.some((b) => b.permanent));
+      else if (f === "temp") groups = groups.filter((g) => !g.some((b) => b.permanent));
+      else if (f === "auto")
+        groups = groups.filter((g) => g.every((b) => !b.by || b.by === "Automod"));
+      else if (f === "staff")
+        groups = groups.filter((g) => g.some((b) => b.by && b.by !== "Automod"));
+      const exp = (g) =>
+        g.some((b) => b.permanent) ? Infinity : Math.max(...g.map((b) => b.expiry || 0));
+      if (banSort === "ending") groups = groups.slice().sort((a, b) => exp(a) - exp(b));
+      else if (banSort === "blocks") groups = groups.slice().sort((a, b) => b.length - a.length);
+      items = groups;
+      build = (g) => buildBanPerson(g, isDev, showIp);
+    } else if (banView === "ended") {
+      items = ended.filter((e) => f === "all" || e.status === f);
+      if (q)
+        items = items.filter((e) =>
+          [e.name, e.by, e.reason].filter(Boolean).join(" ").toLowerCase().includes(q),
+        );
+      build = buildEndedRow;
+    } else {
+      items = historyRows().filter((e) => f === "all" || e.action === f);
+      if (q)
+        items = items.filter((e) =>
+          [e.name, e.by, e.reason, e.ip, e.duration]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase()
+            .includes(q),
+        );
+      build = (e) => buildEventRow(e, showIp);
+    }
+
+    if (!items.length) {
+      const empty =
+        banView === "now"
+          ? bans.length
+            ? "Nobody matches that."
+            : "Nobody is banned right now."
+          : banView === "ended"
+            ? q || f !== "all"
+              ? "Nothing matches that."
+              : "No bans ended in the last 7 days."
+            : "No history matches that.";
       wrap.appendChild(
-        emptyBox("fa-circle-check", "Nobody is currently blocked."),
+        emptyBox(
+          banView === "now" && !bans.length ? "fa-circle-check" : "fa-magnifying-glass",
+          empty,
+        ),
       );
+      renderPager(0);
       return;
     }
-    let list = bans.slice();
-    if (bansFilter === "perm") list = list.filter((b) => b.permanent);
-    else if (bansFilter === "temp") list = list.filter((b) => !b.permanent);
-    else if (bansFilter === "id")
-      list = list.filter((b) => b.kind === "id" || b.did);
-    if (bansQuery)
-      list = list.filter((b) => banSearchable(b).includes(bansQuery));
-    if (!list.length) {
-      wrap.appendChild(
-        emptyBox("fa-filter-circle-xmark", "No blocks match your filter."),
-      );
-      return;
-    }
-    const groups = groupBans(list);
-    const head = divc("banhead");
-    [
-      "",
-      "",
-      "Who",
-      "Blocks",
-      "Placed by",
-      "Banned",
-      "Ends",
-    ].forEach((h) => head.appendChild(span(null, h)));
-    wrap.appendChild(head);
-    groups.forEach((g) => wrap.appendChild(buildBanRow(g, isDev, showIp)));
-    const note = divc("bantotal");
-    note.textContent =
-      groups.length +
-      (groups.length === 1 ? " person" : " people") +
-      "  ·  " +
-      list.length +
-      (list.length === 1 ? " block" : " blocks");
-    wrap.appendChild(note);
+    renderPager(items.length);
+    const page = banPage[banView];
+    items
+      .slice(page * BAN_PAGE, page * BAN_PAGE + BAN_PAGE)
+      .forEach((it) => wrap.appendChild(build(it)));
     startBanTimer();
   }
+
+  function renderBanHistory() {
+    if (banView !== "now") renderBans();
+    else $("banCountHist").textContent = String(historyRows().length);
+  }
+
   function startBanTimer() {
     if (bansTimer) return;
     bansTimer = setInterval(() => {
       if (tab !== "bans") return;
-      let anyLive = false;
-      document.querySelectorAll("#bansList .pill[data-ref]").forEach((pill) => {
-        const b = bans.find((x) => x.ref === pill.dataset.ref);
-        if (!b || b.permanent) return;
-        anyLive = true;
-        pill.textContent = fmtRemaining(b) || "expiring";
-      });
-      if (!anyLive) {
+      const live = document.querySelectorAll("#bansList [data-expiry]");
+      if (!live.length) {
         clearInterval(bansTimer);
         bansTimer = null;
+        return;
       }
-    }, 1000);
-  }
-
-  function renderBanHistory() {
-    const wrap = $("banHistoryList");
-    if (!wrap) return;
-    wrap.textContent = "";
-    const sub = $("banHistSub");
-    if (sub)
-      sub.textContent = banHistory.length
-        ? banHistory.length +
-          " recent event" +
-          (banHistory.length === 1 ? "" : "s")
-        : "No ban activity yet";
-    if (!banHistory.length) {
-      wrap.appendChild(
-        emptyBox("fa-clock-rotate-left", "No ban or unban activity yet."),
-      );
-      return;
-    }
-    const activeKeys = new Set(bans.map((b) => b.ip).filter(Boolean));
-    let list = banHistory.slice();
-    if (banHistFilter !== "all")
-      list = list.filter((e) => e.action === banHistFilter);
-    if (banHistQuery)
-      list = list.filter((e) =>
-        [e.name, e.by, e.reason, e.ip, e.duration]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase()
-          .includes(banHistQuery),
-      );
-    if (!list.length) {
-      wrap.appendChild(
-        emptyBox("fa-filter-circle-xmark", "No history matches your filter."),
-      );
-      return;
-    }
-    list.forEach((e) => {
-      const isUnban = e.action === "unban";
-      const row = divc("bhrow " + (isUnban ? "unban" : "ban"));
-      const ic = divc("bh-ic");
-      ic.appendChild(icon(isUnban ? "fa-unlock" : "fa-ban"));
-      row.appendChild(ic);
-
-      const main = divc("bh-main");
-      const line = divc("bh-line");
-      const who = document.createElement("b");
-      who.textContent = e.by || "A staff member";
-      line.appendChild(who);
-      line.appendChild(document.createTextNode(" "));
-      line.appendChild(
-        span(
-          isUnban ? "verb-unban" : "verb-ban",
-          isUnban ? "unbanned" : "banned",
-        ),
-      );
-      line.appendChild(document.createTextNode(" "));
-      const target = document.createElement("b");
-      target.textContent =
-        e.name || (e.ip ? String(e.ip).replace(/^id:/, "") : "a user");
-      line.appendChild(target);
-      if (!isUnban && e.duration) {
-        line.appendChild(document.createTextNode(" "));
-        line.appendChild(span(null, durationLabel(e.duration)));
-      }
-      main.appendChild(line);
-
-      const s = divc("bh-sub");
-      if (e.kind === "id" || e.kind === "range") {
-        const tag = span("btag " + (e.kind === "id" ? "uid" : "range"));
-        tag.textContent = e.kind === "id" ? "ID BAN" : "RANGE";
-        s.appendChild(tag);
-      }
-      if (e.ip)
-        s.appendChild(span("ip", String(e.ip).replace(/^id:/, "id ")));
-      if (e.reason) s.appendChild(span(null, '"' + e.reason + '"'));
-      if (!isUnban && e.ip && activeKeys.has(e.ip)) {
-        const st = span("stchip active");
-        st.textContent = "ACTIVE";
-        s.appendChild(st);
-      }
-      if (s.childNodes.length) main.appendChild(s);
-      row.appendChild(main);
-
-      const when = span("bh-when", relTime(e.at));
-      when.title = fmtTime(e.at);
-      row.appendChild(when);
-
-      wrap.appendChild(row);
-    });
+      live.forEach((el) => {
+        el.textContent = timeLeft(Number(el.dataset.expiry));
+      });
+    }, 30000);
   }
 
   let modKeys = [];
@@ -4004,6 +4413,7 @@
         (x) => x.targetText && x.targetText.trim(),
       );
       const typedSnap = snapEntry && snapEntry.targetText;
+      if (r.pastBans) card.appendChild(pastBanNotice(r.pastBans));
       const typedBox = divc("rc-typed");
       const typedLbl = divc("lbl");
       typedLbl.appendChild(icon("fa-keyboard"));
@@ -6013,9 +6423,17 @@
     renderBanHistory();
   });
 
+  socket.on("staff ban details", (d) => {
+    const fn = d && banDetailWaiters.get(d.ref);
+    if (!fn) return;
+    banDetailWaiters.delete(d.ref);
+    fn(d);
+  });
+
   socket.on("staff ban history", (list) => {
     banHistory = Array.isArray(list) ? list : [];
-    renderBanHistory();
+    if (banView !== "now" || bans.length) renderBans();
+    else renderBanHistory();
   });
 
   socket.on("dev mod keys", (list) => {
@@ -6257,39 +6675,22 @@
       clearTimeout(banSearchDebounce);
       banSearchDebounce = setTimeout(() => {
         bansQuery = $("banSearch").value.trim().toLowerCase();
+        banPage[banView] = 0;
         renderBans();
       }, 200);
     });
-  document.querySelectorAll("#banSeg button").forEach((btn) => {
+  document.querySelectorAll("#banViews button").forEach((btn) => {
     btn.addEventListener("click", () => {
-      document
-        .querySelectorAll("#banSeg button")
-        .forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-      bansFilter = btn.dataset.b || "all";
+      banView = btn.dataset.v || "now";
       renderBans();
     });
   });
-
-  let banHistDebounce = null;
-  $("banHistSearch") &&
-    $("banHistSearch").addEventListener("input", () => {
-      clearTimeout(banHistDebounce);
-      banHistDebounce = setTimeout(() => {
-        banHistQuery = $("banHistSearch").value.trim().toLowerCase();
-        renderBanHistory();
-      }, 200);
+  $("banSort") &&
+    $("banSort").addEventListener("change", () => {
+      banSort = $("banSort").value;
+      banPage.now = 0;
+      renderBans();
     });
-  document.querySelectorAll("#banHistSeg button").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      document
-        .querySelectorAll("#banHistSeg button")
-        .forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-      banHistFilter = btn.dataset.h || "all";
-      renderBanHistory();
-    });
-  });
 
   document.querySelectorAll("#modsSeg button").forEach((btn) => {
     btn.addEventListener("click", () => {

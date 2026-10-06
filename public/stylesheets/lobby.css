@@ -235,11 +235,11 @@ html {
   overflow-y: auto; /* Enable vertical scrolling */
   overflow-x: hidden; /* Disable horizontal scrolling */
   scrollbar-width: thin;
-  scrollbar-color: var(--tk-accent) transparent;
+  scrollbar-color: rgba(140, 140, 140, 0.55) transparent;
 }
 
 .left-panel::-webkit-scrollbar {
-  width: 8px;
+  width: 6px;
 }
 
 .left-panel::-webkit-scrollbar-track {
@@ -247,8 +247,12 @@ html {
 }
 
 .left-panel::-webkit-scrollbar-thumb {
-  background: var(--tk-accent);
-  border-radius: 4px;
+  background: rgba(140, 140, 140, 0.55);
+  border-radius: 999px;
+}
+
+.left-panel::-webkit-scrollbar-thumb:hover {
+  background: rgba(140, 140, 140, 0.8);
 }
 
 /* Ensure all children of the left panel fit within the padding */
@@ -2238,11 +2242,11 @@ button:disabled {
   /* Firefox and Chromium style the bar from these two; older WebKit falls
      back to the pseudo-element rules below. */
   scrollbar-width: thin;
-  scrollbar-color: var(--tk-accent) transparent;
+  scrollbar-color: rgba(0, 0, 0, 0.22) transparent;
 }
 
 .preset-grid::-webkit-scrollbar {
-  width: 5px;
+  width: 4px;
 }
 
 .preset-grid::-webkit-scrollbar-track {
@@ -2250,8 +2254,12 @@ button:disabled {
 }
 
 .preset-grid::-webkit-scrollbar-thumb {
-  background: var(--tk-accent);
+  background: rgba(0, 0, 0, 0.22);
   border-radius: 999px;
+}
+
+.preset-grid::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.38);
 }
 
 .preset-grid.preset-empty {

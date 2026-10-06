@@ -4628,11 +4628,27 @@ function openUserStaffMenu(user) {
   });
 }
 
+function fetchPastBans(targetUserId) {
+  return new Promise((resolve) => {
+    const done = (data) => {
+      if (data && data.targetUserId !== targetUserId) return;
+      socket.off("staff past bans", done);
+      clearTimeout(timer);
+      resolve(data || null);
+    };
+    const timer = setTimeout(() => done(null), 1500);
+    socket.on("staff past bans", done);
+    socket.emit("staff past bans", { targetUserId });
+  });
+}
+
 async function openIpBlockPicker(user) {
   socket.emit("staff action begin", { targetUserId: user.id });
+  const past = await fetchPastBans(user.id);
   const res = await StaffUI.blockDialog({
     title: "Block " + (user.username || "this user"),
     subtitle: "They are disconnected the moment it is placed",
+    notice: StaffUI.pastBanText && StaffUI.pastBanText(past),
     message:
       "The block covers their device and the network their address sits on (IPv6 /64, IPv4 /24). Pick the rule first; it suggests the usual length.",
     allowPermanent:

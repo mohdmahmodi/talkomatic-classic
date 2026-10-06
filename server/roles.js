@@ -219,11 +219,11 @@ function listDevKeys(all) {
 }
 
 const PUBLIC_STAFF = "the Talkomatic staff";
-const PUBLIC_SYSTEM = "the system";
+const PUBLIC_SYSTEM = "Automod";
 
 const TEAM_LABEL = "Talkomatic staff";
-const SYSTEM_LABEL = "Talkomatic";
-const SYSTEM_ENFORCED = "Talkomatic (Automod)";
+const SYSTEM_LABEL = "Automod";
+const SYSTEM_ENFORCED = "Automod";
 
 function isDevLabel(label) {
   return !!label && devKeys.some((d) => d.label === label);
@@ -269,7 +269,7 @@ function teamReviewer(value, view) {
 }
 
 function publicStaffName(label, role) {
-  if (!label) return null;
+  if (!label) return PUBLIC_SYSTEM;
   return isMainDevActor(label, role) ? PUBLIC_SYSTEM : PUBLIC_STAFF;
 }
 

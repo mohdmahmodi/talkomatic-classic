@@ -118,6 +118,40 @@ function ipInCidr(ip, cidr) {
   }
 }
 
+const cidrParsed = new Map();
+
+function parsedCidr(key) {
+  let v = cidrParsed.get(key);
+  if (v === undefined) {
+    try {
+      v = ipaddr.parseCIDR(String(key));
+    } catch (_) {
+      v = null;
+    }
+    if (cidrParsed.size > 20000) cidrParsed.clear();
+    cidrParsed.set(key, v);
+  }
+  return v;
+}
+
+function rangeMatcher(ips) {
+  const addrs = [];
+  for (const ip of ips) {
+    try {
+      const a = ipaddr.parse(String(ip));
+      addrs.push(a);
+      if (a.kind() === "ipv6" && a.isIPv4MappedAddress()) addrs.push(a.toIPv4Address());
+    } catch (_) {}
+  }
+  return (cidr) => {
+    if (!addrs.length) return false;
+    const p = parsedCidr(cidr);
+    if (!p) return false;
+    for (const a of addrs) if (a.kind() === p[0].kind() && a.match(p[0], p[1])) return true;
+    return false;
+  };
+}
+
 function matchesKey(ip, key) {
   return isRangeKey(key) ? ipInCidr(ip, key) : ip === key;
 }
@@ -256,6 +290,7 @@ function removeBlocksForIp(ip) {
 }
 
 module.exports = {
+  rangeMatcher,
   DEFAULT_IPV6_PREFIX,
   DEFAULT_IPV4_PREFIX,
   BROAD_IPV4_PREFIX,

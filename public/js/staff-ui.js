@@ -241,6 +241,8 @@
   .tk-pop-now{margin:10px 12px 0;padding:9px 11px;border-radius:6px;background:rgba(255,84,104,.09);
     border:1px solid rgba(255,84,104,.35);font-size:12.5px;}
   .tk-pop-now b{color:#ff8a8e;}
+  .tk-notice{margin:0 0 12px;padding:9px 11px;border-radius:4px;background:#2a2112;
+    color:#e8e8e8;font-size:12.5px;line-height:1.45;}
   .tk-pop-now .tk-pop-nowsub{color:#d6d6d6;margin-top:2px;font-size:12px;}
   .tk-pop-list{flex:1;overflow-y:auto;overflow-x:hidden;padding:10px 12px 8px;min-height:120px;
     scrollbar-width:thin;scrollbar-color:#616161 #161616;}
@@ -268,6 +270,10 @@
   .tk-pop-what .tk-pop-by{font-weight:normal;color:#9a9a9a;}
   .tk-pop-row.k-block .tk-pop-what{color:#ff8a8e;}
   .tk-pop-row.k-unblock .tk-pop-what{color:#57d9a3;}
+  .tk-pop-row.k-ended .tk-pop-dot{background:rgba(90,169,255,.15);color:#5aa9ff;}
+  .tk-pop-row.k-ended .tk-pop-what{color:#8cc4ff;}
+  .tk-pop-past{margin:10px 12px 0;padding:8px 11px;border-radius:4px;background:#2a2112;
+    color:#e8e8e8;font-size:12px;line-height:1.45;}
   .tk-pop-why{color:#c9c9c9;font-size:12px;margin-top:1px;word-break:break-word;}
   .tk-pop-quote{margin-top:3px;padding:3px 8px;border-left:2px solid #444;color:#a9a9a9;font-size:11.5px;
     font-style:italic;white-space:pre-wrap;word-break:break-word;max-height:54px;overflow:hidden;}
@@ -529,6 +535,7 @@
     ];
     return new Promise((res) => {
       const form = el("form", { class: "tk-form" });
+      if (o.notice) form.appendChild(el("div", { class: "tk-notice", text: o.notice }));
       if (o.message) form.appendChild(el("p", { text: o.message }));
       const inputs = {};
       const helps = {};
@@ -1551,6 +1558,7 @@
       title: o.title || "Block",
       icon: '<i class="fas fa-ban"></i>',
       subtitle: o.subtitle,
+      notice: o.notice,
       message: o.message,
       fields,
       danger: true,
@@ -1856,6 +1864,7 @@
     "show rules": "fa-book",
     "kill bot": "fa-robot",
     "auto block": "fa-robot",
+    "ban ended": "fa-hourglass-end",
     identity: "fa-id-card",
     signin: "fa-right-to-bracket",
     rename: "fa-pen",
@@ -1900,8 +1909,8 @@
     }
     const dur = DUR_RE.exec(ev.action || "");
     const len = dur ? durationLabel(dur[1]) : ev.duration ? durationLabel(ev.duration) : "";
-    if (base === "auto block")
-      return "Blocked automatically" + (len ? " · " + len : "");
+    if (base === "auto block") return "Blocked" + (len ? " · " + len : "");
+    if (base === "ban ended") return "Ban expired" + (len ? " · " + len : "");
     if (["ip block", "id block", "ban ip", "ban"].includes(base))
       return "Blocked" + (len ? " · " + len : "") + (/\(range\)/.test(ev.action || "") ? " · network" : "");
     if (base === "report")
@@ -2049,7 +2058,7 @@
       const until = b.permanent
         ? "Does not end on its own."
         : "Ends " + new Date(b.expiry).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) + ".";
-      const byLine = b.auto ? "Placed automatically" : b.by ? "By " + b.by : "";
+      const byLine = b.by ? "By " + b.by : "";
       const sinceLine = b.since
         ? "Since " + new Date(b.since).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })
         : "";
@@ -2061,6 +2070,9 @@
         }),
       ]);
       wrap.appendChild(now);
+    } else if (d.pastBans && d.pastBans.total) {
+      const t = pastBanText(d.pastBans);
+      if (t) wrap.appendChild(el("div", { class: "tk-pop-past", text: t }));
     }
 
     const list = el("div", { class: "tk-pop-list" });
@@ -2103,8 +2115,51 @@
     return wrap;
   }
 
+  function agoText(ts) {
+    const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+    const n = (v, one) => v + " " + one + (v === 1 ? "" : "s") + " ago";
+    if (s < 3600) return Math.max(1, Math.floor(s / 60)) + " min ago";
+    if (s < 172800) return n(Math.floor(s / 3600), "hour");
+    return n(Math.floor(s / 86400), "day");
+  }
+  function inWords(ms) {
+    const m = Math.max(1, Math.round(ms / 60000));
+    if (m < 60) return m + " min";
+    const h = Math.round(m / 60);
+    if (h < 48) return h + (h === 1 ? " hour" : " hours");
+    return Math.round(h / 24) + " days";
+  }
+  function banOutcome(o) {
+    if (!o || !o.status) return null;
+    if (o.status === "permanent") return { cls: "active", text: "Still banned, permanent" };
+    if (o.status === "active")
+      return { cls: "active", text: "Still banned, ends in " + inWords((o.endsAt || 0) - Date.now()) };
+    if (o.status === "served")
+      return { cls: "served", text: "Expired " + (o.endedAt ? agoText(o.endedAt) : "") };
+    if (o.status === "lifted")
+      return {
+        cls: "lifted",
+        text: "Lifted early" + (o.liftedBy ? " by " + o.liftedBy : "") + (o.endedAt ? ", " + agoText(o.endedAt) : ""),
+      };
+    if (o.status === "replaced") return { cls: "replaced", text: "Replaced by a later ban" };
+    return { cls: "ended", text: "Ended" };
+  }
+  function pastBanText(p) {
+    if (!p || !p.total || !p.last) return null;
+    const l = p.last;
+    const out = banOutcome(l);
+    const what =
+      (l.duration ? durationLabel(l.duration).toLowerCase() + " ban" : "ban") +
+      (l.reason ? ' for "' + l.reason + '"' : "") +
+      (l.by ? " by " + l.by : "");
+    const more = p.total > 1 ? " Banned " + p.total + " times in total, " + p.served + " expired." : "";
+    return "Banned before: " + what + ". " + (out ? out.text + "." : "") + more;
+  }
+
   window.StaffUI = {
     rank,
+    banOutcome,
+    pastBanText,
     escape,
     el,
     modal,
