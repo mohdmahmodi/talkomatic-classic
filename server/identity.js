@@ -304,6 +304,14 @@ function getRecord(id) {
   return store[id] || null;
 }
 
+function setNet(id, net) {
+  if (!validId(id) || !store[id] || !net || typeof net !== "object") return false;
+  const name = typeof net.network === "string" && net.network ? net.network.slice(0, 60) : null;
+  store[id].net = { n: name, k: net.flagged ? net.type || "proxy" : null, m: net.mobile === true, s: net.school === true };
+  saveSoon();
+  return true;
+}
+
 function setClient(id, info) {
   if (!validId(id) || !store[id] || !info) return false;
   store[id].cl = info;
@@ -410,6 +418,7 @@ module.exports = {
   summary,
   getRecord,
   setClient,
+  setNet,
   noteScript,
   devicesMatching,
   devicesByKeys,

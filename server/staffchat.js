@@ -563,6 +563,12 @@ function sanitizeCard(qkind, c) {
     lines: Array.isArray(c.lines)
       ? c.lines.filter(Boolean).map((x) => cut(x, 160)).slice(0, 12)
       : null,
+    chips: Array.isArray(c.chips)
+      ? c.chips.filter(Boolean).map((x) => cut(x, 40)).slice(0, 8)
+      : null,
+    facts: Array.isArray(c.facts)
+      ? c.facts.filter(Boolean).map((x) => cut(x, 200)).slice(0, 10)
+      : null,
   };
   for (const k in out) if (out[k] == null) delete out[k];
   if (!out.ids.length) delete out.ids;

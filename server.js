@@ -54,6 +54,7 @@ const proxyguard = require("./server/proxyguard");
 const ipredact = require("./server/ipredact");
 const banstatus = require("./server/banstatus");
 const identity = require("./server/identity");
+const automod = require("./server/automod");
 const audit = require("./server/audit");
 const communityThemes = require("./server/themes");
 
@@ -536,6 +537,7 @@ io.use((socket, next) => {
         bannedAt: (block && typeof block === "object" && block.ts) || null,
       };
       if (deviceId) identity.setAckDue(deviceId, true);
+      automod.noteKnock({ socket, deviceId, ip: clientIp, hit: activeBlock });
       return next(err);
     }
     // The block is over, but this device sat on the ban screen: it reads the
@@ -748,6 +750,7 @@ io.use((socket, next) => {
             .consume(socket.id)
             .then(() => nextMw())
             .catch(() => {
+              automod.noteFlood(socket);
               socket.emit(
                 "error",
                 createErrorResponse(

@@ -102,6 +102,7 @@ function armLinkSweep(socket, userId) {
     const clean = linkfilter.redact(raw);
     if (clean === raw) return;
     state.setBuffer(userId, roomId, clean);
+    automod.noteLink(socket);
     const username = socket.handshake?.session?.username;
     const diff = { type: "full-replace", text: clean };
     emitRoomChatUpdate(socket, { userId, username, diff });
@@ -843,6 +844,7 @@ function reportProxyHit(socket, { username, location, type, provider, network, s
       reason: refused + " by the proxy guard",
     },
   });
+  automod.noteProxy(socket, { username, through, provider, refused });
 }
 
 function proxyKeyed(socket) {
@@ -1221,6 +1223,14 @@ function roomBan(room, userId) {
     ? banKeysFor(s.clientIp, s.deviceId, s.legacyDeviceId)
     : banKeysFor(seen?.ip, seen?.deviceId);
   for (const k of keys) room.bannedKeys.add(k);
+  const u = (room.users || []).find((x) => x.id === userId);
+  automod.noteRoomBan(room, {
+    uid: userId,
+    did: s?.deviceId || seen?.deviceId || null,
+    ip: s?.clientIp || seen?.ip || null,
+    name: u?.username || s?.handshake?.session?.username || null,
+    location: u?.location || s?.handshake?.session?.location || null,
+  });
 }
 
 function roomBansSocket(room, socket) {
@@ -3167,6 +3177,13 @@ async function floodGuardSigninFlood(socket, username, location, hit) {
   });
   broadcastBlockList();
   broadcastBanHistory();
+  automod.noteAutoBlock(socket, username, {
+    reason:
+      "Signed in " + hit.count + " times in " + hit.seconds +
+      " seconds with a new identity each time. Blocked for " +
+      durations.labelFor(SIGNIN_FLOOD_BLOCK).toLowerCase() + ".",
+    lines: ["sign-in flood"],
+  });
   audit.recordNotification({
     kind: "floodguard",
     minLevel: 1,
@@ -3208,6 +3225,7 @@ async function floodGuardSigninFlood(socket, username, location, hit) {
 function applyNamePolicy(socket, username) {
   if (!socket || socket.isDev || socket.isMod) return;
   automod.noteWatch(socket, username);
+  automod.noteName(socket, username);
   const wait = 4000 + Math.floor(Math.random() * 7000);
   if (!isListedName(username)) {
     setTimeout(() => settleNameEcho(socket, username), wait);
@@ -3227,6 +3245,7 @@ function settleNameEcho(socket, username) {
       location: socket.handshake?.session?.location || null,
     });
     if (!hit) return automod.noteSignin(socket, username);
+    automod.noteEvasion(socket, hit);
     automod.noteWatch(socket, username, true);
     broadcastBlockList();
     broadcastBanHistory();
@@ -3305,6 +3324,10 @@ async function settleNamePolicy(socket, username) {
   });
   broadcastBlockList();
   broadcastBanHistory();
+  automod.noteAutoBlock(socket, username, {
+    reason: "Matched a blocked user by name and network. The block is permanent.",
+    lines: ["same name as a blocked user", "same network as that block"],
+  });
 
   const affected = new Set(ip ? findSocketsByIp(ip) : []);
   if (did && io())
@@ -4869,6 +4892,7 @@ function emitJoinSuccess(socket, room, userId, username, location, restoredText)
   socket.leave("lobby");
 
   emitRoomUserJoined(room, joinedUser);
+  automod.noteJoin(socket, room, userId);
   if (restoredText)
     emitRoomChatUpdate(socket, {
       userId,
@@ -5107,7 +5131,13 @@ function registerSocketHandlers(opts) {
 
     noteLastSeen(socket);
 
-    if (!proxyExempt(socket)) proxyguard.check(clientIp).catch(() => {});
+    if (!proxyExempt(socket))
+      proxyguard
+        .check(clientIp)
+        .then((net) => {
+          if (net && socket.deviceId) identity.setNet(socket.deviceId, net);
+        })
+        .catch(() => {});
 
     try {
       if (socket.deviceId) {
@@ -5127,6 +5157,7 @@ function registerSocketHandlers(opts) {
               ip: clientIp,
               username: socket.handshake?.session?.username || null,
             });
+            if (hit) automod.noteEvasion(socket, hit);
             if (hit && hit.autoBlocked) {
               broadcastBlockList();
               broadcastBanHistory();
@@ -6823,7 +6854,20 @@ function registerSocketHandlers(opts) {
         emitRoomVoteUpdates(roomId);
         // Staff collect votes but are never kicked by them.
         if (getUserStaffRole(data.targetUserId)) return;
-        if (votesAgainst(room, data.targetUserId) > voteThreshold(room)) {
+        const against = votesAgainst(room, data.targetUserId);
+        const out = against > voteThreshold(room);
+        automod.noteVote(
+          {
+            uid: data.targetUserId,
+            did: findSocketByUserId(data.targetUserId, roomId)?.deviceId || null,
+            name: room.users.find((u) => u.id === data.targetUserId)?.username || null,
+            location: room.users.find((u) => u.id === data.targetUserId)?.location || null,
+          },
+          room,
+          against,
+          out,
+        );
+        if (out) {
           const target = findSocketByUserId(data.targetUserId, roomId);
           if (target) {
             target.emit("kicked");
@@ -11484,6 +11528,11 @@ function registerSocketHandlers(opts) {
           openedTextWiped: !!(opened && opened.wiped),
           openedAt: opened ? opened.at : null,
         });
+        automod.noteReport(
+          { uid: targetUserId, did: targetSocket?.deviceId || null, name: targetName, location: targetLocation, role: targetRole },
+          tally,
+          catLabel,
+        );
         const targetIsStaff = !!targetRole;
         const text =
           `${reporter} reported ${targetName}${targetIsStaff ? " (staff)" : ""} for ${catLabel}` +

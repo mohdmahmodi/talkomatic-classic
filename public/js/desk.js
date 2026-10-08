@@ -2111,8 +2111,13 @@
     renderMessages();
   }
 
-  function nearBottom() {
+  function scroller() {
     const l = els.list;
+    if (!l) return null;
+    return l.classList.contains("dk-am-feed") ? l.closest(".dk-msgs") || l : l;
+  }
+  function nearBottom() {
+    const l = scroller();
     return l && l.scrollHeight - l.scrollTop - l.clientHeight < 120;
   }
 
@@ -2138,8 +2143,9 @@
     if (!list) return;
     closeReactPicker();
     const c = cacheFor(viewKey());
-    const prevHeight = list.scrollHeight;
-    const prevTop = list.scrollTop;
+    const sc = scroller() || list;
+    const prevHeight = sc.scrollHeight;
+    const prevTop = sc.scrollTop;
     list.textContent = "";
 
     if (c.hasMore) {
@@ -2188,9 +2194,9 @@
     }
 
     if (keepScroll) {
-      list.scrollTop = prevTop + (list.scrollHeight - prevHeight);
+      sc.scrollTop = prevTop + (sc.scrollHeight - prevHeight);
     } else {
-      list.scrollTop = list.scrollHeight;
+      sc.scrollTop = sc.scrollHeight;
       missed = 0;
     }
     renderJump();
@@ -2220,7 +2226,8 @@
       list.appendChild(el("div", "dk-day", dayLabel(msg.ts)));
     list.appendChild(row(msg, prev));
     if (stick) {
-      list.scrollTop = list.scrollHeight;
+      const sc = scroller() || list;
+      sc.scrollTop = sc.scrollHeight;
     } else {
       missed++;
       renderJump();
@@ -4961,13 +4968,13 @@
           "div",
           "dk-am-flag-h",
           c.flagged.band === "device"
-            ? 'Same device details as blocked user "' + c.flagged.label + '".'
+            ? "Same device details as blocked user " + c.flagged.label
             : c.flagged.band === "standing"
-            ? 'Has the name of blocked user "' + c.flagged.label + '".'
-            : c.flagged.percent + '% chance this is blocked user "' + c.flagged.label + '".',
+            ? "Same name as blocked user " + c.flagged.label
+            : c.flagged.percent + "% match with blocked user " + c.flagged.label,
         ),
       );
-      txt.appendChild(el("div", "dk-am-flag-p", "Why: " + c.flagged.why.join(", ") + "."));
+      if (c.flagged.why && c.flagged.why.length) txt.appendChild(amFacts(c.flagged.why));
       fl.appendChild(txt);
       if (c.can.vote) {
         const no = btn("dk-minib", "Not them", "fa-xmark");
@@ -5002,7 +5009,7 @@
         if (a.evader) top.appendChild(amChip("dodged a block", "amber"));
         top.appendChild(el("span", "dk-am-row-s", "seen " + amWhen(a.last)));
         r.appendChild(top);
-        if (a.why) r.appendChild(el("div", "dk-am-row-w", "Why: " + a.why + "."));
+        if (a.why) r.appendChild(el("div", "dk-am-row-w", a.why));
         if (a.linkedBy) r.appendChild(el("div", "dk-am-row-w", "Confirmed by " + a.linkedBy + ", " + amWhen(a.linkedAt) + "."));
         sec.appendChild(r);
       }
@@ -5023,7 +5030,7 @@
         if (m.online) top.appendChild(amChip("online", "green"));
         top.appendChild(el("span", "dk-am-row-s", "seen " + amWhen(m.last)));
         r.appendChild(top);
-        r.appendChild(el("div", "dk-am-row-w", "Why: " + m.why.join(", ") + "."));
+        if (m.why && m.why.length) r.appendChild(amFacts(m.why));
         if (m.votes.same || m.votes.different)
           r.appendChild(el("div", "dk-am-row-w", "Staff votes: " + m.votes.same + " same, " + m.votes.different + " not same."));
         const acts = el("div", "dk-am-acts");
@@ -5154,8 +5161,8 @@
       tone: "orange",
       h: "What it is",
       lines: [
-        "One page per user: warnings, blocks, what they typed, and their other accounts.",
-        "It never acts by itself. You press the buttons, and they work the same as everywhere else.",
+        "One page per user with warnings, blocks, what they typed and other accounts.",
+        "Automod doesn't act on its own. The buttons here do what they do everywhere else.",
       ],
     },
     {
@@ -5165,9 +5172,9 @@
       lines: [
         "Type part of a name and press Enter.",
         "Or paste a user id.",
-        "Or press \"Who is this?\" on a report or an appeal.",
-        "From any channel: `/who name`",
-        "Works for offline users. If many match, pick from the list.",
+        "Or press Who is this? on a report or an appeal.",
+        "/who name works in any channel.",
+        "Offline users show too. More than one match shows a list.",
       ],
     },
     {
@@ -5177,12 +5184,12 @@
       rows: [
         [["Clean", "green"], "Nothing on record."],
         [["Warned before", "amber"], "Staff warned or kicked them."],
-        [["Blocked before", "amber"], "Was blocked. Not blocked now."],
-        [["Blocked", "red"], "Blocked right now. Shows until when."],
-        [["Dodged a block", "amber"], "Came back while they were blocked."],
-        [["Online", "green"], "On the site now. Shows the room if it is public."],
-        [["Watching", "blue"], "You asked to be told when they sign in."],
-        [["No browser", "amber"], "Signed in without the details a browser sends. Could be a script."],
+        [["Blocked before", "amber"], "Blocked once. Not now."],
+        [["Blocked", "red"], "Blocked now. Shows until when."],
+        [["Dodged a block", "amber"], "Came back while blocked."],
+        [["Online", "green"], "On the site now. Shows the room if it's public."],
+        [["Watching", "blue"], "You get a note when they sign in."],
+        [["No browser", "amber"], "Signed in without the details a browser sends."],
       ],
     },
     {
@@ -5190,12 +5197,12 @@
       tone: "amber",
       h: "The six numbers",
       rows: [
-        ["warns + kicks", "Times staff warned or kicked them."],
-        ["blocks", "Times they were blocked from the site."],
-        ["reports", "Times other users reported them."],
-        ["appeals", "Times they asked for a block to be lifted."],
-        ["days seen", "Days they showed up."],
-        ["first seen", "How long ago they first came."],
+        ["warns + kicks", "Warnings and kicks from staff."],
+        ["blocks", "Site blocks."],
+        ["reports", "Reports from other users."],
+        ["appeals", "Appeals they sent."],
+        ["days seen", "Days they were on the site."],
+        ["first seen", "When they first came."],
       ],
     },
     {
@@ -5203,23 +5210,23 @@
       tone: "orange",
       h: "The buttons",
       rows: [
-        ["Warn", "Sends a warning. If they are offline, they see it next sign-in."],
-        ["Wipe", "Clears their box. Only shows when they are in a room."],
-        ["Kick", "Removes them from the room. Only shows when they are in a room."],
-        ["Block", "Blocks them from the whole site. Full mods and up."],
-        ["Watch", "You get a private note when they sign in, or when someone signs in with their name or a longer version of it. It shows in your Watching tab. Lasts 7 days. You can watch 20 users."],
-        ["Share", "Posts their page in the feed so other staff can open it."],
+        ["Warn", "Sends a warning. Offline users see it at their next sign-in."],
+        ["Wipe", "Clears their box. Shows while they're in a room."],
+        ["Kick", "Removes them from the room. Shows while they're in a room."],
+        ["Block", "Blocks them from the site. Full mods and up."],
+        ["Watch", "A private note when they sign in, or when someone signs in with their name or a longer version of it. Shows in your Watching tab. 7 days. 20 users at a time."],
+        ["Share", "Posts their page in the feed."],
       ],
     },
     {
       icon: "fa-users",
       tone: "blue",
       h: "Other accounts",
-      lines: ["Other browsers that are the same user. Full mods and up see this. Each one says why it is linked."],
+      lines: ["Other browsers that are the same user. Full mods and up. Each one says why it's linked."],
       rows: [
         [["Staff confirmed", "green"], "A leader checked it."],
-        [["Strong link", "blue"], "Same name on the same connection, or they swapped browsers right after a kick."],
-        [["Medium link", "amber"], "Same network and another sign, like the same name."],
+        [["Strong link", "blue"], "Same name on the same connection, or a browser swap right after a kick."],
+        [["Medium link", "amber"], "Same network plus one more sign, like the same name."],
       ],
     },
     {
@@ -5227,16 +5234,16 @@
       tone: "amber",
       h: "Maybe the same user",
       lines: [
-        "Accounts with the same name that are not linked.",
-        "The % is a guess based on real past cases on Talkomatic.",
-        "It goes up for: the exact same name, coming back soon after a block, the same location text, and a user who was blocked more than once.",
-        "A name that only starts the same, like Sam and Sam2, counts too, but scores lower.",
-        "Common names like Alex match strangers. Read what they type before you act.",
+        "Accounts with the same name that aren't linked.",
+        "The % comes from past cases on Talkomatic.",
+        "It goes up for the exact same name, a return soon after a block, the same location text and more than one past block.",
+        "A name that only starts the same, like Sam and Sam2, scores lower.",
+        "Common names like Alex match strangers.",
       ],
       rows: [
-        [["50% and up, likely", "red"], "About 3 in 5 of these were the same user."],
-        [["25 to 50%, possible", "amber"], "About 2 in 5 were."],
-        [["Under 25%", ""], "About 1 in 8 were. Automod stays quiet."],
+        [["50% and up, likely", "red"], "3 in 5 were the same user."],
+        [["25 to 50%, possible", "amber"], "2 in 5 were."],
+        [["Under 25%", ""], "1 in 8 were. No card."],
       ],
     },
     {
@@ -5244,23 +5251,37 @@
       tone: "green",
       h: "Same user or not",
       rows: [
-        ["Full mod", "Your pick is a vote. It changes nothing yet, but leaders see it."],
-        ["Leader", "Your pick is final. \"Same user\" joins the accounts, so a block on one follows the other."],
+        ["Full mod", "Your pick is a vote. Leaders see it."],
+        ["Leader", "Your pick is final. Same user joins the accounts, so a block on one covers the other."],
       ],
-      lines: ["If a link later helps catch someone, the feed says who made it."],
+      lines: ["When a link helps catch someone, the feed names who made it."],
       after: true,
     },
     {
       icon: "fa-bell",
       tone: "blue",
       h: "The feed",
-      lines: ["Automod posts here by itself. Press Open on a card to see the user."],
+      lines: [
+        "Automod posts cards here on its own. View user opens the person.",
+        "Every card starts with the user's name, location and system. Same and Differs rows compare the two people by network, provider, system, time zone and screen. Never an address.",
+      ],
       rows: [
-        [["Maybe back", "amber"], "Someone signed in with a blocked user's name, or on a device that looks like theirs."],
-        [["No browser", "amber"], "Someone signed in without the details a browser sends. Could be a script, or an old tab."],
-        [["Needs a leader", "purple"], "Two mods voted that two accounts are the same user."],
-        [["Caught", "green"], "Staff blocked a user Automod had flagged."],
-        [["Not them", ""], "Staff checked a flag. It was a different user."],
+        [["Maybe back", "amber"], "A sign-in with a blocked user's name, or a device like theirs. The % is the match."],
+        [["Seen on a blocked network", "amber"], "Their browser was on a blocked network before, or they're on a network a blocked user last used. Not blocked."],
+        [["Blocked at sign-in", "red"], "Automod blocked them. Same browser, network or name as a blocked user, or a sign-in flood."],
+        [["Block held", ""], "A blocked user tried to sign in. The chip counts tries today."],
+        [["No browser", "amber"], "Signed in without the details a browser sends. A script or an old tab."],
+        [["Flooding", "amber"], "Sent more updates in one second than the site allows, 3 times in 10 min. The extra updates were dropped. Not blocked."],
+        [["Name changes", "amber"], "4 or more names in 10 min."],
+        [["Lookalike name", "amber"], "A name that looks like someone in the room or like a staff name."],
+        [["Blocked links", "amber"], "3 or more links removed from their box in 10 min."],
+        [["Voted out", ""], "The room voted them out, or 3 people voted against them."],
+        [["New browser after a ban", "amber"], "A new browser joined a room within 10 min of a ban there and shares something with the banned user."],
+        [["VPN or proxy", ""], "Refused for a VPN, proxy or hosting network. No block."],
+        [["Reported again", "amber"], "A second report on the same person. The reports are in the queue."],
+        [["Needs a leader", "purple"], "2 mods voted that two accounts are one user."],
+        [["Caught", "green"], "Staff blocked a user Automod flagged."],
+        [["Not them", ""], "Staff checked a flag. Different user."],
         [["Shared", ""], "A staff member shared a user's page."],
       ],
     },
@@ -5269,9 +5290,9 @@
       tone: "purple",
       h: "Who can do what",
       rows: [
-        ["Junior mod", "Find, read, warn, kick, wipe, watch."],
-        ["Full mod", "All that, plus other accounts, the maybe list, votes, and block."],
-        ["Leader", "All that, plus final say on links, and the Stats tab."],
+        ["Junior mod", "Find, read, warn, kick, wipe, watch. Reads the feed. Can't press Not them or Block."],
+        ["Full mod", "All that, plus other accounts, the maybe list, votes and Block."],
+        ["Leader", "All that, plus final say on links and the Stats tab."],
       ],
     },
     {
@@ -5279,12 +5300,12 @@
       tone: "",
       h: "Good to know",
       lines: [
-        "Searching is not counted as work.",
-        "Leaders can see which mods looked up whom. Only look up users you have a reason to.",
-        "Staff do not show up in search.",
-        "Your watches are private. Other staff do not see them.",
-        "No addresses are shown at any mod level.",
-        "Device details are a hint, never proof. Two phones of the same model look the same, so they are not counted.",
+        "Searching doesn't count as work.",
+        "Leaders see who looked up whom.",
+        "Staff don't show up in search.",
+        "Your watches are private.",
+        "No addresses at any mod level.",
+        "Device details are a hint. Two phones of the same model look the same, so they aren't counted.",
       ],
     },
   ];
@@ -5487,11 +5508,17 @@
         body.appendChild(amPerson(am.card));
       } else body.appendChild(amResults());
     } else {
-      body.appendChild(el("p", "dk-am-empty", "Automod posts here when a blocked or watched user signs in."));
+      body.appendChild(el("p", "dk-am-empty", "Automod posts cards here on its own. The Help tab explains each kind."));
       body.appendChild(els.list);
       renderMessages();
     }
     main.appendChild(body);
+    if (am.tab === "feed" || !am.tab) {
+      body.scrollTop = body.scrollHeight;
+      requestAnimationFrame(() => {
+        body.scrollTop = body.scrollHeight;
+      });
+    }
   }
 
   const AM_KIND = {
@@ -5503,7 +5530,108 @@
     shared: ["Shared", "fa-share", ""],
     caught: ["Caught", "fa-circle-check", "green"],
     script: ["No browser", "fa-robot", "amber"],
+    knock: ["Block held", "fa-door-closed", ""],
+    evade: ["Seen on a blocked network", "fa-user-secret", "amber"],
+    autoblock: ["Blocked at sign-in", "fa-ban", "red"],
+    flood: ["Flooding", "fa-water", "amber"],
+    rename: ["Name changes", "fa-arrows-rotate", "amber"],
+    copycat: ["Lookalike name", "fa-clone", "amber"],
+    links: ["Blocked links", "fa-link-slash", "amber"],
+    voted: ["Voted out", "fa-thumbs-down", ""],
+    newface: ["New browser after a ban", "fa-user-plus", "amber"],
+    proxy: ["VPN or proxy", "fa-shield-halved", ""],
+    reported: ["Reported again", "fa-flag", "amber"],
   };
+
+  const AM_WHAT = (() => {
+    const out = {};
+    const feed = AM_GUIDE.find((g) => g.h === "The feed");
+    const byLabel = {};
+    for (const row of (feed && feed.rows) || []) byLabel[row[0][0]] = row[1];
+    for (const k in AM_KIND) if (byLabel[AM_KIND[k][0]]) out[k] = byLabel[AM_KIND[k][0]];
+    return out;
+  })();
+
+  const AM_DEVICES = ["Windows", "Android", "iPhone or iPad", "Mac", "Chromebook", "Linux", "other system"];
+  const AM_BROWSERS = ["Chrome", "Firefox", "Safari", "other browser"];
+  const AM_TONE = {
+    Windows: "t-win",
+    Android: "t-android",
+    "iPhone or iPad": "t-apple",
+    Mac: "t-apple",
+    Chromebook: "t-cros",
+    Linux: "t-linux",
+    Chrome: "t-chrome",
+    Firefox: "t-firefox",
+    Safari: "t-safari",
+  };
+  const AM_WHO = new Set(["User", "Blocked user", "Banned user", "Already in the room"]);
+  const AM_LISTS = new Set(["Same", "Differs", "Names", "Missing", "Possible", "Action", "Network", "Signed in", "Matched on"]);
+
+  function amFactChip(tok, label) {
+    const i = tok.indexOf("=");
+    const key = i > 0 ? tok.slice(0, i) : "";
+    const val = i > 0 ? tok.slice(i + 1) : tok;
+    const tone = AM_TONE[val] || (label === "Same" ? "t-same" : label === "Differs" ? "t-diff" : "");
+    const s = el("span", "dk-q-chip dk-am-fchip" + (tone ? " " + tone : ""));
+    if (key) s.appendChild(el("span", "dk-am-fk", key));
+    s.appendChild(document.createTextNode(val));
+    return s;
+  }
+
+  // Cards stored before the chip format hold comma lists; turn them into the
+  // same chips so old and new cards read alike.
+  function amLegacy(label, vals) {
+    if (vals.length !== 1 || vals[0].indexOf("=") > 0 || vals[0].indexOf(", ") === -1) return vals;
+    const bits = vals[0].split(", ");
+    if (AM_WHO.has(label)) {
+      const out = [];
+      let rest = bits.slice();
+      if (rest.length && AM_BROWSERS.includes(rest[rest.length - 1])) out.unshift("Browser=" + rest.pop());
+      if (rest.length && AM_DEVICES.includes(rest[rest.length - 1])) out.unshift("Device=" + rest.pop());
+      if (rest.length > 1) out.unshift("Location=" + rest.slice(1).join(", "));
+      out.unshift("Name=" + rest[0]);
+      return out;
+    }
+    if (label === "Placed") return bits.map((b) => b.replace(/^by /, ""));
+    if (AM_LISTS.has(label)) return bits;
+    return vals;
+  }
+
+  function amFactInto(grid, f) {
+    const parts = String(f).split("|");
+    const label = parts.length > 1 ? parts[0] : "";
+    let vals = parts.length > 1 ? parts.slice(1) : parts;
+    if (label === "Block" && vals.length === 1) {
+      const m = /^(.*), (\d+ [a-z]+ left|permanent)$/.exec(vals[0]);
+      if (m) {
+        amFactInto(grid, "Block|" + m[1]);
+        amFactInto(grid, "Ends|" + (m[2] === "permanent" ? "never" : "in " + m[2].replace(" left", "")));
+        return;
+      }
+    }
+    vals = amLegacy(label, vals);
+    grid.appendChild(el("span", "dk-am-f-k", label));
+    if (vals.length > 1 || (vals[0] || "").indexOf("=") > 0) {
+      const row = el("span", "dk-am-f-v dk-am-fchips");
+      for (const v of vals) if (v) row.appendChild(amFactChip(v, label));
+      grid.appendChild(row);
+    } else grid.appendChild(el("span", "dk-am-f-v", vals[0] || ""));
+  }
+
+  function amFacts(list) {
+    const g = el("div", "dk-am-facts");
+    for (const f of list) amFactInto(g, f);
+    return g;
+  }
+
+  const AM_HOT = new Set(["Blocked", "Permanent"]);
+  const AM_WARM = new Set(["Old block", "Repeat", "Device match", "New browser"]);
+  function amCardChip(text) {
+    const pct = /^(\d+)%$/.exec(text);
+    const cls = AM_HOT.has(text) ? "hot" : (pct ? Number(pct[1]) >= 50 : AM_WARM.has(text)) ? "warn" : "cat";
+    return qChip(text, cls);
+  }
 
   function automodCard(m) {
     const c = m.card || {};
@@ -5517,17 +5645,30 @@
     const who = el("div", "dk-am-card-w");
     who.appendChild(el("span", "dk-am-card-k", kind));
     who.appendChild(el("span", "dk-am-card-t", m.text || ""));
+    if (AM_WHAT[c.category]) who.appendChild(el("span", "dk-am-card-d", AM_WHAT[c.category]));
     head.appendChild(who);
     head.appendChild(el("span", "dk-q-t", clockTime(m.ts)));
     r.appendChild(head);
+    if (c.chips && c.chips.length) {
+      const row = el("div", "dk-am-chips");
+      for (const t of c.chips) row.appendChild(amCardChip(t));
+      r.appendChild(row);
+    }
+    const facts = (c.facts || []).slice();
+    if (c.category === "return cleared" && c.by) facts.push("Checked by|" + c.by);
+    if (facts.length) r.appendChild(amFacts(facts));
     if (c.reason) r.appendChild(el("div", "dk-am-row-w", c.reason));
-    if (c.category === "return" && c.lines && c.lines.length) r.appendChild(el("div", "dk-am-row-w", "Why: " + c.lines.join(", ") + "."));
-    if (c.category === "return cleared" && c.by) r.appendChild(el("div", "dk-am-row-w", "Checked by " + c.by + "."));
+    if (c.lines && c.lines.length) r.appendChild(el("div", "dk-am-row-w", c.lines.join(", ")));
     const acts = el("div", "dk-am-acts");
     if (c.targetUserId) {
-      const open = btn("dk-minib primary", "Open", "fa-id-card");
+      const open = btn("dk-minib primary", "View user", "fa-id-card");
       open.addEventListener("click", () => openAutomod(c.targetUserId));
       acts.appendChild(open);
+    }
+    if (c.itemId && channels.some((ch) => ch.key === "bans")) {
+      const ban = btn("dk-minib", "View block", "fa-ban");
+      ban.addEventListener("click", () => jumpTo("bans", Number(c.itemId)));
+      acts.appendChild(ban);
     }
     if (c.category === "return" && isFullMod()) {
       const no = btn("dk-minib", "Not them", "fa-xmark");
@@ -7413,6 +7554,27 @@
 .dk-am-card-w{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;}
 .dk-am-card-k{font-size:9.5px;font-weight:bold;letter-spacing:.7px;text-transform:uppercase;color: #8d8d8d;}
 .dk-am-card-t{font-size:13.5px;font-weight:bold;color: #fff;line-height:1.45;word-break:break-word;}
+.dk-am-chips{display:flex;flex-wrap:wrap;gap:5px;}
+.dk-am-facts{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;font-size:13px;line-height:1.5;}
+.dk-am-f-k{color: #a6a6a6;font-weight:bold;white-space:nowrap;}
+.dk-am-f-v{color: #ececec;word-break:break-word;min-width:0;}
+.dk-am-card .dk-am-card-t{font-size:14px;}
+.dk-am-card .dk-q-chip{font-size:12px;}
+.dk-am-card-d{font-size:12px;color: #9a9a9a;line-height:1.45;margin-top:1px;}
+.dk-am-fchips{display:flex;flex-wrap:wrap;gap:4px;align-items:center;}
+.dk-am-fchip{font-size:12px;padding:1px 7px;color: #ececec;border-color: #3a3a3a;}
+.dk-am-fk{color: #8d8d8d;margin-right:5px;}
+.dk-am-fchip.t-win{color: #8cc4ff;border-color:rgba(90,169,255,.35);}
+.dk-am-fchip.t-android{color: #7fe3b8;border-color:rgba(87,217,163,.35);}
+.dk-am-fchip.t-apple{color: #f0f0f0;border-color:rgba(255,255,255,.25);}
+.dk-am-fchip.t-cros{color: #d2b0ff;border-color:rgba(192,139,255,.35);}
+.dk-am-fchip.t-linux{color: #ffc97a;border-color:rgba(255,180,84,.35);}
+.dk-am-fchip.t-chrome{color: #ffb55e;border-color:rgba(255,152,0,.4);}
+.dk-am-fchip.t-firefox{color: #ff9a7a;border-color:rgba(255,122,89,.4);}
+.dk-am-fchip.t-safari{color: #8cc4ff;border-color:rgba(90,169,255,.35);}
+.dk-am-fchip.t-same{color: #9fe6c4;border-color:rgba(87,217,163,.3);}
+.dk-am-fchip.t-diff{color: #ff9aa6;border-color:rgba(255,84,104,.3);}
+.dk-am-ico .fas{transform:translateY(.07em);}
 .dk-am-ico{flex:none;width:26px;height:26px;border-radius:13px;background: #252525;color: #8d8d8d;display:flex;
   align-items:center;justify-content:center;font-size:11px;}
 .dk-am-ico.amber{color: #ffb454;background:rgba(255,180,84,.12);}

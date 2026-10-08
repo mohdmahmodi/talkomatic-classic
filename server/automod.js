@@ -45,9 +45,22 @@ const SCRIPT_HOURLY = tuned("GUARD_AM_HOURLY", 6);
 const KEEP_SCRIPTS = 500;
 const DEVICE_RARE = atLeastZero(process.env.GUARD_AM_DEVICE_SHARE, 0);
 const KEEP_VOTES = 3000;
-const DEVICE_MIN = tuned("GUARD_AM_DEVICE_MIN", 300);
+const DEVICE_MIN = tuned("GUARD_AM_DEVICE_MIN", 150);
 const STANDING_LETTERS = tuned("GUARD_AM_OLD_LETTERS", 6);
 const STANDING_OTHERS = tuned("GUARD_AM_OLD_SHARE", 2);
+const EVENT_HOURLY = tuned("GUARD_AM_EVENT_HOURLY", 10);
+const EVENT_QUIET_MS = HOUR;
+const KEEP_EVENTS = 3000;
+const KEEP_BANS = 200;
+const FLOOD_TRIPS = tuned("GUARD_AM_FLOOD_TRIPS", 3);
+const RENAME_TRIPS = tuned("GUARD_AM_RENAMES", 4);
+const LINK_TRIPS = tuned("GUARD_AM_LINKS", 3);
+const VOTES_NOTE = tuned("GUARD_AM_VOTES_NOTE", 3);
+const REPORTS_NOTE = tuned("GUARD_AM_REPORTS", 2);
+const WINDOW_MS = tuned("GUARD_AM_WINDOW_MIN", 10) * 60 * 1000;
+const NEWFACE_MS = tuned("GUARD_AM_NEWFACE_MIN", 10) * 60 * 1000;
+const SYSTEMS = { windows: "Windows", android: "Android", ios: "iPhone or iPad", mac: "Mac", chromeos: "Chromebook", linux: "Linux" };
+const BROWSERS = { chromium: "Chrome", firefox: "Firefox", webkit: "Safari" };
 const WORDS_FILE = path.join(__dirname, "..", "public", "js", "dictionary_words.json");
 const NOBODY = new Set(["anonymous", "anon", "guest", "user", "me", "your name", "name", "undefined"].map((n) => nameguard.skeleton(n)));
 
@@ -66,7 +79,7 @@ function weights(raw, def) {
 }
 
 let ctx = null;
-let store = { watches: [], returns: [], votes: [], links: [], lookups: [], asked: [], scripts: [], usage: {}, staff: {}, since: 0, deviceOn: false };
+let store = { watches: [], returns: [], votes: [], links: [], lookups: [], asked: [], scripts: [], events: [], bans: [], usage: {}, staff: {}, since: 0, deviceOn: false };
 let saveTimer = null;
 let index = null;
 let banCounts = null;
@@ -81,6 +94,11 @@ let lastSweep = 0;
 let sweptTo = 0;
 const lastReturn = new Map();
 const calls = new Map();
+const trips = new Map();
+const eventPosts = new Map();
+const lastEvent = new Map();
+const knocks = new Map();
+let modLabels = null;
 
 function load() {
   let text;
@@ -100,7 +118,7 @@ function load() {
     return;
   }
   if (!raw || typeof raw !== "object") return;
-  for (const k of ["watches", "returns", "votes", "links", "lookups", "asked", "scripts"])
+  for (const k of ["watches", "returns", "votes", "links", "lookups", "asked", "scripts", "events", "bans"])
     if (Array.isArray(raw[k])) store[k] = raw[k];
   if (raw.usage && typeof raw.usage === "object") store.usage = raw.usage;
   if (raw.staff && typeof raw.staff === "object") store.staff = raw.staff;
@@ -417,13 +435,88 @@ function ago(ms) {
   return d + (d === 1 ? " day" : " days");
 }
 
+function short(ms) {
+  const m = Math.max(1, Math.round(ms / 60000));
+  if (m < 60) return m + " min";
+  const h = Math.round(m / 60);
+  if (h < 48) return h + " h";
+  return Math.round(h / 24) + " d";
+}
+
 function reasons({ exact, base, gap, sameLocation, repeat, standing, permanent }) {
-  const out = [exact ? "same name" : 'name starts with "' + base + '"'];
-  if (standing) out.push(permanent ? "that block is permanent and still on" : "that block is still on");
-  else if (gap != null) out.push("back " + ago(gap) + " after the block");
-  if (sameLocation) out.push("same location");
-  if (repeat) out.push("blocked more than once before");
+  const same = [exact ? "name" : "name start (" + base + ")"];
+  if (sameLocation) same.push("location");
+  const notes = [];
+  if (standing) notes.push(permanent ? "old block, permanent" : "old block, still on");
+  else if (gap != null) notes.push("back " + short(gap) + " after the block");
+  if (repeat) notes.push("blocked more than once");
+  return { same, notes };
+}
+
+// Lines for a user page: what matches, what differs, then the notes.
+function whyLines(bits, cmp) {
+  const out = factsOf(bits, cmp);
+  for (const n of bits ? bits.notes : []) out.push("Note|" + n);
   return out;
+}
+
+// Rows as "Label|value" or "Label|chip|chip"; a chip can be "Key=value".
+function factsOf(bits, cmp) {
+  const out = [];
+  const same = (bits ? bits.same : []).concat(cmp ? cmp.same : []);
+  if (same.length) out.push("Same|" + same.join("|"));
+  if (cmp && cmp.differs.length) out.push("Differs|" + cmp.differs.join("|"));
+  if (cmp && cmp.firstAfter) out.push("New browser|" + short(cmp.firstAfter) + " after the block");
+  return out;
+}
+
+// "name, location, system" for a User or Blocked user row.
+function sysTokens(cl) {
+  if (!cl) return [];
+  const out = [];
+  if (SYSTEMS[cl.os]) out.push("Device=" + SYSTEMS[cl.os]);
+  if (BROWSERS[cl.br]) out.push("Browser=" + BROWSERS[cl.br]);
+  return out;
+}
+
+function whoRow(name, loc, did) {
+  const rec = did ? identity.getRecord(did) : null;
+  const where = loc || (rec && rec.loc) || null;
+  return ["Name=" + (name || "(no name)")].concat(where ? ["Location=" + where] : [], sysTokens(rec && rec.cl)).join("|");
+}
+
+function blockedRow(label, did) {
+  return "Blocked user|" + whoRow(label, null, did);
+}
+
+function blockFact(b) {
+  if (!b || typeof b !== "object") return [];
+  let r = b.reason ? String(b.reason).replace(/[.\s]+$/, "") : null;
+  if (r && r.length > 140) r = r.slice(0, 140).replace(/\s+\S*$/, "");
+  const ends = ipban.isPermanentBlock(b) ? "never" : b.expiry ? "in " + short(b.expiry - Date.now()) : null;
+  return [r ? "Block|" + r : null, ends ? "Ends|" + ends : null].filter(Boolean);
+}
+
+function placedFact(b) {
+  if (!b || typeof b !== "object") return null;
+  let who = null;
+  try {
+    who = b.by ? roles.systemLabel(b.by, b.byRole || null) : "Automod";
+  } catch (_) {
+    who = b.by || "Automod";
+  }
+  const at = b.ts || b.since || null;
+  return "Placed|" + [who, at ? short(Date.now() - at) + " ago" : null].filter(Boolean).join("|");
+}
+
+// Rows and the ban list anchor for a card about a block.
+function blockRows(b) {
+  return blockFact(b).concat([placedFact(b)].filter(Boolean));
+}
+
+function blockAnchor(b) {
+  const at = b && typeof b === "object" ? b.ts || b.since || null : null;
+  return at ? { itemId: at } : {};
 }
 
 function locationOf(did) {
@@ -485,7 +578,7 @@ function matchesFor(person, socket) {
       last: s.last,
       percent: Math.round(p * 100),
       band: band(p),
-      why: reasons(facts).concat(deviceLines(deviceFacts(row.did, theirs))),
+      why: whyLines(reasons(facts), withDevice(compare(row.did, null, theirs, { label: person.names[0] || null, since: since || null }), deviceFacts(row.did, theirs))),
       votes: votesOn(person.id, other.id),
     });
   }
@@ -580,7 +673,7 @@ function card(key, socket) {
     if (store.lookups.length > KEEP_LOOKUPS) store.lookups.splice(0, store.lookups.length - KEEP_LOOKUPS);
   }
   const open =
-    shown && level >= 2
+    shown
       ? store.returns.find(
           (r) => r.id && r.uid === uid && !r.result && Date.now() - r.at < RETURN_OPEN_MS && (r.band !== "device" || store.deviceOn),
         )
@@ -595,7 +688,7 @@ function card(key, socket) {
     accounts: level >= 2 && !person.standalone ? linksFor(person, socket) : null,
     matches: level >= 2 && !person.standalone ? matchesFor(person, socket) : null,
     watch: watch ? { until: watch.until } : null,
-    script: shown && level >= 2 && store.scripts.some((s) => s.uid === uid || (s.did && person.devices.some((d) => d.id === s.did))),
+    script: shown && store.scripts.some((s) => s.uid === uid || (s.did && person.devices.some((d) => d.id === s.did))),
     flagged: open
       ? { id: open.id, percent: open.percent, band: open.band, label: open.label, why: open.why, at: open.at }
       : null,
@@ -725,6 +818,11 @@ function noteSignin(socket, username) {
       clientdetails.settle(socket);
       if (socket.detailsAt || socket.connected) scriptHit(socket, uid, did, username);
       if (!returnHit(socket, uid, did, username)) deviceHit(socket, uid, did, username);
+      if (socket._amEvasion) {
+        const held = socket._amEvasion;
+        socket._amEvasion = null;
+        postEvasion(socket, whoFrom(socket), held);
+      }
     } catch (e) {
       console.error("automod sign-in check failed:", e.message);
     }
@@ -746,16 +844,14 @@ function scriptHit(socket, uid, did, username) {
   if (scriptPosts.length < SCRIPT_HOURLY) {
     scriptPosts.push(now);
     msg = post(
-      '"' + username + '" signed in without browser details.',
+      username + " signed in without browser details",
       {
         category: "script",
         target: username,
         targetUserId: uid,
-        reason: missing.length
-          ? "The connection is missing parts every browser sends. Likely a script."
-          : "Could be a script, or a tab left open since before an update.",
+        facts: missing.length ? ["Missing|" + missing.join("|"), "Possible|script"] : ["Possible|script|old tab"],
       },
-      2,
+      1,
     );
   }
   store.scripts.push({ id: msg ? msg.id : null, uid, did, name: username, at: now, odd: missing.length > 0 });
@@ -810,11 +906,87 @@ function deviceFacts(did, others) {
   return out;
 }
 
-function deviceLines(facts) {
+function withDevice(cmp, df) {
+  if (df && df.device) cmp.same.push("device details");
+  return cmp;
+}
+
+function uniq(lines) {
   const out = [];
-  if (facts.device) out.push("same device details, rare on this site");
-  if (facts.zone === "same") out.push("same time zone");
-  if (facts.zone === "different") out.push("different time zone");
+  for (const l of lines) if (l && !out.includes(l)) out.push(l);
+  return out;
+}
+
+const q = (s) => '"' + s + '"';
+
+function systemOf(cl) {
+  if (!cl) return null;
+  const os = SYSTEMS[cl.os] || "other system";
+  const br = BROWSERS[cl.br];
+  return br ? os + ", " + br : os;
+}
+
+function netOf(did) {
+  const rec = did ? identity.getRecord(did) : null;
+  return (rec && rec.net) || null;
+}
+
+function rangeOf(ip) {
+  try {
+    return ip ? ipban.computeRangeCidr(ip) || ip : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+// What two people have in common and where they differ, said without an
+// address. "mine" is the device being looked at, "others" the devices of the
+// person it is compared with. opts.label names the block, opts.since is when
+// it was placed, opts.history false skips the "blocked network before" line.
+function compare(did, ip, others, opts) {
+  const o = opts || {};
+  const out = { same: [], differs: [], firstAfter: null };
+  const mine = did ? identity.getRecord(did) : null;
+  const theirs = (others || []).filter((d) => d && d !== did).map((d) => identity.getRecord(d)).filter(Boolean);
+  if (!theirs.length) return out;
+  const myNets = new Set(Object.keys((mine && mine.nets) || {}));
+  const r = rangeOf(ip);
+  if (r) myNets.add(r);
+  const theirNets = new Set();
+  for (const t of theirs) for (const n of Object.keys(t.nets || {})) theirNets.add(n);
+  let net = false;
+  for (const n of myNets) if (theirNets.has(n)) net = true;
+  if (net) out.same.push("network");
+  const myNet = netOf(did);
+  const isps = new Set(theirs.map((t) => t.net && t.net.n).filter(Boolean));
+  if (myNet && myNet.n && isps.size) {
+    (isps.has(myNet.n) ? out.same : out.differs).push("provider");
+  }
+  if (mine && mine.ips && o.label && o.history !== false) {
+    const idx = blocks();
+    const set = new Set((others || []).map((d) => String(d).toLowerCase()));
+    let seen = false;
+    for (const addr of Object.keys(mine.ips)) {
+      if (addr === ip) continue;
+      for (const key of ipban.keysCovering(addr, idx.prepared)) {
+        const b = state.blockedIPs.get(key);
+        if (!b || typeof b !== "object" || !ipban.isActiveBlock(b)) continue;
+        if ((b.did && set.has(String(b.did).toLowerCase())) || b.label === o.label) seen = true;
+      }
+    }
+    if (seen) out.same.push("blocked network before");
+  }
+  const mcl = mine && mine.cl;
+  const tcl = theirs.map((t) => t.cl).filter(Boolean);
+  if (mcl && tcl.length) {
+    const same = tcl.find((c) => c.os === mcl.os && c.br === mcl.br);
+    (same ? out.same : out.differs).push("system");
+    const zones = tcl.map((c) => c.tz).filter(Boolean);
+    if (mcl.tz && zones.length) (zones.includes(mcl.tz) ? out.same : out.differs).push("time zone");
+    const screens = tcl.map((c) => c.scr).filter(Boolean);
+    if (mcl.scr && screens.length) (screens.includes(mcl.scr) ? out.same : out.differs).push("screen size");
+  }
+  if (mine && o.since && mine.first > o.since) out.firstAfter = mine.first - o.since;
   return out;
 }
 
@@ -828,18 +1000,27 @@ function deviceHit(socket, uid, did, username) {
   if (me.devices.some((d) => d.id === other)) return;
   const facts = deviceFacts(did, [other]);
   if (!facts.device || facts.zone === "different") return;
+  const theirs = identity.getRecord(other);
+  const label = (theirs && theirs.name) || "a blocked user";
   const now = Date.now();
   const quiet = uid + "|device";
   if (now - (lastReturn.get(quiet) || 0) < RETURN_QUIET_MS) return;
   if (store.returns.some((r) => r.uid === uid && r.band === "device" && now - r.at < RETURN_QUIET_MS)) return;
   lastReturn.set(quiet, now);
-  const theirs = identity.getRecord(other);
-  const label = (theirs && theirs.name) || "a blocked user";
-  const why = deviceLines(facts);
+  const cmp = compare(did, socket.clientIp || null, [other], { label });
+  cmp.same.unshift("device details");
+  const why = whyLines(null, cmp);
+  const session = (socket.handshake && socket.handshake.session) || {};
   const msg = post(
-    '"' + username + '" has the same device details as blocked user "' + label + '".',
-    { category: "return", target: username, targetUserId: uid, reason: "This is a hint, not proof. Check before you act.", lines: why },
-    2,
+    username + " has the same device details as " + label,
+    {
+      category: "return",
+      target: username,
+      targetUserId: uid,
+      chips: ["Device match"],
+      facts: ["User|" + whoRow(username, session.location, did), blockedRow(label, other)].concat(factsOf(null, cmp)),
+    },
+    1,
   );
   store.returns.push({ id: msg ? msg.id : null, uid, did, key: nameKey(username), name: username, label, percent: 0, band: "device", why, at: now, result: null, linkedBy: null });
   if (store.returns.length > KEEP_RETURNS) store.returns.splice(0, store.returns.length - KEEP_RETURNS);
@@ -927,9 +1108,10 @@ function returnHit(socket, uid, did, username) {
   if (lastReturn.size > 5000) lastReturn.clear();
   lastReturn.set(quiet, now);
   if (!silent) lastReturn.set(told, now);
-  const why = reasons(facts).concat(
-    deviceLines(deviceFacts(did, best.b.did ? [best.b.did, ...persons.peek(best.b.did).devices.map((d) => d.id)] : [])),
-  );
+  const theirs = best.b.did ? [best.b.did, ...persons.peek(best.b.did).devices.map((d) => d.id)] : [];
+  const bits = reasons(facts);
+  const cmp = withDevice(compare(did, socket.clientIp || null, theirs, { label: best.b.label, since: best.since }), deviceFacts(did, theirs));
+  const why = whyLines(bits, cmp);
   const percent = Math.round(p * 100);
   const linked = mine
     ? mine.edges
@@ -937,21 +1119,18 @@ function returnHit(socket, uid, did, username) {
         .map((e) => store.links.find((l) => l.pair === pairKey(e.a, e.b) && l.together))
         .find(Boolean)
     : null;
+  const rows = ["User|" + whoRow(username, session.location, did), blockedRow(best.b.label, best.b.did || null)].concat(blockRows(best.b));
+  if (!standing && facts.gap != null) rows.push("Signed in|" + short(facts.gap) + " after the block" + (cmp.firstAfter ? "|new browser" : ""));
+  else if (cmp.firstAfter) rows.push("Signed in|new browser|" + short(cmp.firstAfter) + " after the block");
+  cmp.firstAfter = null;
+  rows.push(...factsOf(bits, cmp));
+  const chips = standing ? ["Old block"] : [percent + "%"];
+  if (facts.repeat) chips.push("Repeat");
   const card = () =>
     post(
-      standing
-        ? '"' + username + '" has the name of blocked user "' + best.b.label + '".'
-        : '"' + username + '" could be blocked user "' + best.b.label + '". ' + percent + "%.",
-      {
-        category: "return",
-        target: username,
-        targetUserId: uid,
-        reason:
-          '"' + best.b.label + '" is blocked' +
-          (best.b.reason ? " for: " + String(best.b.reason).slice(0, 160).replace(/[.\s]+$/, "") : "") + ".",
-        lines: why,
-      },
-      2,
+      standing ? "Blocked name " + username + " signed in" : best.exact ? username + " may be back" : username + " may be " + best.b.label,
+      { category: "return", target: username, targetUserId: uid, chips, facts: rows, ...blockAnchor(best.b) },
+      1,
     );
   const msg = silent ? null : card();
   store.returns.push({
@@ -1059,11 +1238,17 @@ function noteAction(label, action, target, role) {
   const entry = open.filter((r) => r.id).pop();
   if (!entry) return;
   post(
-    '"' + entry.name + '" was blocked' + (by ? " by " + by : "") + ". Flagged " + ago(now - entry.at) + " earlier" +
-      (entry.band === "standing" ? "." : " at " + entry.percent + "%.") +
-      (entry.linkedBy ? " Found through a link made by " + entry.linkedBy + "." : ""),
-    { category: "caught", target: entry.name, targetUserId: entry.uid, by },
-    2,
+    entry.name + " blocked" + (by ? " by " + by : ""),
+    {
+      category: "caught",
+      target: entry.name,
+      targetUserId: entry.uid,
+      by,
+      facts: ["Flagged|" + short(now - entry.at) + " earlier" + (entry.band === "standing" ? "" : " at " + entry.percent + "%")].concat(
+        entry.linkedBy ? ["Link by|" + entry.linkedBy] : [],
+      ),
+    },
+    1,
   );
 }
 
@@ -1116,8 +1301,8 @@ function vote({ a, b, same, reason }, socket) {
     const na = (newest(pa) || {}).name || pa.names[0] || "one account";
     const nb = (newest(pb) || {}).name || pb.names[0] || "another";
     post(
-      VOTES_TO_ASK + ' mods think "' + na + '" and "' + nb + '" are the same user.',
-      { category: "confirm", target: na, targetUserId: ua, reason: "A leader can confirm it on the user's page." },
+      na + " and " + nb + " may be one user",
+      { category: "confirm", target: na, targetUserId: ua, facts: ["Votes|" + VOTES_TO_ASK + " mods", "Next|a leader confirms on the user page"] },
       3,
     );
   }
@@ -1189,6 +1374,438 @@ function stats() {
   };
 }
 
+// ── Feed cards for things other than a name coming back ─────────────────────
+
+const plain = (socket) => !!(ctx && socket && !socket.isDev && !socket.isMod && !socket.isBot);
+
+function whoFrom(socket) {
+  const { uid, did } = whoIs(socket);
+  const s = (socket.handshake && socket.handshake.session) || {};
+  return { uid: uid || socket.stableUserId || (did ? devicetoken.userIdFor(did) : null), did, name: s.username || null, location: s.location || null };
+}
+
+function roomLabel(socket) {
+  const room = socket && socket.roomId ? state.rooms.get(socket.roomId) : null;
+  return room ? room.name : null;
+}
+
+function tally(kind, key, windowMs) {
+  const now = Date.now();
+  const k = kind + "|" + key;
+  const list = (trips.get(k) || []).filter((t) => now - t < windowMs);
+  list.push(now);
+  if (list.length > 1000) list.splice(0, list.length - 1000);
+  if (trips.size > 20000) trips.clear();
+  trips.set(k, list);
+  return list.length;
+}
+
+// One card per kind per person per hour, and a ceiling per kind per hour so
+// a raid cannot bury the feed. Everything is kept in the store, posted or
+// not, so the numbers can be checked later.
+function event(kind, who, text, card, opts) {
+  if (!ctx) return null;
+  const o = opts || {};
+  const now = Date.now();
+  const pid = o.pid || (who.did || who.uid ? persons.peek(who.did || who.uid).id : "?");
+  const k = kind + "|" + pid;
+  if (!o.force && now - (lastEvent.get(k) || 0) < (o.quietMs || EVENT_QUIET_MS)) return null;
+  const posts = (eventPosts.get(kind) || []).filter((t) => now - t < HOUR);
+  eventPosts.set(kind, posts);
+  let msg = null;
+  if (posts.length < EVENT_HOURLY) {
+    posts.push(now);
+    const c = { category: kind, target: who.name || "(no name)", targetUserId: who.uid || null, ...(card || {}) };
+    if (!o.noUser) c.facts = ["User|" + whoRow(who.name, who.location, who.did)].concat(c.facts || []);
+    msg = post(text, c, o.minLevel || 1);
+  }
+  if (lastEvent.size > 20000) lastEvent.clear();
+  lastEvent.set(k, now);
+  store.events.push({ id: msg ? msg.id : null, kind, uid: who.uid || null, did: who.did || null, name: who.name || null, at: now });
+  if (store.events.length > KEEP_EVENTS) store.events.splice(0, store.events.length - KEEP_EVENTS);
+  saveSoon();
+  return msg;
+}
+
+const noName = (who) => who.name || "(no name)";
+
+// A blocked connection was refused. Once a day per person; the count on the
+// card grows as they keep trying.
+function noteKnock({ socket, deviceId, ip, hit }) {
+  if (!ctx || !hit || !hit.block) return;
+  try {
+    const b = hit.block;
+    const label = b && typeof b === "object" && b.label ? b.label : null;
+    const did = deviceId ? String(deviceId) : null;
+    const low = did ? did.toLowerCase() : null;
+    const own =
+      !!low &&
+      ((b && typeof b === "object" && b.did && String(b.did).toLowerCase() === low) ||
+        ipban.isIdKey(hit.key || "") ||
+        !!ipban.findActiveIdBlock(low));
+    const pid = did ? persons.peek(did).id : devicetoken.seal("knock:" + String(hit.key || rangeOf(ip) || ""));
+    const day = new Date().toISOString().slice(0, 10);
+    if (knocks.size > 5000) knocks.clear();
+    let k = knocks.get(pid);
+    if (!k || k.day !== day) {
+      k = { day, count: 0, id: null, at: 0 };
+      knocks.set(pid, k);
+    }
+    k.count++;
+    const them = label || "a blocked user";
+    const text = own ? them + " tried to sign in again" : "Sign-in from a network blocked for " + them;
+    const chips = (n) => ["Blocked"].concat(n > 1 ? [n + " today"] : []);
+    const now = Date.now();
+    if (!k.id) {
+      const session = (socket && socket.handshake && socket.handshake.session) || {};
+      const who = { uid: session.userId || (did ? devicetoken.userIdFor(did) : null), did, name: label, location: session.location || null };
+      const facts = blockRows(b).concat(own ? [] : ["Browser|different"]);
+      const msg = event("knock", who, text, { chips: chips(1), facts, ...blockAnchor(b) }, { pid, quietMs: DAY });
+      if (msg) {
+        k.id = msg.id;
+        k.at = now;
+      }
+    } else if (now - k.at > 60 * 1000) {
+      k.at = now;
+      const n = k.count;
+      if (ctx.staffchat.amend)
+        ctx.staffchat.amend(k.id, (m) => {
+          m.card = { ...(m.card || {}), chips: chips(n) };
+        });
+    }
+  } catch (e) {
+    console.error("automod knock failed:", e.message);
+  }
+}
+
+function labelsOf(hit) {
+  const out = [];
+  for (const k of hit.blockKeys || []) {
+    const b = state.blockedIPs.get(k);
+    if (b && typeof b === "object" && b.label && !out.includes(b.label)) out.push(b.label);
+  }
+  if (!out.length && hit.ownerName) out.push(hit.ownerName);
+  for (const n of hit.names || []) if (!out.includes(n)) out.push(n);
+  return out;
+}
+
+function devicesOf(hit) {
+  const out = new Set();
+  for (const k of hit.blockKeys || []) {
+    const b = state.blockedIPs.get(k);
+    if (b && typeof b === "object" && b.did) out.add(String(b.did));
+  }
+  if (hit.ownerDid) out.add(String(hit.ownerDid));
+  return [...out];
+}
+
+// The sign-in checks found something. With a name it posts now; a hint about
+// a nameless connection waits for the sign-in so the card can say who.
+function noteEvasion(socket, hit) {
+  if (!plain(socket) || !hit) return;
+  try {
+    const who = whoFrom(socket);
+    if (!who.name) {
+      const rec = who.did ? identity.getRecord(who.did) : null;
+      if (hit.autoBlocked) who.name = (rec && rec.name) || null;
+      else {
+        socket._amEvasion = hit;
+        return;
+      }
+    }
+    postEvasion(socket, who, hit);
+  } catch (e) {
+    console.error("automod evasion note failed:", e.message);
+  }
+}
+
+function postEvasion(socket, who, hit) {
+  const labels = labelsOf(hit);
+  const label = labels[0] || null;
+  const them = label || "a blocked user";
+  const others = devicesOf(hit);
+  const ip = socket.clientIp || null;
+  const name = noName(who);
+  const blocked = blockedRow(them, others[0] || null);
+  const matched = (hit.blockKeys || []).map((k) => state.blockedIPs.get(k)).find((b) => b && typeof b === "object") || null;
+  if (hit.autoBlocked) {
+    const cmp = compare(who.did, ip, others, { label, history: hit.kind !== "history" });
+    cmp.same.unshift(hit.kind === "history" ? "browser" : hit.kind === "address" ? "network" : "name, network");
+    event(
+      "autoblock",
+      who,
+      name + " blocked at sign-in",
+      {
+        chips: ["Blocked", hit.autoBlocked.permanent ? "Permanent" : "Until the old block ends"],
+        facts: [blocked].concat(matched ? blockRows(matched) : [], factsOf(null, cmp)),
+        ...blockAnchor(matched),
+      },
+      { force: true },
+    );
+    return;
+  }
+  if (hit.kind === "history") {
+    const n = hit.seenCount || 1;
+    const cmp = compare(who.did, ip, others, { label, history: false });
+    event("evade", who, name + " was on a blocked network before", {
+      facts: [blocked, "This browser|seen " + n + (n === 1 ? " time" : " times") + " on the network blocked for " + them].concat(matched ? blockRows(matched) : [], factsOf(null, cmp), ["Action|none"]),
+      ...blockAnchor(matched),
+    });
+  } else if (hit.kind === "address") {
+    const cmp = compare(who.did, ip, others, { label });
+    event("evade", who, name + " is on the network " + them + " last used", {
+      facts: [blocked].concat(factsOf(null, cmp), ["Action|none"]),
+    });
+  }
+}
+
+// A block placed by a sign-in check that does not go through evasion.check.
+// info.facts are "Label|value" rows, info.chips go after "Blocked".
+function noteAutoBlock(socket, username, info) {
+  if (!ctx || !socket || socket.isDev || socket.isMod) return;
+  try {
+    const who = whoFrom(socket);
+    if (username) who.name = username;
+    const i = info || {};
+    event(
+      "autoblock",
+      who,
+      noName(who) + " blocked at sign-in",
+      { chips: ["Blocked"].concat(i.chips || []), facts: i.facts || [] },
+      { force: true },
+    );
+  } catch (e) {
+    console.error("automod block note failed:", e.message);
+  }
+}
+
+function noteFlood(socket) {
+  if (!plain(socket)) return;
+  try {
+    const who = whoFrom(socket);
+    if (!who.uid) return;
+    const n = tally("flood", who.uid, WINDOW_MS);
+    if (n < FLOOD_TRIPS) return;
+    const room = roomLabel(socket);
+    event("flood", who, noName(who) + " flooded " + (room || "the lobby"), {
+      facts: ["Bursts|" + n + " in " + short(WINDOW_MS), "Action|extra updates dropped|not blocked"],
+      roomName: room,
+    });
+  } catch (e) {
+    console.error("automod flood note failed:", e.message);
+  }
+}
+
+function staffLike(name) {
+  const now = Date.now();
+  if (!modLabels || now - modLabels.at > 5 * 60 * 1000) {
+    let labels = [];
+    try {
+      labels = roles
+        .listModKeys()
+        .map((k) => k.label)
+        .filter((l) => usable(l) && letters(l) >= 5 && !plainWord(l));
+    } catch (_) {}
+    modLabels = { at: now, keys: labels.map((l) => ({ label: l, key: nameKey(l) })) };
+  }
+  const key = nameKey(name);
+  const hit = key ? modLabels.keys.find((k) => k.key === key) : null;
+  return hit ? hit.label : null;
+}
+
+// Every sign-in and rename passes here: name hopping, and names that copy a
+// staff member.
+function noteName(socket, username) {
+  if (!plain(socket) || !username) return;
+  try {
+    const who = whoFrom(socket);
+    who.name = username;
+    const key = who.did || who.uid;
+    if (!key) return;
+    const now = Date.now();
+    const k = "names|" + key;
+    const list = (trips.get(k) || []).filter((e) => now - e.at < WINDOW_MS);
+    const sk = nameKey(username);
+    if (!list.length || list[list.length - 1].sk !== sk) list.push({ at: now, sk, name: username });
+    trips.set(k, list);
+    if (new Set(list.map((e) => e.sk)).size >= RENAME_TRIPS) {
+      const names = [];
+      for (const e of list) if (!names.includes(e.name)) names.push(e.name);
+      event("rename", who, username + " changed name " + (list.length - 1) + " times in " + short(now - list[0].at), {
+        facts: ["Names|" + names.slice(0, 8).join("|") + (names.length > 8 ? "|and " + (names.length - 8) + " more" : "")],
+      });
+    }
+    const label = staffLike(username);
+    if (label) {
+      const same = nameguard.fold(username) === nameguard.fold(label);
+      event("copycat", who, username + (same ? " is using staff name " : " is close to staff name ") + label, {
+        facts: [same ? "Spelling|same" : "Spelling|differs"],
+      });
+    }
+  } catch (e) {
+    console.error("automod name note failed:", e.message);
+  }
+}
+
+// Someone sat down in a room: a lookalike name, or a fresh browser arriving
+// right after a ban in that room.
+function noteJoin(socket, room, userId) {
+  if (!plain(socket) || !room) return;
+  try {
+    const who = whoFrom(socket);
+    if (!who.name) return;
+    copycatIn(who, room, userId);
+    newFace(socket, who, room);
+  } catch (e) {
+    console.error("automod join check failed:", e.message);
+  }
+}
+
+function copycatIn(who, room, userId) {
+  const sk = nameKey(who.name);
+  if (!sk) return;
+  const me = persons.peek(who.did || who.uid);
+  const folded = nameguard.fold(who.name);
+  for (const u of room.users || []) {
+    if (!u || u.id === userId || !u.username) continue;
+    if (nameKey(u.username) !== sk || nameguard.fold(u.username) === folded) continue;
+    if (ctx.getUserStaffRole && ctx.getUserStaffRole(u.id) === "dev") continue;
+    const other = persons.peek(u.id);
+    if (!me.standalone && !other.standalone && other.id === me.id) continue;
+    event("copycat", who, who.name + " looks like " + u.username + " in " + room.name, {
+      facts: ["Already in the room|Name=" + u.username + (u.location ? "|Location=" + u.location : ""), "Spelling|differs"],
+      roomName: room.name,
+      roomId: room.id,
+    });
+    return;
+  }
+}
+
+function newFace(socket, who, room) {
+  if (!who.did) return;
+  const now = Date.now();
+  const rec = identity.getRecord(who.did);
+  if (!rec || now - rec.first > NEWFACE_MS) return;
+  const me = persons.peek(who.did);
+  const myNet = rangeOf(socket.clientIp || null);
+  const myIsp = netOf(who.did);
+  const myLoc = nameKey(who.location || "");
+  const cl = clientdetails.of(who.did);
+  for (let i = store.bans.length - 1; i >= 0; i--) {
+    const b = store.bans[i];
+    if (now - b.at > NEWFACE_MS) break;
+    if (b.roomId !== room.id) continue;
+    if (b.did && me.devices.some((d) => d.id === b.did)) continue;
+    const same = [];
+    if (myNet && b.net && myNet === b.net) same.push("network");
+    if (myIsp && myIsp.n && b.isp && myIsp.n === b.isp) same.push("provider");
+    if (myLoc.length >= 3 && b.loc && myLoc === b.loc) same.push("location");
+    if (cl && b.sys && systemOf(cl) === b.sys && cl.tz && b.tz && cl.tz === b.tz) same.push("system", "time zone");
+    if (!same.length) continue;
+    event("newface", who, who.name + " joined " + room.name + " " + short(now - b.at) + " after " + (b.name || "a user") + " was banned there", {
+      chips: ["New browser"],
+      facts: ["Banned user|Name=" + (b.name || "(no name)") + (b.locRaw ? "|Location=" + b.locRaw : ""), "Same|" + same.join("|")],
+      roomName: room.name,
+      roomId: room.id,
+    });
+    return;
+  }
+}
+
+function noteRoomBan(room, info) {
+  if (!ctx || !room) return;
+  try {
+    const i = info || {};
+    const cl = i.did ? clientdetails.of(i.did) : null;
+    const net = netOf(i.did);
+    store.bans.push({
+      roomId: room.id,
+      roomName: room.name,
+      at: Date.now(),
+      uid: i.uid || null,
+      did: i.did || null,
+      name: i.name || null,
+      net: rangeOf(i.ip),
+      isp: net && net.n ? net.n : null,
+      loc: nameKey(i.location || ""),
+      locRaw: i.location || null,
+      sys: cl ? systemOf(cl) : null,
+      tz: cl && cl.tz ? cl.tz : null,
+    });
+    if (store.bans.length > KEEP_BANS) store.bans.splice(0, store.bans.length - KEEP_BANS);
+    saveSoon();
+  } catch (e) {
+    console.error("automod room ban note failed:", e.message);
+  }
+}
+
+function noteLink(socket) {
+  if (!plain(socket)) return;
+  try {
+    const who = whoFrom(socket);
+    if (!who.uid) return;
+    const n = tally("links", who.uid, WINDOW_MS);
+    if (n < LINK_TRIPS) return;
+    const room = roomLabel(socket);
+    event("links", who, noName(who) + " posted " + n + " blocked links" + (room ? " in " + room : ""), {
+      facts: ["Window|" + short(WINDOW_MS)],
+      roomName: room,
+    });
+  } catch (e) {
+    console.error("automod link note failed:", e.message);
+  }
+}
+
+function noteVote(target, room, n, kicked) {
+  if (!ctx || !room || !target || !target.uid) return;
+  try {
+    if (ctx.getUserStaffRole && ctx.getUserStaffRole(target.uid)) return;
+    const who = { uid: target.uid, did: target.did || null, name: target.name || null, location: target.location || null };
+    if (kicked)
+      event("voted", who, noName(who) + " voted out of " + room.name, { facts: ["Votes|" + n], roomName: room.name, roomId: room.id }, { force: true });
+    else if (n >= VOTES_NOTE)
+      event("voted", who, noName(who) + " has " + n + " votes against in " + room.name, {
+        facts: ["Needed to remove|" + (Math.floor((room.users || []).length / 2) + 1)],
+        roomName: room.name,
+        roomId: room.id,
+      });
+  } catch (e) {
+    console.error("automod vote note failed:", e.message);
+  }
+}
+
+function noteProxy(socket, info) {
+  if (!ctx || !socket || socket.isDev || socket.isMod) return;
+  try {
+    const i = info || {};
+    const who = whoFrom(socket);
+    if (i.username) who.name = i.username;
+    const kind = String(i.through || "proxy").replace(/^an? /, "");
+    event(
+      "proxy",
+      who,
+      noName(who) + " refused, " + kind,
+      { facts: ["Network|" + kind + (i.provider ? "|" + i.provider : ""), "Action|" + (i.refused || "refused").toLowerCase() + "|no block"] },
+      { quietMs: DAY },
+    );
+  } catch (e) {
+    console.error("automod proxy note failed:", e.message);
+  }
+}
+
+function noteReport(target, count, what) {
+  if (!ctx || !target || !target.uid || target.role) return;
+  try {
+    if (!count || count.total < REPORTS_NOTE) return;
+    const who = { uid: target.uid, did: target.did || null, name: target.name || null, location: target.location || null };
+    event("reported", who, noName(who) + " reported again", {
+      facts: ["Reports|" + count.total + " from " + count.distinct + (count.distinct === 1 ? " person" : " people"), "Latest|" + (what || "other")],
+    });
+  } catch (e) {
+    console.error("automod report note failed:", e.message);
+  }
+}
+
 function register(socket, safe) {
   const guard = (fn) =>
     safe(async (data) => {
@@ -1242,7 +1859,7 @@ function register(socket, safe) {
       const file = ctx.buildQuickFile(key, socket);
       const by = modName(socket);
       count(socket, "shares");
-      post((by ? by + " shared " : "Shared: ") + '"' + (file.name || "a user") + '".', {
+      post((by || "Staff") + " shared " + (file.name || "a user"), {
         category: "shared",
         target: file.name || "(no name)",
         targetUserId: key,
@@ -1285,4 +1902,26 @@ function register(socket, safe) {
 
 load();
 
-module.exports = { init, register, noteWatch, noteSignin, noteAction, flushSync, search, card, score, CHANNEL };
+module.exports = {
+  init,
+  register,
+  noteWatch,
+  noteSignin,
+  noteAction,
+  noteKnock,
+  noteEvasion,
+  noteAutoBlock,
+  noteFlood,
+  noteName,
+  noteJoin,
+  noteRoomBan,
+  noteLink,
+  noteVote,
+  noteProxy,
+  noteReport,
+  flushSync,
+  search,
+  card,
+  score,
+  CHANNEL,
+};

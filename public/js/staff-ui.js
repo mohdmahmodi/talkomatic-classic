@@ -20,6 +20,7 @@
   .tk-card.tk-xwide{max-width:960px;max-height:92vh;}
   .tk-head{display:flex;align-items:center;gap:13px;padding:15px 18px;border-bottom:1px solid #616161;
     background:linear-gradient(to bottom,#616161,#303030);}
+  .tk-ico i,.tk-pico i,.tk-iico i{margin:0;transform:translateY(.07em);}
   .tk-head .tk-ico{font-size:18px;line-height:1;flex:none;width:42px;height:42px;display:flex;
     align-items:center;justify-content:center;border-radius:8px;background:rgba(0,0,0,.3);
     color:#ff9800;border:1px solid rgba(255,152,0,.5);}
