@@ -14,6 +14,7 @@ const devicetoken = require("./devicetoken");
 const banhistory = require("./banhistory");
 const roles = require("./roles");
 const clientdetails = require("./clientdetails");
+const evasion = require("./evasion");
 
 const FILE = path.join(DATA_DIR, "automod.json");
 const CHANNEL = "automod";
@@ -453,14 +454,12 @@ function reasons({ exact, base, gap, sameLocation, repeat, standing, permanent }
   return { same, notes };
 }
 
-// Lines for a user page: what matches, what differs, then the notes.
 function whyLines(bits, cmp) {
   const out = factsOf(bits, cmp);
   for (const n of bits ? bits.notes : []) out.push("Note|" + n);
   return out;
 }
 
-// Rows as "Label|value" or "Label|chip|chip"; a chip can be "Key=value".
 function factsOf(bits, cmp) {
   const out = [];
   const same = (bits ? bits.same : []).concat(cmp ? cmp.same : []);
@@ -470,7 +469,6 @@ function factsOf(bits, cmp) {
   return out;
 }
 
-// "name, location, system" for a User or Blocked user row.
 function sysTokens(cl) {
   if (!cl) return [];
   const out = [];
@@ -509,7 +507,6 @@ function placedFact(b) {
   return "Placed|" + [who, at ? short(Date.now() - at) + " ago" : null].filter(Boolean).join("|");
 }
 
-// Rows and the ban list anchor for a card about a block.
 function blockRows(b) {
   return blockFact(b).concat([placedFact(b)].filter(Boolean));
 }
@@ -939,10 +936,6 @@ function rangeOf(ip) {
   }
 }
 
-// What two people have in common and where they differ, said without an
-// address. "mine" is the device being looked at, "others" the devices of the
-// person it is compared with. opts.label names the block, opts.since is when
-// it was placed, opts.history false skips the "blocked network before" line.
 function compare(did, ip, others, opts) {
   const o = opts || {};
   const out = { same: [], differs: [], firstAfter: null };
@@ -1011,18 +1004,42 @@ function deviceHit(socket, uid, did, username) {
   cmp.same.unshift("device details");
   const why = whyLines(null, cmp);
   const session = (socket.handshake && socket.handshake.session) || {};
-  const msg = post(
-    username + " has the same device details as " + label,
-    {
-      category: "return",
-      target: username,
-      targetUserId: uid,
-      chips: ["Device match"],
-      facts: ["User|" + whoRow(username, session.location, did), blockedRow(label, other)].concat(factsOf(null, cmp)),
-    },
-    1,
-  );
-  store.returns.push({ id: msg ? msg.id : null, uid, did, key: nameKey(username), name: username, label, percent: 0, band: "device", why, at: now, result: null, linkedBy: null });
+  let placed = null;
+  try {
+    placed = evasion.placeAutoBlock({ deviceId: did, ip: socket.clientIp || null, username, signal: { blockKeys: keysForDevice(other) } });
+  } catch (e) {
+    console.error("automod device block failed:", e.message);
+  }
+  const hit = keysForDevice(other).map((k) => state.blockedIPs.get(k)).find((b) => b && typeof b === "object") || null;
+  const msg = placed
+    ? event(
+        "autoblock",
+        { uid, did, name: username, location: session.location || null },
+        username + " blocked at sign-in",
+        {
+          chips: ["Blocked", placed.permanent ? "Permanent" : "Until the old block ends"],
+          facts: [blockedRow(label, other)].concat(hit ? blockRows(hit) : [], factsOf(null, cmp)),
+          ...blockAnchor(hit),
+        },
+        { force: true },
+      )
+    : post(
+        username + " has the same device details as " + label,
+        {
+          category: "return",
+          target: username,
+          targetUserId: uid,
+          chips: ["Device match"],
+          facts: ["User|" + whoRow(username, session.location, did), blockedRow(label, other)].concat(factsOf(null, cmp)),
+        },
+        1,
+      );
+  if (placed && ctx.blocked) {
+    try {
+      ctx.blocked(socket, placed.keys);
+    } catch (_) {}
+  }
+  store.returns.push({ id: placed ? null : msg ? msg.id : null, uid, did, key: nameKey(username), name: username, label, percent: 0, band: "device", why, at: now, result: placed ? "blocked" : null, linkedBy: null });
   if (store.returns.length > KEEP_RETURNS) store.returns.splice(0, store.returns.length - KEEP_RETURNS);
   saveSoon();
 }
@@ -1056,7 +1073,7 @@ function blocks() {
     if (!b || typeof b !== "object" || !b.label) continue;
     const since = b.since || b.ts || 0;
     for (const [baseKey, baseName] of blockedNames(b)) {
-      const row = { b, since, baseKey, baseName };
+      const row = { b, since, baseKey, baseName, key };
       if (map.has(baseKey)) map.get(baseKey).push(row);
       else map.set(baseKey, [row]);
     }
@@ -1111,6 +1128,14 @@ function returnHit(socket, uid, did, username) {
   const theirs = best.b.did ? [best.b.did, ...persons.peek(best.b.did).devices.map((d) => d.id)] : [];
   const bits = reasons(facts);
   const cmp = withDevice(compare(did, socket.clientIp || null, theirs, { label: best.b.label, since: best.since }), deviceFacts(did, theirs));
+  if (
+    best.exact &&
+    best.b.did &&
+    (cmp.same.includes("network") || cmp.same.includes("device details") || facts.sameLocation) &&
+    distinct(username, key, best) &&
+    sameBack(socket, uid, did, username, best, cmp, facts)
+  )
+    return true;
   const why = whyLines(bits, cmp);
   const percent = Math.round(p * 100);
   const linked = mine
@@ -1150,6 +1175,49 @@ function returnHit(socket, uid, did, username) {
   if (store.returns.length > KEEP_RETURNS) store.returns.splice(0, store.returns.length - KEEP_RETURNS);
   saveSoon();
   return !!msg;
+}
+
+function keysForDevice(did, extra) {
+  const low = String(did || "").toLowerCase();
+  const keys = extra ? [extra] : [];
+  for (const [k, b] of state.blockedIPs)
+    if (!keys.includes(k) && ipban.isActiveBlock(b) && (k === ipban.idKey(low) || (b && typeof b === "object" && b.did && String(b.did).toLowerCase() === low)))
+      keys.push(k);
+  return keys;
+}
+
+function sameBack(socket, uid, did, username, best, cmp, facts) {
+  let placed = null;
+  try {
+    placed = evasion.placeAutoBlock({ deviceId: did, ip: socket.clientIp || null, username, signal: { blockKeys: keysForDevice(best.b.did, best.key) } });
+  } catch (e) {
+    console.error("automod same-back block failed:", e.message);
+  }
+  if (!placed) return false;
+  const session = (socket.handshake && socket.handshake.session) || {};
+  if (facts && facts.sameLocation && !cmp.same.includes("location")) cmp.same.unshift("location");
+  cmp.same.unshift("name");
+  if (cmp.firstAfter) cmp.firstAfter = null;
+  event(
+    "autoblock",
+    { uid, did, name: username, location: session.location || null },
+    username + " blocked at sign-in",
+    {
+      chips: ["Blocked", placed.permanent ? "Permanent" : "Until the old block ends"],
+      facts: [blockedRow(best.b.label, best.b.did)].concat(blockRows(best.b), factsOf(null, cmp)),
+      ...blockAnchor(best.b),
+    },
+    { force: true },
+  );
+  store.returns.push({ id: null, uid, did, key: nameKey(username), name: username, label: best.b.label, percent: 100, band: "same", why: whyLines(null, cmp), at: Date.now(), result: "blocked", by: null, settledAt: Date.now(), linkedBy: null });
+  if (store.returns.length > KEEP_RETURNS) store.returns.splice(0, store.returns.length - KEEP_RETURNS);
+  saveSoon();
+  if (ctx.blocked) {
+    try {
+      ctx.blocked(socket, placed.keys);
+    } catch (_) {}
+  }
+  return true;
 }
 
 function settle(entry, result, by) {
@@ -1374,7 +1442,6 @@ function stats() {
   };
 }
 
-// ── Feed cards for things other than a name coming back ─────────────────────
 
 const plain = (socket) => !!(ctx && socket && !socket.isDev && !socket.isMod && !socket.isBot);
 
@@ -1400,9 +1467,6 @@ function tally(kind, key, windowMs) {
   return list.length;
 }
 
-// One card per kind per person per hour, and a ceiling per kind per hour so
-// a raid cannot bury the feed. Everything is kept in the store, posted or
-// not, so the numbers can be checked later.
 function event(kind, who, text, card, opts) {
   if (!ctx) return null;
   const o = opts || {};
@@ -1429,8 +1493,6 @@ function event(kind, who, text, card, opts) {
 
 const noName = (who) => who.name || "(no name)";
 
-// A blocked connection was refused. Once a day per person; the count on the
-// card grows as they keep trying.
 function noteKnock({ socket, deviceId, ip, hit }) {
   if (!ctx || !hit || !hit.block) return;
   try {
@@ -1499,8 +1561,6 @@ function devicesOf(hit) {
   return [...out];
 }
 
-// The sign-in checks found something. With a name it posts now; a hint about
-// a nameless connection waits for the sign-in so the card can say who.
 function noteEvasion(socket, hit) {
   if (!plain(socket) || !hit) return;
   try {
@@ -1521,16 +1581,18 @@ function noteEvasion(socket, hit) {
 
 function postEvasion(socket, who, hit) {
   const labels = labelsOf(hit);
-  const label = labels[0] || null;
+  const owner = devicesOf(hit)[0] ? identity.getRecord(devicesOf(hit)[0]) : null;
+  const label = labels[0] || (owner && owner.name) || null;
   const them = label || "a blocked user";
   const others = devicesOf(hit);
   const ip = socket.clientIp || null;
-  const name = noName(who);
+  const name = who.name || "Unnamed connection";
   const blocked = blockedRow(them, others[0] || null);
   const matched = (hit.blockKeys || []).map((k) => state.blockedIPs.get(k)).find((b) => b && typeof b === "object") || null;
   if (hit.autoBlocked) {
     const cmp = compare(who.did, ip, others, { label, history: hit.kind !== "history" });
     cmp.same.unshift(hit.kind === "history" ? "browser" : hit.kind === "address" ? "network" : "name, network");
+    cmp.same = [...new Set(cmp.same)];
     event(
       "autoblock",
       who,
@@ -1559,8 +1621,6 @@ function postEvasion(socket, who, hit) {
   }
 }
 
-// A block placed by a sign-in check that does not go through evasion.check.
-// info.facts are "Label|value" rows, info.chips go after "Blocked".
 function noteAutoBlock(socket, username, info) {
   if (!ctx || !socket || socket.isDev || socket.isMod) return;
   try {
@@ -1613,8 +1673,6 @@ function staffLike(name) {
   return hit ? hit.label : null;
 }
 
-// Every sign-in and rename passes here: name hopping, and names that copy a
-// staff member.
 function noteName(socket, username) {
   if (!plain(socket) || !username) return;
   try {
@@ -1647,8 +1705,6 @@ function noteName(socket, username) {
   }
 }
 
-// Someone sat down in a room: a lookalike name, or a fresh browser arriving
-// right after a ban in that room.
 function noteJoin(socket, room, userId) {
   if (!plain(socket) || !room) return;
   try {
@@ -1739,17 +1795,23 @@ function noteRoomBan(room, info) {
   }
 }
 
-function noteLink(socket) {
+function noteLink(socket, raw) {
   if (!plain(socket)) return;
   try {
     const who = whoFrom(socket);
     if (!who.uid) return;
     const n = tally("links", who.uid, WINDOW_MS);
+    const k = "linktext|" + who.uid;
+    const now = Date.now();
+    const texts = (trips.get(k) || []).filter((e) => now - e.at < WINDOW_MS);
+    if (raw) texts.push({ at: now, text: String(raw).replace(/\s+/g, " ").replace(/\|/g, "/").trim().slice(0, 300) });
+    trips.set(k, texts.slice(-10));
     if (n < LINK_TRIPS) return;
     const room = roomLabel(socket);
     event("links", who, noName(who) + " posted " + n + " blocked links" + (room ? " in " + room : ""), {
       facts: ["Window|" + short(WINDOW_MS)],
       roomName: room,
+      ops: { links: texts.map((e) => e.text).filter(Boolean) },
     });
   } catch (e) {
     console.error("automod link note failed:", e.message);

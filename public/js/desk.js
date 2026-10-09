@@ -5266,9 +5266,9 @@
         "Every card starts with the user's name, location and system. Same and Differs rows compare the two people by network, provider, system, time zone and screen. Never an address.",
       ],
       rows: [
-        [["Maybe back", "amber"], "A sign-in with a blocked user's name, or a device like theirs. The % is the match."],
-        [["Seen on a blocked network", "amber"], "Their browser was on a blocked network before, or they're on a network a blocked user last used. Not blocked."],
-        [["Blocked at sign-in", "red"], "Automod blocked them. Same browser, network or name as a blocked user, or a sign-in flood."],
+        [["Maybe back", "amber"], "A sign-in with a blocked user's name. The % is the match. The exact name plus their network, location or device blocks on its own."],
+        [["Seen on a blocked network", "amber"], "Their browser or network matched a blocked user, but that block has ended. Not blocked."],
+        [["Blocked at sign-in", "red"], "Automod blocked them. Same browser, network or device as a blocked user, their name on their network or location, or a sign-in flood."],
         [["Block held", ""], "A blocked user tried to sign in. The chip counts tries today."],
         [["No browser", "amber"], "Signed in without the details a browser sends. A script or an old tab."],
         [["Flooding", "amber"], "Sent more updates in one second than the site allows, 3 times in 10 min. The extra updates were dropped. Not blocked."],
@@ -5579,8 +5579,6 @@
     return s;
   }
 
-  // Cards stored before the chip format hold comma lists; turn them into the
-  // same chips so old and new cards read alike.
   function amLegacy(label, vals) {
     if (vals.length !== 1 || vals[0].indexOf("=") > 0 || vals[0].indexOf(", ") === -1) return vals;
     const bits = vals[0].split(", ");
@@ -5656,6 +5654,7 @@
     }
     const facts = (c.facts || []).slice();
     if (c.category === "return cleared" && c.by) facts.push("Checked by|" + c.by);
+    if (c.ops && Array.isArray(c.ops.links)) for (const t of c.ops.links) facts.push("Typed|" + t);
     if (facts.length) r.appendChild(amFacts(facts));
     if (c.reason) r.appendChild(el("div", "dk-am-row-w", c.reason));
     if (c.lines && c.lines.length) r.appendChild(el("div", "dk-am-row-w", c.lines.join(", ")));

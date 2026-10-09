@@ -429,6 +429,10 @@ function mentions(msg, socket) {
 function outbound(msg, socket) {
   const copy = socket.isMainDev ? { ...msg } : maskDeep(msg);
   if (!socket.isDev) delete copy.history;
+  if (!socket.isMainDev && copy.card && copy.card.ops) {
+    copy.card = { ...copy.card };
+    delete copy.card.ops;
+  }
   copy.mention = mentions(msg, socket);
   if (Array.isArray(msg.reactions) && msg.reactions.length) {
     const mine = idKeyOf(who(socket));
@@ -569,6 +573,10 @@ function sanitizeCard(qkind, c) {
     facts: Array.isArray(c.facts)
       ? c.facts.filter(Boolean).map((x) => cut(x, 200)).slice(0, 10)
       : null,
+    ops:
+      c.ops && typeof c.ops === "object" && Array.isArray(c.ops.links) && c.ops.links.length
+        ? { links: c.ops.links.filter(Boolean).map((x) => cut(x, 300)).slice(0, 10) }
+        : null,
   };
   for (const k in out) if (out[k] == null) delete out[k];
   if (!out.ids.length) delete out.ids;

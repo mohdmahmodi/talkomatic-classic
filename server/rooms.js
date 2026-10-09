@@ -102,7 +102,7 @@ function armLinkSweep(socket, userId) {
     const clean = linkfilter.redact(raw);
     if (clean === raw) return;
     state.setBuffer(userId, roomId, clean);
-    automod.noteLink(socket);
+    automod.noteLink(socket, raw);
     const username = socket.handshake?.session?.username;
     const diff = { type: "full-replace", text: clean };
     emitRoomChatUpdate(socket, { userId, username, diff });
@@ -4966,6 +4966,11 @@ function registerSocketHandlers(opts) {
     presenceByUser,
     getUserStaffRole,
     logStaff,
+    blocked(socket, keys) {
+      broadcastBlockList();
+      broadcastBanHistory();
+      kickEvasionBlocked(keys, socket.deviceId).catch(() => {});
+    },
   });
   gamesFloor.init({
     socketsInRoom(roomId) {
@@ -5179,6 +5184,23 @@ function registerSocketHandlers(opts) {
               });
           }, 1500);
       }
+
+      if (!socket.deviceId && !socket.isDev && !socket.isMod)
+        try {
+          const hit = evasion.check({
+            deviceId: null,
+            ip: clientIp,
+            username: socket.handshake?.session?.username || null,
+          });
+          if (hit) automod.noteEvasion(socket, hit);
+          if (hit && hit.autoBlocked) {
+            broadcastBlockList();
+            broadcastBanHistory();
+            kickEvasionBlocked(hit.autoBlocked.keys, null).catch(() => {});
+          }
+        } catch (e) {
+          console.error("evasion check failed:", e.message);
+        }
 
       // They came back holding a revoked key: tell them why it was pulled.
       if (socket.formerModNotice && !socket.isDev && !socket.isMod) {

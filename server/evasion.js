@@ -20,7 +20,7 @@ const recentAlerts = new Map();
 // A device is auto-blocked only when it used the blocked address more than
 // once, so a single stray connection from a recycled address does not ban an
 // unrelated person.
-const AUTO_BLOCK_MIN_SEEN = 2;
+const AUTO_BLOCK_MIN_SEEN = 1;
 
 const CACHE_MS = 60 * 1000;
 const LONG_MS = 7 * 24 * 60 * 60 * 1000;
@@ -153,6 +153,7 @@ function snapshot() {
   if (cache && now - cache.at < CACHE_MS) return cache;
   const keys = [];
   const seenIps = new Map();
+  const seenNets = new Map();
   const marks = [];
   const { pools, places, people } = census();
   const bare = [];
@@ -203,10 +204,13 @@ function snapshot() {
     }
     if (!did) continue;
     if (!rec || !rec.ips) continue;
-    for (const ip of Object.keys(rec.ips))
+    for (const ip of Object.keys(rec.ips)) {
       if (!seenIps.has(ip)) seenIps.set(ip, { did, name: rec.name || null });
+      const net = ipban.computeRangeCidr(ip);
+      if (net && !seenNets.has(net)) seenNets.set(net, { did, name: rec.name || null });
+    }
   }
-  cache = { at: now, prepared: ipban.prepareKeys(keys), seenIps, marks, pools, places };
+  cache = { at: now, prepared: ipban.prepareKeys(keys), seenIps, seenNets, marks, pools, places };
   return cache;
 }
 
@@ -326,26 +330,33 @@ function check({ deviceId, ip, username }) {
   }
 
   if (!signal && ip) {
-    const owner = snap.seenIps.get(ip);
-    if (owner && owner.did !== deviceId)
+    const net = ipban.computeRangeCidr(ip);
+    const owner = snap.seenIps.get(ip) || (net ? snap.seenNets.get(net) : null);
+    if (owner && owner.did !== deviceId) {
+      const low = String(owner.did).toLowerCase();
+      const blockKeys = [];
+      for (const [k, b] of state.blockedIPs)
+        if (
+          ipban.isActiveBlock(b) &&
+          (k === ipban.idKey(low) || (b && typeof b === "object" && b.did && String(b.did).toLowerCase() === low))
+        )
+          blockKeys.push(k);
       signal = {
         kind: "address",
         text:
-          "is on an IP address last used by " +
+          "is on a network used by " +
           (owner.name ? `"${owner.name}"` : "somebody") +
           ", who is blocked",
         ownerName: owner.name || null,
         ownerDid: owner.did || null,
-        blocks: ipban.keysCovering(ip, snap.prepared).map(describeBlock),
+        blockKeys,
+        blocks: blockKeys.concat(ipban.keysCovering(ip, snap.prepared)).map(describeBlock),
       };
+    }
   }
 
   if (!signal) return null;
-  if (
-    signal.kind === "history" &&
-    deviceId &&
-    (signal.seenCount || 0) >= AUTO_BLOCK_MIN_SEEN
-  )
+  if (signal.kind === "address" || (signal.seenCount || 0) >= AUTO_BLOCK_MIN_SEEN)
     signal.autoBlocked = placeAutoBlock({ deviceId, ip, username, signal });
   return report(signal, { deviceId, ip, username });
 }
@@ -530,4 +541,4 @@ function invalidate(all) {
   if (all) counted = null;
 }
 
-module.exports = { check, recheck, agrees, invalidate, ALERT_COOLDOWN_MS };
+module.exports = { check, recheck, agrees, invalidate, placeAutoBlock, ALERT_COOLDOWN_MS };
