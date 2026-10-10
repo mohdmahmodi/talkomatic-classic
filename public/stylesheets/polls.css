@@ -1,0 +1,465 @@
+.tkp-modal {
+  max-width: 480px;
+}
+
+.tkp-body {
+  padding: 16px 18px 18px;
+}
+
+.tkp-label {
+  color: var(--tk-muted);
+  font-size: 12px;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin: 14px 0 6px;
+}
+
+.tkp-label:first-child {
+  margin-top: 0;
+}
+
+.tkp-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--tk-tile);
+  color: var(--tk-text);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.tkp-input::placeholder {
+  color: var(--tk-muted);
+  opacity: 0.8;
+}
+
+.tkp-input:focus {
+  border-color: var(--primary, var(--tk-accent));
+  background: var(--tk-card);
+}
+
+.tkp-opts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tkp-opt-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.tkp-x {
+  flex: none;
+  width: 36px;
+  height: 38px;
+  border: none;
+  border-radius: 6px;
+  background: var(--tk-tile);
+  color: var(--tk-muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.tkp-x:hover {
+  background: var(--tk-tile-hover);
+  color: var(--tk-text);
+}
+
+.tkp-add,
+.tkp-ghost {
+  background: none;
+  border: none;
+  color: var(--primary, var(--tk-accent));
+  font-size: 13px;
+  font-weight: bold;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 6px 0;
+}
+
+.tkp-add {
+  margin-top: 6px;
+}
+
+.tkp-add:hover,
+.tkp-ghost:hover {
+  text-decoration: underline;
+}
+
+.tkp-ghost {
+  padding: 8px 10px;
+  border-radius: 6px;
+}
+
+.tkp-ghost:hover {
+  background: var(--tk-tile);
+  text-decoration: none;
+}
+
+.tkp-end {
+  color: #e5484d;
+}
+
+.tkp-seg {
+  display: flex;
+  gap: 6px;
+}
+
+.tkp-seg-btn {
+  flex: 1;
+  background: var(--tk-tile);
+  color: var(--tk-muted);
+  border: none;
+  border-radius: 6px;
+  padding: 9px 0;
+  font-size: 13px;
+  font-weight: bold;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.tkp-seg-btn:hover {
+  background: var(--tk-tile-hover);
+  color: var(--tk-text);
+}
+
+.tkp-seg-btn.active {
+  background: var(--primary, var(--tk-accent));
+  color: #1a1a1a;
+}
+
+.tkp-hint {
+  color: var(--tk-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  margin-top: 8px;
+}
+
+.tkp-err {
+  display: none;
+  color: #e5484d;
+  font-size: 12.5px;
+  margin-top: 10px;
+}
+
+.tkp-err.show {
+  display: block;
+}
+
+.tkp-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.tkp-status {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tkp-pill {
+  padding: 5px 9px;
+  border-radius: 5px;
+  background: var(--tk-tile);
+  color: var(--tk-text);
+  font-size: 12px;
+  font-weight: bold;
+  white-space: nowrap;
+}
+
+.tkp-pill.time {
+  color: var(--tk-muted);
+}
+
+.tkp-pill.done {
+  background: var(--primary, var(--tk-accent));
+  color: #1a1a1a;
+}
+
+.tkp-primary {
+  flex: none;
+  background: var(--primary, var(--tk-accent));
+  color: #1a1a1a;
+  border: none;
+  border-radius: 6px;
+  padding: 10px 18px;
+  min-height: 40px;
+  font-size: 14px;
+  font-weight: bold;
+  font-family: inherit;
+  cursor: pointer;
+  transition: filter 0.15s ease;
+}
+
+.tkp-primary:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.tkp-primary:disabled {
+  background: var(--tk-tile-hover);
+  color: var(--tk-muted);
+  cursor: default;
+}
+
+.tkp-q-text {
+  color: var(--tk-text);
+  font-size: 17px;
+  font-weight: bold;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  margin-bottom: 14px;
+}
+
+.tkp-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tkp-choice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  background: var(--tk-tile);
+  color: var(--tk-text);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 11px 13px;
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.tkp-choice:hover {
+  background: var(--tk-tile-hover);
+  border-color: var(--primary, var(--tk-accent));
+}
+
+.tkp-choice.mine {
+  border-color: var(--primary, var(--tk-accent));
+}
+
+.tkp-choice-text {
+  overflow-wrap: anywhere;
+}
+
+.tkp-choice-n {
+  flex: none;
+  color: var(--tk-muted);
+  font-size: 12.5px;
+  font-weight: bold;
+}
+
+.tkp-results {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tkp-res {
+  background: var(--tk-tile);
+  border-radius: 8px;
+  padding: 11px 13px 12px;
+}
+
+.tkp-res.win {
+  background: var(--tk-card);
+}
+
+.tkp-res-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 9px;
+}
+
+.tkp-res-left {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 14.5px;
+  color: var(--tk-text);
+}
+
+.tkp-res-text {
+  overflow-wrap: anywhere;
+}
+
+.tkp-res-right {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.15;
+}
+
+.tkp-pct {
+  color: var(--tk-text);
+  font-size: 17px;
+  font-weight: bold;
+}
+
+.tkp-res.win .tkp-pct {
+  color: var(--primary, var(--tk-accent));
+}
+
+.tkp-votes {
+  color: var(--tk-muted);
+  font-size: 11.5px;
+}
+
+.tkp-chip {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: var(--tk-bg);
+  color: var(--tk-muted);
+  font-size: 10.5px;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.tkp-chip.mine {
+  color: var(--tk-text);
+}
+
+.tkp-chip.win {
+  background: var(--primary, var(--tk-accent));
+  color: #1a1a1a;
+}
+
+.tkp-bar {
+  height: 9px;
+  border-radius: 4px;
+  background: var(--tk-bg);
+  overflow: hidden;
+}
+
+.tkp-fill {
+  height: 100%;
+  width: 0;
+  border-radius: 4px;
+  background: var(--tk-muted);
+  transition: width 0.3s ease;
+}
+
+.tkp-res.mine .tkp-fill,
+.tkp-res.win .tkp-fill {
+  background: var(--primary, var(--tk-accent));
+}
+
+.tkp-voters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.tkp-voter {
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: var(--tk-bg);
+  color: var(--tk-text);
+  font-size: 11.5px;
+}
+
+.tkp-close {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 50%;
+  background: var(--tk-tile);
+  color: var(--tk-muted);
+  font-size: 15px;
+  cursor: pointer;
+  font-family: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.tkp-close:hover {
+  background: var(--tk-tile-hover);
+  color: var(--tk-text);
+}
+
+.tkp-staff {
+  margin-top: 16px;
+  padding: 11px 13px 12px;
+  border-radius: 6px;
+  background: var(--tk-tile);
+}
+
+.tkp-staff-h {
+  color: var(--tk-muted);
+  font-size: 11px;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 7px;
+}
+
+.tkp-staff-row {
+  display: flex;
+  gap: 10px;
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+.tkp-staff-k {
+  flex: none;
+  width: 72px;
+  color: var(--tk-muted);
+}
+
+.tkp-staff-v {
+  color: var(--tk-text);
+  overflow-wrap: anywhere;
+}
+
+.tkp-tag {
+  margin-left: 4px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--tk-accent);
+  color: #1a1a1a;
+  font-size: 10.5px;
+  font-weight: bold;
+  white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+  .tkp-tag {
+    display: inline-block;
+    margin-left: 2px;
+  }
+}
+
+.tkp-choices .tkp-voters {
+  margin: -2px 0 4px 13px;
+}

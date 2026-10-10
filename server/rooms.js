@@ -63,6 +63,7 @@ const browser = require("./browser");
 const diag = require("./diag");
 const gamesFloor = require("./games");
 const gamesSocket = require("./games/socket");
+const polls = require("./polls");
 const staffchat = require("./staffchat");
 const bots = require("./bots");
 const buffertrail = require("./buffertrail");
@@ -1083,6 +1084,7 @@ async function pressureCleanup() {
 
     state.rooms.delete(roomId);
     gamesFloor.roomClosed(roomId);
+    polls.roomClosed(roomId);
     state.roomSoloSince.delete(roomId);
     state.roomLastChatActivity.delete(roomId);
     cleanupBoardState(roomId);
@@ -4195,6 +4197,7 @@ function startRoomDeletionTimer(roomId) {
       for (const key of [...parkedText.keys()])
         if (key.startsWith(roomId + ":")) parkedText.delete(key);
       gamesFloor.roomClosed(roomId);
+      polls.roomClosed(roomId);
       state.roomDeletionTimers.delete(roomId);
       state.roomSoloSince.delete(roomId);
       state.roomLastChatActivity.delete(roomId);
@@ -4545,6 +4548,7 @@ async function leaveRoom(socket, userId, opts) {
       if (socket.isDev || socket.isMod) staffchat.presenceDirty();
 
       gamesFloor.userLeftRoom(roomId, userId);
+      polls.userLeft(roomId);
 
       if (room.users.length === 0) startRoomDeletionTimer(roomId);
     }
@@ -4948,6 +4952,7 @@ function registerSocketHandlers(opts) {
       kickEvasionBlocked(keys, socket.deviceId).catch(() => {});
     },
   });
+  polls.init({ io, state, logStaff });
   gamesFloor.init({
     socketsInRoom(roomId) {
       const out = [];
@@ -5774,6 +5779,7 @@ function registerSocketHandlers(opts) {
 
     // ── Mini games: queue, tables, moves ────────────────────────────────
     gamesSocket.register(socket, safe);
+    polls.register(socket, safe);
 
     // ── The Desk: staff chat, pings, presence, inspector ────────────────
     staffchat.register(socket, safe);

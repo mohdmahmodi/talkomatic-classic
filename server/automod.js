@@ -1688,6 +1688,26 @@ function noteFlood(socket) {
   }
 }
 
+function notePoll(socket, poll) {
+  if (!plain(socket) || !poll) return;
+  try {
+    const who = whoFrom(socket);
+    if (!who.uid) return;
+    const room = roomLabel(socket);
+    const bar = (t) => String(t || "").replace(/\|/g, "/");
+    const rec = who.did ? identity.getRecord(who.did) : null;
+    const facts = [
+      "Question|" + bar(poll.question),
+      "Answers|" + poll.options.map((o) => bar(o.text)).join("|"),
+      "Length|" + poll.minutes + " min",
+    ];
+    if (rec && rec.first) facts.push("First seen|" + short(Date.now() - rec.first) + " ago" + (rec.days ? "|" + rec.days.length + (rec.days.length === 1 ? " active day" : " active days") : ""));
+    event("poll", who, noName(who) + " started a poll in " + (room || "a room"), { facts, roomName: room }, { minLevel: 4, force: true });
+  } catch (e) {
+    console.error("automod poll note failed:", e.message);
+  }
+}
+
 function staffLike(name) {
   const now = Date.now();
   if (!modLabels || now - modLabels.at > 5 * 60 * 1000) {
@@ -2006,6 +2026,7 @@ module.exports = {
   noteEvasion,
   noteAutoBlock,
   noteFlood,
+  notePoll,
   noteName,
   noteJoin,
   noteRoomBan,

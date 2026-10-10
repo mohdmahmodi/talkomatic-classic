@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  var VERSION = "6.2";
+  var VERSION = "6.3";
   var SHOW_AFTER_MS = 90000;
   var RETRY_MS = 30000;
   var REPEAT_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
@@ -9,6 +9,23 @@
   var VERSION_KEY = "talkomatic_popup_last_version";
 
   var SECTIONS = [
+    {
+      title: "Polls",
+      items: [
+        {
+          icon: "fa-square-poll-vertical",
+          tag: "new",
+          title: "Ask the room",
+          text: "Polls is in the Apps menu of every room, or type /poll in your box. Write a question, give it 2 to 6 answers and a length of 2 to 5 minutes. It ends early once everyone in the room has voted.",
+        },
+        {
+          icon: "fa-check-to-slot",
+          tag: "new",
+          title: "Vote and see who picked what",
+          text: "A New poll tag appears next to Apps when someone starts one. Results stay hidden until you vote, then you see the percentages and who chose each answer. You can change your vote while the poll runs, and whoever asked can end it at any time.",
+        },
+      ],
+    },
     {
       title: "Safechat",
       items: [

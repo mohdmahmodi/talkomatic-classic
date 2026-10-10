@@ -1,9 +1,9 @@
-// feature-announce.js - One-time card for the personal toggles (word filter,
-// hide bots). Dismissed via cookie for 60 days. The name is versioned so a
-// reworded card shows once more to people who dismissed an older one. It is
-// shown by first-visit.js in its turn, never on its own.
+// feature-announce.js - One-time card for the newest room feature. Dismissed
+// via cookie for 60 days. The name is versioned so a reworded card shows once
+// more to people who dismissed an older one. It is shown by first-visit.js in
+// its turn, never on its own.
 (function () {
-  var COOKIE_NAME = "tk_announce_seen2";
+  var COOKIE_NAME = "tk_announce_seen3";
   var COOKIE_DAYS = 60;
 
   function getCookie(name) {

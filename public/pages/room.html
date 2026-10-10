@@ -16,6 +16,7 @@
     <link rel="stylesheet" href="stylesheets/info-modal.css?v=1.2.0" />
     <link rel="stylesheet" href="stylesheets/talkoboard.css?v=4.7.1" />
     <link rel="stylesheet" href="stylesheets/games.css?v=3.15.0" />
+    <link rel="stylesheet" href="stylesheets/polls.css?v=1.0.0" />
     <!-- Applies the saved custom theme before first paint -->
     <link rel="stylesheet" href="stylesheets/effects.css?v=1.3.3" />
     <link rel="stylesheet" href="stylesheets/announce.css?v=1.1.0" />
@@ -365,14 +366,14 @@
         position: fixed;
         inset: 0;
         z-index: 99999;
-        background: rgba(0, 0, 0, 0.85);
+        background: rgba(0, 0, 0, 0.78);
         align-items: center;
         justify-content: center;
-        padding: 16px;
+        padding: 24px;
       }
       .feature-announce-overlay.show {
         display: flex;
-        animation: fadeIn 0.2s ease-out;
+        animation: fadeIn 0.18s ease-out;
       }
       @keyframes fadeIn {
         from {
@@ -383,8 +384,9 @@
         }
       }
       .feature-announce-box {
-        background: #000;
-        border: 1px solid var(--tk-border, #616161);
+        background: var(--tk-bg);
+        border: 1px solid var(--tk-border);
+        border-radius: 10px;
         max-width: 440px;
         width: 100%;
         text-align: left;
@@ -393,103 +395,178 @@
       .feature-announce-head {
         display: flex;
         align-items: center;
-        gap: 11px;
-        background: var(--tk-cream, #fdf5e6);
-        color: #000;
-        padding: 13px 16px;
+        gap: 12px;
+        padding: 15px 18px 13px;
+        border-bottom: 1px solid var(--tk-border);
       }
       .feature-announce-icon {
+        flex: none;
+        width: 38px;
+        height: 38px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 9px;
+        background: color-mix(in srgb, var(--tk-accent) 18%, var(--tk-tile));
+        color: var(--tk-accent);
         font-size: 17px;
-        color: #4ade80;
       }
       .feature-announce-title {
-        flex: 1;
         margin: 0;
-        color: #000;
-        font-size: 16px;
+        color: var(--tk-accent);
+        font-size: 17px;
         font-weight: bold;
-        letter-spacing: 0.2px;
+        line-height: 1.3;
       }
-      .feature-announce-tag {
-        background: var(--tk-accent);
-        color: #000;
-        font-size: 10px;
-        font-weight: bold;
-        text-transform: uppercase;
-        letter-spacing: 0.8px;
-        padding: 2px 7px;
+      .feature-announce-sub {
+        margin: 3px 0 0;
+        color: var(--tk-muted);
+        font-size: 12px;
       }
       .feature-announce-body {
-        display: flex;
-        flex-direction: column;
-        gap: 12px;
-        padding: 16px;
+        padding: 14px 18px 18px;
       }
       .feature-announce-lead {
-        margin: 0;
-        color: #dcdcdc;
+        margin: 0 0 12px;
+        color: var(--tk-text);
         font-size: 14px;
-        line-height: 1.6;
+        line-height: 1.55;
+      }
+      .feature-announce-ways {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 14px;
+        color: var(--tk-muted);
+        font-size: 12.5px;
+      }
+      .feature-announce-way {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 10px;
+        border-radius: 5px;
+        background: var(--tk-tile);
+        color: var(--tk-text);
+        font-size: 12.5px;
+        font-weight: bold;
+      }
+      .feature-announce-way i {
+        color: var(--tk-muted);
+        font-size: 12px;
+      }
+      .feature-announce-way.code {
+        font-family: "Consolas", "Menlo", monospace;
+        color: var(--tk-accent);
+        background: color-mix(in srgb, var(--tk-accent) 12%, var(--tk-tile));
       }
       .feature-announce-row {
         display: flex;
-        align-items: flex-start;
-        gap: 11px;
-        background: #1b1b1b;
-        border: 1px solid #333;
-        padding: 11px 13px;
+        gap: 12px;
+        padding: 12px 13px 13px;
+        border-radius: 8px;
+        background: var(--tk-tile);
       }
-      .feature-announce-row > i {
-        width: 20px;
-        margin-top: 2px;
-        font-size: 16px;
-        text-align: center;
+      .feature-announce-row + .feature-announce-row {
+        margin-top: 8px;
       }
-      .feature-announce-row.f-filter {
-        border-left: 3px solid #4ade80;
+      .feature-announce-row-icon {
+        flex: none;
+        width: 32px;
+        height: 32px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 8px;
+        font-size: 14px;
       }
-      .feature-announce-row.f-filter > i {
+      .feature-announce-row.ask .feature-announce-row-icon {
+        background: color-mix(in srgb, #4ade80 16%, var(--tk-bg));
         color: #4ade80;
       }
-      .feature-announce-row.f-bots {
-        border-left: 3px solid #26c6da;
+      .feature-announce-row.vote .feature-announce-row-icon {
+        background: color-mix(in srgb, #5aa9ff 16%, var(--tk-bg));
+        color: #5aa9ff;
       }
-      .feature-announce-row.f-bots > i {
-        color: #26c6da;
+      .feature-announce-row > div:last-child {
+        flex: 1;
+        min-width: 0;
       }
       .feature-announce-row b {
         display: block;
-        margin-bottom: 2px;
-        color: #fff;
+        margin: 2px 0 3px;
+        color: var(--tk-text);
         font-size: 13.5px;
       }
       .feature-announce-row p {
         margin: 0;
-        color: #c3c3c3;
+        color: var(--tk-muted);
         font-size: 12.5px;
         line-height: 1.55;
       }
-      .feature-announce-note {
-        margin: 0;
-        color: #8d8d8d;
+      .feature-announce-demo {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-top: 10px;
+      }
+      .feature-announce-bar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
         font-size: 12px;
-        line-height: 1.55;
+        color: var(--tk-text);
+      }
+      .feature-announce-bar span:first-child {
+        flex: none;
+        width: 64px;
+      }
+      .feature-announce-bar span:last-child {
+        flex: none;
+        width: 32px;
+        text-align: right;
+        color: var(--tk-muted);
+        font-weight: bold;
+      }
+      .feature-announce-bar.lead span:last-child {
+        color: var(--tk-accent);
+      }
+      .feature-announce-track {
+        flex: 1;
+        height: 7px;
+        border-radius: 4px;
+        background: var(--tk-bg);
+        overflow: hidden;
+      }
+      .feature-announce-fill {
+        height: 100%;
+        border-radius: 4px;
+        background: var(--tk-muted);
+      }
+      .feature-announce-bar.lead .feature-announce-fill {
+        background: var(--tk-accent);
+      }
+      .feature-announce-foot {
+        display: flex;
+        justify-content: flex-end;
+        margin-top: 16px;
       }
       .feature-announce-btn {
-        align-self: flex-end;
         background: var(--tk-accent);
-        color: #000;
+        color: #1a1a1a;
         border: none;
-        border-radius: 0;
-        padding: 9px 22px;
-        font-size: 13px;
+        border-radius: 6px;
+        padding: 10px 18px;
+        min-height: 40px;
+        font-size: 14px;
         font-weight: bold;
         font-family: inherit;
         cursor: pointer;
-        transition: background 0.15s ease;
+        transition: filter 0.15s ease;
       }
       .feature-announce-btn:hover {
-        background: #ffa726;
+        filter: brightness(1.1);
       }
 
       .user-info button.staff-action-button i.fas {
@@ -614,46 +691,75 @@
       </div>
     </div>
 
-    <!-- Feature announcement: the word filter and bots are personal toggles -->
     <div id="featureAnnounce" class="feature-announce-overlay">
       <div class="feature-announce-box">
         <div class="feature-announce-head">
-          <i class="fas fa-shield-halved feature-announce-icon"></i>
-          <h2 class="feature-announce-title">Automod and bots are optional</h2>
-          <span class="feature-announce-tag">New</span>
+          <div class="feature-announce-icon">
+            <i class="fas fa-square-poll-vertical"></i>
+          </div>
+          <div>
+            <h2 class="feature-announce-title">Polls</h2>
+            <p class="feature-announce-sub">New in every room</p>
+          </div>
         </div>
         <div class="feature-announce-body">
           <p class="feature-announce-lead">
-            Two of the icons in the top bar are yours to switch. Click one to
-            turn it on or off whenever you like.
+            Ask the room a question and let everyone vote.
           </p>
-          <div class="feature-announce-row f-filter">
-            <i class="fas fa-shield-halved"></i>
+          <div class="feature-announce-ways">
+            <div class="feature-announce-way">
+              <i class="fas fa-th"></i>Apps, then Polls
+            </div>
+            or type
+            <div class="feature-announce-way code">/poll</div>
+          </div>
+          <div class="feature-announce-row ask">
+            <div class="feature-announce-row-icon">
+              <i class="fas fa-pen"></i>
+            </div>
             <div>
-              <b>Word filter</b>
+              <b>Ask</b>
               <p>
-                Stars out offensive words for you. A green shield means it is
-                on; red with a slash means it is off.
+                A question, 2 to 6 answers and 2 to 5 minutes. It ends once
+                everyone has voted or the time is up, and you can end your
+                own poll whenever you like.
               </p>
             </div>
           </div>
-          <div class="feature-announce-row f-bots">
-            <i class="fas fa-robot"></i>
+          <div class="feature-announce-row vote">
+            <div class="feature-announce-row-icon">
+              <i class="fas fa-check-to-slot"></i>
+            </div>
             <div>
-              <b>Hide bots</b>
+              <b>Vote</b>
               <p>
-                Takes bot users out of your view. Click the robot again to
-                bring them back.
+                A New poll tag shows next to Apps when someone starts one.
+                Results stay hidden until you vote, then you see the numbers
+                and who picked what.
               </p>
+              <div class="feature-announce-demo">
+                <div class="feature-announce-bar lead">
+                  <span>Pizza</span>
+                  <div class="feature-announce-track">
+                    <div class="feature-announce-fill" style="width: 67%"></div>
+                  </div>
+                  <span>67%</span>
+                </div>
+                <div class="feature-announce-bar">
+                  <span>Burgers</span>
+                  <div class="feature-announce-track">
+                    <div class="feature-announce-fill" style="width: 33%"></div>
+                  </div>
+                  <span>33%</span>
+                </div>
+              </div>
             </div>
           </div>
-          <p class="feature-announce-note">
-            Both only change what <strong>you</strong> see. Other people in
-            the room are not affected.
-          </p>
-          <button class="feature-announce-btn" id="featureAnnounceClose">
-            Got it
-          </button>
+          <div class="feature-announce-foot">
+            <button class="feature-announce-btn" id="featureAnnounceClose">
+              Got it
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -675,6 +781,7 @@
     <script src="js/theme-editor.js?v=3.2.0"></script>
 
     <script src="js/games-client.js?v=4.21.0"></script>
+    <script src="js/polls.js?v=1.0.0"></script>
 
     <!-- Feature announcement logic -->
     <script src="js/rules-modal.js?v=1.4.0"></script>

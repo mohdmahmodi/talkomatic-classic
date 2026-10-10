@@ -1700,6 +1700,16 @@ const APPS_DATA = {
     openInNewTab: false,
     action: "themeEditor",
   },
+  polls: {
+    name: "Polls",
+    description: "Ask the room a question",
+    fa: "fa-square-poll-vertical",
+    tint: "#c084fc",
+    status: "available",
+    url: null,
+    openInNewTab: false,
+    action: "polls",
+  },
   minigames: {
     name: "Mini Games",
     description: "Draw & Guess, Guess the Flag, Tic Tac Toe, Connect Four",
@@ -1736,6 +1746,7 @@ function createAppDirectoryDropdown() {
   Object.entries(APPS_DATA).forEach(([id, app]) => {
     const item = document.createElement("div");
     item.className = `app-item ${app.status === "coming-soon" ? "disabled" : ""}`;
+    item.dataset.app = id;
     const icon = document.createElement("div");
     icon.className = "app-icon";
     icon.innerHTML = `<i class="fas ${app.fa}"></i>`;
@@ -1772,6 +1783,8 @@ function createAppDirectoryDropdown() {
           if (window.ThemeEditor) window.ThemeEditor.open();
         } else if (app.action === "games") {
           if (window.TalkomaticGames) window.TalkomaticGames.open();
+        } else if (app.action === "polls") {
+          if (window.TalkomaticPolls) window.TalkomaticPolls.open();
         } else if (app.openInNewTab) {
           window.open(app.url, "_blank", "noopener,noreferrer");
         } else {
@@ -1795,6 +1808,11 @@ function showAppDirectory() {
   hideAutocomplete();
   const ed = document.getElementById("emotesDropdown");
   if (ed) ed.style.display = "none";
+  const pollItem = appDirectoryDropdown.querySelector('[data-app="polls"] .app-enter');
+  if (pollItem) {
+    const s = window.TalkomaticPolls && window.TalkomaticPolls.status();
+    pollItem.innerHTML = (s || "Enter") + ' <i class="fas fa-arrow-right"></i>';
+  }
   appDirectoryDropdown.classList.add("show");
 }
 function hideAppDirectory() {
@@ -2924,6 +2942,10 @@ function createUserRow(user, container) {
       if (!isStaff() && /(^|\s)@rules\b/i.test(text) && window.TalkomaticRules) {
         stripTypedWord(div, /\s?@rules\b/i);
         window.TalkomaticRules.open();
+      }
+      if (/(^|\s)\/(create )?poll\b/i.test(text) && window.TalkomaticPolls) {
+        stripTypedWord(div, /\s?\/(create )?poll\b/i);
+        window.TalkomaticPolls.create();
       }
       if (
         !currentUserIsDev &&
