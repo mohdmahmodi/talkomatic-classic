@@ -53,6 +53,7 @@ const devicetoken = require("./server/devicetoken");
 const proxyguard = require("./server/proxyguard");
 const ipredact = require("./server/ipredact");
 const banstatus = require("./server/banstatus");
+const browser = require("./server/browser");
 const identity = require("./server/identity");
 const automod = require("./server/automod");
 const audit = require("./server/audit");
@@ -515,17 +516,23 @@ io.use((socket, next) => {
           ? block.expiry
           : block;
       const err = new Error("IP blocked");
+      // Staff wrote this to be read by the person they blocked, and
+      // "evading from x.x.x.x" is a natural thing to write. It gets the
+      // same treatment on the way out as anything else somebody typed.
+      const reason = ipredact.redact(
+        banstatus.shownReason(block && block.by, block && block.reason),
+      );
       // Surfaced to the client's connect_error handler so the lobby can show
       // a clear ban screen with a live countdown (or "permanent").
       err.data = {
         banned: true,
         permanent: expiry >= Number.MAX_SAFE_INTEGER,
         expiry,
-        // Staff wrote this to be read by the person they blocked, and
-        // "evading from x.x.x.x" is a natural thing to write. It gets the
-        // same treatment on the way out as anything else somebody typed.
-        reason: ipredact.redact(
-          banstatus.shownReason(block && block.by, block && block.reason),
+        reason,
+        embedded: browser.embeddedHint(
+          socket.handshake.headers["user-agent"],
+          reason,
+          !!signedId,
         ),
         // When it was placed, and who it came from as the user is told it:
         // the team rather than the person, so nobody can be gone after for a
@@ -1462,6 +1469,13 @@ app.get(`${API}/ban-status`, (req, res) => {
     rule: rule ? Number(rule[1]) : null,
     by: banned && b && "by" in b ? roles.publicStaffName(b.by, b.byRole) : null,
     bannedAt: (b && b.ts) || null,
+    embedded: banned
+      ? browser.embeddedHint(
+          req.headers["user-agent"],
+          reason,
+          !!devicetoken.idFromCookieHeader(req.headers.cookie),
+        )
+      : null,
     since: banned ? eff.since || null : null,
     file: deviceId ? ownFile(req, deviceId, legacyId) : [],
     ackRequired: !banned && !!deviceId && identity.ackDue(deviceId),

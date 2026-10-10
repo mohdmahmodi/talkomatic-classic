@@ -59,6 +59,7 @@ const proxyguard = require("./proxyguard");
 const dataexport = require("./dataexport");
 const automod = require("./automod");
 const clientdetails = require("./clientdetails");
+const browser = require("./browser");
 const diag = require("./diag");
 const gamesFloor = require("./games");
 const gamesSocket = require("./games/socket");
@@ -3097,49 +3098,23 @@ function clientLines(socket) {
     from = ours ? "the Talkomatic site" : "another website, " + host;
   }
   const cookies = !!socket.stableUserId;
-  const raw = String(headers["user-agent"] || "");
-  const app = /Edg\//.test(raw)
-    ? "Edge"
-    : /OPR\/|Opera/.test(raw)
-      ? "Opera"
-      : /Firefox\//.test(raw)
-        ? "Firefox"
-        : /Chrome\/|CriOS/.test(raw)
-          ? "Chrome"
-          : /Safari\//.test(raw)
-            ? "Safari"
-            : null;
-  const os = /iPhone|iPad|iPod/.test(raw)
-    ? "iOS"
-    : /Android/.test(raw)
-      ? "Android"
-      : /CrOS/.test(raw)
-        ? "ChromeOS"
-        : /Windows/.test(raw)
-          ? "Windows"
-          : /Mac OS X|Macintosh/.test(raw)
-            ? "Mac"
-            : /Linux/.test(raw)
-              ? "Linux"
-              : null;
-  const ua = !raw
-    ? "none sent"
-    : app
-      ? app + (os ? " on " + os : "")
-      : "not a known browser (" + raw.replace(/[\d.]+/g, "").slice(0, 40).trim() + ")";
+  const b = browser.describe(headers["user-agent"]);
+  const inside = "the Talkomatic site inside " + (b.host ? b.host + "'s" : "another app's") + " built-in browser";
   return [
     "Looks like: " +
       (socket.isBot
         ? "a registered bot"
         : !ours
           ? "a homemade bot, script or app, not the Talkomatic site"
-          : cookies
-            ? "a normal browser on the Talkomatic site"
-            : "the Talkomatic site with cookies blocked or cleared every time, possibly a script"),
+          : b.embedded
+            ? inside + (cookies ? "" : ", which kept no cookies")
+            : cookies
+              ? "a normal browser on the Talkomatic site"
+              : "the Talkomatic site with cookies blocked or cleared every time, possibly a script"),
     "Bot token: " + (socket.isBot ? "yes" : "none"),
     "Connected from: " + from,
     "Cookies: " + (cookies ? "kept, like a normal browser" : "none sent, so every visit looked like a new person"),
-    "Browser: " + ua,
+    "Browser: " + browser.label(headers["user-agent"]),
   ];
 }
 

@@ -685,6 +685,7 @@ function showBanScreen(info) {
     '<div class="bs-brand">Talkomatic</div>' +
     '<div class="bs-state" id="banState"></div>' +
     '<div class="bs-card" id="banWhy" hidden></div>' +
+    '<div class="bs-card" id="banBrowser" hidden></div>' +
     '<div class="bs-card" id="banFile" hidden></div>' +
     '<details class="bs-appeal" id="banAppeal" hidden>' +
     '<summary><i class="fas fa-scale-balanced"></i> <span id="banAppealTitle">Appeal this block</span></summary>' +
@@ -816,6 +817,26 @@ function showBanScreen(info) {
     if (d.bannedAt) meta.push("Placed " + fmtDate(d.bannedAt));
     if (d.by) meta.push("by " + d.by);
     if (meta.length) box.appendChild(node("div", "bs-meta", meta.join(", ")));
+  }
+
+  function paintBrowser(d) {
+    const box = $("banBrowser");
+    if (!box) return;
+    box.textContent = "";
+    const e = d.banned ? d.embedded : null;
+    box.hidden = !e;
+    if (!e) return;
+    box.appendChild(node("span", "bs-k", "Browser"));
+    box.appendChild(
+      node(
+        "p",
+        "bs-why-text",
+        "You reached Talkomatic through the built-in browser inside " +
+          (e.app || "another app") +
+          ". It does not keep Talkomatic's cookie, so each visit counted as a new person, which is what Automod blocked. " +
+          "Open Talkomatic in Safari, Chrome or Firefox instead, not inside another app.",
+      ),
+    );
   }
 
   // Everything staff have done to this person, told to the person.
@@ -1318,6 +1339,7 @@ function showBanScreen(info) {
   function apply(d) {
     paintState(d);
     paintWhy(d);
+    paintBrowser(d);
     paintFile(d);
     const ap = $("banAppeal");
     if (ap) ap.hidden = !d.banned;
