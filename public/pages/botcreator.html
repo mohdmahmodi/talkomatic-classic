@@ -837,7 +837,9 @@
               <code>It vanished</code>
               <span
                 >Your bot goes home when: you leave Talkomatic, its room
-                empties, the room votes it out, or a moderator stops it.</span
+                empties, the room votes it out, or a moderator stops it. If
+                the room votes it out, you leave with it and are kept out of
+                that room.</span
               >
               <code>Only works for me</code>
               <span
@@ -859,12 +861,15 @@
             <p>
               Bots follow the same rules people do. What they say is filtered
               by each viewer's own automod setting, exactly like what people
-              type. A room can vote a bot out. Rooms have bot seats by size
+              type. A room can vote a bot out, and when it does you go with
+              it and are kept out of that room. Rooms have bot seats by size
               (1 for every 5 people they can hold, up to 5), you can run one
               bot at a time, and
               <b>whatever your bot does counts as YOU doing it</b> - so make
-              things people will like having around. Moderators can see every
-              bot and its owner, and can turn any bot off.
+              things people will like having around. Bots do not vote in
+              room polls and do not count toward everyone having voted.
+              Moderators can see every bot and its owner, and can turn any
+              bot off.
             </p>
           </div>
         </div>
@@ -1173,11 +1178,16 @@ def get_token():
               <code>Bot tokens not allowed in browsers</code>
               <span>The handshake looked like a browser. Drop the fake
               browser headers.</span>
+              <code>Too many bot connections from this network</code>
+              <span>One live bot connection per network at a time: an IPv4
+              address, or an IPv6 /64. A second bot from the same place is
+              refused until the first disconnects. This number is not in
+              <code>/api/v1/config</code>.</span>
               <code>Too many connections</code>
-              <span>One IP can hold 8 sockets at once, and your own browser
+              <span>One IP can hold 60 sockets at once, and your own browser
               tabs on the same network count. Close some.</span>
               <code>IP rate limit exceeded</code>
-              <span>More than 20 connection attempts in 15 seconds from one
+              <span>More than 60 connection attempts in 15 seconds from one
               IP. Back off for 30 seconds. A reconnect loop with no delay
               does this to itself.</span>
               <code>IP blocked</code>
@@ -1231,10 +1241,12 @@ socket.on("signin status", (s) => {
             </p>
             <p>
               The <code>userId</code> you get belongs to this connection's
-              session. Connect again and you are somebody new. Nothing
-              follows the old id around, but room bans stick to it, so a
-              vote-kicked bot that reconnects for a new id and walks back in
-              is ban evasion. Do not build that.
+              session. Connect again and you are somebody new. Room bans do
+              not care: a vote-kick bans the bot's network address from that
+              room, so a reconnect with a fresh id is refused, and a browser
+              on the same connection is kept out of that room too. Walking
+              back in from another address is ban evasion. Do not build
+              that.
             </p>
           </div>
         </div>
@@ -1314,8 +1326,8 @@ socket.on("room joined", (d) => {
               <code>does not allow bots</code>
               <span>The room was made with bots switched off.</span>
               <code>banned</code>
-              <span>This identity was vote-kicked from that room
-              earlier.</span>
+              <span>This identity, or its network address, was vote-kicked
+              from that room earlier.</span>
               <code>locked / maintenance</code>
               <span>Staff locked the room, or the whole site is in
               maintenance mode.</span>
@@ -1533,9 +1545,10 @@ function onLine(userId, username, line) {
               message. Fix: recreate or pick a livelier room.</span>
               <code>Voted out</code>
               <span>3+ people, a majority against the bot: it gets
-              <code>kicked</code>, loses the seat, and that identity is
-              banned from that room. The right response is to stay gone, not
-              to reconnect around it.</span>
+              <code>kicked</code>, loses the seat, and its network address is
+              banned from that room, which covers your own browser on the
+              same connection. The right response is to stay gone, not to
+              reconnect around it.</span>
               <code>Staff</code>
               <span>Moderators see every running bot and its owner and can
               disconnect any of them, or turn all bots off. Repeat offenders
@@ -1545,8 +1558,9 @@ function onLine(userId, username, line) {
               server drops you as dead. Keep heavy work off the socket
               thread.</span>
               <code>Connection and event caps</code>
-              <span>8 sockets per IP, 20 connection attempts per 15 seconds,
-              500 events per minute per bot. The caps do not disconnect you
+              <span>One bot connection per network, 60 sockets per IP, 60
+              connection attempts per 15 seconds, 500 events per minute per
+              bot. The caps do not disconnect you
               (events over the line are dropped with an
               <code>error</code>), but a hot reconnect loop will lock the IP
               out for 30 seconds at a time.</span>
@@ -1958,7 +1972,8 @@ while not stopped:
                   <tr><td><code>user left</code></td><td><code>userId</code> (string)</td><td>Someone left.</td></tr>
                   <tr><td><code>user typing</code></td><td><code>{ userId, username, isTyping }</code></td><td>The indicator.</td></tr>
                   <tr><td><code>update votes</code></td><td><code>{ voterId: targetId, ... }</code></td><td>The vote map changed.</td></tr>
-                  <tr><td><code>kicked</code></td><td>none</td><td>The room voted you out. You are also banned from it.</td></tr>
+                  <tr><td><code>poll state</code></td><td><code>{ question, options: [{ text, count }], total, ended, ... }</code> or <code>null</code></td><td>A poll in your room started, changed or ended. Bots cannot vote; counts arrive once it ends.</td></tr>
+                  <tr><td><code>kicked</code></td><td>none</td><td>The room voted you out. Your address is banned from it.</td></tr>
                   <tr><td><code>room full</code> / <code>room not found</code> / <code>access code required</code></td><td>error-shaped / none</td><td>Join refusals with their own names.</td></tr>
                   <tr><td><code>afk warning</code></td><td><code>{ message, secondsRemaining }</code></td><td>2.5 quiet minutes. Answer with <code>afk response</code>.</td></tr>
                   <tr><td><code>afk timeout</code></td><td><code>{ message }</code></td><td>Removed from the room (idle, or the room closed).</td></tr>
@@ -1978,8 +1993,8 @@ while not stopped:
                   <tr><td><code>POST /api/v1/bot-tokens/request</code></td><td>none (from code)</td><td>A fresh token (section 2).</td></tr>
                   <tr><td><code>GET /api/v1/bot-tokens/info</code></td><td>Bearer token</td><td>That token's state.</td></tr>
                   <tr><td><code>GET /api/v1/status</code></td><td>none</td><td>Users online, rooms open, uptime.</td></tr>
-                  <tr><td><code>GET /api/v1/config</code></td><td>Bearer token</td><td>The live limits and feature switches.</td></tr>
-                  <tr><td><code>GET /api/v1/avatars</code></td><td>Bearer token</td><td>Valid avatar preset ids.</td></tr>
+                  <tr><td><code>GET /api/v1/config</code></td><td>none</td><td>The live limits and feature switches.</td></tr>
+                  <tr><td><code>GET /api/v1/avatars</code></td><td>none</td><td>Valid avatar preset ids.</td></tr>
                 </tbody>
               </table>
             </div>
@@ -1998,8 +2013,9 @@ while not stopped:
               <span>Token lifetime</span><b>30 days</b>
               <span>Live tokens per IP</span><b>3</b>
               <span>Token requests per IP</span><b>3 per hour</b>
-              <span>Sockets per IP</span><b>8</b>
-              <span>Connection attempts per IP</span><b>20 per 15s</b>
+              <span>Bot connections per network</span><b>1</b>
+              <span>Sockets per IP</span><b>60</b>
+              <span>Connection attempts per IP</span><b>60 per 15s</b>
               <span>Socket events per bot</span><b>500 per minute</b>
               <span>Your textbox</span><b>5000 characters</b>
               <span>Username / location</span><b>15 / 20 characters</b>
@@ -2103,11 +2119,13 @@ while not stopped:
             <details class="bc-faq">
               <summary>How do I run more than one bot?</summary>
               <div>
-                One connection per bot, each signed in with its own name.
-                One token can carry several connections. The walls: 8
-                sockets per IP, one bot slot per 5 seats in any one room,
-                and one room per identity. Two of your bots can share a
-                10-seat room, since it has two bot slots.
+                One connection per bot, each signed in with its own name,
+                and one live bot connection per network. Two bots from the
+                same address cannot both connect: the second is refused
+                with <code>Too many bot connections from this network</code>.
+                To run two at once they need two networks. Inside a room the
+                other walls still apply: one bot slot per 5 seats, and one
+                room per identity.
               </div>
             </details>
             <details class="bc-faq">

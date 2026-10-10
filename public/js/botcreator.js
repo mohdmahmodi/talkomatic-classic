@@ -3904,8 +3904,9 @@
 
   // ── What's new ────────────────────────────────────────────────────────────
 
-  const NEWS_VERSION = 10;
+  const NEWS_VERSION = 11;
   const NEWS = [
+    "For coders, numbers checked against the server: one bot connection per network, 60 sockets and 60 connection attempts per address, a vote-kick bans the bot's address from the room, and the new poll state event.",
     'Memory shared by all your bots: pick "shared by all my bots" on a memory block and read it with {shared:coins}. One bot can pay into a bank and another can spend from it, and it stays put between deploys. Only your own bots can see it.',
     'New checks "is empty" and "is not empty": ONLY IF {word1} is empty catches !calc typed with nothing after it, so your bot can reply with how to use it instead of doing maths on nothing.',
     'Share a bot with friends: the new share button in the editor makes a code. Anyone who enters it under "Add a shared bot" becomes a manager - they can edit the bot, send it to rooms, and use its admin-only commands in rooms, exactly like you. Only you can delete the bot, remove managers, or hand ownership over. The clock button shows the bot\'s history (who made it, who saved what), the last 5 versions are kept with one-click restore for the owner, and nobody can accidentally overwrite anyone else\'s save.',
@@ -3923,6 +3924,17 @@
   ];
 
   const CHANGELOG = [
+    {
+      title: "For coders, checked against the server",
+      icon: "fa-code",
+      items: [
+        "One live bot connection per network. A second bot from the same address is refused with Too many bot connections from this network.",
+        "60 sockets per IP and 60 connection attempts per 15 seconds, up from the 8 and 20 the page used to say.",
+        "A vote-kick bans the bot's network address from that room, which also keeps your own browser out of it on the same connection.",
+        "Rooms have polls now. A bot in the room receives poll state but cannot vote.",
+        "GET /api/v1/config and /avatars need no token.",
+      ],
+    },
     {
       title: "Memory for all your bots",
       icon: "fa-brain",

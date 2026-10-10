@@ -854,7 +854,7 @@ function proxyKeyed(socket) {
 }
 
 function proxyExempt(socket) {
-  return !!(socket.isBot || socket.isModLog);
+  return !!socket.isModLog;
 }
 
 function proxyRefusal(net, socket, username, location) {
@@ -944,7 +944,7 @@ async function proxyTurnAway(s, net, at) {
 function proxyFollowUp(ip, net) {
   if (!io()) return;
   for (const [, s] of io().sockets.sockets) {
-    if (s.isBot || proxyguard.publicIp(s.clientIp) !== ip) continue;
+    if (proxyguard.publicIp(s.clientIp) !== ip) continue;
     const staff = !!(s.isDev || s.isMod);
     if (staff && s.isModLog) {
       s.disconnect(true);
