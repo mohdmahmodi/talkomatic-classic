@@ -41,7 +41,7 @@ const STAFF_KEEP_MS = 90 * DAY;
 const SWEEP_MS = 10 * 60 * 1000;
 const SWEEP_GAP_MS = 30 * 1000;
 const SCRIPT_GRACE_MS = tuned("GUARD_AM_GRACE_DAYS", 3) * DAY;
-const SCRIPT_WAIT_MS = tuned("GUARD_AM_WAIT_SEC", 8) * 1000;
+const SCRIPT_WAIT_MS = tuned("GUARD_AM_WAIT_SEC", 20) * 1000;
 const SCRIPT_HOURLY = tuned("GUARD_AM_HOURLY", 6);
 const KEEP_SCRIPTS = 500;
 const DEVICE_RARE = atLeastZero(process.env.GUARD_AM_DEVICE_SHARE, 0);
@@ -164,6 +164,7 @@ function init(deps) {
   }
   const timer = setInterval(sweep, SWEEP_MS);
   if (timer.unref) timer.unref();
+  clientdetails.onAccept(noteDetails);
 }
 
 const io = () => (ctx && ctx.io ? ctx.io() : null);
@@ -846,13 +847,44 @@ function scriptHit(socket, uid, did, username) {
         category: "script",
         target: username,
         targetUserId: uid,
-        facts: missing.length ? ["Missing|" + missing.join("|"), "Possible|script"] : ["Possible|script|old tab"],
+        facts: missing.length ? ["Missing|" + missing.join("|"), "Possible|script"] : ["Possible|script|slow browser"],
       },
       1,
     );
   }
   store.scripts.push({ id: msg ? msg.id : null, uid, did, name: username, at: now, odd: missing.length > 0 });
   if (store.scripts.length > KEEP_SCRIPTS) store.scripts.splice(0, store.scripts.length - KEEP_SCRIPTS);
+  saveSoon();
+}
+
+function noteDetails(socket) {
+  if (!ctx || !socket || socket.isDev || socket.isMod || socket.isBot) return;
+  const { uid, did } = whoIs(socket);
+  if (!uid && !did) return;
+  const now = Date.now();
+  let entry = null;
+  for (let i = store.scripts.length - 1; i >= 0; i--) {
+    const s = store.scripts[i];
+    if (now - s.at > HOUR) break;
+    if (s.late || s.odd) continue;
+    if ((did && s.did === did) || (uid && s.uid === uid)) {
+      entry = s;
+      break;
+    }
+  }
+  if (!entry) return;
+  entry.late = Math.max(1, Math.round((now - entry.at) / 1000));
+  if (did) identity.clearScript(did);
+  const after = socket.detailsAfterMs ? Math.round(socket.detailsAfterMs / 1000) : null;
+  if (entry.id && ctx.staffchat && ctx.staffchat.amend)
+    ctx.staffchat.amend(entry.id, (m) => {
+      m.text = entry.name + "'s browser details arrived late";
+      m.card = {
+        ...(m.card || {}),
+        category: "script late",
+        facts: [after ? "Arrived|" + after + " s after connecting" : "Arrived|" + entry.late + " s after the card", "Possible|slow browser"],
+      };
+    });
   saveSoon();
 }
 

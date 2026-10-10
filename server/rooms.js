@@ -4913,6 +4913,7 @@ function handleTyping(socket, userId, username, isTyping) {
 // ── Socket Event Registration ───────────────────────────────────────────────
 
 let getBuildId = null;
+const OLD_BUILD_MS = 5000;
 
 function registerSocketHandlers(opts) {
   if (opts && typeof opts.buildId === "function") getBuildId = opts.buildId;
@@ -5089,6 +5090,7 @@ function registerSocketHandlers(opts) {
     });
 
     socket.use((packet, next) => {
+      if (socket.oldBuild) return;
       if (WARNING_OPEN_EVENTS.has(packet[0]) || !warnings.has(socket.deviceId))
         return next();
       const now = Date.now();
@@ -5103,7 +5105,16 @@ function registerSocketHandlers(opts) {
       }
     });
 
-    if (getBuildId) socket.emit("server build", { id: getBuildId() });
+    if (getBuildId) {
+      socket.emit("server build", { id: getBuildId() });
+      if (!socket.isBot && socket.handshake?.auth?.build !== getBuildId()) {
+        socket.oldBuild = true;
+        const cut = setTimeout(() => {
+          if (socket.connected) socket.disconnect(true);
+        }, OLD_BUILD_MS);
+        if (cut.unref) cut.unref();
+      }
+    }
 
     socket.deviceType = deviceTypeFromUA(
       socket.handshake.headers["user-agent"],

@@ -400,6 +400,7 @@ const socket = io({
   autoConnect: true,
   withCredentials: true,
   auth: {
+    build: (window.TalkomaticIdentity && window.TalkomaticIdentity.build) || undefined,
     devKey: localStorage.getItem("talkomatic_devKey") || undefined,
     modKey: localStorage.getItem("talkomatic_modKey") || undefined,
     staffHidden: localStorage.getItem("talkomatic_devHidden") || undefined,

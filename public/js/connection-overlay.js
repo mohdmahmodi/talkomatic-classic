@@ -203,7 +203,11 @@
         } catch (e) {
           tried = null;
         }
-        if (tried === theirs) return showOutdated();
+        if (tried === theirs) {
+          socket.io.opts.reconnection = false;
+          socket.disconnect();
+          return showOutdated();
+        }
         try {
           sessionStorage.setItem("tk-build-reload", theirs);
         } catch (e) {

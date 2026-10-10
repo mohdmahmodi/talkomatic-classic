@@ -6,6 +6,7 @@
     transports: ["websocket"],
     upgrade: false,
     auth: {
+      build: (window.TalkomaticIdentity && window.TalkomaticIdentity.build) || undefined,
       devKey: localStorage.getItem("talkomatic_devKey") || undefined,
       modKey: localStorage.getItem("talkomatic_modKey") || undefined,
       deviceId:

@@ -326,6 +326,14 @@ function noteScript(id) {
   saveSoon();
 }
 
+function clearScript(id) {
+  if (!validId(id) || !store[id] || !store[id].script) return;
+  const n = (store[id].script.n || 1) - 1;
+  if (n > 0) store[id].script.n = n;
+  else delete store[id].script;
+  saveSoon();
+}
+
 function devicesMatching(pred, limit = 25) {
   const out = [];
   for (const id of Object.keys(store)) {
@@ -420,6 +428,7 @@ module.exports = {
   setClient,
   setNet,
   noteScript,
+  clearScript,
   devicesMatching,
   devicesByKeys,
   noteEvasion,

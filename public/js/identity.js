@@ -67,8 +67,10 @@
 
   var restored = !lsId && !!ckId;
 
+  var buildTag = document.querySelector('meta[name="tk-build"]');
   window.TalkomaticIdentity = {
     deviceId: id,
+    build: (buildTag && buildTag.getAttribute("content")) || null,
     restored: restored,
     activity: null,
     ready: null,

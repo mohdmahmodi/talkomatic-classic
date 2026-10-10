@@ -5270,7 +5270,8 @@
         [["Seen on a blocked network", "amber"], "Their browser or network matched a blocked user, but that block has ended. Not blocked."],
         [["Blocked at sign-in", "red"], "Automod blocked them. Same browser, network or device as a blocked user, their name on their network or location, or a sign-in flood."],
         [["Block held", ""], "A blocked user tried to sign in. The chip counts tries today."],
-        [["No browser", "amber"], "Signed in without the details a browser sends. A script or an old tab."],
+        [["No browser", "amber"], "Signed in without the details a browser sends. A script, or a browser that was slow to answer. Old tabs cannot sign in."],
+        [["Details arrived late", ""], "The details came after the No browser card. A slow browser, not a script."],
         [["Flooding", "amber"], "Sent more updates in one second than the site allows, 3 times in 10 min. The extra updates were dropped. Not blocked."],
         [["Name changes", "amber"], "4 or more names in 10 min."],
         [["Lookalike name", "amber"], "A name that looks like someone in the room or like a staff name."],
@@ -5530,6 +5531,7 @@
     shared: ["Shared", "fa-share", ""],
     caught: ["Caught", "fa-circle-check", "green"],
     script: ["No browser", "fa-robot", "amber"],
+    "script late": ["Details arrived late", "fa-robot", ""],
     knock: ["Block held", "fa-door-closed", ""],
     evade: ["Seen on a blocked network", "fa-user-secret", "amber"],
     autoblock: ["Blocked at sign-in", "fa-ban", "red"],
@@ -7716,6 +7718,7 @@ button.dk-chan:focus-visible,button.dk-thread:focus-visible,.dk-minib:focus-visi
         transports: ["websocket"],
         upgrade: false,
         auth: {
+          build: (window.TalkomaticIdentity && window.TalkomaticIdentity.build) || undefined,
           devKey: localStorage.getItem("talkomatic_devKey") || undefined,
           modKey: localStorage.getItem("talkomatic_modKey") || undefined,
           deviceId:

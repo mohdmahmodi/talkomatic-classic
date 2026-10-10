@@ -76,14 +76,28 @@ function read(socket, data) {
   };
 }
 
+const listeners = [];
+
+function onAccept(fn) {
+  if (typeof fn === "function") listeners.push(fn);
+}
+
 function accept(socket, data) {
   if (!socket || socket.detailsAt) return;
   socket.detailsAt = Date.now();
+  socket.detailsAfterMs = socket._idAt ? socket.detailsAt - socket._idAt : null;
   try {
     socket.clientDetails = read(socket, data);
     settle(socket);
   } catch (_) {
     socket.clientDetails = null;
+  }
+  for (const fn of listeners) {
+    try {
+      fn(socket);
+    } catch (e) {
+      console.error("client details listener failed:", e.message);
+    }
   }
 }
 
@@ -112,4 +126,4 @@ function register(socket, safe) {
   );
 }
 
-module.exports = { register, accept, settle, odd, of, read, family, VERSION };
+module.exports = { register, accept, settle, odd, of, read, family, onAccept, VERSION };
