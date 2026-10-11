@@ -125,6 +125,19 @@ function canRead(socket, key) {
   return true;
 }
 
+function accessFloor(key) {
+  let ch = CHANNELS.find((c) => c.key === key);
+  if (!ch && key.startsWith("t")) {
+    const thread = desk.threads.find((t) => t.id === key);
+    ch = CHANNELS.find((c) => c.key === (thread && thread.origin || "floor"));
+  }
+  if (!ch) return 0;
+  if (ch.access === "dev") return 4;
+  if (ch.access === "l3") return 3;
+  if (ch.access === "l2") return 2;
+  return 1;
+}
+
 const isReadonly = (key) => {
   const ch = CHANNELS.find((c) => c.key === key);
   return !!(ch && ch.readonly);
@@ -1120,6 +1133,7 @@ function register(socket, safe) {
           name: c.name,
           desc: c.desc,
           restricted: !!c.access,
+          accessLevel: accessFloor(c.key),
           readonly: !!c.readonly,
         })),
         threads: desk.threads
@@ -1202,8 +1216,43 @@ function register(socket, safe) {
         return socket.emit("desk error", {
           message: "Slow down - a few seconds between messages.",
         });
+      const forwardId = typeof data?.forwardId === "string" ? data.forwardId : null;
       const text = String(data?.text || "").trim().slice(0, MSG_MAX);
-      if (!text) return;
+      if (!text && !forwardId) return;
+      let forwarded = null;
+      if (forwardId) {
+        const source = byId.get(forwardId);
+        if (
+          !source ||
+          source.msg.kind !== "chat" ||
+          source.msg.deletedAt ||
+          !source.msg.author ||
+          !canSeeMessage(socket, source.key, source.msg)
+        )
+          return socket.emit("desk error", {
+            message: "That message cannot be forwarded.",
+          });
+        if (
+          source.key === key ||
+          isVirtual(key) ||
+          key.startsWith("t") ||
+          accessFloor(key) !== accessFloor(source.key)
+        )
+          return socket.emit("desk error", {
+            message: "Choose a different channel with the same access level.",
+          });
+        forwarded = {
+          key: source.key,
+          id: source.msg.id,
+          ts: source.msg.ts,
+          author: {
+            label: source.msg.author.label,
+            role: source.msg.author.role,
+            level: source.msg.author.level,
+          },
+          text: String(source.msg.text || "").slice(0, MSG_MAX),
+        };
+      }
       let reply = null;
       if (typeof data?.replyTo === "string") {
         const ref = byId.get(data.replyTo);
@@ -1222,6 +1271,7 @@ function register(socket, safe) {
         kind: "chat",
         author: w,
         text,
+        ...(forwarded ? { forwarded } : {}),
         ...(named.labels.length ? { mentions: named.labels } : {}),
         ...(named.groups.length ? { mentionGroups: named.groups } : {}),
         ...(reply ? { reply } : {}),
