@@ -873,3 +873,15 @@
     flex: 1 1 100%;
   }
 }
+
+.tkw-part + .tkw-part {
+  margin-top: 14px;
+}
+
+.tkw-rule-title {
+  color: var(--tk-text);
+  font-size: 14.5px;
+  font-weight: bold;
+  line-height: 1.4;
+  margin-bottom: 6px;
+}

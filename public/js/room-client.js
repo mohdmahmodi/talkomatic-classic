@@ -4464,23 +4464,8 @@ function openUserStaffMenu(user) {
     desc: "Send a private warning",
     onClick: async () => {
       socket.emit("staff action begin", { targetUserId: user.id });
-      const r = await StaffUI.prompt({
-        title: `Warn ${name}`,
-        icon: '<i class="fas fa-bullhorn"></i>',
-        fields: [
-          {
-            name: "value",
-            label: "Warning message",
-            type: "textarea",
-            placeholder: "Please follow the room rules...",
-            maxLength: 1000,
-            required: true,
-          },
-        ],
-        confirmText: "Send warning",
-      });
-      if (r != null)
-        socket.emit("staff warn", { targetUserId: user.id, message: r });
+      const r = await StaffUI.warnPrompt({ title: `Warn ${name}` });
+      if (r) socket.emit("staff warn", { targetUserId: user.id, ...r });
     },
   });
 

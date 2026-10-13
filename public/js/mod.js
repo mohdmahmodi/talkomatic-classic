@@ -4295,27 +4295,15 @@
     if (!window.StaffUI)
       return socket.emit("staff warn user", { targetUserId: r.targetUserId });
     socket.emit("staff action begin", { targetUserId: r.targetUserId });
-    const msg = await StaffUI.prompt({
+    const w = await StaffUI.warnPrompt({
       title: "Warn " + (r.name || "user"),
       icon: '<i class="fas fa-triangle-exclamation"></i>',
       subtitle: r.online
         ? "They will see it right away"
         : "Saved until they next come online",
-      confirmText: "Send warning",
-      fields: [
-        {
-          name: "value",
-          label: "Message (optional)",
-          placeholder: "Please follow the Talkomatic rules.",
-          maxLength: 1000,
-        },
-      ],
     });
-    if (msg == null) return;
-    socket.emit("staff warn user", {
-      targetUserId: r.targetUserId,
-      message: String(msg).trim(),
-    });
+    if (!w) return;
+    socket.emit("staff warn user", { targetUserId: r.targetUserId, ...w });
   }
 
   function renderReports() {
@@ -6983,6 +6971,12 @@
           "response",
           0,
           "One line everyone can read: what usually happens the first time",
+        );
+        field(
+          "What to do instead",
+          "instead",
+          2,
+          "Fills the warning dialog when a moderator picks this rule: what the person should do instead",
         );
         card.appendChild(
           Object.assign(document.createElement("label"), {

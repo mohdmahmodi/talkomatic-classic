@@ -455,6 +455,21 @@ function nextId() {
 // moderator can always pick a different length.
 const BLOCKS = ["", "none", "1h", "6h", "24h", "3d", "7d", "30d", "permanent"];
 
+const DEFAULT_INSTEAD = {
+  r1: "If someone in the room bothers you, leave the room or use the dislike vote. You do not have to like them, and you do not get to push them out.",
+  r2: "Talkomatic is for people 13 and older. Come back when you are old enough.",
+  r3: "When an argument is over, let it be over. Do not follow the person to other rooms, bring up what they said, or bring friends into it.",
+  r4: "Disagree with what someone says, not with who they are. If a whole group of people annoys you, leave the room instead of telling them they do not belong.",
+  r5: "Keep names, schools, towns, numbers and pictures out of the room, yours and other people's. If you want someone to know you, tell them in private, off the site.",
+  r6: "Pick a name that is yours. If you want to help moderate, apply from the lobby.",
+  r7: "Use a name nobody else in the room is using. Copying someone to make them look bad counts as harassment.",
+  r8: "Keep it out of public rooms, where anyone can walk in, including kids.",
+  r9: "Say it once. If nobody answers, they are not interested, and pasting it again does not change that.",
+  r10: "Leave it out. If it is a crime in the real world, it does not belong in a room here.",
+  r12: "A private or semi-private room belongs to the people in it. If they ask you to leave, leave, and do not come back under a new name.",
+  r13: "Use the Report option on their name and let staff handle it. Answering in kind makes you part of the problem.",
+};
+
 function normalise(raw, isMod) {
   const title = clean(raw && raw.title, MAX_TITLE);
   const body = clean(raw && raw.body, MAX_BODY);
@@ -468,8 +483,19 @@ function normalise(raw, isMod) {
     out.response = clean(raw && raw.response, 240);
     const block = clean(raw && raw.block, 12);
     out.block = BLOCKS.includes(block) ? block : "";
+    out.instead =
+      raw && typeof raw.instead === "string"
+        ? clean(raw.instead, 240)
+        : DEFAULT_INSTEAD[out.id] || "";
   }
   return out;
+}
+
+function communityRule(n) {
+  const i = Number(n);
+  if (!Number.isInteger(i) || i < 1 || i > store.community.length) return null;
+  const r = store.community[i - 1];
+  return { n: i, title: r.title, body: r.body, instead: r.instead || "" };
 }
 
 function seed(list, isMod) {
@@ -592,6 +618,7 @@ load();
 
 module.exports = {
   publicRules,
+  communityRule,
   setSection,
   resetSection,
   flushSync,

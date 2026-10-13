@@ -1707,3 +1707,13 @@
     margin-left: 0;
   }
 }
+
+.sb-new-pill.is-archived {
+  border-color: var(--tk-border);
+  background: var(--tk-tile);
+  color: var(--tk-muted);
+}
+
+.sb-archive-note {
+  margin: 0 0 12px;
+}

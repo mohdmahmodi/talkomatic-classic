@@ -10,7 +10,14 @@
   var overlay = null;
   var current = null;
   var shown = null;
-  var msgEl = null;
+  var msgEl = null,
+    ruleWrap,
+    ruleTitleEl,
+    ruleBodyEl,
+    insteadWrap,
+    insteadEl,
+    msgWrap,
+    msgLabelEl;
   var timeEl = null;
   var agreeEl = null;
   var okEl = null;
@@ -57,9 +64,24 @@
     modal.appendChild(head);
 
     var body = el("div", "tkm-body");
-    body.appendChild(el("div", "tkw-label", "What the moderator said"));
+    ruleWrap = el("div", "tkw-part");
+    ruleWrap.appendChild(el("div", "tkw-label", "The rule"));
+    ruleTitleEl = el("div", "tkw-rule-title");
+    ruleBodyEl = el("div", "tkw-message");
+    ruleWrap.appendChild(ruleTitleEl);
+    ruleWrap.appendChild(ruleBodyEl);
+    body.appendChild(ruleWrap);
+    insteadWrap = el("div", "tkw-part");
+    insteadWrap.appendChild(el("div", "tkw-label", "What to do instead"));
+    insteadEl = el("div", "tkw-message");
+    insteadWrap.appendChild(insteadEl);
+    body.appendChild(insteadWrap);
+    msgWrap = el("div", "tkw-part");
+    msgLabelEl = el("div", "tkw-label", "What the moderator said");
+    msgWrap.appendChild(msgLabelEl);
     msgEl = el("div", "tkw-message");
-    body.appendChild(msgEl);
+    msgWrap.appendChild(msgEl);
+    body.appendChild(msgWrap);
     timeEl = el("div", "tkw-when");
     body.appendChild(timeEl);
     body.appendChild(
@@ -100,7 +122,20 @@
   }
 
   function render() {
-    msgEl.textContent = current.message;
+    var rule = current.rule;
+    ruleWrap.style.display = rule ? "" : "none";
+    if (rule) {
+      ruleTitleEl.textContent = "Rule " + rule.n + ": " + rule.title;
+      ruleBodyEl.textContent = rule.body || "";
+      ruleBodyEl.style.display = rule.body ? "" : "none";
+    }
+    insteadWrap.style.display = current.instead ? "" : "none";
+    insteadEl.textContent = current.instead || "";
+    var structured = !!(rule || current.instead);
+    var note = structured ? current.note : current.message;
+    msgWrap.style.display = note ? "" : "none";
+    msgLabelEl.textContent = structured ? "From the moderator" : "What the moderator said";
+    msgEl.textContent = note || "";
     timeEl.textContent = whenText(current.at);
     timeEl.style.display = current.at ? "" : "none";
     agreeEl.checked = false;
@@ -148,7 +183,14 @@
     }
     if (current && current.id === data.id) return open();
     if (!queue.some(function (w) { return w.id === data.id; }))
-      queue.push({ id: data.id, message: message, at: data.at || 0 });
+      queue.push({
+        id: data.id,
+        message: message,
+        rule: data.rule && data.rule.title ? data.rule : null,
+        instead: data.instead || "",
+        note: data.note || "",
+        at: data.at || 0,
+      });
     open();
   });
 })();

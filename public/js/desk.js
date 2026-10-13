@@ -865,6 +865,13 @@
     } catch (_) {}
   }
 
+  function warnVia(ev, targetUserId, opts) {
+    if (!window.StaffUI || !window.StaffUI.warnPrompt) return;
+    window.StaffUI.warnPrompt(opts).then((w) => {
+      if (w) socket.emit(ev, { targetUserId, ...w });
+    });
+  }
+
   function ask(opts, cb) {
     if (window.StaffUI && window.StaffUI.prompt) {
       window.StaffUI.prompt({
@@ -2452,20 +2459,10 @@
 
     if (kind === "report" && c.targetUserId) {
       add("Warn", "fa-triangle-exclamation", "", () =>
-        ask(
-          {
-            title: "Warn " + (c.target || "them"),
-            label: "Message (optional)",
-            placeholder: "Please follow the Talkomatic rules.",
-            max: 1000,
-            icon: '<i class="fas fa-triangle-exclamation"></i>',
-          },
-          (message) =>
-            socket.emit("staff warn user", {
-              targetUserId: c.targetUserId,
-              message: String(message || "").trim(),
-            }),
-        ),
+        warnVia("staff warn user", c.targetUserId, {
+          title: "Warn " + (c.target || "them"),
+          icon: '<i class="fas fa-triangle-exclamation"></i>',
+        }),
       );
       add("Kick", "fa-door-open", "", () =>
         socket.emit("staff kick", { targetUserId: c.targetUserId, ban: false }),
@@ -3967,17 +3964,10 @@
           const acts = el("div", "dk-occ-b");
           const warn = btn("dk-minib", "Warn", "fa-triangle-exclamation");
           warn.addEventListener("click", () =>
-            ask(
-              {
-                title: "Warn " + (u.username || "user"),
-                label: "The warning they will see",
-                value: "Please follow the room rules.",
-                max: 1000,
-                icon: '<i class="fas fa-triangle-exclamation"></i>',
-              },
-              (message) =>
-                socket.emit("staff warn", { targetUserId: u.id, message }),
-            ),
+            warnVia("staff warn", u.id, {
+              title: "Warn " + (u.username || "user"),
+              icon: '<i class="fas fa-triangle-exclamation"></i>',
+            }),
           );
           acts.appendChild(warn);
           const wipe = btn("dk-minib", "Wipe", "fa-eraser");
@@ -4867,17 +4857,11 @@
     };
     if (c.can.warn)
       add("Warn", "fa-triangle-exclamation", "", () =>
-        ask(
-          {
-            title: "Warn " + name,
-            icon: '<i class="fas fa-triangle-exclamation"></i>',
-            message: c.online ? "They see it right away." : "They are offline. They see it next time they sign in.",
-            label: "Message",
-            placeholder: "Please stop spamming the room.",
-            max: 300,
-          },
-          (message) => socket.emit("staff warn user", { targetUserId: c.key, message }),
-        ),
+        warnVia("staff warn user", c.key, {
+          title: "Warn " + name,
+          icon: '<i class="fas fa-triangle-exclamation"></i>',
+          message: c.online ? "They see it right away." : "They are offline. They see it next time they sign in.",
+        }),
       );
     if (c.can.room) {
       add("Wipe", "fa-eraser", "", () => socket.emit("staff wipe buffer", { targetUserId: c.key }));

@@ -51,12 +51,16 @@ function flushSync() {
   }
 }
 
-function queue(deviceId, message, by) {
-  if (!deviceId || !message) return null;
+function queue(deviceId, fields, by) {
+  const f = typeof fields === "string" ? { message: fields } : fields || {};
+  if (!deviceId || !f.message) return null;
   const arr = store[deviceId] || (store[deviceId] = []);
   const entry = {
     id: crypto.randomBytes(8).toString("hex"),
-    message: String(message).slice(0, 1000),
+    message: String(f.message).slice(0, 1000),
+    rule: f.rule ? { n: f.rule.n, title: f.rule.title, body: f.rule.body } : null,
+    instead: f.instead ? String(f.instead).slice(0, 240) : "",
+    note: f.note ? String(f.note).slice(0, 500) : "",
     by: by || null,
     at: Date.now(),
   };
@@ -64,6 +68,17 @@ function queue(deviceId, message, by) {
   if (arr.length > MAX_PER_DEVICE) arr.splice(0, arr.length - MAX_PER_DEVICE);
   saveSoon();
   return entry;
+}
+
+function payload(w) {
+  return {
+    id: w.id,
+    message: w.message,
+    at: w.at,
+    rule: w.rule || null,
+    instead: w.instead || "",
+    note: w.note || "",
+  };
 }
 
 function pendingFor(deviceId) {
@@ -99,4 +114,4 @@ function ack(deviceId, id) {
 
 load();
 
-module.exports = { queue, pendingFor, has, ack, flushSync };
+module.exports = { queue, payload, pendingFor, has, ack, flushSync };

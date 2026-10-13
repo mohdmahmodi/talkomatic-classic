@@ -853,6 +853,17 @@ function proxyKeyed(socket) {
   return !!(socket && (socket.isDev || socket.isMod || socket.staffProxy));
 }
 
+function buildWarning(data) {
+  const note = sanitizeMessage(typeof data?.message === "string" ? data.message : "").slice(0, 500);
+  const instead = sanitizeMessage(typeof data?.instead === "string" ? data.instead : "").slice(0, 240);
+  const rule = rules.communityRule(data?.rule);
+  const parts = [];
+  if (rule) parts.push("Rule " + rule.n + ": " + rule.title + ".");
+  if (note) parts.push(note);
+  if (instead) parts.push("What to do instead: " + instead);
+  return { rule, instead, note, message: parts.join(" ").slice(0, 1000) };
+}
+
 function proxyExempt(socket) {
   return !!socket.isModLog;
 }
@@ -5102,11 +5113,7 @@ function registerSocketHandlers(opts) {
       if (now - (socket.warnNudgedAt || 0) > 3000) {
         socket.warnNudgedAt = now;
         for (const w of warnings.pendingFor(socket.deviceId))
-          socket.emit("staff warning", {
-            id: w.id,
-            message: w.message,
-            at: w.at,
-          });
+          socket.emit("staff warning", warnings.payload(w));
       }
     });
 
@@ -5168,11 +5175,7 @@ function registerSocketHandlers(opts) {
         if (queuedWarnings.length)
           setTimeout(() => {
             for (const w of queuedWarnings)
-              socket.emit("staff warning", {
-                id: w.id,
-                message: w.message,
-                at: w.at,
-              });
+              socket.emit("staff warning", warnings.payload(w));
           }, 1500);
       }
 
@@ -8045,10 +8048,9 @@ function registerSocketHandlers(opts) {
               "You cannot act on this user.",
             ),
           );
-        let message = sanitizeMessage(
-          typeof data?.message === "string" ? data.message : "",
-        ).slice(0, 1000);
-        if (!message) message = "Please follow the room rules.";
+        const built = buildWarning(data);
+        if (!built.message) built.message = "Please follow the room rules.";
+        const message = built.message;
         const targets = findSocketsByUserId(targetUserId);
         if (targets.length === 0)
           return socket.emit(
@@ -8057,15 +8059,13 @@ function registerSocketHandlers(opts) {
           );
         const warning = warnings.queue(
           targets[0].deviceId,
-          message,
+          built,
           socket.staffLabel || null,
         );
-        for (const s of targets)
-          s.emit("staff warning", {
-            id: warning?.id || null,
-            message,
-            at: warning?.at || Date.now(),
-          });
+        const sent = warning
+          ? warnings.payload(warning)
+          : { id: null, at: Date.now(), ...built };
+        for (const s of targets) s.emit("staff warning", sent);
         const roomId = getUserCurrentRoom(targetUserId);
         const room = roomId ? state.rooms.get(roomId) : null;
         const targetUser = room?.users.find((u) => u.id === targetUserId);
@@ -11830,26 +11830,23 @@ function registerSocketHandlers(opts) {
               action: "warn (cannot act on staff)",
             });
         }
-        let message = sanitizeMessage(
-          typeof data?.message === "string" ? data.message : "",
-        ).slice(0, 1000);
-        if (!message)
-          message =
+        const built = buildWarning(data);
+        if (!built.message)
+          built.message =
             "A moderator has issued you a warning. Please follow the Talkomatic rules.";
+        const message = built.message;
         const online = findSocketsByUserId(targetUserId);
         const deviceId =
           (online[0] && online[0].deviceId) || (lk && lk.deviceId) || null;
         const warning = warnings.queue(
           deviceId,
-          message,
+          built,
           socket.staffLabel || null,
         );
-        for (const s of online)
-          s.emit("staff warning", {
-            id: warning?.id || null,
-            message,
-            at: warning?.at || Date.now(),
-          });
+        const sent = warning
+          ? warnings.payload(warning)
+          : { id: null, at: Date.now(), ...built };
+        for (const s of online) s.emit("staff warning", sent);
         const delivered = online.length > 0;
         const queued = !delivered && !!deviceId;
         const targetName =

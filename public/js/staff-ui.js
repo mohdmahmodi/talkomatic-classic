@@ -1505,6 +1505,56 @@
     return t ? rule + ". " + t : rule + ".";
   }
 
+  async function warnPrompt(opts) {
+    const o = opts || {};
+    const list = (await fetchCommunityRules(o.socket)) || [];
+    const fields = [];
+    const ruleField = await communityRuleField({ socket: o.socket });
+    let auto = "";
+    if (ruleField) {
+      ruleField.onChange = (value, inputs) => {
+        const m = /^Rule (\d+)/.exec(value || "");
+        const r = m ? list[Number(m[1]) - 1] : null;
+        const box = inputs.instead;
+        if (!box) return;
+        if (!box.value.trim() || box.value === auto) {
+          auto = (r && r.instead) || "";
+          box.value = auto;
+        }
+      };
+      fields.push(ruleField);
+    }
+    fields.push({
+      name: "instead",
+      label: "What to do instead (optional)",
+      type: "textarea",
+      placeholder: "Fills in from the rule. Change it or clear it.",
+      maxLength: 240,
+    });
+    fields.push({
+      name: "note",
+      label: "Your own note (optional)",
+      type: "textarea",
+      placeholder: o.placeholder || "Anything else they should know.",
+      maxLength: 500,
+    });
+    const res = await prompt({
+      title: o.title || "Warn",
+      icon: o.icon || '<i class="fas fa-bullhorn"></i>',
+      subtitle: o.subtitle,
+      message: o.message || "",
+      fields,
+      confirmText: "Send warning",
+    });
+    if (res == null) return null;
+    const m = /^Rule (\d+)/.exec(res.rule || "");
+    return {
+      rule: m ? Number(m[1]) : null,
+      instead: String(res.instead || "").trim(),
+      message: String(res.note || "").trim(),
+    };
+  }
+
   // ── Block lengths and the one dialog every block goes through ─────────────
   // Same ladder as server/durations.js; change both.
   const DURATIONS = [
@@ -2335,6 +2385,7 @@
     communityRules: fetchCommunityRules,
     communityRuleField,
     ruleReason,
+    warnPrompt,
     DURATIONS,
     durationOptions,
     durationLabel,

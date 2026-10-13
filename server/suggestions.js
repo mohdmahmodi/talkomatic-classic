@@ -14,6 +14,7 @@ const STORE_PATH = path.join(DATA_DIR, "suggestions.json");
 const MAX = 2000;
 const WINDOW_MS = 365 * 24 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const ARCHIVE_MS = 14 * DAY_MS;
 
 const POSTS_PER_DAY = 3;
 const REPLIES_PER_DAY = 15;
@@ -291,7 +292,19 @@ function get(id) {
   return suggestions.find((s) => s.id === id) || null;
 }
 
+function lastTouch(s) {
+  let t = Math.max(s.at || 0, s.statusAt || 0);
+  for (const r of s.replies || []) if ((r.at || 0) > t) t = r.at;
+  return t;
+}
+
+function isArchived(s, now) {
+  if (s.status !== "implemented" && s.status !== "declined") return false;
+  return now - lastTouch(s) > ARCHIVE_MS;
+}
+
 function publicList({ deviceId, isDev, isStaff, limit = MAX } = {}) {
+  const now = Date.now();
   const out = suggestions
     .slice()
     .sort((a, b) => (b.at || 0) - (a.at || 0))
@@ -315,6 +328,7 @@ function publicList({ deviceId, isDev, isStaff, limit = MAX } = {}) {
             ? roles.publicStaffName(s.statusBy, s.statusRole)
             : null,
         statusAt: s.statusAt,
+        archived: isArchived(s, now),
         up,
         down,
         score: up - down,

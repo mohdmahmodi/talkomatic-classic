@@ -73,6 +73,8 @@
     ["idea", "Ideas", "fa-lightbulb"],
     ["bug", "Bugs", "fa-bug"],
     ["mine", "My posts", "fa-user"],
+    ["replies", "New replies", "fa-comments"],
+    ["archive", "Archive", "fa-box-archive"],
   ];
   var SORTS = [
     ["top", "Top", "fa-arrow-up-wide-short"],
@@ -92,6 +94,7 @@
   var built = false;
   var isOpen = false;
   var sessionSince = 0;
+  var listScroll = 0;
   var knownIds = null;
   var readAt = lsJSON(READ_KEY) || {};
   var replyDrafts = {};
@@ -344,7 +347,7 @@
   function readSince(p) {
     var t = readAt[p.id];
     if (t != null) return t;
-    return p.mine ? sessionSince : Infinity;
+    return p.mine ? sessionSince : sessionSince || Infinity;
   }
 
   function unreadInfo(p) {
@@ -402,6 +405,9 @@
 
   function inTab(p) {
     if (tab === "mine") return !!p.mine;
+    if (tab === "replies") return unreadInfo(p).replies > 0;
+    if (tab === "archive") return !!p.archived;
+    if (p.archived) return false;
     if (tab === "all") return true;
     return kindOf(p) === tab;
   }
@@ -428,6 +434,10 @@
     if (tab === "mine")
       posts.sort(function (a, b) {
         return (unreadInfo(b).any ? 1 : 0) - (unreadInfo(a).any ? 1 : 0);
+      });
+    if (tab === "replies")
+      posts.sort(function (a, b) {
+        return unreadInfo(b).latest - unreadInfo(a).latest;
       });
     return posts;
   }
@@ -474,6 +484,8 @@
       "<li><b>Search before you post.</b> If it is already here, upvote it instead of posting it again.</li>" +
       "<li><b>Statuses:</b> New means nobody has looked yet. Approved or Confirmed means we want to do it. Built or Fixed means it is done. Not doing or Won't fix means we decided against it.</li>" +
       "<li><b>My posts</b> keeps everything you wrote, with a marker when someone replies or a status changes. You also get a short note in the lobby when that happens.</li>" +
+      "<li><b>New replies</b> lists every post that got a reply since your last visit, newest first.</li>" +
+      "<li><b>Archive</b> holds posts that were built, fixed or closed and have had no replies for 14 days. A reply on one moves it back to the active list.</li>" +
       "<li>You can edit or delete your own posts any time. You get 3 posts a day.</li>" +
       "</ul>";
 
@@ -541,9 +553,11 @@
     view = { name: "list", id: null };
     editing = null;
     render();
+    main.scrollTop = listScroll;
   }
 
   function openThread(id) {
+    if (view.name === "list") listScroll = main.scrollTop;
     view = { name: "thread", id: id };
     editing = null;
     markRead(id);
@@ -573,13 +587,19 @@
   function renderSide() {
     side.textContent = "";
     var posts = allPosts();
-    var counts = { all: posts.length, idea: 0, bug: 0, mine: 0 };
+    var counts = { all: 0, idea: 0, bug: 0, mine: 0, replies: 0, archive: 0 };
     var unreadMine = 0;
     posts.forEach(function (p) {
-      counts[kindOf(p)]++;
+      if (p.archived) counts.archive++;
+      else {
+        counts.all++;
+        counts[kindOf(p)]++;
+      }
+      var u = unreadInfo(p);
+      if (u.replies) counts.replies++;
       if (p.mine) {
         counts.mine++;
-        if (unreadInfo(p).any) unreadMine++;
+        if (u.any) unreadMine++;
       }
     });
 
@@ -590,11 +610,14 @@
         icon(t[2]) + "<span>" + t[1] + "</span>",
         function () {
           tab = t[0];
+          listScroll = 0;
           goList();
         },
       );
       if (t[0] === "mine" && unreadMine)
         b.appendChild(el("span", "sb-nav-dot", String(unreadMine)));
+      else if (t[0] === "replies" && counts.replies)
+        b.appendChild(el("span", "sb-nav-dot", String(counts.replies)));
       else b.appendChild(el("span", "sb-nav-count", String(counts[t[0]])));
       nav.appendChild(b);
     });
@@ -786,14 +809,12 @@
     var total = allPosts().filter(inTab).length;
 
     var count = el("div", "sb-count-line");
+    var noun = tab === "archive" ? ["archived post", "archived posts"] : ["post", "posts"];
+    var suffix = tab === "mine" ? " of yours" : tab === "replies" ? " with new replies" : "";
     count.textContent =
-      tab === "mine"
-        ? posts.length === total
-          ? plural(total, "post", "posts") + " of yours"
-          : "Showing " + posts.length + " of your " + plural(total, "post", "posts")
-        : posts.length === total
-          ? plural(total, "post", "posts")
-          : "Showing " + posts.length + " of " + total;
+      posts.length === total
+        ? plural(total, noun[0], noun[1]) + suffix
+        : "Showing " + posts.length + " of " + plural(total, noun[0], noun[1]) + suffix;
     listEl.appendChild(count);
 
     if (!posts.length) {
@@ -821,6 +842,14 @@
       empty.appendChild(
         button("sb-btn sb-btn-primary", icon("fa-plus") + " Write your first post", openCompose),
       );
+    } else if (tab === "replies" && !total) {
+      empty.innerHTML =
+        icon("fa-comments") +
+        "<p>No new replies since your last visit.</p><span>Posts that get replies while you are away show up here.</span>";
+    } else if (tab === "archive" && !total) {
+      empty.innerHTML =
+        icon("fa-box-archive") +
+        "<p>Nothing archived yet.</p><span>Built, fixed and closed posts move here after 14 quiet days.</span>";
     } else if (total) {
       empty.innerHTML =
         icon("fa-magnifying-glass") +
@@ -923,6 +952,11 @@
     meta.appendChild(replies);
     if (unread.replies)
       meta.appendChild(el("span", "sb-new-pill", plural(unread.replies, "new reply", "new replies")));
+    if (p.archived && tab !== "archive") {
+      var ar = el("span", "sb-new-pill is-archived", "");
+      ar.innerHTML = icon("fa-box-archive") + " Archived";
+      meta.appendChild(ar);
+    }
     if (unread.status) {
       var st = el("span", "sb-new-pill " + STATUS[p.status].cls, "");
       st.innerHTML = icon(STATUS[p.status].icon) + " " + esc(statusLabel(p.status, kindOf(p)));
@@ -1041,6 +1075,13 @@
       replies.appendChild(replyRow(p, r));
     });
     main.appendChild(replies);
+    if (p.archived) {
+      var arch = el("div", "sb-status-note sb-archive-note");
+      arch.innerHTML =
+        icon("fa-box-archive") +
+        "<span>This post is in the archive. A reply moves it back to the active list.</span>";
+      main.appendChild(arch);
+    }
     main.appendChild(replyBox(p, focusReply));
   }
 
