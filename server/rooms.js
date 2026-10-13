@@ -11557,7 +11557,7 @@ function registerSocketHandlers(opts) {
               ? ` Their chat box read (wiped just before the report): "${targetText}"`
               : ` Their chat box read: "${targetText}"`
             : "") +
-          (openedText && openedText !== targetText
+          (openedText
             ? ` When the report form was opened it read: "${openedText}"`
             : "");
         audit.recordNotification({

@@ -2343,7 +2343,7 @@
             "quote",
           ),
         );
-      if (c.openedQuote && c.openedQuote !== c.quote)
+      if (c.openedQuote)
         b.appendChild(
           qField(
             c.openedQuoteWiped
