@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  var VERSION = "6.3";
+  var VERSION = "6.4";
   var SHOW_AFTER_MS = 90000;
   var RETRY_MS = 30000;
   var REPEAT_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
@@ -9,6 +9,34 @@
   var VERSION_KEY = "talkomatic_popup_last_version";
 
   var SECTIONS = [
+    {
+      title: "Halloween",
+      items: [
+        {
+          icon: "fa-ghost",
+          tag: "new",
+          title: "A night in the graveyard",
+          text: "The lobby is a moonlit graveyard for the season, with bats, crows, ghosts and spiders out for the night. Rooms get pumpkins, candles, a lantern and cobwebs, and the odd bat flies through.",
+        },
+        {
+          icon: "fa-sliders",
+          tag: "new",
+          title: "Animated, still or off",
+          text: "Press the ghost next to the palette in the lobby, or in the top bar of a room. Animated shows everything, Still keeps the decorations with nothing moving, and Off brings back the usual look. Your own theme keeps its colors either way.",
+        },
+        {
+          icon: "fa-music",
+          tag: "new",
+          title: "Music and a howl",
+          text: "The lobby plays a quiet waltz once you click anywhere, and the speaker button next to the ghost mutes it. In rooms a wolf howls instead of the ding when someone comes in or leaves. The sound button mutes it like before.",
+        },
+        {
+          icon: "fa-hand",
+          title: "Shy creatures",
+          text: "Bats scatter, spiders run and ghosts get scared when your mouse comes close.",
+        },
+      ],
+    },
     {
       title: "Polls",
       items: [

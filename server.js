@@ -51,6 +51,7 @@ const ipban = require("./server/ipban");
 const personblocks = require("./server/personblocks");
 const devicetoken = require("./server/devicetoken");
 const proxyguard = require("./server/proxyguard");
+const season = require("./server/season");
 const ipredact = require("./server/ipredact");
 const banstatus = require("./server/banstatus");
 const browser = require("./server/browser");
@@ -917,7 +918,10 @@ function sendPage(req, res, file) {
       // that it is running old code after an update and reload itself.
       out = out.replace(
         /<head(\s[^>]*)?>/i,
-        (m) => m + `\n    <meta name="tk-build" content="${BUILD_ID}" />`,
+        (m) =>
+          m +
+          `\n    <meta name="tk-build" content="${BUILD_ID}" />` +
+          `\n    <meta name="tk-season" content="${season.get()}" />`,
       );
       res.type("html").send(out);
     })

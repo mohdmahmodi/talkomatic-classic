@@ -1167,6 +1167,12 @@
         title = "Application reviewed";
         body = "The applicant has been told the outcome.";
         break;
+      case "season":
+        title = d.theme ? "Halloween on" : "Halloween off";
+        body = d.theme
+          ? "Open pages switch over now."
+          : "Open pages go back to the usual look now.";
+        break;
       default:
         title = A.charAt(0).toUpperCase() + A.slice(1);
         body = "Done.";

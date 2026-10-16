@@ -6119,6 +6119,42 @@
       .forEach((h) => removed.appendChild(keyCard(h, false)));
   }
 
+  let seasonTheme = null;
+
+  socket.on("season state", (d) => {
+    seasonTheme = d && typeof d.theme === "string" ? d.theme : "";
+    renderSeason();
+  });
+
+  function renderSeason() {
+    const list = $("seasonList");
+    if (!list) return;
+    list.innerHTML = "";
+    const on = seasonTheme === "halloween";
+    const card = divc("season-row");
+    card.appendChild(icon("fa-ghost", "season-ico"));
+    const main = divc("season-main");
+    const name = divc("season-name");
+    name.textContent = "Halloween";
+    const state = divc("season-state" + (on ? " is-on" : ""));
+    state.textContent =
+      seasonTheme === null ? "Loading" : on ? "On for everyone" : "Off";
+    main.appendChild(name);
+    main.appendChild(state);
+    card.appendChild(main);
+    const btn = document.createElement("button");
+    btn.className = on ? "btn sm danger" : "btn sm primary";
+    btn.disabled = seasonTheme === null;
+    btn.appendChild(icon(on ? "fa-power-off" : "fa-wand-magic-sparkles"));
+    btn.appendChild(document.createTextNode(on ? " Turn off" : " Turn on"));
+    btn.addEventListener("click", () => {
+      btn.disabled = true;
+      socket.emit("dev set season", { theme: on ? "" : "halloween" });
+    });
+    card.appendChild(btn);
+    list.appendChild(card);
+  }
+
   // ── Allowed link domains ──────────────────────────────────────────────────
   let allowedLinkHosts = [];
 
@@ -6219,6 +6255,7 @@
     if (name === "sessions") socket.emit("dev get sessions");
     if (name === "announce") socket.emit("announcement list");
     if (name === "links") socket.emit("dev link whitelist");
+    if (name === "season") renderSeason();
     if (name === "rules") socket.emit("rules get");
     if (name === "applications") socket.emit("mod applications list");
     if (name === "reports") socket.emit("staff get reports");

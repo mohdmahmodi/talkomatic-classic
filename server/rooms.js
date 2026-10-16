@@ -42,6 +42,7 @@ const identity = require("./identity");
 const modwatch = require("./modwatch");
 const keywatch = require("./keywatch");
 const applications = require("./applications");
+const season = require("./season");
 const reports = require("./reports");
 const lastseen = require("./lastseen");
 const appeals = require("./appeals");
@@ -5266,6 +5267,7 @@ function registerSocketHandlers(opts) {
       }
 
       socket.emit("applications state", { open: !!applications.isOpen() });
+      socket.emit("season state", { theme: season.get() });
 
       // ── One active ROOM tab per browser session ─────────────────────────
       socket.isModLog = socket.handshake?.auth?.app === "modlog";
@@ -11734,6 +11736,27 @@ function registerSocketHandlers(opts) {
           action: "applications open",
           ok: true,
           open: applications.isOpen(),
+        });
+      }),
+    );
+    socket.on(
+      "dev set season",
+      safe(async (data) => {
+        if (!requireDev(socket)) return;
+        const next = typeof data?.theme === "string" ? data.theme : "";
+        await season.set(next);
+        logStaff(
+          socket,
+          season.get() ? "season on" : "season off",
+          "-",
+          "-",
+          season.get() || "none",
+        );
+        io().emit("season state", { theme: season.get() });
+        socket.emit("staff action result", {
+          action: "season",
+          ok: true,
+          theme: season.get(),
         });
       }),
     );

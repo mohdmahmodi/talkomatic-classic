@@ -1,0 +1,340 @@
+html.tk-hw {
+  --tk-accent: #ff8a1f;
+  --tk-accent-hover: #ff6b00;
+  --tk-detail: #ffc078;
+  --tk-bg: #000000;
+  --tk-muted: #bdbdbd;
+  --tk-border: #383838;
+  --tk-panel: #0b0b0b;
+  --tk-tile: #121212;
+  --tk-tile-hover: #1e1e1e;
+  --tk-card: #050505;
+  --tk-cream: #ededed;
+  --tk-cream-text: #000000;
+  --tk-input-bg: #ffffff;
+  --tk-userbar-bottom: #141414;
+}
+
+html.tk-hw ::selection {
+  background: #ff8a1f;
+  color: #000;
+}
+
+html.tk-hw .left-panel::-webkit-scrollbar-thumb,
+html.tk-hw .right-panel::-webkit-scrollbar-thumb,
+html.tk-hw .roomList::-webkit-scrollbar-thumb {
+  background: rgba(200, 200, 200, 0.35);
+}
+
+html.tk-hw #signInMessage {
+  background-color: rgba(20, 20, 20, 0.92);
+}
+
+html.tk-hw .panel-header .talkomatic {
+  text-shadow: 0 0 14px rgba(255, 120, 20, 0.4);
+}
+
+html.tk-hw-font .right-panel h2 {
+  font-family: "Creepster", var(--tk-font-main, talkoSS, Arial, sans-serif);
+  font-size: 34px;
+  letter-spacing: 1px;
+  color: #ff8a1f;
+  text-shadow:
+    0 2px 0 #2a1000,
+    0 0 18px rgba(255, 110, 0, 0.3);
+}
+
+html.tk-hw .room {
+  background-color: #050505;
+}
+
+html.tk-hw .chat-row {
+  border-color: #2e2e2e;
+}
+
+html.tk-hw .chat-row.current-user {
+  border-color: var(--tk-chat-text);
+}
+
+html.tk-hw .top-navbar {
+  background: linear-gradient(to bottom, #141414, #000);
+}
+
+html.tk-hw .second-navbar {
+  background: #000;
+}
+
+html.tk-hw-font .top-navbar .brand {
+  text-shadow: 0 0 14px rgba(255, 120, 20, 0.4);
+}
+
+html.tk-hw-scene .right-panel {
+  background-color: transparent;
+}
+
+html.tk-hw-scene .left-panel {
+  background-color: rgba(0, 0, 0, 0.62);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+
+@media (min-width: 993px) {
+  html.tk-hw-scene .left-panel {
+    background-color: transparent;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+html.tk-hw-scene {
+  background-color: #000;
+}
+
+html.tk-hw-scene body {
+  background: transparent;
+}
+
+#hwSky {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
+  background: #000 url("../images/halloween/night.webp") 78% 100% / cover no-repeat;
+  image-rendering: pixelated;
+}
+
+@media (max-aspect-ratio: 1/1) {
+  #hwSky {
+    background-position: 87% 100%;
+  }
+}
+
+html:not(.tk-hw-scene) #hwSky {
+  display: none;
+}
+
+.hw-stars {
+  position: absolute;
+  inset: 0 0 35% 0;
+  background: url("../images/halloween/stars2.png") 170px 90px / 640px 480px repeat;
+  image-rendering: pixelated;
+  mask-image: linear-gradient(to bottom, #000 55%, transparent);
+  -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent);
+}
+
+.hw-stars.hw-twinkle {
+  animation: hw-twinkle 5s ease-in-out infinite alternate;
+}
+
+@keyframes hw-twinkle {
+  from {
+    opacity: 0.25;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.hw-shoot {
+  position: absolute;
+  top: 12%;
+  left: 18%;
+  width: 140px;
+  height: 2px;
+  background: linear-gradient(to right, transparent, rgba(255, 255, 255, 0.9));
+  transform: rotate(-18deg) translateX(0);
+  opacity: 0;
+  animation: hw-shoot 17s linear infinite 6s;
+}
+
+@keyframes hw-shoot {
+  0%,
+  93% {
+    opacity: 0;
+    transform: rotate(-18deg) translateX(0);
+  }
+  94% {
+    opacity: 1;
+  }
+  98% {
+    opacity: 0.8;
+  }
+  100% {
+    opacity: 0;
+    transform: rotate(-18deg) translateX(520px);
+  }
+}
+
+html.tk-hw-still .hw-twinkle,
+html.tk-hw-still .hw-shoot {
+  animation: none;
+}
+
+.hw-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+html.tk-hw-scene .hw-layer.hw-back {
+  z-index: -1;
+}
+
+.hw-canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  image-rendering: pixelated;
+}
+
+.hw-fog {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 26vh;
+  opacity: 0.32;
+  mask-image: linear-gradient(to top, #000 10%, transparent);
+  -webkit-mask-image: linear-gradient(to top, #000 10%, transparent);
+}
+
+html.tk-hw:not(.tk-hw-lobby) .hw-fog {
+  height: 16vh;
+  opacity: 0.16;
+}
+
+.hw-fog span {
+  position: absolute;
+  bottom: -6vh;
+  left: 0;
+  width: 200%;
+  height: 100%;
+  background:
+    radial-gradient(ellipse 22% 55% at 12% 70%, rgba(200, 200, 205, 0.55), transparent 70%),
+    radial-gradient(ellipse 18% 45% at 38% 80%, rgba(180, 180, 186, 0.45), transparent 70%),
+    radial-gradient(ellipse 26% 60% at 63% 72%, rgba(205, 205, 210, 0.5), transparent 70%),
+    radial-gradient(ellipse 20% 50% at 88% 78%, rgba(180, 180, 186, 0.45), transparent 70%);
+  animation: hw-drift 70s linear infinite;
+}
+
+.hw-fog span + span {
+  bottom: -10vh;
+  opacity: 0.7;
+  animation-duration: 110s;
+  animation-direction: reverse;
+}
+
+.hw-still .hw-fog span {
+  animation: none;
+}
+
+@keyframes hw-drift {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.hw-toggle i,
+.hw-music-btn i {
+  color: #ff8a1f;
+}
+
+.hw-toggle.is-off i,
+.hw-music-btn.is-off i {
+  color: #8d8d8d;
+}
+
+.hw-menu {
+  position: fixed;
+  z-index: 2000;
+  width: 250px;
+  overflow: hidden;
+  background: var(--tk-card, #050505);
+  border: var(--tk-border-width, 1px) solid var(--tk-border, #383838);
+  border-radius: var(--tk-radius, 5px);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.6);
+  font-family: var(--tk-font-main, talkoSS, Arial, sans-serif);
+  color: var(--tk-text, #fff);
+}
+
+.hw-menu-head {
+  padding: 10px 14px;
+  background: var(--tk-cream, #ededed);
+  color: var(--tk-cream-text, #000);
+  font-size: 15px;
+  font-weight: bold;
+}
+
+.hw-menu-body {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px;
+}
+
+.hw-opt {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  margin: 0;
+  padding: 9px 11px;
+  background: var(--tk-tile, #121212);
+  border: var(--tk-border-width, 1px) solid var(--tk-border, #383838);
+  border-radius: var(--tk-radius, 5px);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hw-opt:hover,
+.hw-opt:focus-visible {
+  background: var(--tk-tile-hover, #1e1e1e);
+  border-color: var(--tk-accent, #ff8a1f);
+  outline: none;
+}
+
+.hw-opt.is-on {
+  border-color: var(--tk-accent, #ff8a1f);
+}
+
+.hw-opt-ico {
+  flex: none;
+  width: 18px;
+  text-align: center;
+  color: var(--tk-accent, #ff8a1f);
+}
+
+.hw-opt-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.hw-opt-label {
+  font-size: 14px;
+  font-weight: bold;
+}
+
+.hw-opt.is-on .hw-opt-label {
+  color: var(--tk-accent, #ff8a1f);
+}
+
+.hw-opt-sub {
+  font-size: 12px;
+  color: var(--tk-muted, #bdbdbd);
+}
+
+.hw-opt-tick {
+  flex: none;
+  color: var(--tk-accent, #ff8a1f);
+}

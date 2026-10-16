@@ -300,6 +300,34 @@
       #linkAllowInput {
         max-width: 320px;
       }
+      .season-row {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 16px 18px;
+        background: var(--tile);
+        border-radius: 8px;
+      }
+      .season-row .season-ico {
+        color: #ff8a1f;
+        font-size: 1.2rem;
+      }
+      .season-row .season-main {
+        flex: 1;
+        min-width: 0;
+      }
+      .season-row .season-name {
+        font-weight: bold;
+        font-size: 0.95rem;
+      }
+      .season-row .season-state {
+        margin-top: 3px;
+        font-size: 0.78rem;
+        color: var(--dim2);
+      }
+      .season-row .season-state.is-on {
+        color: var(--green);
+      }
       .link-allow-row .mc-title i {
         color: var(--green);
         margin-right: 8px;
@@ -4844,6 +4872,9 @@
           <button class="nav-item" data-tab="rules" data-dev>
             <i class="fas fa-scale-balanced"></i> Rules
           </button>
+          <button class="nav-item" data-tab="season" data-dev>
+            <i class="fas fa-ghost"></i> Seasonal
+          </button>
           <button class="nav-item" data-tab="guide">
             <i class="fas fa-circle-question"></i> Guide
           </button>
@@ -5302,6 +5333,24 @@
         </section>
 
         <!-- Guide -->
+        <section id="tab-season" class="panel">
+          <div class="strip">
+            <i class="fas fa-ghost lead ic-orange"></i> Seasonal theme
+            <span class="sub">Decorations for everyone in the lobby and rooms</span>
+          </div>
+          <p class="note-box">
+            <i class="fas fa-circle-info"></i>
+            <span>
+              Halloween puts a night sky, pumpkins, cobwebs, bats, ghosts and
+              spiders on the lobby and in rooms, with a matching colour set for
+              anyone on the default look. Custom themes keep their own colours.
+              Each person can set it to still or off for themselves with the
+              ghost button. Changes reach open pages straight away.
+            </span>
+          </p>
+          <div id="seasonList" class="cards"></div>
+        </section>
+
         <section id="tab-links" class="panel">
           <div class="strip">
             <i class="fas fa-link lead ic-orange"></i> Allowed links
