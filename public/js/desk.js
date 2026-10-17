@@ -88,6 +88,9 @@
     }
   }
 
+  const previewText = (m) =>
+    String(m.text || (m.forwarded ? m.forwarded.text : "") || "");
+
   const rankOf = (a) =>
     !a
       ? null
@@ -1715,14 +1718,6 @@
     renderAll();
     loadView();
   }
-  function openMessage(key, ts) {
-    const thread = threads.find((item) => item.id === key);
-    view = thread ? { kind: "thread", key } : { kind: "channel", key };
-    mode = "chat";
-    replyTo = null;
-    renderAll();
-    socket.emit("desk history", { key, around: ts });
-  }
   function loadView(force) {
     const c = cacheFor(viewKey());
     if (!c.loaded || force) socket.emit("desk history", { key: viewKey() });
@@ -3147,61 +3142,94 @@
     return note ? picked + " " + note : picked;
   }
 
-  function openForwardForm(rowNode, message) {
-    const existing = rowNode.querySelector(".dk-forward-form");
-    if (existing) return existing.remove();
-    const sourceKey = viewKey();
-    const sourceThread = threads.find((thread) => thread.id === sourceKey);
-    const sourceChannel = channels.find(
-      (channel) => channel.key === (sourceThread ? sourceThread.origin : sourceKey),
+  function forwardTargets() {
+    const from = viewKey();
+    const t = threads.find((x) => x.id === from);
+    const home = channels.find((c) => c.key === (t ? t.origin : from));
+    if (!home) return [];
+    return channels.filter(
+      (c) =>
+        !c.readonly &&
+        c.key !== "queues" &&
+        c.key !== from &&
+        (c.accessLevel || 1) >= (home.accessLevel || 1),
     );
-    if (!sourceChannel) return;
-    const targets = channels.filter(
-      (channel) =>
-        !channel.readonly &&
-        channel.key !== sourceKey &&
-        channel.accessLevel === sourceChannel.accessLevel,
-    );
+  }
+
+  function openForwardForm(node, m) {
+    const open = node.querySelector(".dk-fwdform");
+    if (open) return open.remove();
+    const targets = forwardTargets();
     if (!targets.length) return;
+    let pick = targets[0].key;
 
-    const form = el("div", "dk-forward-form");
-    const label = el("label", "dk-forward-to", "Forward to");
-    const select = document.createElement("select");
-    select.setAttribute("aria-label", "Forward to channel");
-    for (const channel of targets) {
-      const option = document.createElement("option");
-      option.value = channel.key;
-      option.textContent = "#" + channel.name;
-      select.appendChild(option);
+    const form = el("div", "dk-fwdform");
+    const head = el("div", "dk-fwdform-head");
+    head.appendChild(el("span", "dk-fwdform-k", "Forward to"));
+    const note = el("textarea", "dk-fwdform-note");
+    for (const c of targets) {
+      const b = btn("dk-fwdform-ch" + (c.key === pick ? " on" : ""), "#" + c.name);
+      b.addEventListener("click", () => {
+        pick = c.key;
+        for (const x of head.querySelectorAll(".dk-fwdform-ch"))
+          x.classList.toggle("on", x === b);
+        note.focus();
+      });
+      head.appendChild(b);
     }
-    label.appendChild(select);
+    form.appendChild(head);
 
-    const note = el("textarea", "dk-forward-note");
     note.rows = 2;
     note.maxLength = 1200;
     note.placeholder = "Add a message (optional)";
-    note.setAttribute("aria-label", note.placeholder);
-    const actions = el("div", "dk-forward-actions");
-    const send = btn("dk-forward-send", "Forward", "fa-share");
-    const cancel = btn("dk-forward-cancel", "Cancel");
-    send.addEventListener("click", () => {
-      const text = note.value.trim();
-      socket.emit("desk send", {
-        key: select.value,
-        text,
-        forwardId: message.id,
-      });
-      form.remove();
-    });
-    cancel.addEventListener("click", () => form.remove());
-    actions.appendChild(send);
-    actions.appendChild(cancel);
-    form.appendChild(label);
     form.appendChild(note);
-    form.appendChild(actions);
-    form.addEventListener("click", (event) => event.stopPropagation());
-    rowNode.appendChild(form);
+
+    const acts = el("div", "dk-fwdform-acts");
+    const cancel = btn("dk-minib", "Cancel");
+    const send = btn("dk-minib primary", "Forward", "fa-share");
+    const close = () => form.remove();
+    send.addEventListener("click", () => {
+      socket.emit("desk send", {
+        key: pick,
+        text: note.value.trim(),
+        forwardId: m.id,
+      });
+      toast("Forwarded to " + channelLabel(pick));
+      close();
+    });
+    cancel.addEventListener("click", close);
+    note.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        send.click();
+      }
+      if (e.key === "Escape") close();
+    });
+    acts.appendChild(cancel);
+    acts.appendChild(send);
+    form.appendChild(acts);
+    form.addEventListener("click", (e) => e.stopPropagation());
+    node.appendChild(form);
     note.focus();
+  }
+
+  function forwardedBlock(f) {
+    const box = el("div", "dk-fwd");
+    const head = btn("dk-fwd-head", null, "fa-share", "Go to the original message");
+    const rank = rankOf(f.author);
+    head.appendChild(el("span", "dk-fwd-k", "Forwarded from"));
+    head.appendChild(el("span", "dk-fwd-name " + rank, f.author.label));
+    head.appendChild(rankChip(rank));
+    head.appendChild(el("span", "dk-fwd-k", "in " + channelLabel(f.key)));
+    head.addEventListener("click", (e) => {
+      e.stopPropagation();
+      jumpTo(f.key, f.ts);
+    });
+    box.appendChild(head);
+    const shots = imagesIn(f.text);
+    if (f.text && (!shots.urls.length || shots.rest)) box.appendChild(textEl(f.text));
+    if (shots.urls.length) box.appendChild(imageBlock(shots.urls));
+    return box;
   }
 
   function row(m, prev) {
@@ -3229,7 +3257,8 @@
       prev.author.role === m.author.role &&
       m.ts - prev.ts < 5 * 60 * 1000 &&
       !prev.deletedAt &&
-      !m.reply;
+      !m.reply &&
+      !m.forwarded;
 
     const mention =
       m.mention ||
@@ -3249,7 +3278,10 @@
       q.title = "Go to the original message";
       q.appendChild(icon("fa-reply"));
       q.appendChild(el("span", "dk-quote-w", m.reply.label));
-      q.appendChild(el("span", "dk-quote-t", mdPlain(m.reply.text) || "(removed)"));
+      const orig = cacheFor(viewKey()).messages.find((x) => x.id === m.reply.id);
+      q.appendChild(
+        el("span", "dk-quote-t", mdPlain(m.reply.text || (orig && previewText(orig))) || "(removed)"),
+      );
       q.addEventListener("click", () => {
         const c = cacheFor(viewKey());
         const there = c.messages.some((x) => x.id === m.reply.id);
@@ -3301,35 +3333,7 @@
         el("span", "dk-tomb", "Message removed by " + (m.deletedBy || "?")),
       );
     } else {
-      if (m.forwarded && m.forwarded.author) {
-        const forwarded = el("div", "dk-forwarded");
-        const forwardedHead = el("div", "dk-forwarded-head");
-        forwardedHead.appendChild(el("span", "dk-forwarded-label", "Forwarded from"));
-        forwardedHead.appendChild(el(
-          "span",
-          "dk-forwarded-name " + rankOf(m.forwarded.author),
-          m.forwarded.author.label,
-        ));
-        forwardedHead.appendChild(rankChip(rankOf(m.forwarded.author)));
-        const sourceLink = el(
-          "button",
-          "dk-forwarded-source",
-          channelLabel(m.forwarded.key),
-        );
-        sourceLink.type = "button";
-        sourceLink.title = "Open the original message";
-        sourceLink.addEventListener("click", (event) => {
-          event.stopPropagation();
-          openMessage(m.forwarded.key, m.forwarded.ts);
-        });
-        forwardedHead.appendChild(el("span", "dk-forwarded-label", "in"));
-        forwardedHead.appendChild(sourceLink);
-        forwarded.appendChild(forwardedHead);
-        const forwardedText = el("div", "dk-forwarded-text");
-        forwardedText.appendChild(textEl(m.forwarded.text));
-        forwarded.appendChild(forwardedText);
-        body.appendChild(forwarded);
-      }
+      if (m.forwarded && m.forwarded.author) body.appendChild(forwardedBlock(m.forwarded));
       const shots = imagesIn(m.text);
       if (m.text && (!shots.urls.length || shots.rest)) body.appendChild(textEl(m.text));
       if (m.editedAt) {
@@ -3391,8 +3395,8 @@
         startReply(m);
       });
       tools.appendChild(rb);
-      if (m.kind === "chat" && m.author) {
-        const fb = btn("dk-tool", null, "fa-share", "Forward to another channel");
+      if (m.kind === "chat" && m.author && forwardTargets().length) {
+        const fb = btn("dk-tool", null, "fa-share", "Forward");
         fb.addEventListener("click", (e) => {
           e.stopPropagation();
           openForwardForm(r, m);
@@ -3529,7 +3533,7 @@
     replyTo = {
       id: m.id,
       label: m.author ? m.author.label : "system",
-      text: String(m.text || "").slice(0, 90),
+      text: previewText(m).slice(0, 90),
     };
     renderReplyBar();
     if (els.composer) els.composer.focus();
@@ -7018,30 +7022,29 @@
 .dk-alias{font-size:11px;color: #8d8d8d;font-style:italic;}
 .dk-mtime{font-size:10.5px;color: #8d8d8d;margin-left:auto;font-variant-numeric:tabular-nums;white-space:nowrap;}
 .dk-mbody{font-size:13.5px;line-height:1.5;word-break:break-word;white-space:pre-wrap;color: #dedede;}
-.dk-forwarded{margin:2px 0 6px;padding:6px 8px;background: #1b1b1b;border-left:2px solid #5aa9ff;
-  border-radius:0 4px 4px 0;}
-.dk-forwarded-head{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:3px;font-size:11px;}
-.dk-forwarded-label{color: #8d8d8d;}
-.dk-forwarded-name{font-weight:bold;color: #dedede;}
-.dk-forwarded-name.dev{color: #ff7a88;}
-.dk-forwarded-name.l3{color: #77dd77;}
-.dk-forwarded-name.l2{color: #7dbcff;}
-.dk-forwarded-name.l1{color: #cfa6ff;}
-.dk-forwarded-source{background:none;border:0;padding:0;color: #5aa9ff;font:inherit;cursor:pointer;}
-.dk-forwarded-source:hover{text-decoration:underline;color: #8cc4ff;}
-.dk-forwarded-text{color: #c3c3c3;font-size:12.5px;}
-.dk-forward-form{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:5px 0;padding:8px;
-  background: #1b1b1b;border:1px solid #333;border-radius:4px;}
-.dk-forward-to{display:flex;align-items:center;gap:6px;color: #8d8d8d;font-size:11.5px;}
-.dk-forward-to select,.dk-forward-note{background: #111;color: #fff;border:1px solid #444;border-radius:3px;
-  font:inherit;padding:5px 7px;min-width:0;}
-.dk-forward-note{flex:1 1 220px;resize:vertical;min-height:34px;max-height:100px;font-size:12px;}
-.dk-forward-actions{display:flex;gap:5px;}
-.dk-forward-send,.dk-forward-cancel{border:1px solid #444;background: #262626;color: #dedede;
-  font:inherit;font-size:11px;padding:5px 8px;border-radius:3px;cursor:pointer;}
-.dk-forward-send{background: #ff9800;border-color: #ff9800;color: #111;font-weight:bold;}
-.dk-forward-send:hover{background: #ffad33;}
-.dk-forward-cancel:hover{background: #333;color: #fff;}
+.dk-fwd{margin:2px 0 4px;padding:7px 10px 8px;background: #171717;border-radius:6px;}
+.dk-fwd-head{display:flex;align-items:center;gap:6px;flex-wrap:wrap;width:100%;background:none;border:none;
+  padding:0 0 4px;font-family:inherit;font-size:11.5px;color: #8d8d8d;cursor:pointer;text-align:left;}
+.dk-fwd-head .fas{font-size:10px;}
+.dk-fwd-head:hover .dk-fwd-k{color: #c3c3c3;}
+.dk-fwd-name{font-weight:bold;color: #fff;}
+.dk-fwd-name.dev{color: #ff7a88;}
+.dk-fwd-name.l3{color: #77dd77;}
+.dk-fwd-name.l2{color: #7dbcff;}
+.dk-fwd-name.l1{color: #cfa6ff;}
+.dk-fwdform{display:flex;flex-direction:column;gap:8px;margin:6px 0 4px;padding:10px;background: #171717;
+  border-radius:6px;}
+.dk-fwdform-head{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.dk-fwdform-k{font-size:11.5px;color: #8d8d8d;margin-right:2px;}
+.dk-fwdform-ch{background: #2a2a2a;border:none;color: #dedede;font-family:inherit;font-size:12px;
+  font-weight:bold;padding:4px 10px;border-radius:11px;cursor:pointer;}
+.dk-fwdform-ch:hover{background: #333;color: #fff;}
+.dk-fwdform-ch.on{background: #ff9800;color: #000;}
+.dk-fwdform-note{width:100%;background: #000;color: #fff;border:1px solid #3a3a3a;border-radius:5px;
+  padding:7px 9px;font-family:inherit;font-size:13px;resize:vertical;min-height:38px;max-height:140px;outline:none;}
+.dk-fwdform-note::placeholder{color: #6f6f6f;}
+.dk-fwdform-note:focus{border-color: #ff9800;}
+.dk-fwdform-acts{display:flex;justify-content:flex-end;gap:6px;}
 .dk-edited{font-size:10px;color: #8d8d8d;margin-left:5px;}
 .dk-tomb{color: #8d8d8d;font-style:italic;font-size:12.5px;}
 .dk-hist{background:none;border:none;color: #5aa9ff;font-size:10.5px;cursor:pointer;font-family:inherit;

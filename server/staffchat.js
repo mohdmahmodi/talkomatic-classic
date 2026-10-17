@@ -125,18 +125,25 @@ function canRead(socket, key) {
   return true;
 }
 
+const ACCESS_RANK = { l2: 2, l3: 3, dev: 4 };
+
 function accessFloor(key) {
-  let ch = CHANNELS.find((c) => c.key === key);
-  if (!ch && key.startsWith("t")) {
-    const thread = desk.threads.find((t) => t.id === key);
-    ch = CHANNELS.find((c) => c.key === (thread && thread.origin || "floor"));
+  if (key.startsWith("t")) {
+    const t = desk.threads.find((x) => x.id === key);
+    key = (t && t.origin) || "floor";
   }
-  if (!ch) return 0;
-  if (ch.access === "dev") return 4;
-  if (ch.access === "l3") return 3;
-  if (ch.access === "l2") return 2;
-  return 1;
+  const ch = CHANNELS.find((c) => c.key === key);
+  return ch ? ACCESS_RANK[ch.access] || 1 : 0;
 }
+
+function canForwardTo(from, to) {
+  if (from === to || to === "queues" || to.startsWith("t")) return false;
+  if (isVirtual(to) || isReadonly(to)) return false;
+  return accessFloor(to) >= accessFloor(from);
+}
+
+const previewText = (m) =>
+  String(m.text || (m.forwarded ? m.forwarded.text : "") || "");
 
 const isReadonly = (key) => {
   const ch = CHANNELS.find((c) => c.key === key);
@@ -1232,26 +1239,25 @@ function register(socket, safe) {
           return socket.emit("desk error", {
             message: "That message cannot be forwarded.",
           });
-        if (
-          source.key === key ||
-          isVirtual(key) ||
-          key.startsWith("t") ||
-          accessFloor(key) !== accessFloor(source.key)
-        )
+        if (!canForwardTo(source.key, key))
           return socket.emit("desk error", {
-            message: "Choose a different channel with the same access level.",
+            message: "Pick a channel at the same level or higher.",
           });
-        forwarded = {
-          key: source.key,
-          id: source.msg.id,
-          ts: source.msg.ts,
-          author: {
-            label: source.msg.author.label,
-            role: source.msg.author.role,
-            level: source.msg.author.level,
-          },
-          text: String(source.msg.text || "").slice(0, MSG_MAX),
-        };
+        const m = source.msg;
+        forwarded =
+          !m.text && m.forwarded
+            ? { ...m.forwarded }
+            : {
+                key: source.key,
+                id: m.id,
+                ts: m.ts,
+                author: {
+                  label: m.author.label,
+                  role: m.author.role,
+                  level: m.author.level,
+                },
+                text: String(m.text || "").slice(0, MSG_MAX),
+              };
       }
       let reply = null;
       if (typeof data?.replyTo === "string") {
@@ -1261,7 +1267,7 @@ function register(socket, safe) {
             id: ref.msg.id,
             ts: ref.msg.ts,
             label: ref.msg.author ? ref.msg.author.label : "system",
-            text: String(ref.msg.text || "").slice(0, 120),
+            text: previewText(ref.msg).slice(0, 120),
           };
       }
       const named = extractMentions(text);
@@ -1373,7 +1379,7 @@ function register(socket, safe) {
           message: "Edits close five minutes after sending.",
         });
       const text = String(data?.text || "").trim().slice(0, MSG_MAX);
-      if (!text) return;
+      if (!text && !ref.msg.forwarded) return;
       (ref.msg.history = ref.msg.history || []).push({
         ts: Date.now(),
         text: ref.msg.text,
@@ -1696,9 +1702,10 @@ function register(socket, safe) {
       const scan = (key, list, title) => {
         for (let i = list.length - 1; i >= 0 && hits.length < 60; i--) {
           const m = list[i];
-          if (m.deletedAt || !m.text) continue;
+          const raw = previewText(m);
+          if (m.deletedAt || !raw) continue;
           if (!canSeeMessage(socket, key, m)) continue;
-          const text = socket.isMainDev ? m.text : maskIps(m.text);
+          const text = socket.isMainDev ? raw : maskIps(raw);
           const author = m.author
             ? socket.isMainDev
               ? m.author.label
