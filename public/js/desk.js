@@ -3144,16 +3144,22 @@
 
   function forwardTargets() {
     const from = viewKey();
-    const t = threads.find((x) => x.id === from);
-    const home = channels.find((c) => c.key === (t ? t.origin : from));
-    if (!home) return [];
-    return channels.filter(
-      (c) =>
-        !c.readonly &&
-        c.key !== "queues" &&
-        c.key !== from &&
-        (c.accessLevel || 1) >= (home.accessLevel || 1),
-    );
+    const levelOf = (key) => {
+      const t = threads.find((x) => x.id === key);
+      const c = channels.find((x) => x.key === (t ? t.origin || "floor" : key));
+      return c ? c.accessLevel || 1 : 0;
+    };
+    const floor = levelOf(from);
+    if (!floor) return [];
+    const ok = (key) => key !== from && levelOf(key) >= floor;
+    return channels
+      .filter((c) => !c.readonly && c.key !== "queues" && ok(c.key))
+      .map((c) => ({ key: c.key, name: "#" + c.name }))
+      .concat(
+        threads
+          .filter((t) => !t.archived && ok(t.id))
+          .map((t) => ({ key: t.id, name: t.title, thread: true })),
+      );
   }
 
   function openForwardForm(node, m) {
@@ -3168,7 +3174,13 @@
     head.appendChild(el("span", "dk-fwdform-k", "Forward to"));
     const note = el("textarea", "dk-fwdform-note");
     for (const c of targets) {
-      const b = btn("dk-fwdform-ch" + (c.key === pick ? " on" : ""), "#" + c.name);
+      const b = btn(
+        "dk-fwdform-ch" + (c.key === pick ? " on" : ""),
+        null,
+        c.thread ? "fa-message" : null,
+        c.thread ? c.name : null,
+      );
+      b.appendChild(el("span", "dk-fwdform-chn", c.name));
       b.addEventListener("click", () => {
         pick = c.key;
         for (const x of head.querySelectorAll(".dk-fwdform-ch"))
@@ -7036,8 +7048,10 @@
   border-radius:6px;}
 .dk-fwdform-head{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
 .dk-fwdform-k{font-size:11.5px;color: #8d8d8d;margin-right:2px;}
-.dk-fwdform-ch{background: #2a2a2a;border:none;color: #dedede;font-family:inherit;font-size:12px;
-  font-weight:bold;padding:4px 10px;border-radius:11px;cursor:pointer;}
+.dk-fwdform-ch{display:inline-flex;align-items:center;gap:5px;max-width:200px;background: #2a2a2a;border:none;
+  color: #dedede;font-family:inherit;font-size:12px;font-weight:bold;padding:4px 10px;border-radius:11px;cursor:pointer;}
+.dk-fwdform-ch .fas{font-size:10px;flex:none;}
+.dk-fwdform-chn{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .dk-fwdform-ch:hover{background: #333;color: #fff;}
 .dk-fwdform-ch.on{background: #ff9800;color: #000;}
 .dk-fwdform-note{width:100%;background: #000;color: #fff;border:1px solid #3a3a3a;border-radius:5px;

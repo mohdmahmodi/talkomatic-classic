@@ -137,7 +137,7 @@ function accessFloor(key) {
 }
 
 function canForwardTo(from, to) {
-  if (from === to || to === "queues" || to.startsWith("t")) return false;
+  if (from === to || to === "queues") return false;
   if (isVirtual(to) || isReadonly(to)) return false;
   return accessFloor(to) >= accessFloor(from);
 }
