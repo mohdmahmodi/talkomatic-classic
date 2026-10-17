@@ -901,6 +901,14 @@
   font-size: 13px;
   font-weight: bold;
 }
+.tb-msg-loc {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11.5px;
+  color: var(--tb-muted);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 .tb-msg-time {
   margin-left: auto;
   font-size: 11px;

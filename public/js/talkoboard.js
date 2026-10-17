@@ -5258,6 +5258,13 @@ class Talkoboard {
     name.textContent = data.username || "User";
     name.style.color = mine ? "var(--tk-accent, #ff9800)" : this.nameColor(data.userId);
     head.appendChild(name);
+    if (data.location) {
+      const loc = document.createElement("span");
+      loc.className = "tb-msg-loc";
+      loc.textContent = "/ " + data.location;
+      loc.title = data.location;
+      head.appendChild(loc);
+    }
     const flair = this.flairNode(data.role);
     if (flair) head.appendChild(flair);
     const time = document.createElement("span");

@@ -6514,12 +6514,19 @@ function registerSocketHandlers(opts) {
         if (!data?.text || typeof data.text !== "string") return;
         const text = chatguard.clean(data.text, 200);
         if (!text) return;
+        const seat = state.rooms
+          .get(socket.roomId)
+          ?.users.find((u) => u.id === socket.handshake.session.userId);
+        const location = String(seat?.location || socket.handshake.session.location || "")
+          .trim()
+          .slice(0, 40);
         emitSubAppEvent(
           socket,
           "board chat",
           {
             userId: socket.handshake.session.userId,
             username: socket.handshake.session.username || "Anonymous",
+            location: location || null,
             avatar: socket.handshake.session.avatar || null,
             role: socket.isHidden ? null : staffRoleOf(socket),
             text,
