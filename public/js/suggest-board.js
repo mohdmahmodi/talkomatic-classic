@@ -1591,7 +1591,7 @@
     if (!filter && !filterPending) loadFilter();
     overlay.classList.add("show");
     document.body.style.overflow = "hidden";
-    socket.emit("board open");
+    socket.emit("suggest board open");
     markSeen();
     renderBadges(null);
     if (board) render();
@@ -1603,7 +1603,7 @@
     editing = null;
     overlay.classList.remove("show");
     document.body.style.overflow = "";
-    socket.emit("board close");
+    socket.emit("suggest board close");
     markSeen();
     refreshBadges();
   }

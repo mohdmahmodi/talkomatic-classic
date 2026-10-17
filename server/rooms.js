@@ -284,8 +284,8 @@ function cleanupBoardState(roomId) {
 }
 
 // ── Claimed areas: a patch of board that is yours ───────────────────────────
-const CLAIM_MIN = 120;
-const CLAIM_MAX = 3600;
+const CLAIM_MIN = 600;
+const CLAIM_MAX = 60000;
 const CLAIM_GUESTS_MAX = 30;
 
 function claimAllows(c, userId) {
@@ -382,6 +382,13 @@ function fillSwallows(rings, strokes, userId) {
 
 function fillTooGreedy(sw) {
   return sw.owners >= FILL_SWALLOW_OWNERS || sw.count > FILL_SWALLOW_STROKES;
+}
+
+const FILL_MAX_SIDE = 6000;
+
+function fillTooBig(rings) {
+  const b = strokeBounds({ rings });
+  return b.maxX - b.minX > FILL_MAX_SIDE || b.maxY - b.minY > FILL_MAX_SIDE;
 }
 
 function pointInRings(rings, pt) {
@@ -2562,26 +2569,50 @@ function buildReportsList(view) {
       canBanOffline,
       first: s.first,
       last: s.last,
-      reasons: rows
-        .slice()
-        .reverse()
-        .map((r) => ({
-          category: r.category,
-          reason: showIp ? r.reason : audit.maskIps(r.reason),
-          by: r.byName,
-          at: r.at,
-          targetText: showIp
-            ? r.targetText || null
-            : audit.maskIps(r.targetText || null),
-          targetTextWiped: !!r.targetTextWiped,
-          openedText: showIp
-            ? r.openedText || null
-            : audit.maskIps(r.openedText || null),
-          openedTextWiped: !!r.openedTextWiped,
-          openedAt: r.openedAt || null,
-        })),
+      reasons: reportRowsFor(rows, showIp),
     };
   });
+}
+
+function reportRowsFor(rows, showIp) {
+  return rows
+    .slice()
+    .reverse()
+    .map((r) => ({
+      category: r.category,
+      reason: showIp ? r.reason : audit.maskIps(r.reason),
+      by: r.byName,
+      at: r.at,
+      targetText: showIp ? r.targetText || null : audit.maskIps(r.targetText || null),
+      targetTextWiped: !!r.targetTextWiped,
+      openedText: showIp ? r.openedText || null : audit.maskIps(r.openedText || null),
+      openedTextWiped: !!r.openedTextWiped,
+      openedAt: r.openedAt || null,
+    }));
+}
+
+function buildClosedReports(view) {
+  const showIp = !!(view && view.ip);
+  return reports.closedList().map((c) => ({
+    id: c.id,
+    targetUserId: c.targetKey,
+    name: c.name || knownName({ userId: c.targetKey }) || "(unknown user)",
+    location: c.location || null,
+    total: c.total,
+    distinct: c.distinct,
+    categories: c.categories || {},
+    first: c.first,
+    last: c.last,
+    outcome: c.outcome,
+    closedAt: c.closedAt,
+    steps: (c.steps || []).map((st) => ({
+      action: st.action,
+      detail: showIp ? st.detail || null : audit.maskIps(st.detail || null),
+      by: st.by ? roles.teamReviewer(st.by, view) : null,
+      at: st.at,
+    })),
+    reasons: reportRowsFor(c.rows || [], showIp),
+  }));
 }
 
 const NO_MORE_APPEALS =
@@ -2956,11 +2987,23 @@ function broadcastApplicationsState() {
 
 function broadcastReportsList(also) {
   sendBoard("staff reports", buildReportsList, watchesBoard, also);
+  sendBoard("staff reports closed", buildClosedReports, watchesBoard, also);
 }
 
-function clearReportAfterAction(socket, targetUserId) {
-  if (!targetUserId || !reports.clear(targetUserId)) return;
-  broadcastReportsList(socket);
+function reportActor(socket) {
+  const role = socket?.isDev ? "dev" : "mod";
+  return role + ":" + (socket?.staffLabel || role);
+}
+
+function clearReportAfterAction(socket, targetUserId, action, detail) {
+  if (!targetUserId) return;
+  const done = reports.close(targetUserId, {
+    outcome: "action",
+    action,
+    detail,
+    by: reportActor(socket),
+  });
+  if (done) broadcastReportsList(socket);
 }
 
 function broadcastBlockList(also) {
@@ -4277,17 +4320,25 @@ function clearAFKTimers(userId) {
   }
 }
 
+function afkExempt(socket, userId) {
+  if (socket.isDev || socket.isMod) return true;
+  const roomId = socket.roomId;
+  if (socket.boardOpen) return true;
+  if (gamesFloor.isBusy(roomId, userId)) return true;
+  for (const s of findSocketsByUserId(userId))
+    if (s.roomId === roomId && s.boardOpen) return true;
+  return false;
+}
+
 function setupAFKTimers(socket, userId) {
   clearAFKTimers(userId);
   if (!socket || !socket.roomId) return;
-  if (socket.isDev || socket.isMod) return;
-  if (socket.boardOpen) return;
-  if (gamesFloor.isPlaying(socket.roomId, userId)) return;
+  if (socket.isDev || socket.isMod || socket.boardOpen) return;
 
   state.afkWarningTimers.set(
     userId,
     setTimeout(() => {
-      if (socket.connected)
+      if (socket.connected && !afkExempt(socket, userId))
         socket.emit("afk warning", {
           message: "You have been inactive.",
           secondsRemaining: 30,
@@ -4305,6 +4356,7 @@ function setupAFKTimers(socket, userId) {
 
 async function handleAFKTimeout(socket, userId) {
   if (!socket || !socket.roomId) return;
+  if (afkExempt(socket, userId)) return setupAFKTimers(socket, userId);
   console.log(`AFK timeout: ${userId} in room ${socket.roomId}`);
   socket.emit("afk timeout", {
     message: "Removed from room due to inactivity.",
@@ -4320,10 +4372,8 @@ async function handleAfkSpectate(socket, userId) {
   state.afkSpectateTimers.delete(userId);
   if (!socket || !socket.connected || !socket.roomId || socket.spectating)
     return;
-  if (socket.isDev || socket.isMod || socket.isBot) return;
-  if (socket.boardOpen) return;
+  if (socket.isBot || afkExempt(socket, userId)) return;
   const roomId = socket.roomId;
-  if (gamesFloor.isPlaying(roomId, userId)) return;
   const room = state.rooms.get(roomId);
   if (!room || !room.users.find((u) => u.id === userId)) return;
 
@@ -6352,6 +6402,8 @@ function registerSocketHandlers(opts) {
         if (s.fill && !isStaffSocket(socket)) {
           const rings =
             Array.isArray(s.rings) && s.rings.length ? s.rings : [points];
+          if (fillTooBig(rings))
+            return socket.emit("board fill refused", { id: s.id, tooBig: true });
           for (const ring of rings) {
             if (!Array.isArray(ring)) continue;
             for (let i = 0; i < ring.length; i++) {
@@ -7397,7 +7449,7 @@ function registerSocketHandlers(opts) {
           ban,
           roomId,
         });
-        clearReportAfterAction(socket, targetUserId);
+        clearReportAfterAction(socket, targetUserId, ban ? "kick+ban" : "kick", reason || null);
       }),
     );
 
@@ -7658,7 +7710,7 @@ function registerSocketHandlers(opts) {
           rangeApplied: !!cidr,
           stretched: stretched.length,
         });
-        clearReportAfterAction(socket, targetUserId);
+        clearReportAfterAction(socket, targetUserId, "block " + durations.labelFor(duration), reason || null);
       }),
     );
 
@@ -10425,7 +10477,9 @@ function registerSocketHandlers(opts) {
       "staff get reports",
       safe(async () => {
         if (!requireStaff(socket)) return;
-        socket.emit("staff reports", buildReportsList(roles.viewFor(socket)));
+        const view = roles.viewFor(socket);
+        socket.emit("staff reports", buildReportsList(view));
+        socket.emit("staff reports closed", buildClosedReports(view));
       }),
     );
 
@@ -10438,13 +10492,28 @@ function registerSocketHandlers(opts) {
         const before = reports
           .summary()
           .find((s) => s.targetKey === targetUserId);
-        reports.clear(targetUserId);
+        reports.close(targetUserId, {
+          outcome: "discarded",
+          action: "discard",
+          by: reportActor(socket),
+          name: before?.name || null,
+        });
         logStaff(
           socket,
           "dismiss report",
           { name: before?.name || "?", id: targetUserId },
           "-",
         );
+        broadcastReportsList(socket);
+      }),
+    );
+
+    socket.on(
+      "staff delete closed report",
+      safe(async (data) => {
+        if (!requireDev(socket)) return;
+        const id = Number(data?.id);
+        if (!id || !reports.removeClosed(id)) return;
         broadcastReportsList(socket);
       }),
     );
@@ -10827,6 +10896,7 @@ function registerSocketHandlers(opts) {
           decision === "approved" ? "approve suggestion" : "decline suggestion",
           { name: s.name || "?", id: s.userId || s.deviceId || "-" },
           "-",
+          suggestions.describe(s),
         );
         broadcastSuggestionsList(socket);
         settleQueueItem("suggestion", id);
@@ -10834,7 +10904,7 @@ function registerSocketHandlers(opts) {
     );
 
     socket.on(
-      "board open",
+      "suggest board open",
       safe(async () => {
         socket.suggestBoardOpen = true;
         socket.emit("board data", boardPayloadFor(socket));
@@ -10842,7 +10912,7 @@ function registerSocketHandlers(opts) {
     );
 
     socket.on(
-      "board close",
+      "suggest board close",
       safe(async () => {
         socket.suggestBoardOpen = false;
       }),
@@ -11276,6 +11346,8 @@ function registerSocketHandlers(opts) {
       "board status",
       safe(async (data) => {
         if (!socket.isDev && !socket.isMod) return;
+        const before = suggestions.get(Number(data?.id));
+        const prevStatus = before ? before.status : null;
         const s = suggestions.setStatus(
           Number(data?.id),
           String(data?.status || ""),
@@ -11287,11 +11359,13 @@ function registerSocketHandlers(opts) {
             "error",
             createErrorResponse(ERROR_CODES.BAD_REQUEST, "No such suggestion."),
           );
+        if (s.status === prevStatus) return broadcastBoard();
         logStaff(
           socket,
           `suggestion ${s.status}`,
           { name: s.name || "?", id: s.userId || "-" },
           "-",
+          suggestions.describe(s),
         );
         if (["approved", "implemented", "declined"].includes(s.status))
           settleQueueItem("suggestion", s.id);
@@ -11307,6 +11381,7 @@ function registerSocketHandlers(opts) {
         const s = suggestions.get(id);
         if (!s) return;
         const byStaff = !!socket.isDev || !!socket.isMod;
+        const what = suggestions.describe(s, replyId);
         if (!suggestions.remove(id, replyId, socket.deviceId || null, byStaff))
           return socket.emit("board result", {
             ok: false,
@@ -11319,6 +11394,7 @@ function registerSocketHandlers(opts) {
             replyId ? "delete board reply" : "delete board post",
             { name: s.name || "?", id: s.userId || "-" },
             "-",
+            what,
           );
         socket.emit("board result", { ok: true, action: "delete" });
         broadcastBoard();
@@ -11908,7 +11984,12 @@ function registerSocketHandlers(opts) {
             ? "warned " + targetName
             : "warning queued for " + targetName,
         });
-        clearReportAfterAction(socket, targetUserId);
+        clearReportAfterAction(
+          socket,
+          targetUserId,
+          "warn",
+          built.rule ? "Rule " + built.rule.n + ": " + built.rule.title : built.note || null,
+        );
       }),
     );
 
@@ -12110,7 +12191,8 @@ function registerSocketHandlers(opts) {
       "afk response",
       safe(async () => {
         const userId = socket.handshake.session?.userId;
-        if (userId && socket.roomId) setupAFKTimers(socket, userId);
+        if (userId && socket.roomId && !socket.spectating && !socket.tabHidden)
+          setupAFKTimers(socket, userId);
       }),
     );
 

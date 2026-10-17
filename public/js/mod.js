@@ -47,6 +47,8 @@
   let applicationsOpen = true;
   const APPS_PAGE = 8;
   let reportsList = [];
+  let closedReports = [];
+  let reportsFilter = "open";
   let appealsList = [];
   let suggestionsList = [];
 
@@ -4306,19 +4308,202 @@
     socket.emit("staff warn user", { targetUserId: r.targetUserId, ...w });
   }
 
+  function reportCatsNode(categories) {
+    const catEntries = Object.entries(categories || {}).sort((a, b) => b[1] - a[1]);
+    if (!catEntries.length) return null;
+    const cats = document.createElement("div");
+    cats.className = "rc-cats";
+    cats.appendChild(span("lead", "Reported for"));
+    catEntries.forEach(([k, v]) => {
+      const c = reportCat(k);
+      const tag = document.createElement("span");
+      tag.className = "ctag";
+      tag.style.color = c.color;
+      tag.appendChild(icon(c.icon));
+      tag.appendChild(document.createTextNode(" " + c.label));
+      tag.appendChild(span("n", " x" + v));
+      cats.appendChild(tag);
+    });
+    return cats;
+  }
+
+  function reportLogNodes(card, reasons) {
+    const logHead = document.createElement("div");
+    logHead.className = "report-log-head";
+    logHead.textContent = "Who reported (" + reasons.length + ")";
+    card.appendChild(logHead);
+    const log = document.createElement("div");
+    log.className = "report-log";
+    reasons.forEach((rr) => {
+      const c = reportCat(rr.category);
+      const item = document.createElement("div");
+      item.className = "rlog";
+      item.appendChild(span("rl-av", initialOf(rr.by || "?")));
+      const m = document.createElement("div");
+      m.className = "rl-main";
+      const top = document.createElement("div");
+      top.className = "rl-top";
+      top.appendChild(span("rl-by", rr.by || "Someone"));
+      top.appendChild(span("rl-said", "reported for"));
+      const cat = span("rl-cat", c.label);
+      cat.style.color = c.color;
+      cat.style.borderColor = c.color;
+      top.appendChild(cat);
+      if (rr.at) top.appendChild(span("rl-when", relTime(rr.at)));
+      m.appendChild(top);
+      m.appendChild(span("rl-reason" + (rr.reason ? "" : " none"), rr.reason || "No note left"));
+      if (rr.targetText && rr.targetText.trim())
+        m.appendChild(span("rl-reason", "Their chat box: " + rr.targetText));
+      item.appendChild(m);
+      log.appendChild(item);
+    });
+    card.appendChild(log);
+  }
+
+  function reportStepLabel(st) {
+    const a = String(st.action || "");
+    if (a === "warn") return "Warned";
+    if (a === "kick") return "Kicked from the room";
+    if (a === "kick+ban") return "Kicked and banned from the room";
+    if (a === "discard") return "Discarded";
+    if (a.startsWith("block ")) {
+      const len = a.slice(6);
+      return len === "Permanent" ? "Blocked permanently" : "Blocked for " + len;
+    }
+    return a || "Closed";
+  }
+
+  function renderClosedReports(wrap, list) {
+    list.forEach((r) => {
+      const card = divc("report-card closed");
+      const head = divc("rc-head");
+      const av = divc("avatar");
+      av.style.background = "var(--line)";
+      av.textContent = initialOf(r.name);
+      head.appendChild(av);
+      const idCol = divc("rc-id");
+      idCol.appendChild(span("rc-kicker", "Reported user"));
+      const nameNode = uref(r.name || "user", r.targetUserId);
+      nameNode.classList.add("nm");
+      idCol.appendChild(nameNode);
+      const meta = divc("rc-meta");
+      const action = r.outcome === "action";
+      const stb = span("rbadge " + (action ? "on" : "off"));
+      stb.appendChild(icon(action ? "fa-gavel" : "fa-xmark"));
+      stb.appendChild(document.createTextNode(action ? " ACTION TAKEN" : " DISCARDED"));
+      meta.appendChild(stb);
+      const cnt = span("rbadge warm");
+      cnt.appendChild(icon("fa-user-group"));
+      cnt.appendChild(
+        document.createTextNode(" " + r.distinct + (r.distinct === 1 ? " reporter" : " reporters")),
+      );
+      meta.appendChild(cnt);
+      if (r.location) {
+        const loc = span(null, "");
+        loc.appendChild(icon("fa-location-dot"));
+        loc.appendChild(document.createTextNode(" " + r.location));
+        meta.appendChild(loc);
+      }
+      if (r.closedAt) {
+        const t = span(null, "closed " + relTime(r.closedAt));
+        t.title = fmtTime(r.closedAt);
+        meta.appendChild(t);
+      }
+      idCol.appendChild(meta);
+      head.appendChild(idCol);
+      card.appendChild(head);
+
+      const cats = reportCatsNode(r.categories);
+      if (cats) card.appendChild(cats);
+
+      const out = divc("rc-outcome");
+      out.appendChild(span("rc-outcome-lbl", action ? "What was done" : "What happened"));
+      (r.steps || []).forEach((st) => {
+        const row = divc("rc-step");
+        row.appendChild(span("rc-step-what", reportStepLabel(st)));
+        row.appendChild(span("rc-step-by", st.by ? "by " + cleanReviewer(st.by) : "by staff"));
+        const when = span("rc-step-when", relTime(st.at));
+        when.title = fmtTime(st.at);
+        row.appendChild(when);
+        if (st.detail) row.appendChild(span("rc-step-detail", st.detail));
+        out.appendChild(row);
+      });
+      card.appendChild(out);
+
+      reportLogNodes(card, r.reasons || []);
+
+      if (me && me.role === "dev") {
+        const foot = divc("rc-foot");
+        foot.appendChild(span("spacer"));
+        const del = document.createElement("button");
+        del.className = "btn sm danger";
+        del.appendChild(icon("fa-trash"));
+        del.appendChild(document.createTextNode(" Delete"));
+        del.title = "Remove this closed report from the history";
+        del.addEventListener("click", async () => {
+          if (window.StaffUI) {
+            const ok = await StaffUI.confirm({
+              title: "Delete closed report",
+              message: "Remove this report about " + (r.name || "this user") + " from the history. This cannot be undone.",
+              danger: true,
+              confirmText: "Delete",
+            });
+            if (!ok) return;
+          }
+          socket.emit("staff delete closed report", { id: r.id });
+        });
+        foot.appendChild(del);
+        card.appendChild(foot);
+      }
+      wrap.appendChild(card);
+    });
+  }
+
   function renderReports() {
     const wrap = $("reportsList");
     if (!wrap) return;
     wrap.textContent = "";
+    const counts = {
+      open: reportsList.length,
+      action: closedReports.filter((r) => r.outcome === "action").length,
+      discarded: closedReports.filter((r) => r.outcome !== "action").length,
+    };
     const badge = $("reportsBadge");
     if (badge) badge.textContent = String(reportsList.length);
+    document.querySelectorAll("#reportsSeg button").forEach((b) => {
+      const k = b.dataset.s;
+      const n = b.querySelector(".n");
+      if (n) n.textContent = counts[k] ? " " + counts[k] : "";
+      b.classList.toggle("active", k === reportsFilter);
+    });
     const sub = $("reportsSub");
     if (sub)
       sub.textContent = reportsList.length
         ? reportsList.length +
           " reported user" +
-          (reportsList.length === 1 ? "" : "s")
-        : "No reports yet";
+          (reportsList.length === 1 ? "" : "s") +
+          " waiting"
+        : closedReports.length
+          ? "Nothing waiting  ·  " + counts.action + " acted on, " + counts.discarded + " discarded"
+          : "No reports yet";
+    if (reportsFilter !== "open") {
+      const shown = closedReports.filter((r) =>
+        reportsFilter === "action" ? r.outcome === "action" : r.outcome !== "action",
+      );
+      if (!shown.length) {
+        wrap.appendChild(
+          emptyBox(
+            "fa-flag",
+            reportsFilter === "action"
+              ? "No reports acted on in the last 30 days."
+              : "No discarded reports in the last 30 days.",
+          ),
+        );
+        return;
+      }
+      renderClosedReports(wrap, shown);
+      return;
+    }
     if (!reportsList.length) {
       const empty = document.createElement("div");
       empty.className = "empty";
@@ -4401,25 +4586,8 @@
         card.appendChild(h);
       }
 
-      const catEntries = Object.entries(r.categories || {}).sort(
-        (a, b) => b[1] - a[1],
-      );
-      if (catEntries.length) {
-        const cats = document.createElement("div");
-        cats.className = "rc-cats";
-        cats.appendChild(span("lead", "Reported for"));
-        catEntries.forEach(([k, v]) => {
-          const c = reportCat(k);
-          const tag = document.createElement("span");
-          tag.className = "ctag";
-          tag.style.color = c.color;
-          tag.appendChild(icon(c.icon));
-          tag.appendChild(document.createTextNode(" " + c.label));
-          tag.appendChild(span("n", " x" + v));
-          cats.appendChild(tag);
-        });
-        card.appendChild(cats);
-      }
+      const cats = reportCatsNode(r.categories);
+      if (cats) card.appendChild(cats);
 
       const snapEntry = (r.reasons || []).find(
         (x) => x.targetText && x.targetText.trim(),
@@ -4465,40 +4633,7 @@
         card.appendChild(openBox);
       }
 
-      const reasons = r.reasons || [];
-      const logHead = document.createElement("div");
-      logHead.className = "report-log-head";
-      logHead.textContent = "Who reported (" + reasons.length + ")";
-      card.appendChild(logHead);
-      const log = document.createElement("div");
-      log.className = "report-log";
-      reasons.forEach((rr) => {
-        const c = reportCat(rr.category);
-        const item = document.createElement("div");
-        item.className = "rlog";
-        item.appendChild(span("rl-av", initialOf(rr.by || "?")));
-        const m = document.createElement("div");
-        m.className = "rl-main";
-        const top = document.createElement("div");
-        top.className = "rl-top";
-        top.appendChild(span("rl-by", rr.by || "Someone"));
-        top.appendChild(span("rl-said", "reported for"));
-        const cat = span("rl-cat", c.label);
-        cat.style.color = c.color;
-        cat.style.borderColor = c.color;
-        top.appendChild(cat);
-        if (rr.at) top.appendChild(span("rl-when", relTime(rr.at)));
-        m.appendChild(top);
-        m.appendChild(
-          span(
-            "rl-reason" + (rr.reason ? "" : " none"),
-            rr.reason || "No note left",
-          ),
-        );
-        item.appendChild(m);
-        log.appendChild(item);
-      });
-      card.appendChild(log);
+      reportLogNodes(card, (r.reasons || []).map((x) => ({ ...x, targetText: null })));
 
       const foot = document.createElement("div");
       foot.className = "rc-foot";
@@ -6506,6 +6641,10 @@
     renderApps();
   });
 
+  socket.on("staff reports closed", (list) => {
+    closedReports = Array.isArray(list) ? list : [];
+    renderReports();
+  });
   socket.on("staff reports", (list) => {
     reportsList = Array.isArray(list) ? list : [];
     renderReports();
@@ -6780,6 +6919,12 @@
     $("suggestionsRefresh").addEventListener("click", () =>
       socket.emit("staff get suggestions"),
     );
+  document.querySelectorAll("#reportsSeg button").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      reportsFilter = btn.dataset.s || "open";
+      renderReports();
+    });
+  });
   document.querySelectorAll("#appealsSeg button").forEach((btn) => {
     btn.addEventListener("click", () => {
       appealsFilter = btn.dataset.s || "active";

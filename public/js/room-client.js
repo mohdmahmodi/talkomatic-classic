@@ -523,13 +523,46 @@ let currentEmotePrefix = "";
 let currentEmoteInfo = null;
 let useOverlayEmotes = false;
 
-function canDisplay(src) {
+function canDisplay(src, timeoutMs, onTimeout) {
   return new Promise((resolve) => {
     const probe = new Image();
-    probe.onload = () => resolve(probe.naturalWidth > 0);
-    probe.onerror = () => resolve(false);
+    let timer = null;
+    const done = (v) => {
+      clearTimeout(timer);
+      resolve(v);
+    };
+    probe.onload = () => done(probe.naturalWidth > 0);
+    probe.onerror = () => done(false);
+    if (timeoutMs) timer = setTimeout(() => done(onTimeout), timeoutMs);
+    probe.referrerPolicy = "no-referrer";
     probe.src = src;
   });
+}
+
+const EMOTE_HEALTH_KEY = "tkm-emote-health";
+const DAY_MS = 24 * 60 * 60 * 1000;
+const emoteFormatSeen = {};
+let emoteSource = null;
+let emoteHealth = readEmoteHealth();
+
+function readEmoteHealth() {
+  const blank = { ua: navigator.userAgent, avifUntil: 0, codes: {} };
+  try {
+    const h = JSON.parse(localStorage.getItem(EMOTE_HEALTH_KEY) || "null");
+    if (!h || h.ua !== navigator.userAgent) return blank;
+    const now = Date.now();
+    const codes = {};
+    for (const c in h.codes || {}) if (h.codes[c] > now) codes[c] = h.codes[c];
+    return { ua: h.ua, avifUntil: h.avifUntil > now ? h.avifUntil : 0, codes };
+  } catch (_) {
+    return blank;
+  }
+}
+
+function saveEmoteHealth() {
+  try {
+    localStorage.setItem(EMOTE_HEALTH_KEY, JSON.stringify(emoteHealth));
+  } catch (_) {}
 }
 
 const EMOTE_SOURCES = [
@@ -561,9 +594,10 @@ async function fetchExtraEmotes() {
   }
 }
 
+const AVIF_SAMPLES = ["petthemods", "pphop"];
+
 async function loadEmotes() {
-  const validCode = /^[A-Za-z0-9_.-]{1,40}$/;
-  const [meta, avifOk, extra] = await Promise.all([
+  const [meta, probeOk, extra] = await Promise.all([
     fetchEmoteMeta().catch((err) => {
       console.error("Error loading emotes:", err);
       return null;
@@ -571,26 +605,44 @@ async function loadEmotes() {
     canDisplay(ANIMATED_AVIF_PROBE),
     fetchExtraEmotes(),
   ]);
-  const next = {};
+  let pairs = {};
   try {
-    if (meta) {
-      const pairs = parseJSONC(meta.text);
-      const validExt = avifOk
-        ? /^(?:png|gif|webp|jpe?g|avif|bmp|svg)$/i
-        : /^(?:png|gif|webp|jpe?g|bmp|svg)$/i;
-      for (const [name, ext] of Object.entries(pairs))
-        if (validCode.test(name) && typeof ext === "string" && validExt.test(ext))
-          next[name] = `${meta.base}/assets/${name}.${ext}`;
-    }
+    if (meta) pairs = parseJSONC(meta.text);
   } catch (err) {
     console.error("Error reading emotes:", err);
   }
+  let avifOk = probeOk && !emoteHealth.avifUntil;
+  if (avifOk && meta) {
+    const sample =
+      AVIF_SAMPLES.find((n) => pairs[n] === "avif") ||
+      Object.keys(pairs).find((n) => pairs[n] === "avif");
+    if (sample)
+      avifOk = await canDisplay(`${meta.base}/assets/${sample}.avif`, 8000, true);
+  }
+  emoteSource = { base: meta ? meta.base : null, pairs, extra };
+  buildEmoteList(avifOk);
+  if (!avifOk) console.warn("Emotes: this browser cannot show AVIF, skipping those.");
+  console.log("Emotes loaded:", Object.keys(emoteList).length);
+}
+
+function buildEmoteList(avifOk) {
+  const { base: zackiBase, pairs, extra } = emoteSource;
+  const validCode = /^[A-Za-z0-9_.-]{1,40}$/;
+  const validExt = avifOk
+    ? /^(?:png|gif|webp|jpe?g|avif|bmp|svg)$/i
+    : /^(?:png|gif|webp|jpe?g|bmp|svg)$/i;
+  const skip = emoteHealth.codes;
+  const next = {};
+  if (zackiBase)
+    for (const [name, ext] of Object.entries(pairs))
+      if (validCode.test(name) && typeof ext === "string" && validExt.test(ext) && !skip[name])
+        next[name] = `${zackiBase}/assets/${name}.${ext}`;
   const taken = new Set(Object.keys(next).map((c) => c.toLowerCase()));
   const preview = {};
   for (const row of extra) {
     const [name, id, animated] = Array.isArray(row) ? row : [];
     if (!validCode.test(name || "") || !/^[0-9A-Za-z]{20,32}$/.test(id || "")) continue;
-    if (taken.has(name.toLowerCase())) continue;
+    if (taken.has(name.toLowerCase()) || skip[name]) continue;
     taken.add(name.toLowerCase());
     const base = `https://cdn.7tv.app/emote/${id}/`;
     if (!animated) {
@@ -604,9 +656,104 @@ async function loadEmotes() {
     emoteList = next;
     emotePreview = preview;
   }
-  if (!avifOk) console.warn("Emotes: this browser cannot show AVIF, skipping those.");
-  console.log("Emotes loaded:", Object.keys(emoteList).length);
 }
+
+function emoteExt(url) {
+  const m = /\.([a-z0-9]+)(?:[?#]|$)/i.exec(url || "");
+  return m ? m[1].toLowerCase() : "";
+}
+
+function formatSeen(ext) {
+  if (!emoteFormatSeen[ext]) emoteFormatSeen[ext] = { ok: 0, fail: 0 };
+  return emoteFormatSeen[ext];
+}
+
+function dropEmote(code, remember) {
+  if (code in emoteList) {
+    const next = Object.assign({}, emoteList);
+    delete next[code];
+    emoteList = next;
+  }
+  emoteThumbs.delete(code);
+  if (remember) {
+    emoteHealth.codes[code] = Date.now() + 3 * DAY_MS;
+    saveEmoteHealth();
+  }
+}
+
+let autocompleteRedraw = 0;
+function hideEmoteImage(img) {
+  const pick = img.closest(".emote-item");
+  if (pick) return pick.remove();
+  if (img.closest(".emote-autocomplete-item")) {
+    img.remove();
+    cancelAnimationFrame(autocompleteRedraw);
+    autocompleteRedraw = requestAnimationFrame(() => {
+      if (autocompleteActive && currentEmotePrefix) showAutocomplete(currentEmotePrefix);
+    });
+    return;
+  }
+  if (img.parentNode) img.replaceWith(document.createTextNode(img.alt));
+}
+
+function giveUpOnAvif() {
+  if (emoteHealth.avifUntil) return;
+  emoteHealth.avifUntil = Date.now() + DAY_MS;
+  saveEmoteHealth();
+  if (emoteSource) buildEmoteList(false);
+  console.warn("Emotes: AVIF failed to draw here, switched off.");
+  for (const img of document.querySelectorAll("img[data-emote-code]")) {
+    const code = img.dataset.emoteCode;
+    const src = img.getAttribute("src") || "";
+    if (!(code in emoteList)) hideEmoteImage(img);
+    else if (emoteExt(src) === "avif") img.src = emoteList[code];
+  }
+}
+
+function onEmoteImageFailed(img, code, src) {
+  if (emotePreview[code] && src === emotePreview[code]) {
+    delete emotePreview[code];
+    if (emoteList[code]) img.src = emoteList[code];
+    else hideEmoteImage(img);
+    return;
+  }
+  const ext = emoteExt(src);
+  const seen = formatSeen(ext);
+  seen.fail++;
+  if (/\/1x\.avif$/.test(src)) {
+    const webp = src.replace(/1x\.avif$/, "1x.webp");
+    if (emoteList[code] === src) emoteList[code] = webp;
+    img.src = webp;
+  } else {
+    dropEmote(code, seen.ok > 0 && navigator.onLine !== false);
+    hideEmoteImage(img);
+  }
+  if (ext !== "avif" || seen.ok > 0 || seen.fail < 3) return;
+  for (const other in emoteFormatSeen)
+    if (other !== "avif" && emoteFormatSeen[other].ok > 0) return giveUpOnAvif();
+}
+
+document.addEventListener(
+  "load",
+  (e) => {
+    const img = e.target;
+    if (!img || img.tagName !== "IMG" || !img.dataset.emoteCode) return;
+    const src = img.getAttribute("src") || "";
+    if (src && !src.startsWith("data:")) formatSeen(emoteExt(src)).ok++;
+  },
+  true,
+);
+
+document.addEventListener(
+  "error",
+  (e) => {
+    const img = e.target;
+    if (!img || img.tagName !== "IMG" || !img.dataset.emoteCode) return;
+    const src = img.getAttribute("src") || "";
+    if (src && !src.startsWith("data:")) onEmoteImageFailed(img, img.dataset.emoteCode, src);
+  },
+  true,
+);
 
 function parseJSONC(input, filteredTags = ["*"]) {
   const json = stripJSONC(input, filteredTags);
@@ -760,9 +907,6 @@ function createEmoteNode(emoteCode, isOverlay = false) {
   if (isOverlay) img.dataset.emoteOverlay = "true";
   else delete img.dataset.emoteOverlay;
   img.decoding = "async";
-  img.addEventListener("error", () => {
-    if (img.parentNode) img.replaceWith(document.createTextNode(img.alt));
-  });
   return img;
 }
 
@@ -1082,15 +1226,8 @@ function emoteThumb(code) {
   img.src = EMOTE_IMAGE_PLACEHOLDER;
   img.dataset.src = emotePreview[code] || emoteList[code];
   img.alt = `:${code}:`;
+  img.dataset.emoteCode = code;
   img.decoding = "async";
-  img.addEventListener("error", () => {
-    if (emotePreview[code] && img.src === emotePreview[code]) {
-      img.src = emoteList[code];
-      return;
-    }
-    emoteThumbs.delete(code);
-    img.remove();
-  });
   emoteThumbs.set(code, img);
   return img;
 }
@@ -1270,6 +1407,13 @@ function insertEmote(emoteCode, emoteInfo, options = {}) {
     : findEmoteAtCursor();
   const useOverlayToken = options.overlay ?? (targetInfo?.isOverlayQuery ?? false);
   const tokenText = useOverlayToken ? `;${emoteCode};` : `:${emoteCode}:`;
+  const before = getPlainText(chatInput);
+  const selNow = window.getSelection();
+  if (
+    !targetInfo &&
+    (!selNow.rangeCount || !chatInput.contains(selNow.anchorNode) || document.activeElement !== chatInput)
+  )
+    placeCursorAtEnd(chatInput);
 
   try {
     if (targetInfo && targetInfo.node && targetInfo.node.parentNode) {
@@ -1299,6 +1443,26 @@ function insertEmote(emoteCode, emoteInfo, options = {}) {
       );
       if (useOverlayToken) replaceEmotes(chatInput);
     } catch { }
+  }
+
+  if (getPlainText(chatInput) === before) {
+    const node = useOverlayToken
+      ? document.createTextNode(tokenText)
+      : createEmoteNode(emoteCode);
+    const sel = window.getSelection();
+    let r = sel.rangeCount ? sel.getRangeAt(0) : null;
+    if (!r || !chatInput.contains(r.startContainer) || document.activeElement !== chatInput) {
+      r = document.createRange();
+      r.selectNodeContents(chatInput);
+      r.collapse(false);
+    }
+    r.deleteContents();
+    r.insertNode(node);
+    r.setStartAfter(node);
+    r.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(r);
+    if (useOverlayToken) replaceEmotes(chatInput);
   }
 
   ensureCaretInTextNode();
@@ -1446,9 +1610,6 @@ function applySelfFilter(typing) {
 const EMOTE_IMAGE_PLACEHOLDER =
   "data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA=";
 
-function dropOnError(img) {
-  img.addEventListener("error", () => img.remove(), { once: true });
-}
 
 function isEmoteImageVisible(img, container) {
   if (!img || !container) return false;
@@ -1539,25 +1700,18 @@ function createEmotesDropdown() {
     const img = document.createElement("img");
     img.referrerPolicy = "no-referrer";
     img.src = EMOTE_IMAGE_PLACEHOLDER;
-    let still = emotePreview[code];
+    const still = emotePreview[code];
     img.dataset.src = still || emoteList[code];
+    img.dataset.emoteCode = code;
     img.alt = `:${code}:`;
     img.decoding = "async";
     if (still) {
-      img.addEventListener("error", () => {
-        if (still && img.src === still) {
-          still = null;
-          img.src = emoteList[code];
-        } else img.remove();
-      });
       item.addEventListener("mouseenter", () => {
-        if (still && !img.dataset.src && img.src === still) img.src = emoteList[code];
+        if (emotePreview[code] && !img.dataset.src && img.src === still) img.src = emoteList[code];
       });
       item.addEventListener("mouseleave", () => {
-        if (still && !img.dataset.src && img.src === emoteList[code]) img.src = still;
+        if (emotePreview[code] && !img.dataset.src && img.src === emoteList[code]) img.src = still;
       });
-    } else {
-      dropOnError(img);
     }
     const name = document.createElement("span");
     name.textContent = code;
@@ -1567,6 +1721,7 @@ function createEmotesDropdown() {
       e.preventDefault();
       e.stopPropagation();
       dropdown.style.display = "none";
+      if (chatInput) chatInput.focus();
       setTimeout(() => {
         if (chatInput) {
           chatInput.focus();
@@ -3813,6 +3968,32 @@ socket.on("access code required", () => {
     },
   );
 });
+
+(function () {
+  let lastPing = 0;
+  const ping = () => {
+    if (isSpectating || !currentRoomId || document.hidden) return;
+    const now = Date.now();
+    if (now - lastPing < 30000) return;
+    lastPing = now;
+    socket.emit("afk response");
+  };
+  const watch = (target) => {
+    for (const ev of ["pointerdown", "keydown", "touchstart"])
+      target.addEventListener(ev, ping, { capture: true, passive: true });
+  };
+  watch(window);
+  document.addEventListener(
+    "load",
+    (e) => {
+      if (e.target && e.target.tagName === "IFRAME")
+        try {
+          watch(e.target.contentWindow);
+        } catch (_) {}
+    },
+    true,
+  );
+})();
 
 socket.on("afk timeout", (data) => {
   showInfoModal(data.message ?? "Removed from room due to inactivity.", () => {

@@ -4123,6 +4123,49 @@
       .pastban {
         margin: 0 0.8125rem 0.5rem;
       }
+      .report-card.closed .rc-head .avatar {
+        color: var(--dim);
+      }
+      .rc-outcome {
+        display: flex;
+        flex-direction: column;
+        gap: 0.375rem;
+        margin: 0 0.8125rem 0.75rem;
+        padding: 0.625rem 0.75rem;
+        border-radius: 0.375rem;
+        background: var(--tile);
+      }
+      .rc-outcome-lbl {
+        font-size: 0.7188rem;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--dim2);
+      }
+      .rc-step {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 0.25rem 0.5rem;
+        font-size: 0.8438rem;
+      }
+      .rc-step-what {
+        font-weight: bold;
+        color: var(--txt);
+      }
+      .rc-step-by {
+        color: var(--dim);
+      }
+      .rc-step-when {
+        margin-left: auto;
+        font-size: 0.75rem;
+        color: var(--dim2);
+      }
+      .rc-step-detail {
+        flex-basis: 100%;
+        color: var(--dim);
+        font-size: 0.8125rem;
+        line-height: 1.45;
+      }
       .rc-handled {
         display: flex;
         align-items: center;
@@ -4948,6 +4991,11 @@
               >Users reported by the community</span
             >
             <div class="ph-actions">
+              <div class="seg" id="reportsSeg">
+                <button class="active" data-s="open">Open<span class="n"></span></button>
+                <button data-s="action">Action taken<span class="n"></span></button>
+                <button data-s="discarded">Discarded<span class="n"></span></button>
+              </div>
               <button id="reportsRefresh" class="btn sm">
                 <i class="fas fa-arrows-rotate"></i> Refresh
               </button>
@@ -4958,9 +5006,10 @@
             <span>
               A report is not proof. The name at the top of each card is the
               person being reported; the list below shows who reported them and
-              why. If a report is false, click Discard. If no action is needed,
-              keep it so the history stays and others can report this person
-              later.
+              why. Warn, kick or block from the card and it moves to Action
+              taken with what was done and by whom. Discard a false report and
+              it moves to Discarded with your name on it. Both are kept for 30
+              days.
             </span>
           </p>
           <div id="reportsList" class="grid2"></div>

@@ -1,7 +1,7 @@
 // talkoboard.js v4.4 - Collaborative whiteboard for Talkomatic
 //
-// Every drawing tool takes its label, tooltip, shortcut and help entry from
-// this one table, so the toolbar and the "?" panel cannot drift apart.
+// Every drawing tool takes its label, tooltip and shortcut from this one
+// table, so the toolbar and its tooltips cannot drift apart.
 const TOOL_HELP = [
   { name: "pan", fa: "fa-hand", label: "Move", key: "H", tip: "Move around the board. Hold Space to move while drawing." },
   { name: "pen", fa: "fa-pen", label: "Pen", key: "P", tip: "Draw freehand." },
@@ -10,24 +10,75 @@ const TOOL_HELP = [
   { name: "rect", fa: "fa-square", label: "Box", key: "R", tip: "Rectangle. Hold Shift for a square." },
   { name: "ellipse", fa: "fa-circle", label: "Circle", key: "O", tip: "Ellipse. Hold Shift for a circle." },
   { name: "triangle", fa: "fa-play", label: "Triangle", key: "T", tip: "Triangle." },
-  { name: "fill", fa: "fa-fill", label: "Filled", tip: "Filled shapes on or off. Boxes, circles and triangles come out solid." },
+  { name: "fill", fa: "fa-fill", label: "Fill", tip: "Filled shapes on or off. Boxes, circles and triangles come out solid." },
   { name: "bucket", fa: "fa-fill-drip", label: "Bucket", key: "B", tip: "Tap inside a closed shape to fill it with color." },
   { name: "claim", fa: "fa-vector-square", label: "Protect", tip: "Drag a box around your art. Only you can draw inside it, and other people's strokes stop at the edge." },
   { name: "open", fa: "fa-lock", label: "Only me", tip: "Choose who may draw inside your protected area: just you, everyone, or people you pick." },
   { name: "release", fa: "fa-square-xmark", label: "Release", tip: "Give your protected area back so anyone can draw there again." },
   { name: "color", fa: "fa-palette", label: "Color", key: "C", tip: "Pick a color or a gradient, and set how see-through it is." },
-  { name: "size", fa: "fa-circle", label: "Size", key: "S", tip: "Brush thickness." },
+  { name: "size", fa: "fa-circle", label: "Size", key: "[ ]", tip: "Brush thickness. Drag the slider on the toolbar, or press [ and ]." },
   { name: "layers", fa: "fa-layer-group", label: "Layers", key: "Y", tip: "Pick which of the five layers you draw on. Sketch on one, color on the one below: the eraser only rubs out its own layer, and you can hide layers while you work." },
   { name: "trace", fa: "fa-image", label: "Trace", key: "I", tip: "Put a picture of your own under the board and draw over it. Only you can see it; it never leaves your device." },
   { name: "inspect", fa: "fa-user-shield", label: "Inspect", staff: true, tip: "Mod tools: tap a drawing to see who made it." },
 ];
 
-const BOARD_TIPS = [
-  "Protect keeps a drawing yours. Everyone can still see it, nobody else can draw over it. The button next to it lets everyone, or just the friends you pick, draw inside.",
-  "Layers stack bottom to top and everyone shares the same five. Tap a layer to draw on it. Hide only hides it for you.",
-  "Scroll to zoom and hold Space to move. Shift snaps lines and makes squares and circles.",
-  "Ctrl+Z undoes your last stroke and Ctrl+Y brings it back.",
-];
+const TB_ICONS = {
+  "fa-hand":
+    '<path d="M18 11V6a2 2 0 0 0-4 0v4"/><path d="M14 10V4a2 2 0 0 0-4 0v6"/><path d="M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.9-6-2.3l-3.6-3.6a2 2 0 0 1 2.8-2.8L7 15"/>',
+  "fa-pen": '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+  "fa-eraser":
+    '<path d="m7 21-4.3-4.3a1 1 0 0 1 0-1.4l10-10a1 1 0 0 1 1.4 0l5.6 5.6a1 1 0 0 1 0 1.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/>',
+  "fa-slash": '<path d="M6 18 18 6"/><circle cx="5" cy="19" r="1.6" fill="currentColor"/><circle cx="19" cy="5" r="1.6" fill="currentColor"/>',
+  "fa-square": '<rect x="4" y="4" width="16" height="16" rx="1.5"/>',
+  "fa-circle": '<circle cx="12" cy="12" r="8.5"/>',
+  "fa-play": '<path d="M12 4 21 19.5H3Z"/>',
+  "fa-fill": '<rect x="4" y="4" width="16" height="16" rx="2" fill="currentColor" fill-opacity="0.35"/>',
+  "fa-fill-drip":
+    '<path d="m19 11-8-8-8.6 8.6a2 2 0 0 0 0 2.8l5.2 5.2a2 2 0 0 0 2.8 0Z"/><path d="m5 2 5 5"/><path d="M2 13h15"/><path d="M22 20a2 2 0 1 1-4 0c0-1.6 1.7-2.4 2-4 .3 1.6 2 2.4 2 4Z"/>',
+  "fa-vector-square": '<path d="M12 21.5s7.5-3.6 7.5-9.5V5.2L12 2.5 4.5 5.2V12c0 5.9 7.5 9.5 7.5 9.5Z"/><rect x="9" y="11" width="6" height="5" rx="1"/><path d="M10.2 11V9.6a1.8 1.8 0 0 1 3.6 0V11"/>',
+  "fa-lock": '<rect x="5" y="11" width="14" height="10" rx="1.5"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+  "fa-lock-open": '<rect x="5" y="11" width="14" height="10" rx="1.5"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/>',
+  "fa-user-group":
+    '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7"/><path d="M21.5 20a6.5 6.5 0 0 0-4-6"/>',
+  "fa-square-xmark": '<rect x="4" y="4" width="16" height="16" rx="1.5"/><path d="m9 9 6 6"/><path d="m15 9-6 6"/>',
+  "fa-palette":
+    '<path d="M12 2a10 10 0 0 0 0 20c1 0 1.7-.8 1.7-1.7 0-.4-.2-.8-.4-1.1-.3-.3-.4-.7-.4-1.1 0-.9.8-1.7 1.7-1.7h2A5.6 5.6 0 0 0 22 11c0-5-4.5-9-10-9Z"/><circle cx="7.5" cy="11.5" r="1.3" fill="currentColor" stroke="none"/><circle cx="10" cy="7" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="7.5" r="1.3" fill="currentColor" stroke="none"/>',
+  "fa-layer-group": '<path d="M12 3 21 8 12 13 3 8Z"/><path d="m3 12.5 9 5 9-5"/><path d="m3 17 9 5 9-5"/>',
+  "fa-image": '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="m21 15-4.5-4.5L8 19"/>',
+  "fa-user-shield": '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/>',
+  "fa-download": '<path d="M12 4v11"/><path d="m7.5 10.5 4.5 4.5 4.5-4.5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>',
+  "fa-comment": '<path d="M21 12a8.5 8.5 0 0 1-12.5 7.5L3 21l1.5-5.2A8.5 8.5 0 1 1 21 12Z"/>',
+  "fa-xmark": '<path d="M6 6l12 12"/><path d="M18 6 6 18"/>',
+  "fa-minus": '<path d="M5 12h14"/>',
+  "fa-plus": '<path d="M12 5v14"/><path d="M5 12h14"/>',
+  "fa-expand": '<path d="M8 3H3v5"/><path d="M16 3h5v5"/><path d="M8 21H3v-5"/><path d="M16 21h5v-5"/>',
+  "fa-magnifying-glass": '<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>',
+  "fa-arrows-up-down-left-right":
+    '<path d="M12 3v18"/><path d="M3 12h18"/><path d="m9 6 3-3 3 3"/><path d="m9 18 3 3 3-3"/><path d="m6 9-3 3 3 3"/><path d="m18 9 3 3-3 3"/>',
+  "fa-up-down-left-right":
+    '<path d="M12 3v18"/><path d="M3 12h18"/><path d="m9 6 3-3 3 3"/><path d="m9 18 3 3 3-3"/><path d="m6 9-3 3 3 3"/><path d="m18 9 3 3-3 3"/>',
+  "fa-rotate-left": '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
+  "fa-rotate-right": '<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/>',
+  "fa-location-crosshairs":
+    '<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/><path d="M12 2v3"/><path d="M12 19v3"/><path d="M2 12h3"/><path d="M19 12h3"/>',
+  "fa-house": '<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9v12h14V9"/><path d="M10 21v-6h4v6"/>',
+  "fa-paper-plane": '<path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4Z"/>',
+  "fa-eye": '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
+  "fa-eye-slash":
+    '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/><path d="M3 3l18 18"/>',
+  "fa-left-right": '<path d="M8 7 3 12l5 5"/><path d="m16 7 5 5-5 5"/><path d="M3 12h18"/>',
+  "fa-folder-open": '<path d="M3 6a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z"/>',
+  "fa-trash": '<path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/>',
+  "fa-ban": '<circle cx="12" cy="12" r="9"/><path d="m5.6 5.6 12.8 12.8"/>',
+  "fa-circle-check": '<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>',
+  "fa-crop-simple": '<path d="M6 2v16h16"/><path d="M2 6h16v16"/>',
+  "fa-eye-dropper":
+    '<path d="m2 22 1-1h3l9-9"/><path d="M3 21v-3l9-9"/><path d="m15 6 3.4-3.4a2.1 2.1 0 1 1 3 3L18 9l.4.4a2.1 2.1 0 1 1-3 3l-3.8-3.8a2.1 2.1 0 1 1 3-3Z"/>',
+  "fa-face-smile":
+    '<circle cx="12" cy="12" r="9.5"/><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0"/><path d="M9 9.5h.01"/><path d="M15 9.5h.01"/>',
+  "fa-chevron-down": '<path d="m6 9 6 6 6-6"/>',
+  "fa-chevron-up": '<path d="m6 15 6-6 6 6"/>',
+};
 
 class Talkoboard {
   constructor(socketRef, userId, username, staff) {
@@ -51,11 +102,12 @@ class Talkoboard {
     // ── Infinite canvas: pan & zoom ─────────────────────────────────
     this.panX = 0;
     this.panY = 0;
-    this.zoom = 1;
+    this.zoom = 0.2;
     this.isPanning = false;
     this.panStart = null;
-    this.MIN_ZOOM = 1e-5;
-    this.MAX_ZOOM = 1e9;
+    this.BASE_ZOOM = 0.2;
+    this.MIN_ZOOM = 0.002;
+    this.MAX_ZOOM = this.BASE_ZOOM;
     this.wheelMode = "zoom";
     try {
       if (localStorage.getItem("tb_wheel") === "pan") this.wheelMode = "pan";
@@ -103,7 +155,8 @@ class Talkoboard {
     this.trace = null;
     this._traceDrag = null;
     this.TRACE_MAX_PX = 2048;
-    this.TRACE_MAX_WORLD = 5 * 3600;
+    this.TRACE_MAX_WORLD = 5 * 60000;
+    this.FILL_MAX_SIDE = 6000;
 
     // ── Layers ──────────────────────────────────────────────────────
     this.LAYERS = 5;
@@ -373,12 +426,27 @@ class Talkoboard {
   }
 
   icon(name) {
-    return '<i class="fas ' + name + '"></i>';
+    const svg = TB_ICONS[name];
+    if (!svg) return '<i class="fas ' + name + '"></i>';
+    return (
+      '<svg class="tb-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      svg +
+      "</svg>"
+    );
   }
 
-  // One full-screen canvas with the controls floating over it: name and close
-  // top left, tools top centre, chat and save top right, zoom and history
-  // bottom left. Phones move the tools to the bottom edge.
+  setIcon(btn, name) {
+    const old = btn.querySelector(".tb-ico, i");
+    if (!old) return;
+    const holder = document.createElement("span");
+    holder.innerHTML = this.icon(name);
+    old.replaceWith(holder.firstChild);
+  }
+
+  // Dark gray panels float over the board: name top left, close top right,
+  // tools and save down the left, zoom and history bottom left, brush bottom
+  // centre. Chat docks on the right so people can draw and talk at once.
+  // Phones move the tools to the bottom edge and chat to a sheet.
   buildModal() {
     this.modal = document.createElement("div");
     this.modal.id = "talkoboardModal";
@@ -426,21 +494,19 @@ class Talkoboard {
       return b;
     };
 
-    const brand = panel("tb-brand");
-    brand.innerHTML = this.icon("fa-paintbrush") + "<span>Talkoboard</span>";
-    this.saveBtn = this.makeBtn("tb-btn", this.icon("fa-download"), "Save as image");
+    const brand = panel("tb-title");
+    brand.innerHTML = '<span class="tb-title-name">Talkoboard</span>';
+    this.saveBtn = labelled(
+      this.makeBtn("tb-btn", this.icon("fa-download"), "Save the board as a picture"),
+      { label: "Save" },
+    );
     this.saveBtn.addEventListener("click", () => this.togglePop("save"));
-    this.helpBtn = this.makeBtn("tb-btn tb-help-btn", this.icon("fa-circle-question"), "What do the tools do?");
-    this.helpBtn.addEventListener("click", () => this.togglePop("help"));
-    brand.appendChild(this.saveBtn);
-    brand.appendChild(this.helpBtn);
 
-    const tools = panel("tb-tools");
+    const tools = panel("tb-rail");
     this.panBtn = tool("pan");
     this.penBtn = tool("pen");
     this.eraserBtn = tool("eraser");
     const shapes = [tool("line"), tool("rect"), tool("ellipse"), tool("triangle")];
-    shapes[3].querySelector("i").style.transform = "rotate(-90deg)";
     const fillHelp = helpFor("fill");
     this.fillBtn = labelled(this.makeBtn("tb-btn off", this.icon(fillHelp.fa), fillHelp.tip), fillHelp);
     this.fillBtn.addEventListener("click", () => this.setFillShapes(!this.fillShapes));
@@ -466,12 +532,7 @@ class Talkoboard {
     this.colorBtn.insertBefore(this.colorSwatch, this.colorBtn.firstChild);
     this.colorBtn.addEventListener("click", () => this.togglePop("color"));
 
-    const sizeHelp = helpFor("size");
-    this.sizeBtn = labelled(this.makeBtn("tb-btn tb-size-btn", "", tipText(sizeHelp)), sizeHelp);
-    this.sizeDot = document.createElement("span");
-    this.sizeDot.className = "tb-size-dot";
-    this.sizeBtn.insertBefore(this.sizeDot, this.sizeBtn.firstChild);
-    this.sizeBtn.addEventListener("click", () => this.togglePop("size"));
+    this.sizeTool = this.buildSizeTool(tipText(helpFor("size")));
 
     const traceHelp = helpFor("trace");
     this.traceBtn = labelled(this.makeBtn("tb-btn", this.icon(traceHelp.fa), tipText(traceHelp)), traceHelp);
@@ -493,35 +554,33 @@ class Talkoboard {
       this.openBtn,
       this.releaseBtn,
       sep(),
-      this.colorBtn,
-      this.sizeBtn,
-      this.layersBtn,
-      sep(),
       this.traceBtn,
     ];
     tools.appendChild(this.panBtn);
     for (const el of drawTools) tools.appendChild(el);
+    tools.appendChild(this.saveBtn);
     if (this.isStaff) {
       this.inspectBtn = tool("inspect", "tb-mod-btn");
       tools.appendChild(sep());
       tools.appendChild(this.inspectBtn);
     }
 
-    const actions = panel("tb-actions");
-    this.chatFab = this.makeBtn(
-      "tb-btn",
-      this.icon("fa-comment") + '<span class="tb-chat-badge"></span>',
-      "Chat",
-    );
-    this.chatFab.addEventListener("click", () =>
-      this.chatOpen ? this.closeChat() : this.openChat(),
-    );
-    const closeBtn = this.makeBtn("tb-btn", this.icon("fa-xmark"), "Close (Esc)");
+    const brushBar = panel("tb-brushbar");
+    brushBar.appendChild(this.colorBtn);
+    brushBar.appendChild(this.sizeTool);
+    brushBar.appendChild(this.layersBtn);
+
+    const actions = panel("tb-closer");
+    const closeBtn = this.makeBtn("tb-close", this.icon("fa-xmark") + "<span>Close</span>", "Close (Esc)");
     closeBtn.addEventListener("click", () => this.close());
-    actions.appendChild(this.chatFab);
     actions.appendChild(closeBtn);
 
-    const view = panel("tb-zoom");
+    const group = (cls) => {
+      const g = document.createElement("div");
+      g.className = "tb-group " + cls;
+      return g;
+    };
+    const view = group("tb-zoom");
     const zoomOut = this.makeBtn("tb-btn", this.icon("fa-minus"), "Zoom out (- or Ctrl+-)");
     this.zoomLabel = this.makeBtn("tb-zoom-label", "100%", "Back to 100% (0)");
     const zoomIn = this.makeBtn("tb-btn", this.icon("fa-plus"), "Zoom in (+ or Ctrl++)");
@@ -538,7 +597,7 @@ class Talkoboard {
       view.appendChild(el);
     this.setWheelMode(this.wheelMode);
 
-    const history = panel("tb-history");
+    const history = group("tb-history");
     this.undoBtn = this.makeBtn("tb-btn", this.icon("fa-rotate-left"), "Undo (Ctrl+Z)");
     this.redoBtn = this.makeBtn("tb-btn", this.icon("fa-rotate-right"), "Redo (Ctrl+Y)");
     this.undoBtn.addEventListener("click", () => this.undo());
@@ -546,31 +605,34 @@ class Talkoboard {
     history.appendChild(this.undoBtn);
     history.appendChild(this.redoBtn);
 
-    this.watchHide = drawTools.concat([history]);
+    this.watchHide = drawTools.concat([history, brushBar]);
 
-    const find = panel("tb-find");
+    const find = group("tb-find");
     const mineBtn = this.makeBtn("tb-btn", this.icon("fa-location-crosshairs"), "Go to my last drawing (M)");
     const homeBtn = this.makeBtn("tb-btn", this.icon("fa-house"), "Back to the start (0)");
     mineBtn.addEventListener("click", () => this.goToMine());
     homeBtn.addEventListener("click", () => this.resetView());
-    find.appendChild(mineBtn);
     find.appendChild(homeBtn);
+    find.appendChild(mineBtn);
 
     this.hintEl = document.createElement("div");
     this.hintEl.className = "tb-hint";
 
-    for (const el of [stage, brand, tools, actions, view, history, find, this.hintEl])
+    const dock = panel("tb-dock");
+    for (const el of [history, view, find]) dock.appendChild(el);
+    this.dockEl = dock;
+    this.brushBar = brushBar;
+
+    for (const el of [stage, brand, tools, brushBar, actions, dock, this.hintEl])
       this.modal.appendChild(el);
     this.pops = {};
     this.buildColorPanel(this.modal);
     this.colorPanel.classList.add("tb-pop");
     this.pops.color = { panel: this.colorPanel, btn: this.colorBtn };
-    this.buildSizePanel(this.modal);
     this.buildLayersPanel(this.modal);
     this.buildTracePanel(this.modal);
     this.buildSharePanel(this.modal);
     this.buildSavePanel(this.modal);
-    this.buildHelpPanel(this.modal);
     this.buildTooltip();
     this.buildChat(this.modal);
     document.body.appendChild(this.modal);
@@ -591,42 +653,32 @@ class Talkoboard {
     else this.setClaims(this.claims);
   }
 
-  buildSizePanel(parent) {
-    const panel = document.createElement("div");
-    panel.className = "tb-pop tb-size-panel";
-    panel.addEventListener("pointerdown", (e) => e.stopPropagation());
-    const title = document.createElement("div");
-    title.className = "tb-pop-title";
-    title.textContent = "Brush size";
-    const row = document.createElement("div");
+  buildSizeTool(tip) {
+    const wrap = document.createElement("label");
+    wrap.className = "tb-size-tool";
+    this.setTip(wrap, tip);
+    const row = document.createElement("span");
     row.className = "tb-size-row";
+    const well = document.createElement("span");
+    well.className = "tb-size-well";
+    this.sizeDot = document.createElement("span");
+    this.sizeDot.className = "tb-size-dot";
+    well.appendChild(this.sizeDot);
     this.sizeInput = document.createElement("input");
     this.sizeInput.type = "range";
     this.sizeInput.min = "1";
-    this.sizeInput.max = "30";
+    this.sizeInput.max = "50";
+    this.sizeInput.setAttribute("aria-label", "Brush size");
     this.sizeInput.addEventListener("input", (e) => this.setSize(+e.target.value));
-    this.sizeLabel = document.createElement("span");
-    this.sizeLabel.className = "tb-size-label";
+    this.sizeInput.addEventListener("change", () => this.sizeInput.blur());
+    row.appendChild(well);
     row.appendChild(this.sizeInput);
-    row.appendChild(this.sizeLabel);
-    const presets = document.createElement("div");
-    presets.className = "tb-size-presets";
-    this.sizePresetEls = [];
-    for (const n of [2, 4, 8, 14, 22]) {
-      const b = this.makeBtn("tb-size-preset", "", n + " px");
-      const dot = document.createElement("span");
-      dot.style.width = dot.style.height = Math.min(22, n + 3) + "px";
-      b.appendChild(dot);
-      b.addEventListener("click", () => this.setSize(n));
-      presets.appendChild(b);
-      this.sizePresetEls.push({ el: b, n });
-    }
-    panel.appendChild(title);
-    panel.appendChild(row);
-    panel.appendChild(presets);
-    parent.appendChild(panel);
-    this.pops.size = { panel, btn: this.sizeBtn };
+    this.sizeLabel = document.createElement("span");
+    this.sizeLabel.className = "tb-btn-label";
+    wrap.appendChild(row);
+    wrap.appendChild(this.sizeLabel);
     this.setSize(this.size);
+    return wrap;
   }
 
   buildLayersPanel(parent) {
@@ -1358,48 +1410,6 @@ class Talkoboard {
     this.pops.save = { panel, btn: this.saveBtn };
   }
 
-  // ── Help panel and tooltips ──────────────────────────────────────
-  buildHelpPanel(parent) {
-    const panel = document.createElement("div");
-    panel.className = "tb-pop tb-help-panel";
-    panel.addEventListener("pointerdown", (e) => e.stopPropagation());
-
-    const title = document.createElement("div");
-    title.className = "tb-pop-title";
-    title.textContent = "What the tools do";
-    panel.appendChild(title);
-
-    const list = document.createElement("div");
-    list.className = "tb-help-list";
-    for (const t of TOOL_HELP) {
-      if (t.staff && !this.isStaff) continue;
-      const row = document.createElement("div");
-      row.className = "tb-help-row" + (t.name === "claim" ? " tb-help-star" : "");
-      row.innerHTML =
-        '<span class="tb-help-ico">' + this.icon(t.fa) + "</span>" +
-        '<span class="tb-help-text"><b>' + t.label + "</b> " + t.tip + "</span>" +
-        (t.key ? '<kbd class="tb-help-key">' + t.key + "</kbd>" : "");
-      list.appendChild(row);
-    }
-    panel.appendChild(list);
-
-    const more = document.createElement("div");
-    more.className = "tb-pop-title";
-    more.textContent = "Good to know";
-    panel.appendChild(more);
-    const notes = document.createElement("ul");
-    notes.className = "tb-help-notes";
-    for (const text of BOARD_TIPS) {
-      const li = document.createElement("li");
-      li.textContent = text;
-      notes.appendChild(li);
-    }
-    panel.appendChild(notes);
-
-    parent.appendChild(panel);
-    this.pops.help = { panel, btn: this.helpBtn };
-  }
-
   // One floating tooltip serves every button with a data-tip. Native titles
   // take a second to appear and never show on touch; this one is quick on
   // hover and keyboard focus, and the labels under the icons cover touch.
@@ -1436,6 +1446,14 @@ class Talkoboard {
       tip.classList.add("show");
       const r = btn.getBoundingClientRect();
       const m = this.modal.getBoundingClientRect();
+      const side = !!btn.closest(".tb-rail");
+      tip.classList.toggle("side", side);
+      if (side) {
+        tip.style.left = Math.round(r.right - m.left + 10) + "px";
+        tip.style.top = Math.round(r.top - m.top + r.height / 2) + "px";
+        tip.style.bottom = "auto";
+        return;
+      }
       const below = r.top - m.top < m.height / 2;
       const half = tip.offsetWidth / 2;
       const x = r.left + r.width / 2 - m.left;
@@ -1450,21 +1468,6 @@ class Talkoboard {
     if (this.tipEl) this.tipEl.classList.remove("show");
   }
 
-  introSeen() {
-    try {
-      return localStorage.getItem("tb_intro") === "1";
-    } catch (_) {
-      return true;
-    }
-  }
-
-  markIntroSeen() {
-    if (this.helpBtn) this.helpBtn.classList.remove("tb-attn");
-    try {
-      localStorage.setItem("tb_intro", "1");
-    } catch (_) {}
-  }
-
   // Popovers hang off their toolbar button; opening one closes the rest.
   togglePop(name, force) {
     const pop = this.pops[name];
@@ -1474,7 +1477,7 @@ class Talkoboard {
     if (!open) return;
     pop.panel.classList.add("show");
     pop.btn.classList.add("active");
-    if (name === "help") this.markIntroSeen();
+    this.placePop(pop.panel, pop.btn);
     if (name === "layers") this.renderLayerRows();
     if (name === "share") {
       const mine = this.myClaim();
@@ -1490,7 +1493,33 @@ class Talkoboard {
     }
   }
 
+  placePop(panel, btn) {
+    const st = panel.style;
+    st.top = st.left = st.right = st.bottom = st.transform = "";
+    if (window.matchMedia("(max-width: 768px)").matches) return;
+    const m = this.modal.getBoundingClientRect();
+    const b = btn.getBoundingClientRect();
+    const pw = panel.offsetWidth;
+    const ph = panel.offsetHeight;
+    const edge = this.chatOpen ? this.chatEl.getBoundingClientRect().left - m.left : m.width;
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+    if (btn.closest(".tb-rail")) {
+      const rail = btn.closest(".tb-rail").getBoundingClientRect();
+      st.left = rail.right - m.left + 10 + "px";
+      st.top = clamp(b.top - m.top - 8, 10, m.height - ph - 10) + "px";
+    } else if (btn.closest(".tb-brushbar")) {
+      const bar = btn.closest(".tb-brushbar").getBoundingClientRect();
+      st.top = "auto";
+      st.bottom = m.bottom - bar.top + 10 + "px";
+      st.left = clamp(b.left - m.left + b.width / 2 - pw / 2, 10, edge - pw - 10) + "px";
+    } else {
+      st.top = b.bottom - m.top + 10 + "px";
+      st.left = clamp(b.left - m.left, 10, edge - pw - 10) + "px";
+    }
+  }
+
   closePops() {
+    if (this.emotePicker) this.toggleEmotePicker(false);
     for (const p of Object.values(this.pops || {})) {
       p.panel.classList.remove("show");
       p.btn.classList.remove("active");
@@ -1545,7 +1574,7 @@ class Talkoboard {
     this.eyedropperBtn.className = "tb-eyedropper";
     this.eyedropperBtn.title = "Take a color off the board";
     this.eyedropperBtn.innerHTML =
-      '<i class="fas fa-eye-dropper"></i><span>Pick up</span>';
+      this.icon("fa-eye-dropper") + "<span>Pick up</span>";
     this.eyedropperBtn.addEventListener("click", () =>
       this.activateEyedropper(),
     );
@@ -1690,44 +1719,301 @@ class Talkoboard {
     chat.className = "tb-chat";
     chat.addEventListener("pointerdown", (e) => e.stopPropagation());
 
-    const bar = document.createElement("div");
-    bar.className = "tb-chat-bar";
-    const title = document.createElement("span");
-    title.className = "tb-chat-title";
-    title.textContent = "Chat";
-    const closeChatBtn = this.makeBtn("tb-btn", this.icon("fa-xmark"), "Hide chat");
-    closeChatBtn.addEventListener("click", () => this.closeChat());
-    bar.appendChild(title);
-    bar.appendChild(closeChatBtn);
+    this.chatFab = this.makeBtn(
+      "tb-chat-bar",
+      this.icon("fa-comment") +
+        '<span class="tb-chat-title">Chat</span><span class="tb-chat-badge"></span>' +
+        '<span class="tb-chat-chev">' + this.icon("fa-chevron-up") + "</span>",
+      "Board chat",
+    );
+    this.chatFab.addEventListener("click", () =>
+      this.chatOpen ? this.closeChat() : this.openChat(),
+    );
 
     this.chatLog = document.createElement("div");
     this.chatLog.className = "tb-chat-log";
 
     const inputRow = document.createElement("div");
     inputRow.className = "tb-chat-input-row";
+    this.emoteBtn = this.makeBtn("tb-chat-emote", this.icon("fa-face-smile"), "Emoticons");
+    this.emoteBtn.addEventListener("click", () => this.toggleEmotePicker());
     this.chatInput = document.createElement("input");
     this.chatInput.type = "text";
     this.chatInput.className = "tb-chat-input";
     this.chatInput.placeholder = "Say something";
     this.chatInput.maxLength = 200;
     this.chatInput.addEventListener("keydown", (e) => {
+      if (this.emoteAcKey(e)) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
       if (e.key === "Enter") this.submitChat();
       else if (e.key === "Escape") {
-        this.closeChat();
+        if (this.emotePickerOpen()) this.toggleEmotePicker(false);
+        else this.chatInput.blur();
         e.preventDefault();
       }
       e.stopPropagation();
     });
+    this.chatInput.addEventListener("input", () => this.updateEmoteAc());
+    this.chatInput.addEventListener("click", () => this.updateEmoteAc());
+    this.chatInput.addEventListener("blur", () => setTimeout(() => this.hideEmoteAc(), 150));
     this.chatSendBtn = this.makeBtn("tb-chat-send", this.icon("fa-paper-plane"), "Send");
     this.chatSendBtn.addEventListener("click", () => this.submitChat());
+    inputRow.appendChild(this.emoteBtn);
     inputRow.appendChild(this.chatInput);
     inputRow.appendChild(this.chatSendBtn);
 
-    chat.appendChild(bar);
-    chat.appendChild(this.chatLog);
-    chat.appendChild(inputRow);
+    this.emotePicker = this.buildEmotePicker();
+    this.emoteAc = document.createElement("div");
+    this.emoteAc.className = "tb-emote-ac";
+    this.emoteAcItems = [];
+    this.emoteAcIndex = 0;
+
+    const body = document.createElement("div");
+    body.className = "tb-chat-body";
+    body.appendChild(this.chatLog);
+    body.appendChild(this.emotePicker);
+    body.appendChild(this.emoteAc);
+    body.appendChild(inputRow);
+
+    chat.appendChild(this.chatFab);
+    chat.appendChild(body);
     this.chatEl = chat;
     parent.appendChild(chat);
+  }
+
+  emoteCodes() {
+    return typeof emoteList === "object" && emoteList ? Object.keys(emoteList) : [];
+  }
+
+  buildEmotePicker() {
+    const pop = document.createElement("div");
+    pop.className = "tb-emotes";
+    const search = document.createElement("input");
+    search.type = "text";
+    search.className = "tb-emotes-search";
+    search.placeholder = "Search emoticons";
+    search.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        this.toggleEmotePicker(false);
+        this.chatInput.focus();
+        e.preventDefault();
+      }
+      e.stopPropagation();
+    });
+    const list = document.createElement("div");
+    list.className = "tb-emotes-list";
+    pop.appendChild(search);
+    pop.appendChild(list);
+
+    const PAGE = 96;
+    let codes = [];
+    let shown = 0;
+    const item = (code) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "emote-item tb-emote";
+      b.title = ":" + code + ":";
+      const img = document.createElement("img");
+      img.referrerPolicy = "no-referrer";
+      img.loading = "lazy";
+      img.decoding = "async";
+      img.alt = ":" + code + ":";
+      img.dataset.emoteCode = code;
+      img.src = (typeof emotePreview === "object" && emotePreview && emotePreview[code]) || emoteList[code];
+      b.appendChild(img);
+      b.addEventListener("click", () => this.insertEmoteCode(code));
+      return b;
+    };
+    const more = () => {
+      const end = Math.min(codes.length, shown + PAGE);
+      const frag = document.createDocumentFragment();
+      for (; shown < end; shown++) frag.appendChild(item(codes[shown]));
+      list.appendChild(frag);
+    };
+    const fill = () => {
+      const q = search.value.trim().toLowerCase();
+      codes = this.emoteCodes().filter((c) => !q || c.toLowerCase().includes(q));
+      if (q)
+        codes.sort(
+          (a, b) =>
+            (a.toLowerCase().startsWith(q) ? 0 : 1) - (b.toLowerCase().startsWith(q) ? 0 : 1) ||
+            a.length - b.length,
+        );
+      shown = 0;
+      list.textContent = "";
+      list.scrollTop = 0;
+      if (!codes.length) {
+        const none = document.createElement("div");
+        none.className = "tb-emotes-empty";
+        none.textContent = this.emoteCodes().length ? "No emoticons match that." : "Emoticons are still loading.";
+        list.appendChild(none);
+        return;
+      }
+      more();
+    };
+    let timer = null;
+    search.addEventListener("input", () => {
+      clearTimeout(timer);
+      timer = setTimeout(fill, 150);
+    });
+    list.addEventListener(
+      "scroll",
+      () => {
+        if (list.scrollTop + list.clientHeight > list.scrollHeight - 200 && shown < codes.length) more();
+      },
+      { passive: true },
+    );
+    this._fillEmotes = () => {
+      const now = typeof emoteList === "object" ? emoteList : null;
+      if (this._emotesFor !== now || !now) {
+        this._emotesFor = now;
+        fill();
+      }
+    };
+    return pop;
+  }
+
+  emoteAcToken() {
+    const input = this.chatInput;
+    const pos = input.selectionStart != null ? input.selectionStart : input.value.length;
+    const m = /(^|\s):([A-Za-z0-9_.-]{1,40})$/.exec(input.value.slice(0, pos));
+    return m ? { query: m[2], start: pos - m[2].length - 1, end: pos } : null;
+  }
+
+  updateEmoteAc() {
+    const tok = this.emoteAcToken();
+    const codes = this.emoteCodes();
+    if (!tok || !codes.length) return this.hideEmoteAc();
+    const q = tok.query.toLowerCase();
+    const starts = [];
+    const has = [];
+    for (const c of codes) {
+      const l = c.toLowerCase();
+      if (l.startsWith(q)) starts.push(c);
+      else if (l.includes(q)) has.push(c);
+      if (starts.length >= 8) break;
+    }
+    starts.sort((a, b) => a.length - b.length);
+    const list = starts.concat(has).slice(0, 8);
+    if (!list.length) return this.hideEmoteAc();
+    this.emoteAcToken_ = tok;
+    this.emoteAcItems = list;
+    this.emoteAcIndex = 0;
+    this.emoteAc.textContent = "";
+    list.forEach((code, i) => {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "emote-item tb-emote-ac-row" + (i === 0 ? " active" : "");
+      const img = document.createElement("img");
+      img.referrerPolicy = "no-referrer";
+      img.decoding = "async";
+      img.alt = ":" + code + ":";
+      img.dataset.emoteCode = code;
+      img.src = (typeof emotePreview === "object" && emotePreview && emotePreview[code]) || emoteList[code];
+      const name = document.createElement("span");
+      name.textContent = ":" + code + ":";
+      row.appendChild(img);
+      row.appendChild(name);
+      row.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        this.pickEmoteAc(i);
+      });
+      this.emoteAc.appendChild(row);
+    });
+    this.emoteAc.classList.add("show");
+  }
+
+  hideEmoteAc() {
+    if (!this.emoteAc) return;
+    this.emoteAc.classList.remove("show");
+    this.emoteAcItems = [];
+  }
+
+  emoteAcKey(e) {
+    if (!this.emoteAc || !this.emoteAc.classList.contains("show") || !this.emoteAcItems.length) return false;
+    const n = this.emoteAcItems.length;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      this.emoteAcIndex = (this.emoteAcIndex + (e.key === "ArrowDown" ? 1 : n - 1)) % n;
+      [...this.emoteAc.children].forEach((r, i) => r.classList.toggle("active", i === this.emoteAcIndex));
+      this.emoteAc.children[this.emoteAcIndex].scrollIntoView({ block: "nearest" });
+      return true;
+    }
+    if (e.key === "Enter" || e.key === "Tab") {
+      this.pickEmoteAc(this.emoteAcIndex);
+      return true;
+    }
+    if (e.key === "Escape") {
+      this.hideEmoteAc();
+      return true;
+    }
+    return false;
+  }
+
+  pickEmoteAc(i) {
+    const code = this.emoteAcItems[i];
+    const tok = this.emoteAcToken_;
+    if (!code || !tok) return this.hideEmoteAc();
+    const input = this.chatInput;
+    const v = input.value;
+    const after = v.slice(tok.end);
+    const add = ":" + code + ":" + (after.startsWith(" ") ? "" : " ");
+    const next = v.slice(0, tok.start) + add + after;
+    this.hideEmoteAc();
+    if (next.length > input.maxLength) return this.showHint("That message is full");
+    input.value = next;
+    const pos = tok.start + add.length;
+    input.focus();
+    input.setSelectionRange(pos, pos);
+  }
+
+  emotePickerOpen() {
+    return !!(this.emotePicker && this.emotePicker.classList.contains("show"));
+  }
+
+  toggleEmotePicker(force) {
+    const open = force != null ? !!force : !this.emotePickerOpen();
+    this.emotePicker.classList.toggle("show", open);
+    this.emoteBtn.classList.toggle("active", open);
+    if (open) this._fillEmotes();
+  }
+
+  insertEmoteCode(code) {
+    const input = this.chatInput;
+    const token = ":" + code + ":";
+    const v = input.value;
+    const a = input.selectionStart != null ? input.selectionStart : v.length;
+    const b = input.selectionEnd != null ? input.selectionEnd : v.length;
+    const before = v.slice(0, a) + (a > 0 && !/\s$/.test(v.slice(0, a)) ? " " : "");
+    const after = v.slice(b);
+    const add = token + (after.startsWith(" ") ? "" : " ");
+    if ((before + add + after).length > input.maxLength) return this.showHint("That message is full");
+    input.value = before + add + after;
+    const pos = before.length + add.length;
+    input.focus();
+    input.setSelectionRange(pos, pos);
+  }
+
+  renderChatText(node, raw) {
+    node.textContent = "";
+    const text = this.masked(raw);
+    const list = typeof emoteList === "object" && emoteList ? emoteList : null;
+    if (!list || typeof createEmoteNode !== "function" || text.indexOf(":") < 0) {
+      node.textContent = text;
+      return;
+    }
+    const re = /:([A-Za-z0-9_.-]{1,40}):/g;
+    let last = 0;
+    let m;
+    while ((m = re.exec(text))) {
+      if (!Object.prototype.hasOwnProperty.call(list, m[1])) continue;
+      if (m.index > last) node.appendChild(document.createTextNode(text.slice(last, m.index)));
+      node.appendChild(createEmoteNode(m[1]));
+      last = m.index + m[0].length;
+    }
+    if (last < text.length) node.appendChild(document.createTextNode(text.slice(last)));
   }
 
   submitChat() {
@@ -1735,24 +2021,62 @@ class Talkoboard {
     if (!text) return;
     this.sendChat(text);
     this.chatInput.value = "";
+    this.toggleEmotePicker(false);
+    this.hideEmoteAc();
   }
 
-  openChat() {
+  openChat(quiet) {
     this.closePops();
     this.chatOpen = true;
     this.chatEl.classList.add("open");
+    this.modal.classList.add("tb-chat-on");
     this.chatFab.classList.add("active");
+    this.setIcon(this.chatFab.querySelector(".tb-chat-chev"), "fa-chevron-down");
     this.chatUnread = 0;
     this.updateChatBadge();
-    setTimeout(() => this.chatInput && this.chatInput.focus(), 30);
+    this.saveChatPref(true);
+    this.chatResized();
+    if (!quiet) setTimeout(() => this.chatInput && this.chatInput.focus(), 30);
     this.chatLog.scrollTop = this.chatLog.scrollHeight;
   }
 
-  closeChat() {
+  closeChat(keepPref) {
     this.chatOpen = false;
     this.chatEl.classList.remove("open");
+    this.modal.classList.remove("tb-chat-on");
     this.chatFab.classList.remove("active");
+    this.setIcon(this.chatFab.querySelector(".tb-chat-chev"), "fa-chevron-up");
+    this.toggleEmotePicker(false);
+    this.hideEmoteAc();
     this.chatInput.blur();
+    if (!keepPref) this.saveChatPref(false);
+    this.chatResized();
+  }
+
+  chatDocks() {
+    return !window.matchMedia("(max-width: 768px)").matches;
+  }
+
+  saveChatPref(on) {
+    if (!this.chatDocks()) return;
+    try {
+      localStorage.setItem("tb_chat", on ? "1" : "0");
+    } catch (_) {}
+  }
+
+  chatPref() {
+    if (!this.chatDocks()) return false;
+    try {
+      return localStorage.getItem("tb_chat") !== "0";
+    } catch (_) {
+      return true;
+    }
+  }
+
+  chatResized() {
+    if (!this.isOpen || !this.canvas) return;
+    this.resizeCanvas();
+    this.redraw();
   }
 
   updateChatBadge() {
@@ -1860,7 +2184,7 @@ class Talkoboard {
       if (e.key !== "Escape" || !this.isOpen) return;
       if (this.isTypingTarget(e.target) && e.target !== this.chatInput) return;
       if (this.popOpen()) return this.closePops();
-      if (this.chatOpen) return this.closeChat();
+      if (document.activeElement === this.chatInput) return this.chatInput.blur();
       this.close();
     };
     document.addEventListener("keydown", this._escHandler);
@@ -1890,7 +2214,9 @@ class Talkoboard {
       if (this.watching && (KEYS[k] || k === "c" || k === "s" || k === "y" || k === "i")) return;
       if (KEYS[k]) this.setTool(KEYS[k]);
       else if (k === "c") this.togglePop("color");
-      else if (k === "s") this.togglePop("size");
+      else if (k === "s") this.sizeInput.focus();
+      else if (k === "[") this.setSize(this.size - (this.size > 10 ? 2 : 1));
+      else if (k === "]") this.setSize(this.size + (this.size >= 10 ? 2 : 1));
       else if (k === "y") this.togglePop("layers");
       else if (k === "i") this.togglePop("trace");
       else if (k === "f") this.fitToView();
@@ -1948,7 +2274,7 @@ class Talkoboard {
   isTypingTarget(t) {
     return !!(
       t &&
-      (t.tagName === "INPUT" ||
+      ((t.tagName === "INPUT" && !/^(range|checkbox|radio|button|color)$/.test(t.type)) ||
         t.tagName === "TEXTAREA" ||
         t.tagName === "SELECT" ||
         t.isContentEditable)
@@ -2084,18 +2410,16 @@ class Talkoboard {
   }
 
   setSize(n) {
-    this.size = Math.max(1, Math.min(30, Math.round(n) || 1));
+    this.size = Math.max(1, Math.min(50, Math.round(n) || 1));
     if (this.sizeInput) this.sizeInput.value = String(this.size);
-    if (this.sizeLabel) this.sizeLabel.textContent = this.size + " px";
-    for (const p of this.sizePresetEls || [])
-      p.el.classList.toggle("active", p.n === this.size);
+    if (this.sizeLabel) this.sizeLabel.textContent = "Size " + this.size;
     this.updateSizeDot();
     this.updateCursor();
   }
 
   updateSizeDot() {
     if (!this.sizeDot) return;
-    const d = Math.max(4, Math.min(20, this.size + 2));
+    const d = 3 + ((this.size - 1) / 49) * 19;
     this.sizeDot.style.width = d + "px";
     this.sizeDot.style.height = d + "px";
     this.sizeDot.style.background = this.eraser
@@ -2267,6 +2591,15 @@ class Talkoboard {
     return sw.owners >= 2 || sw.count > 30;
   }
 
+  fillTooBig(rings) {
+    const b = this.strokeBB({ rings, points: rings[0] || [] });
+    return b.maxX - b.minX > this.FILL_MAX_SIDE || b.maxY - b.minY > this.FILL_MAX_SIDE;
+  }
+
+  tooBigFillHint() {
+    return "That fill is too big. Zoom in and fill a smaller area";
+  }
+
   greedyFillHint(sw) {
     return (
       "That would paint around " +
@@ -2403,10 +2736,7 @@ class Talkoboard {
       const mode = this.shareModeOf(mine);
       const n = mine && Array.isArray(mine.guests) ? mine.guests.length : 0;
       this.openBtn.classList.toggle("active", mode !== "me");
-      const ico = this.openBtn.querySelector("i");
-      if (ico)
-        ico.className =
-          "fas " + (mode === "all" ? "fa-lock-open" : mode === "some" ? "fa-user-group" : "fa-lock");
+      this.setIcon(this.openBtn, mode === "all" ? "fa-lock-open" : mode === "some" ? "fa-user-group" : "fa-lock");
       const lbl = this.openBtn.querySelector(".tb-btn-label");
       if (lbl)
         lbl.textContent =
@@ -2482,6 +2812,7 @@ class Talkoboard {
     const closedShape =
       kind === "rect" || kind === "ellipse" || kind === "triangle";
     if (closedShape && this.fillShapes && !this.isStaff) {
+      if (this.fillTooBig([pts])) return this.showHint(this.tooBigFillHint());
       for (const c of this.claims) {
         if (this.claimAllows(c)) continue;
         const mid = { x: c.x + c.w / 2, y: c.y + c.h / 2 };
@@ -2646,6 +2977,7 @@ class Talkoboard {
     }
 
     if (!this.isStaff) {
+      if (this.fillTooBig(out)) return this.showHint(this.tooBigFillHint());
       const sw = this.fillSwallows(out);
       if (this.fillTooGreedy(sw)) return this.showHint(this.greedyFillHint(sw));
     }
@@ -2985,14 +3317,14 @@ class Talkoboard {
     }
     this.isOpen = true;
     this.modal.classList.add("show");
+    if (this.chatPref() !== this.chatOpen) {
+      if (this.chatPref()) this.openChat(true);
+      else this.closeChat();
+    }
     this.resizeCanvas();
     this.redraw();
     this.updateCursor();
     this.updateUndoRedoButtons();
-    if (!this.watching && !this.introSeen()) {
-      this.helpBtn.classList.add("tb-attn");
-      this.showHint("New here? Tap ? in the top left to see what each tool does", 5000);
-    }
 
     this.socket.emit("board open");
 
@@ -3038,7 +3370,7 @@ class Talkoboard {
       cancelAnimationFrame(this._redrawRaf);
       this._redrawRaf = null;
     }
-    this.closeChat();
+    this.closeChat(true);
     this.closeModCard();
 
     clearTimeout(this._settleTimer);
@@ -3075,6 +3407,18 @@ class Talkoboard {
     this.displayWidth = rect.width;
     this.displayHeight = rect.height;
     this.dpr = dpr;
+    this.placeBrushBar();
+  }
+
+  placeBrushBar() {
+    const bar = this.brushBar;
+    if (!bar || !this.dockEl) return;
+    bar.style.left = "";
+    if (window.matchMedia("(max-width: 768px)").matches) return;
+    const m = this.modal.getBoundingClientRect();
+    const b = bar.getBoundingClientRect();
+    const minLeft = this.dockEl.getBoundingClientRect().right - m.left + 12;
+    if (b.left - m.left < minLeft) bar.style.left = minLeft + b.width / 2 + "px";
   }
 
   updateCursor() {
@@ -3131,7 +3475,7 @@ class Talkoboard {
   // ═══════════════════════════════════════════════════════════════════════════
 
   formatZoom() {
-    const z = this.zoom;
+    const z = this.zoom / this.BASE_ZOOM;
     if (z < 0.1) return parseFloat((z * 100).toPrecision(2)) + "%";
     if (z < 10) return Math.round(z * 100) + "%";
     if (z < 1000) return Math.round(z) + "×";
@@ -3142,6 +3486,7 @@ class Talkoboard {
 
   updateZoomLabel() {
     this.zoomLabel.textContent = this.formatZoom();
+    this.updateSizeDot();
   }
 
   zoomAt(nz, ax, ay) {
@@ -3212,7 +3557,7 @@ class Talkoboard {
     this.stopZoom();
     this.panX = 0;
     this.panY = 0;
-    this.zoom = 1;
+    this.zoom = this.MAX_ZOOM;
     this.updateZoomLabel();
     this.redraw();
   }
@@ -4261,7 +4606,7 @@ class Talkoboard {
   // Zooming out stops at the 100% size, so a pen never grows into something
   // that covers the board in one move.
   worldBrushSize() {
-    return this.size / Math.max(this.zoom, 1);
+    return this.size / Math.max(this.zoom, this.BASE_ZOOM);
   }
 
   startStrokeAt(pt) {
@@ -4423,7 +4768,7 @@ class Talkoboard {
         const y = Math.min(start.y, end.y);
         const w = Math.abs(end.x - start.x);
         const h = Math.abs(end.y - start.y);
-        if (w >= 20 && h >= 20)
+        if (w >= 100 && h >= 100)
           this.socket.emit("board claim", { x, y, w, h });
         this.scheduleRedraw();
         return;
@@ -4800,7 +5145,7 @@ class Talkoboard {
     let h = 0;
     const s = String(userId || "x");
     for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) & 0xffff;
-    return `hsl(${h % 360}, 65%, 38%)`;
+    return `hsl(${h % 360}, 70%, 68%)`;
   }
 
   readableColor(color) {
@@ -4810,7 +5155,7 @@ class Talkoboard {
       g = (n >> 8) & 255,
       b = n & 255;
     const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-    if (lum <= 0.5) return color;
+    if (lum >= 0.5) return color;
     const rn = r / 255,
       gn = g / 255,
       bn = b / 255;
@@ -4827,7 +5172,7 @@ class Talkoboard {
       else h = (rn - gn) / d + 4;
       h *= 60;
     }
-    const nl = Math.min(l, 0.4);
+    const nl = Math.max(l, 0.65);
     return `hsl(${Math.round(h)}, ${Math.round(sat * 100)}%, ${Math.round(nl * 100)}%)`;
   }
 
@@ -4885,7 +5230,7 @@ class Talkoboard {
 
   refilterChat() {
     for (const node of this.chatLog.querySelectorAll(".tb-msg-text"))
-      if (node.dataset.raw !== undefined) node.textContent = this.masked(node.dataset.raw);
+      if (node.dataset.raw !== undefined) this.renderChatText(node, node.dataset.raw);
   }
 
   addSystemChat(text) {
@@ -4911,7 +5256,7 @@ class Talkoboard {
     const name = document.createElement("span");
     name.className = "tb-msg-name";
     name.textContent = data.username || "User";
-    name.style.color = mine ? "#c25e00" : this.nameColor(data.userId);
+    name.style.color = mine ? "var(--tk-accent, #ff9800)" : this.nameColor(data.userId);
     head.appendChild(name);
     const flair = this.flairNode(data.role);
     if (flair) head.appendChild(flair);
@@ -4925,7 +5270,7 @@ class Talkoboard {
     const text = document.createElement("div");
     text.className = "tb-msg-text";
     text.dataset.raw = data.text;
-    text.textContent = this.masked(data.text);
+    this.renderChatText(text, data.text);
     body.appendChild(head);
     body.appendChild(text);
     msg.appendChild(body);
@@ -5023,7 +5368,7 @@ class Talkoboard {
         this.updateUndoRedoButtons();
         this.scheduleRedraw();
       }
-      this.showHint(this.greedyFillHint(data || {}));
+      this.showHint(data && data.tooBig ? this.tooBigFillHint() : this.greedyFillHint(data || {}));
     });
 
     this.socket.on("board too fast", (data) => {

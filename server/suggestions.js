@@ -358,6 +358,21 @@ function headline(s) {
   return flat.length > 70 ? flat.slice(0, 70) + "…" : flat;
 }
 
+function describe(s, replyId) {
+  if (!s) return null;
+  const line = linkfilter.redact(headline(s)) || "(no text)";
+  let out = `Post #${s.id}: ${line}`;
+  if (replyId) {
+    const r = (s.replies || []).find((x) => x.id === replyId);
+    if (r) {
+      const flat = String(r.text || "").replace(/\s+/g, " ").trim();
+      const short = flat.length > 70 ? flat.slice(0, 70) + "…" : flat;
+      out += ` | Reply: ${linkfilter.redact(short)}`;
+    }
+  }
+  return out;
+}
+
 // What happened to this browser's own posts since `since`: counts for the
 // lobby badge, plus the posts themselves so the board can point at them.
 function unreadFor(deviceId, since) {
@@ -443,6 +458,7 @@ module.exports = {
   ownsPost,
   remove,
   get,
+  describe,
   STATUSES,
   KINDS,
   remainingPosts,

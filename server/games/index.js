@@ -978,6 +978,20 @@ function isPlaying(roomId, userId) {
   return false;
 }
 
+function isBusy(roomId, userId) {
+  const f = floors.get(roomId);
+  if (!f) return false;
+  for (const arr of f.pools.values()) if (arr.includes(userId)) return true;
+  for (const t of f.tables.values())
+    if (
+      t.seats.some((s) => s.userId === userId) ||
+      t.spectators.has(userId) ||
+      t.nextUp.includes(userId)
+    )
+      return true;
+  return false;
+}
+
 function leaveTable(roomId, userId, tableId) {
   const f = floorFor(roomId);
   const t = f.tables.get(tableId);
@@ -1471,6 +1485,7 @@ module.exports = {
   drawStrokes,
   syncCanvas,
   isPlaying,
+  isBusy,
   flagImage: (token) => {
     const code = flagcdn.codeForToken(token);
     return code ? flagcdn.imageFor(code) : null;
