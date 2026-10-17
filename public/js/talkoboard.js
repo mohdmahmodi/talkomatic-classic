@@ -3418,7 +3418,13 @@ class Talkoboard {
     const m = this.modal.getBoundingClientRect();
     const b = bar.getBoundingClientRect();
     const minLeft = this.dockEl.getBoundingClientRect().right - m.left + 12;
-    if (b.left - m.left < minLeft) bar.style.left = minLeft + b.width / 2 + "px";
+    let left = b.left - m.left;
+    if (!this.chatOpen && this.chatEl) {
+      const maxRight = this.chatEl.getBoundingClientRect().left - m.left - 12;
+      if (left + b.width > maxRight) left = maxRight - b.width;
+    }
+    left = Math.max(left, minLeft);
+    if (left !== b.left - m.left) bar.style.left = left + b.width / 2 + "px";
   }
 
   updateCursor() {
