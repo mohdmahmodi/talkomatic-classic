@@ -85,6 +85,9 @@ function gracefulFlush() {
     require("./server/applications").flushSync();
   } catch (e) {}
   try {
+    require("./server/interviews").flushSync();
+  } catch (e) {}
+  try {
     require("./server/reports").flushSync();
   } catch (e) {}
   try {

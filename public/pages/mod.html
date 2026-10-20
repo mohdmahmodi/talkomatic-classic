@@ -4884,7 +4884,7 @@
             <i class="fas fa-flag"></i> Reports
             <span class="ni-badge" id="reportsBadge">0</span>
           </button>
-          <button class="nav-item" data-tab="applications" data-lead>
+          <button class="nav-item" data-tab="applications" data-min2>
             <i class="fas fa-user-pen"></i> Applications
             <span class="ni-badge" id="appsBadge">0</span>
           </button>
@@ -5037,11 +5037,11 @@
           <p class="note-box">
             <i class="fas fa-circle-info"></i>
             <span>
-              Each card is one person applying for the junior (L1) role. Read
-              why they want to help and their availability, then approve to mint
-              and deliver their key automatically, or decline with an optional
-              private reason. Applications are never auto-accepted; a human
-              always reviews.
+              Each card is one person applying for the junior (L1) role. Full
+              mods and up can read them and interview the applicant in the
+              Desk's #interviews. Mod leaders approve or decline: an approval is
+              an offer, and their key is made when they accept it. Applications
+              are never auto-accepted; a human always reviews.
               <br /><br />
               <b>Discord counts.</b> An applicant with Discord linked shows a
               green check. Someone who is in the Talkomatic Discord server is
@@ -5570,7 +5570,7 @@
                 <li>IP or device block anyone (full mod)</li>
                 <li>Close a room, discard a report, or kill a bot (full mod)</li>
                 <li>Read or decide appeals, or see the ban list (full mod)</li>
-                <li>See or review applications (mod leader)</li>
+                <li>See applications or interview applicants (full mod)</li>
                 <li>Act on, warn, or ban anybody on staff</li>
               </ul>
               <div class="rc-sub sees">You see</div>
@@ -5596,13 +5596,14 @@
                 <li>Run the whole report queue, including discarding reports</li>
                 <li>Handle appeals: reply, reopen, lock, dismiss, and bar repeat appeals</li>
                 <li>Resolve suggestions, kill any bot, take down community themes</li>
+                <li>Read applications and interview applicants in the Desk's #interviews</li>
                 <li>Create rooms up to 25 people</li>
               </ul>
               <div class="rc-sub cant">You cannot</div>
               <ul>
                 <li>Lift a permanent block, block wide ranges, or re-time a block (admin)</li>
                 <li>Lift a ban through an appeal, unbar, or delete an appeal (admin)</li>
-                <li>See or review applications, promote, or revoke keys (mod leader)</li>
+                <li>Approve or decline applications, end interviews, promote, or revoke keys (mod leader)</li>
                 <li>Read anybody's moderator record (mod leader)</li>
               </ul>
               <div class="rc-sub sees">You see</div>
@@ -5620,7 +5621,8 @@
               <div class="rc-sub can">You can (everything a full mod can, plus)</div>
               <ul>
                 <li>Open and close moderator applications</li>
-                <li>Read applications in full and approve as junior (L1) or decline</li>
+                <li>Approve applications as junior (L1) or decline them, from the dashboard or straight from an interview</li>
+                <li>End and reopen interviews</li>
                 <li>Promote L1 to L2 and demote L2 to L1, live</li>
                 <li>Revoke a junior or full mod key, with a written reason they will see</li>
                 <li>Bring a former mod back, as a junior</li>
@@ -5720,9 +5722,11 @@
               <h3><i class="fas fa-door-open"></i> Joining</h3>
               <p>
                 Mod leaders open and close applications. When intake is open,
-                active members apply from the lobby, a leader reads the
-                application, and approval mints a junior (L1) key on the spot.
-                Nobody starts above junior, and nobody is auto-accepted.
+                active members apply from the lobby, full mods and leaders can
+                interview them in the Desk's #interviews, and a leader decides.
+                Approval is an offer for the junior (L1) role; the key is made
+                when they accept. Nobody starts above junior, and nobody is
+                auto-accepted.
               </p>
             </div>
             <div class="gcard">
@@ -5768,8 +5772,8 @@
               <p>
                 This dashboard holds the boards; the Desk rides along on every
                 page for live work. Cards in the Desk's #queues appear at the
-                rank that can settle them: reports for everyone, appeals for
-                full mods, applications and abuse flags for leaders.
+                rank that can settle them: reports for everyone, appeals and
+                applications for full mods, abuse flags for leaders.
               </p>
             </div>
           </div>
@@ -5801,12 +5805,13 @@
             <div class="gcard">
               <h3>
                 <i class="fas fa-user-pen"></i> Applications
-                <span class="tag">LEADER</span>
+                <span class="tag">L2</span>
               </h3>
               <p>
-                Active members applying for the junior role. Mod leaders open
-                and close intake, approve to mint and deliver an L1 key
-                automatically, or decline. Each card shows whether they have
+                Active members applying for the junior role. Full mods read them
+                and interview applicants from the Desk. Mod leaders open and
+                close intake, approve, or decline; an approval is an offer and
+                the L1 key is made when they accept. Each card shows whether they have
                 Discord linked; someone in the Talkomatic server is easier to
                 trust and gets the site mod role once approved. Applications
                 are never auto-accepted.

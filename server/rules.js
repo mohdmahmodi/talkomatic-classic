@@ -236,7 +236,7 @@ const DEFAULT_MOD = [
     level: "full",
     title: "Full moderators: what you hold",
     body:
-      "Everything a junior has, plus IP blocks from 1 hour to 1 month, or permanent, closing a room, spectating public rooms, discarding reports, resolving appeals, killing bots, and taking down community themes. Lifting a permanent block, wide range bans, applications and promotions, and the site-wide tools sit above you.",
+      "Everything a junior has, plus IP blocks from 1 hour to 1 month, or permanent, closing a room, spectating public rooms, discarding reports, resolving appeals, killing bots, taking down community themes, reading mod applications, and interviewing applicants. Lifting a permanent block, wide range bans, deciding applications, promotions, and the site-wide tools sit above you.",
     why: "Anything that cannot be undone by the person who did it sits one level above them on purpose.",
   },
   {
@@ -257,7 +257,7 @@ const DEFAULT_MOD = [
     level: "leader",
     title: "Mod leaders: what you hold",
     body:
-      "Everything a full moderator has, plus the team itself: opening and closing applications, approving applicants as juniors, declining them, promoting between L1 and L2, removing junior and full mod keys with a written reason, bringing former mods back as juniors, and reading any junior or full mod's record and abuse flags. Leader keys, ban lifts, and the platform tools stay with admins.",
+      "Everything a full moderator has, plus the team itself: opening and closing applications, approving applicants as juniors, declining them, ending interviews, promoting between L1 and L2, removing junior and full mod keys with a written reason, bringing former mods back as juniors, and reading any junior or full mod's record and abuse flags. Leader keys, ban lifts, and the platform tools stay with admins.",
     why: "Somebody has to own who is on the team and how they are doing, and it should be a person whose own record is on the line, not just whoever happens to hold an admin key.",
   },
   {

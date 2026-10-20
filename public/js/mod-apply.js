@@ -650,7 +650,9 @@
             ? "Your moderator access has been revoked. If you would like to help out again, you can apply again below."
             : st.status === "withdrawn"
               ? "You turned down the junior moderator role. If you change your mind, you can apply again below."
-              : "Your application is in the queue. A mod leader will review it soon. Thanks for your patience.";
+              : st.interview === "ended"
+                ? "Your interview has ended and your application is still being reviewed. You get a popup here when there is a decision."
+                : "Your application is in the queue. A mod leader will review it soon. Thanks for your patience.";
     body.appendChild(p);
     if (st.submittedAt) {
       var s = document.createElement("p");
@@ -674,6 +676,13 @@
         label: "Apply again",
         onClick: function () {
           openForm();
+        },
+      });
+    if (st.interview && st.status !== "revoked" && window.TkInterview)
+      actions.unshift({
+        label: "Read the interview",
+        onClick: function () {
+          TkInterview.open();
         },
       });
     StaffUI.modal({
@@ -946,7 +955,13 @@
       }
       if (myStatus && myStatus.has) {
         socket.emit("mod application status");
-        showStatus();
+        if (
+          myStatus.status === "pending" &&
+          myStatus.interview === "open" &&
+          window.TkInterview
+        )
+          TkInterview.open();
+        else showStatus();
       } else openForm();
     },
     decisionOpen: function () {

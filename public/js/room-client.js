@@ -3569,9 +3569,19 @@ function sendAfkState(isAfk) {
   socket.emit("afk state", { isAfk });
 }
 
+let sentTabHidden = false;
+
 function sendTabState(hidden) {
   if (isSpectating || !currentRoomId) return;
+  sentTabHidden = !!hidden;
   socket.emit("tab state", { hidden });
+}
+
+function markSelfPresent() {
+  if (fakeAfkActive || isSpectating || !currentRoomId) return;
+  if (sentTabHidden) sendTabState(false);
+  if (afkHiddenTimer) armAfkTimer();
+  if (selfTabAfk) sendAfkState(false);
 }
 
 function armAfkTimer() {
@@ -3972,7 +3982,8 @@ socket.on("access code required", () => {
 (function () {
   let lastPing = 0;
   const ping = () => {
-    if (isSpectating || !currentRoomId || document.hidden) return;
+    markSelfPresent();
+    if (isSpectating || !currentRoomId) return;
     const now = Date.now();
     if (now - lastPing < 30000) return;
     lastPing = now;

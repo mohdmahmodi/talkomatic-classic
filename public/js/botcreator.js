@@ -2390,6 +2390,17 @@
 
   let drag = null;
 
+  function keepScroll(node, fn) {
+    const saved = [];
+    for (let p = node.parentElement; p; p = p.parentElement)
+      if (p.scrollHeight > p.clientHeight) saved.push([p, p.scrollTop]);
+    const doc = document.scrollingElement;
+    const docTop = doc ? doc.scrollTop : 0;
+    fn();
+    for (const [p, top] of saved) p.scrollTop = top;
+    if (doc) doc.scrollTop = docTop;
+  }
+
   function mkGrip() {
     const g = document.createElement("span");
     g.className = "bc-grip";
@@ -2413,6 +2424,7 @@
     window.addEventListener("pointermove", onDragMove);
     window.addEventListener("pointerup", endDrag);
     window.addEventListener("pointercancel", cancelDrag);
+    window.addEventListener("blur", cancelDrag);
   }
 
   function startGhost() {
@@ -2443,6 +2455,7 @@
 
   function onDragMove(e) {
     if (!drag) return;
+    if (e.pointerType === "mouse" && !(e.buttons & 1)) return cancelDrag();
     if (!drag.started) {
       if (
         Math.abs(e.clientX - drag.sx) < 6 &&
@@ -2576,6 +2589,7 @@
     window.removeEventListener("pointermove", onDragMove);
     window.removeEventListener("pointerup", endDrag);
     window.removeEventListener("pointercancel", cancelDrag);
+    window.removeEventListener("blur", cancelDrag);
     document.body.classList.remove("bc-dragging");
     if (drag?.ghost) drag.ghost.remove();
     if (drag?.line) drag.line.remove();
@@ -3073,10 +3087,11 @@
           ? "Also, {name} arrived! (written under what it already said)"
           : "Hi {name}! (press Enter for a new line)";
       t.value = act.text || "";
-      const grow = () => {
-        t.style.height = "auto";
-        t.style.height = Math.min(160, Math.max(52, t.scrollHeight)) + "px";
-      };
+      const grow = () =>
+        keepScroll(t, () => {
+          t.style.height = "auto";
+          t.style.height = Math.min(160, Math.max(52, t.scrollHeight)) + "px";
+        });
       t.addEventListener("input", () => {
         act.text = t.value;
         grow();

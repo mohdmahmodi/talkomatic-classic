@@ -42,6 +42,7 @@ const identity = require("./identity");
 const modwatch = require("./modwatch");
 const keywatch = require("./keywatch");
 const applications = require("./applications");
+const interviews = require("./interviews");
 const season = require("./season");
 const reports = require("./reports");
 const lastseen = require("./lastseen");
@@ -2931,6 +2932,7 @@ function appStatusPayload(deviceId, isStaff) {
     status,
     reason,
     offer: a.status === "approved" && !a.claimed,
+    interview: interviews.stateFor(a.id),
     by:
       status === "approved" || status === "rejected"
         ? reviewerPublicName(a.reviewedBy)
@@ -2964,6 +2966,7 @@ function sendAppsList(s) {
       reviewedAt: a.reviewedAt,
       reason: a.reason,
       claimed: a.claimed,
+      interview: interviews.summary(a.id),
       deviceId: a.deviceId || null,
       discord: a.discord || null,
       discordId: a.discordId || null,
@@ -2976,7 +2979,7 @@ function sendAppsList(s) {
 function broadcastAppsList() {
   if (!io()) return;
   for (const [, s] of io().sockets.sockets)
-    if (s.isDev || (s.isMod && (s.modLevel || 1) >= 3)) sendAppsList(s);
+    if (s.isDev || (s.isMod && (s.modLevel || 1) >= 2)) sendAppsList(s);
 }
 
 function broadcastApplicationsState() {
@@ -3632,7 +3635,10 @@ function generateRoomId() {
 // ── Dev Mode: Visibility Helpers (vanish / hide) ────────────────────────────
 
 function getJoinableUserCount(room) {
-  return (room?.users || []).filter((u) => !(u.isDev && u.isVanished)).length;
+  return (
+    (room?.users || []).filter((u) => !(u.isDev && u.isVanished)).length +
+    (room ? heldSeats(room, null) : 0)
+  );
 }
 
 function getRecipientUserId(socket) {
@@ -4199,6 +4205,40 @@ async function loadRooms() {
 
 // ── Room Timers ─────────────────────────────────────────────────────────────
 
+const SEAT_HOLD_MS = 30 * 1000;
+const seatHolds = new Map();
+
+function holdSeat(roomId, userId) {
+  let m = seatHolds.get(roomId);
+  if (!m) seatHolds.set(roomId, (m = new Map()));
+  m.set(userId, Date.now() + SEAT_HOLD_MS);
+}
+
+function heldSeats(room, exceptUserId) {
+  const m = seatHolds.get(room.id);
+  if (!m) return 0;
+  const now = Date.now();
+  let n = 0;
+  for (const [uid, until] of m) {
+    if (until <= now) {
+      m.delete(uid);
+      continue;
+    }
+    if (uid === exceptUserId) continue;
+    if ((room.users || []).some((u) => u.id === uid)) continue;
+    n++;
+  }
+  if (!m.size) seatHolds.delete(room.id);
+  return n;
+}
+
+function releaseSeat(userId) {
+  for (const [roomId, m] of seatHolds) {
+    m.delete(userId);
+    if (!m.size) seatHolds.delete(roomId);
+  }
+}
+
 const PARK_MS = 10 * 60 * 1000;
 const parkedText = new Map();
 
@@ -4249,6 +4289,7 @@ function startRoomDeletionTimer(roomId) {
     const room = state.rooms.get(roomId);
     if (room && room.users.length === 0) {
       state.rooms.delete(roomId);
+      seatHolds.delete(roomId);
       for (const key of [...parkedText.keys()])
         if (key.startsWith(roomId + ":")) parkedText.delete(key);
       gamesFloor.roomClosed(roomId);
@@ -4323,10 +4364,11 @@ function clearAFKTimers(userId) {
 function afkExempt(socket, userId) {
   if (socket.isDev || socket.isMod) return true;
   const roomId = socket.roomId;
-  if (socket.boardOpen) return true;
+  const interviewing = (s) => s.ivWindow && !s.tabHidden;
+  if (socket.boardOpen || interviewing(socket)) return true;
   if (gamesFloor.isBusy(roomId, userId)) return true;
   for (const s of findSocketsByUserId(userId))
-    if (s.roomId === roomId && s.boardOpen) return true;
+    if (s.roomId === roomId && (s.boardOpen || interviewing(s))) return true;
   return false;
 }
 
@@ -4596,6 +4638,8 @@ async function leaveRoom(socket, userId, opts) {
       const leftUser = room.users.find((u) => u.id === userId);
       room.users = room.users.filter((u) => u.id !== userId);
       room.lastActiveTime = Date.now();
+      if (opts && opts.park && leftUser && !socket.isBot && !socket.isDev && !socket.isMod)
+        holdSeat(roomId, userId);
 
       if (room.votes) {
         delete room.votes[userId];
@@ -4765,9 +4809,10 @@ function joinRoom(socket, roomId, userId) {
     if (!room.users) room.users = [];
     if (!room.votes) room.votes = {};
 
-    const joinableUserCount = (room.users || []).filter(
-      (u) => u.id !== userId && !(u.isDev && u.isVanished),
-    ).length;
+    const joinableUserCount =
+      (room.users || []).filter(
+        (u) => u.id !== userId && !(u.isDev && u.isVanished),
+      ).length + heldSeats(room, userId);
     if (!isStaff && joinableUserCount >= roomCapacity(room))
       return socket.emit(
         "room full",
@@ -4810,6 +4855,7 @@ function joinRoom(socket, roomId, userId) {
       );
 
     clearAFKTimers(userId);
+    releaseSeat(userId);
     room.users = room.users.filter((u) => u.id !== userId);
     socket.join(roomId);
 
@@ -4988,6 +5034,14 @@ function registerSocketHandlers(opts) {
   } catch (e) {
     console.error("flood block cover failed:", e.message);
   }
+  interviews.init({
+    io,
+    applications,
+    roles,
+    logStaff,
+    statusFor: (deviceId) => appStatusPayload(deviceId, false),
+    changed: () => broadcastAppsList(),
+  });
   staffchat.init({
     io,
     state,
@@ -5314,6 +5368,7 @@ function registerSocketHandlers(opts) {
       if (socket.deviceId && !socket.isDev && !socket.isMod) {
         const st = appStatusPayload(socket.deviceId, false);
         if (st.has) socket.emit("mod application status", st);
+        interviews.greet(socket);
       }
 
       socket.emit("applications state", { open: !!applications.isOpen() });
@@ -5838,6 +5893,7 @@ function registerSocketHandlers(opts) {
 
     // ── The Desk: staff chat, pings, presence, inspector ────────────────
     staffchat.register(socket, safe);
+    interviews.register(socket, safe);
     automod.register(socket, safe);
     clientdetails.register(socket, safe);
 
@@ -7110,6 +7166,21 @@ function registerSocketHandlers(opts) {
               "Invalid delete count.",
             ),
           );
+
+        const present = state.rooms
+          .get(socket.roomId)
+          ?.users?.find((u) => u.id === userId);
+        if (present && present.isAfk) {
+          present.isAfk = false;
+          startActiveTime(socket);
+          emitRoomAfkUpdate(socket, userId, false);
+          updateLobby();
+        }
+        if (socket.tabHidden) {
+          socket.tabHidden = false;
+          startActiveTime(socket);
+          setupAFKTimers(socket, userId);
+        }
 
         if (!state.pendingChatUpdates.has(userId))
           state.pendingChatUpdates.set(userId, { diffs: [] });
@@ -8826,9 +8897,10 @@ function registerSocketHandlers(opts) {
           if (state.maintenance) return fail("maintenance");
           if (room.locked) return fail("locked");
         }
-        const others = (room.users || []).filter(
-          (u) => u.id !== userId && !(u.isDev && u.isVanished),
-        ).length;
+        const others =
+          (room.users || []).filter(
+            (u) => u.id !== userId && !(u.isDev && u.isVanished),
+          ).length + heldSeats(room, userId);
         if (others >= roomCapacity(room) && !(staff && data?.force))
           return fail("full");
         const cur = staff ? null : getOwnCurrentRoom(userId);
@@ -11464,11 +11536,12 @@ function registerSocketHandlers(opts) {
         const who = app.username || "An applicant";
         if (!data?.accept) {
           applications.withdraw(app.id);
+          interviews.onAnswer(app, false);
           audit.recordNotification({
             kind: "application",
             text: `${who} turned down the junior mod role`,
             by: app.username || null,
-            minLevel: 3,
+            minLevel: 2,
           });
           broadcastAppsList();
           socket.emit("mod application accept result", { ok: true, accepted: false });
@@ -11490,11 +11563,12 @@ function registerSocketHandlers(opts) {
               : reviewedBy) || "application";
           const granted = await roles.grantModKey(app.username || "mod", 1, grantedBy);
           applications.markClaimed(app.id);
+          interviews.onAnswer(app, true);
           audit.recordNotification({
             kind: "application",
             text: `${who} accepted the junior mod role`,
             by: app.username || null,
-            minLevel: 3,
+            minLevel: 2,
           });
           broadcastAppsList();
           socket.emit("mod application accept result", { ok: true, accepted: true });
@@ -11778,7 +11852,7 @@ function registerSocketHandlers(opts) {
           kind: "application",
           text: `New mod application from ${socket.handshake.session?.username || "a user"}`,
           by: socket.handshake.session?.username || null,
-          minLevel: 3,
+          minLevel: 2,
           card: {
             ids: [socket.deviceId].filter(Boolean),
             by: socket.handshake.session?.username || "a user",
@@ -11790,6 +11864,7 @@ function registerSocketHandlers(opts) {
           },
         });
         broadcastAppsList();
+        interviews.touch(applications.get(res.id));
         socket.emit("mod application result", { ok: true });
       }),
     );
@@ -11798,7 +11873,7 @@ function registerSocketHandlers(opts) {
       "mod applications list",
       safe(async () => {
         if (!requireStaff(socket)) return;
-        if (!requireModLevel(socket, 3)) return;
+        if (!requireModLevel(socket, 2)) return;
         sendAppsList(socket);
       }),
     );
@@ -11900,6 +11975,7 @@ function registerSocketHandlers(opts) {
             createErrorResponse(ERROR_CODES.BAD_REQUEST, "Unknown decision."),
           );
         }
+        interviews.onDecision(app, decision, socket);
         broadcastAppsList();
         settleQueueItem("application", id);
         socket.emit("staff action result", {

@@ -14,6 +14,14 @@ const CHANNELS = [
   { key: "floor", name: "floor", desc: "Day to day. The default." },
   { key: "help", name: "help", desc: "Live calls for backup from rooms." },
   { key: "queues", name: "queues", desc: "Incoming reports, appeals, applications. Cards show at your level." },
+  {
+    key: "interviews",
+    name: "interviews",
+    desc: "Mod applicants and their interviews.",
+    access: "l2",
+    readonly: true,
+    virtual: true,
+  },
   { key: "automod", name: "automod", desc: "Find a user. See who came back.", readonly: true },
   { key: "l2", name: "l2", desc: "Bans, blocks, escalations.", access: "l2" },
   { key: "leads", name: "leads", desc: "Applications, promotions, the team.", access: "l3" },
@@ -281,12 +289,12 @@ function dropSettledCards() {
 }
 
 // Card floors by kind: reports go to every staff level, appeals and
-// suggestions to L2+, applications and abuse flags to leaders.
+// suggestions and applications to L2+, abuse flags to leaders.
 const CARD_FLOORS = {
   report: 1,
   appeal: 2,
   suggestion: 2,
-  application: 3,
+  application: 2,
   abuse: 3,
   key: 3,
 };

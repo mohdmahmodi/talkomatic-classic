@@ -581,10 +581,10 @@ const ACTION_GROUPS = [
   {
     key: "talking",
     label: "Talking to users",
-    blurb: "Appeal conversations. Queue work, not enforcement.",
+    blurb: "Appeal and interview conversations. Queue work, not enforcement.",
     actions: [
       "reply to appeal", "end appeal chat", "reopen appeal chat",
-      "reopen appeal",
+      "reopen appeal", "start interview", "reopen interview", "end interview",
     ],
   },
   {

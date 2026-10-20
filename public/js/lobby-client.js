@@ -3372,14 +3372,16 @@ function updateModApplyLink() {
   const mine = !!(myAppStatus && myAppStatus.has);
   if (mine && APP_STATUS_META[myAppStatus.status]) {
     const m = APP_STATUS_META[myAppStatus.status];
+    const live =
+      myAppStatus.status === "pending" && myAppStatus.interview === "open";
     link.innerHTML =
       '<i class="fas fa-user-pen"></i> Check status' +
       '<span class="apply-state" style="background:' +
-      m.color +
+      (live ? "#64b5f6" : m.color) +
       ';color:#1a1a1a">' +
-      APP_STATUS_TAG[myAppStatus.status] +
+      (live ? "Interview" : APP_STATUS_TAG[myAppStatus.status]) +
       "</span>";
-    link.title = m.title;
+    link.title = live ? "Staff opened an interview with you" : m.title;
     return;
   }
   if (applicationsOpen === null) {

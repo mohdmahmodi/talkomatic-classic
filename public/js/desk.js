@@ -890,6 +890,8 @@
             maxLength: opts.max || 200,
           },
         ],
+        ...(opts.confirm ? { confirmText: opts.confirm } : {}),
+        ...(opts.danger ? { danger: true } : {}),
       }).then((r) => {
         if (r && typeof r.v === "string") cb(r.v);
       });
@@ -962,9 +964,11 @@
     let n = 0;
     let loud = 0;
     for (const k in unread) {
+      if (k === "interviews") continue;
       n += unread[k].n || 0;
       loud += unread[k].mentions || 0;
     }
+    n += ivUnread();
     let help = (unread.help && unread.help.n) || 0;
     for (const m of cacheFor("help").messages)
       if (m.ping && (m.ping.status === "open" || m.ping.status === "waiting"))
@@ -1155,6 +1159,7 @@
     });
 
     wireAutomod();
+    wireInterviews();
 
     socket.on("desk roster", (d) => {
       roster = (d && d.staff) || [];
@@ -1706,6 +1711,7 @@
       loadView(true);
       socket.emit("desk presence");
     }
+    syncIvWatch();
   }
   const toggle = () => setOpen(!panelOpen);
 
@@ -1719,15 +1725,21 @@
     loadView();
   }
   function loadView(force) {
+    if (viewKey() === "interviews") {
+      if (isFullMod()) socket.emit("staff interview list");
+      return;
+    }
     const c = cacheFor(viewKey());
     if (!c.loaded || force) socket.emit("desk history", { key: viewKey() });
     else if (viewingNow(viewKey())) markRead(viewKey());
   }
 
   function renderAll() {
+    if (els.panel) els.panel.classList.toggle("dk-iv-wide", onInterviews());
     renderRail();
     renderMain();
     renderSide();
+    syncIvWatch();
   }
 
   // ── Rail ──────────────────────────────────────────────────────────────────
@@ -1749,7 +1761,7 @@
       row.appendChild(el("span", "dk-hash", "#"));
       row.appendChild(el("span", "dk-chan-name", c.name));
       if (c.restricted) row.appendChild(icon("fa-lock"));
-      const u = unread[c.key];
+      const u = c.key === "interviews" ? { n: ivUnread(), mentions: 0 } : unread[c.key];
       if (u && u.n) {
         const b = el(
           "span",
@@ -1886,6 +1898,7 @@
     if (mode === "appeal") return renderAppeal();
     if (mode === "help") return renderHelp();
     if (mode === "playbook") return renderPlaybook();
+    if (view.kind === "channel" && view.key === "interviews") return renderInterviews();
     if (view.kind === "channel" && view.key === "automod") return renderAutomod();
     const main = els.main;
     main.textContent = "";
@@ -2494,7 +2507,10 @@
       return bar;
     }
 
-    if (kind === "application" && c.itemId && isLeader()) {
+    if (kind === "application" && c.itemId) {
+      if (isFullMod())
+        add("Interview", "fa-comments", "", () => openInterview(c.itemId));
+      if (!isLeader()) return bar;
       add("Approve as L1", "fa-check", "primary", () =>
         ask(
           {
@@ -5838,6 +5854,866 @@
     });
   }
 
+  const iv = {
+    rows: [],
+    loaded: false,
+    tab: null,
+    sel: null,
+    thread: null,
+    typing: null,
+    typingTimer: null,
+    watching: null,
+    reactions: ["👍", "❤️", "😂", "🎉", "🤔", "👀", "✅", "🙏"],
+    drafts: new Map(),
+    showApp: new Map(),
+    pane: "list",
+    lastTypeSent: 0,
+    lastSent: null,
+    readTimer: null,
+  };
+  let ivView = null;
+
+  const onInterviews = () =>
+    view.kind === "channel" && view.key === "interviews" && mode === "chat";
+
+  function ivUnread() {
+    let n = 0;
+    for (const r of iv.rows) n += (r.interview && r.interview.unread) || 0;
+    return n;
+  }
+
+  function ivGroup(r) {
+    if (r.interview && r.interview.status === "open") return "live";
+    if (r.status === "pending") return "applied";
+    return "decided";
+  }
+
+  const IV_TABS = [
+    ["applied", "Applied"],
+    ["live", "Interviewing"],
+    ["decided", "Decided"],
+  ];
+  const IV_EMPTY = {
+    applied: "No applications waiting.",
+    live: "No interviews in progress.",
+    decided: "Nothing decided in the last 30 days.",
+  };
+
+  function ivAgo(ts) {
+    if (!ts) return "";
+    const r = relTime(ts);
+    return r === "now" ? "just now" : r + " ago";
+  }
+
+  function ivStatus(t) {
+    if (t.status === "approved")
+      return t.claimed ? ["ACCEPTED", "ok"] : ["APPROVED", "ok"];
+    if (t.status === "rejected") return ["DECLINED", "no"];
+    if (t.status === "withdrawn") return ["TURNED DOWN", "ghost"];
+    if (t.interview && t.interview.status === "open") return ["INTERVIEWING", "live"];
+    if (t.interview) return ["INTERVIEWED", "wait"];
+    return ["APPLIED", "wait"];
+  }
+
+  function ivFace(p, cls) {
+    const wrap = el("span", "dk-iv-face " + (cls || ""));
+    const pic = el("span", "dk-iv-pic");
+    pic.appendChild(el("span", "dk-av-i", initialOf(p.name)));
+    const url = avatarUrl(p.avatar, 64);
+    if (url) {
+      const img = document.createElement("img");
+      img.loading = "eager";
+      img.decoding = "async";
+      img.referrerPolicy = "no-referrer";
+      img.alt = "";
+      img.addEventListener("load", () => pic.classList.add("has-pic"));
+      img.addEventListener("error", () => {
+        img.remove();
+        pic.classList.remove("has-pic");
+      });
+      img.src = url;
+      pic.appendChild(img);
+    }
+    wrap.appendChild(pic);
+    if (p.online != null) {
+      if (p.online) wrap.appendChild(el("span", "dk-iv-dot"));
+      wrap.title = p.online ? "Online now" : "Offline";
+    }
+    return wrap;
+  }
+
+  function openInterview(appId) {
+    if (appId != null) {
+      const id = Number(appId);
+      if (iv.sel !== id) {
+        iv.thread = null;
+        iv.typing = null;
+      }
+      iv.sel = id;
+      iv.pane = "conv";
+      const r = iv.rows.find((x) => x.appId === id);
+      if (r) iv.tab = ivGroup(r);
+    }
+    if (onInterviews()) {
+      renderInterviews();
+      syncIvWatch(true);
+      return;
+    }
+    openView({ kind: "channel", key: "interviews" });
+  }
+
+  function syncIvWatch(force) {
+    if (!socket || !isFullMod()) return;
+    const want = panelOpen && onInterviews() && iv.sel ? iv.sel : null;
+    if (want === iv.watching && !force) return;
+    iv.watching = want;
+    socket.emit("staff interview open", { appId: want });
+  }
+
+  function ivMarkRead() {
+    clearTimeout(iv.readTimer);
+    iv.readTimer = setTimeout(() => {
+      if (!iv.watching || !panelOpen || !onInterviews() || !document.hasFocus()) return;
+      const r = iv.rows.find((x) => x.appId === iv.watching);
+      if (r && r.interview && r.interview.unread)
+        socket.emit("staff interview read", { appId: iv.watching });
+    }, 400);
+  }
+
+  function renderInterviews() {
+    const main = els.main;
+    if (!main) return;
+    closeReactPicker();
+    main.textContent = "";
+    if (els.headSub) els.headSub.textContent = "#interviews";
+    els.list = null;
+    els.jump = null;
+    els.replyBar = null;
+    els.palette = null;
+    els.emotes = null;
+    els.emoteBtn = null;
+    els.composer = null;
+    els.sizeTa = null;
+    els.announceForm = null;
+    const wrap = el("div", "dk-iv");
+    const inner = el("div", "dk-iv-in" + (iv.pane === "conv" && iv.sel ? " conv" : ""));
+    const list = el("div", "dk-iv-list");
+    const conv = el("div", "dk-iv-conv");
+    inner.appendChild(list);
+    inner.appendChild(conv);
+    wrap.appendChild(inner);
+    main.appendChild(wrap);
+    ivView = { inner, list, conv, sig: null, head: null, body: null, typing: null, composer: null };
+    paintIvList();
+    paintIvConv();
+  }
+
+  function ivListSig() {
+    return JSON.stringify([
+      iv.tab,
+      iv.sel,
+      iv.loaded,
+      isLeader(),
+      iv.rows.map((r) => [
+        r.appId,
+        r.name,
+        r.status,
+        r.claimed,
+        r.online,
+        r.avatar,
+        r.interview && [r.interview.status, r.interview.unread, r.interview.last],
+        relTime((r.interview && r.interview.lastTs) || (r.status !== "pending" && r.reviewedAt) || r.submittedAt),
+      ]),
+    ]);
+  }
+
+  function paintIvList() {
+    if (!ivView || !ivView.list.isConnected) return;
+    const sig = ivListSig();
+    if (ivView.listSig === sig) return;
+    ivView.listSig = sig;
+    const host = ivView.list;
+    const old = host.querySelector(".dk-iv-rows");
+    const keep = old ? old.scrollTop : 0;
+    host.textContent = "";
+    const groups = { live: [], applied: [], decided: [] };
+    for (const r of iv.rows) groups[ivGroup(r)].push(r);
+    groups.live.sort((a, b) => (b.interview.lastTs || 0) - (a.interview.lastTs || 0));
+    groups.applied.sort((a, b) => (a.submittedAt || 0) - (b.submittedAt || 0));
+    groups.decided.sort(
+      (a, b) => (b.reviewedAt || b.submittedAt || 0) - (a.reviewedAt || a.submittedAt || 0),
+    );
+    if (!iv.tab) iv.tab = groups.applied.length || !groups.live.length ? "applied" : "live";
+
+    const tabs = el("div", "dk-iv-tabs");
+    for (const [key, label] of IV_TABS) {
+      const b = el("button", "dk-iv-tab" + (iv.tab === key ? " on" : ""));
+      b.type = "button";
+      b.appendChild(document.createTextNode(label));
+      const n = groups[key].length;
+      if (n && key !== "decided") b.appendChild(el("span", "dk-iv-tabn", String(n)));
+      if (key === "live" && groups.live.some((r) => r.interview.unread))
+        b.classList.add("hot");
+      b.addEventListener("click", () => {
+        iv.tab = key;
+        paintIvList();
+      });
+      tabs.appendChild(b);
+    }
+    host.appendChild(tabs);
+
+    const rowsEl = el("div", "dk-iv-rows");
+    const rows = groups[iv.tab] || [];
+    if (!iv.loaded) rowsEl.appendChild(el("div", "dk-iv-none", "Loading..."));
+    else if (!rows.length) rowsEl.appendChild(el("div", "dk-iv-none", IV_EMPTY[iv.tab]));
+    for (const r of rows) rowsEl.appendChild(ivRow(r));
+    host.appendChild(rowsEl);
+    rowsEl.scrollTop = keep;
+
+    host.appendChild(
+      el(
+        "div",
+        "dk-iv-foot",
+        isLeader()
+          ? "You can interview, approve, decline, and end or reopen interviews."
+          : "You can interview applicants. Mod leaders approve, decline and end interviews.",
+      ),
+    );
+  }
+
+  function ivRowLine(r) {
+    const l = r.interview && r.interview.last;
+    if (r.status === "approved") return r.claimed ? "Accepted the role" : "Offer sent, not answered yet";
+    if (r.status === "rejected") return "Declined";
+    if (r.status === "withdrawn") return "Turned the role down";
+    if (l && l.from === "system") return l.text;
+    if (l) return (l.from === "staff" ? l.by + ": " : "") + l.text;
+    return "Applied " + ivAgo(r.submittedAt);
+  }
+
+  function ivRow(r) {
+    const unread = (r.interview && r.interview.unread) || 0;
+    const b = el(
+      "button",
+      "dk-iv-row" + (r.appId === iv.sel ? " on" : "") + (unread ? " unread" : ""),
+    );
+    b.type = "button";
+    b.appendChild(ivFace(r, "md"));
+    const m = el("div", "dk-iv-rmain");
+    const top = el("div", "dk-iv-rtop");
+    top.appendChild(el("span", "dk-iv-rname", r.name));
+    const ts =
+      (r.interview && r.interview.lastTs) ||
+      (r.status !== "pending" && r.reviewedAt) ||
+      r.submittedAt;
+    const t = el("span", "dk-iv-rtime", relTime(ts));
+    if (ts) t.title = new Date(ts).toLocaleString();
+    top.appendChild(t);
+    m.appendChild(top);
+    const bottom = el("div", "dk-iv-rbot");
+    bottom.appendChild(el("span", "dk-iv-rsub", ivRowLine(r)));
+    if (unread) bottom.appendChild(el("span", "dk-b", unread > 99 ? "99+" : String(unread)));
+    m.appendChild(bottom);
+    b.appendChild(m);
+    b.addEventListener("click", () => openInterview(r.appId));
+    return b;
+  }
+
+  function ivSig(t) {
+    if (!t) return "none:" + (iv.sel || 0) + ":" + (iv.thread && iv.thread.missing ? 1 : 0);
+    return [
+      t.appId,
+      t.status,
+      t.interview ? t.interview.status : "none",
+      t.can.write ? 1 : 0,
+      t.can.start ? 1 : 0,
+      t.can.reopen ? 1 : 0,
+    ].join("|");
+  }
+
+  function paintIvConv() {
+    if (!ivView || !ivView.conv.isConnected) return;
+    const conv = ivView.conv;
+    const t = iv.thread && iv.thread.appId === iv.sel && !iv.thread.missing ? iv.thread : null;
+    const sig = ivSig(t);
+    if (ivView.sig === sig && ivView.body && conv.contains(ivView.body)) {
+      paintIvHead(t);
+      paintIvBody(t);
+      paintIvTyping();
+      return;
+    }
+    conv.textContent = "";
+    ivView.sig = sig;
+    ivView.head = null;
+    ivView.body = null;
+    ivView.typing = null;
+    ivView.composer = null;
+    if (!iv.sel) {
+      conv.appendChild(
+        ivEmpty(
+          "fa-user-pen",
+          "Pick an applicant",
+          "Their application and interview show here. Starting an interview sends them a notice, and they reply from the lobby or a room.",
+        ),
+      );
+      return;
+    }
+    if (!t) {
+      conv.appendChild(
+        el("div", "dk-empty", iv.thread && iv.thread.missing ? "That application is gone." : "Looking..."),
+      );
+      return;
+    }
+    ivView.head = el("div", "dk-iv-head");
+    ivView.headSig = null;
+    conv.appendChild(ivView.head);
+    paintIvHead(t);
+    ivView.body = el("div", "dk-iv-body");
+    ivView.bodySig = null;
+    conv.appendChild(ivView.body);
+    paintIvBody(t, true);
+    ivView.typing = el("div", "dk-iv-typing");
+    conv.appendChild(ivView.typing);
+    paintIvTyping();
+    conv.appendChild(ivFoot(t));
+  }
+
+  function ivEmpty(fa, title, text) {
+    const box = el("div", "dk-iv-empty");
+    box.appendChild(icon(fa));
+    box.appendChild(el("div", "dk-iv-empty-t", title));
+    box.appendChild(el("div", "dk-iv-empty-p", text));
+    return box;
+  }
+
+  function ivApprove(t) {
+    ask(
+      {
+        title: "Approve " + t.name,
+        message:
+          "They get an offer for the junior (L1) role on the site. Their key is made when they accept it." +
+          (t.discord
+            ? " Give @" + t.discord + " the mod role in the Talkomatic Discord once they do."
+            : ""),
+        label: "Message to them (optional)",
+        max: 300,
+        icon: '<i class="fas fa-check"></i>',
+        confirm: "Approve",
+      },
+      (reason) => {
+        lastCommandAt = Date.now();
+        socket.emit("mod application review", {
+          id: t.appId,
+          decision: "approve",
+          reason: String(reason || "").trim(),
+        });
+      },
+    );
+  }
+
+  function ivDecline(t) {
+    ask(
+      {
+        title: "Decline " + t.name,
+        message: "They see this on the site and can apply again later.",
+        label: "Message to them (optional)",
+        max: 300,
+        icon: '<i class="fas fa-xmark"></i>',
+        confirm: "Decline",
+        danger: true,
+      },
+      (reason) => {
+        lastCommandAt = Date.now();
+        socket.emit("mod application review", {
+          id: t.appId,
+          decision: "reject",
+          reason: String(reason || "").trim(),
+        });
+      },
+    );
+  }
+
+  function paintIvHead(t) {
+    const h = ivView && ivView.head;
+    if (!h || !t) return;
+    const sig = JSON.stringify([t.name, t.avatar, t.online, ivStatus(t), t.can, ivAgo(t.submittedAt)]);
+    if (ivView.headSig === sig && h.childNodes.length) return;
+    ivView.headSig = sig;
+    h.textContent = "";
+    const top = el("div", "dk-iv-htop");
+    const back = btn("dk-hbtn dk-iv-back", null, "fa-arrow-left", "All applicants");
+    back.addEventListener("click", () => {
+      iv.pane = "list";
+      if (ivView) ivView.inner.classList.remove("conv");
+    });
+    top.appendChild(back);
+    top.appendChild(ivFace({ name: t.name, avatar: t.avatar, online: t.online }, "lg"));
+    const id = el("div", "dk-iv-hid");
+    id.appendChild(el("div", "dk-iv-hname", t.name));
+    const meta = el("div", "dk-iv-hmeta");
+    const st = ivStatus(t);
+    meta.appendChild(el("span", "dk-chip dk-iv-st " + st[1], st[0]));
+    const sub = el(
+      "span",
+      "dk-iv-hsub",
+      (t.online ? "Online" : "Offline") + " · Applied " + ivAgo(t.submittedAt),
+    );
+    meta.appendChild(sub);
+    id.appendChild(meta);
+    top.appendChild(id);
+    h.appendChild(top);
+
+    const acts = el("div", "dk-iv-acts");
+    const add = (label, fa, cls, fn, title) => {
+      const b = btn("dk-minib" + (cls ? " " + cls : ""), label, fa, title);
+      b.addEventListener("click", fn);
+      acts.appendChild(b);
+      return b;
+    };
+    if (t.can.start)
+      add("Start interview", "fa-comments", "primary", () => {
+        lastCommandAt = Date.now();
+        socket.emit("staff interview start", { appId: t.appId });
+      }, "Open a chat with them. They get a notice on the site.");
+    if (t.can.reopen)
+      add("Reopen interview", "fa-rotate-left", "", () => {
+        lastCommandAt = Date.now();
+        socket.emit("staff interview start", { appId: t.appId });
+      }, "Let them write again");
+    if (t.can.end) {
+      const end = btn("dk-minib", "End interview", "fa-flag-checkered", "Close the chat for both sides. The application stays pending.");
+      armTwice(end, "End it?", () => {
+        lastCommandAt = Date.now();
+        socket.emit("staff interview end", { appId: t.appId });
+      });
+      acts.appendChild(end);
+    }
+    if (t.can.decide) {
+      add("Approve as L1", "fa-check", "primary", () => ivApprove(t));
+      add("Decline", "fa-xmark", "danger", () => ivDecline(t));
+    } else if (t.status === "pending" && !isLeader()) {
+      acts.appendChild(el("span", "dk-iv-note", "Mod leaders decide"));
+    }
+    if (acts.childNodes.length) h.appendChild(acts);
+  }
+
+  function ivAppCard(t) {
+    const hasTalk = !!(t.interview && t.interview.messages.some((m) => m.from !== "system"));
+    const open = iv.showApp.has(t.appId) ? iv.showApp.get(t.appId) : !hasTalk;
+    const card = el("div", "dk-iv-app" + (open ? " open" : ""));
+    const head = el("button", "dk-iv-apph");
+    head.type = "button";
+    head.appendChild(icon("fa-file-signature"));
+    head.appendChild(el("span", "dk-iv-appt", "Application"));
+    let when = "";
+    try {
+      when = new Date(t.submittedAt).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+    } catch (_) {}
+    head.appendChild(el("span", "dk-iv-apps", when ? "Sent " + when : ""));
+    head.appendChild(icon(open ? "fa-chevron-up" : "fa-chevron-down"));
+    head.addEventListener("click", () => {
+      iv.showApp.set(t.appId, !open);
+      paintIvBody(t, false, true);
+    });
+    card.appendChild(head);
+    if (!open) return card;
+    const b = el("div", "dk-iv-appb");
+    const chips = el("div", "dk-q-chips");
+    chips.appendChild(
+      qChip(t.discord ? "@" + t.discord : "No Discord", t.discord ? "cat" : "quiet", "fa-comments"),
+    );
+    if (t.answers.age14 && t.answers.agreed)
+      chips.appendChild(qChip("14+, terms agreed", "", "fa-file-signature"));
+    b.appendChild(chips);
+    b.appendChild(qField("Why they want to moderate", t.answers.why || "Not given"));
+    b.appendChild(qField("Moderated before", t.answers.experience || "Not given"));
+    b.appendChild(qField("Usually online", t.answers.availability || "Not given"));
+    if (t.status !== "pending") {
+      const st =
+        t.status === "approved"
+          ? "Approved"
+          : t.status === "rejected"
+            ? "Declined"
+            : "Approved, then turned down by them";
+      b.appendChild(
+        qField(
+          "Decision",
+          st + (t.reviewedBy ? " by " + t.reviewedBy : "") + (t.reviewedAt ? ", " + ivAgo(t.reviewedAt) : ""),
+        ),
+      );
+      if (t.reason) b.appendChild(qField("Message to them", t.reason, "quote"));
+    }
+    card.appendChild(b);
+    return card;
+  }
+
+  function ivReactPicker(anchor, t, m) {
+    closeReactPicker();
+    if (!els.panel) return;
+    const pop = el("div", "dk-rxp dk-iv-rxp");
+    els.react = pop;
+    const quick = el("div", "dk-rxp-q");
+    for (const e of iv.reactions) {
+      const b = el("button", "dk-rxp-b", e);
+      b.type = "button";
+      b.title = e;
+      b.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        socket.emit("staff interview react", { appId: t.appId, id: m.id, e });
+        closeReactPicker();
+      });
+      quick.appendChild(b);
+    }
+    pop.appendChild(quick);
+    pop.addEventListener("click", (ev) => ev.stopPropagation());
+    els.panel.appendChild(pop);
+    const pr = els.panel.getBoundingClientRect();
+    const ar = anchor.getBoundingClientRect();
+    let left = ar.left - pr.left;
+    let top = ar.bottom - pr.top + 6;
+    if (left + pop.offsetWidth > pr.width - 8) left = pr.width - pop.offsetWidth - 8;
+    if (left < 8) left = 8;
+    if (top + pop.offsetHeight > pr.height - 8) top = ar.top - pr.top - pop.offsetHeight - 6;
+    if (top < 8) top = 8;
+    pop.style.left = Math.round(left) + "px";
+    pop.style.top = Math.round(top) + "px";
+    setTimeout(() => document.addEventListener("click", closeReactPicker, { once: true }), 0);
+  }
+
+  function ivReactions(t, m) {
+    const wrap = el("div", "dk-rx dk-iv-rx");
+    for (const r of m.reactions || []) {
+      const c = el("button", "dk-rx-c" + (r.me ? " mine" : ""));
+      c.type = "button";
+      c.appendChild(el("span", "dk-rx-e", r.e));
+      c.appendChild(el("span", "dk-rx-n", String(r.n)));
+      c.title = (r.who || []).join(", ");
+      if (t.can.write)
+        c.addEventListener("click", (e) => {
+          e.stopPropagation();
+          socket.emit("staff interview react", { appId: t.appId, id: m.id, e: r.e });
+        });
+      else c.disabled = true;
+      wrap.appendChild(c);
+    }
+    return wrap.childNodes.length ? wrap : null;
+  }
+
+  function ivThread(host, t) {
+    const msgs = (t.interview && t.interview.messages) || [];
+    let lastStaff = -1;
+    for (let i = msgs.length - 1; i >= 0; i--)
+      if (msgs[i].from === "staff") {
+        lastStaff = i;
+        break;
+      }
+    let lastKey = null;
+    let lastTs = 0;
+    let lastDay = null;
+    msgs.forEach((m, i) => {
+      const day = dayKey(m.ts);
+      if (day !== lastDay) {
+        host.appendChild(el("div", "dk-day", dayLabel(m.ts)));
+        lastDay = day;
+        lastKey = null;
+      }
+      if (m.from === "system") {
+        const s = el("div", "dk-ap-sys", m.text + " · " + clockTime(m.ts));
+        s.title = new Date(m.ts).toLocaleString();
+        host.appendChild(s);
+        lastKey = null;
+        return;
+      }
+      const staff = m.from === "staff";
+      const key = staff ? "s:" + m.by : "a";
+      const grouped = key === lastKey && m.ts - lastTs < 5 * 60 * 1000;
+      lastKey = key;
+      lastTs = m.ts;
+      const row = el("div", "dk-ap-m dk-iv-m " + (staff ? "staff" : "user") + (grouped ? " grouped" : ""));
+      const gut = el("div", "dk-ap-gut");
+      if (!grouped) {
+        if (staff) {
+          rememberAvatar(m.by, m.avatar);
+          const f = faceEl({ label: m.by, role: m.role, level: m.level, avatar: m.avatar }, "sm");
+          f.classList.add("clickable");
+          f.title = "Open " + m.by + "'s record";
+          f.addEventListener("click", (e) => {
+            e.stopPropagation();
+            openRecord(m.by, m.role === "dev" ? "dev" : "mod", m.level);
+          });
+          gut.appendChild(f);
+        } else {
+          gut.appendChild(ivFace({ name: t.name, avatar: m.avatar || t.avatar }, "sm"));
+        }
+      }
+      row.appendChild(gut);
+      const stack = el("div", "dk-ap-stack");
+      if (!grouped) {
+        const who = el("div", "dk-ap-who");
+        if (staff) {
+          const nm = el("button", "dk-ap-name", m.by);
+          nm.type = "button";
+          nm.title = "Open " + m.by + "'s record";
+          nm.addEventListener("click", (e) => {
+            e.stopPropagation();
+            openRecord(m.by, m.role === "dev" ? "dev" : "mod", m.level);
+          });
+          who.appendChild(nm);
+          who.appendChild(rankChip(rankOf({ role: m.role, level: m.level })));
+        } else {
+          who.appendChild(el("span", "dk-ap-name plain", t.name));
+          who.appendChild(el("span", "dk-chip ghost", "APPLICANT"));
+        }
+        const tm = el("span", "dk-ap-t", clockTime(m.ts));
+        tm.title = new Date(m.ts).toLocaleString();
+        who.appendChild(tm);
+        stack.appendChild(who);
+      }
+      const bw = el("div", "dk-iv-bw");
+      const bub = el("div", "dk-ap-bub");
+      bub.appendChild(el("span", "dk-iv-txt", m.text));
+      bw.appendChild(bub);
+      if (t.can.write) {
+        const add = btn("dk-iv-add", null, "fa-face-smile", "React");
+        add.setAttribute("aria-label", "React");
+        add.addEventListener("click", (e) => {
+          e.stopPropagation();
+          ivReactPicker(add, t, m);
+        });
+        bw.appendChild(add);
+      }
+      stack.appendChild(bw);
+      const rx = ivReactions(t, m);
+      if (rx) stack.appendChild(rx);
+      if (i === lastStaff && t.interview && t.interview.applicantSeen >= m.ts)
+        stack.appendChild(el("div", "dk-iv-seen", "Seen"));
+      row.appendChild(stack);
+      host.appendChild(row);
+    });
+  }
+
+  function ivBodySig(t) {
+    const ivs = t.interview;
+    return JSON.stringify([
+      t.appId,
+      t.status,
+      t.claimed,
+      t.reviewedBy,
+      t.reviewedAt,
+      t.reason,
+      t.answers,
+      t.discord,
+      t.can,
+      iv.showApp.get(t.appId),
+      ivs ? [ivs.status, ivs.applicantSeen] : null,
+      ((ivs && ivs.messages) || []).map((m) => [
+        m.id,
+        m.text,
+        m.by,
+        m.avatar,
+        (m.reactions || []).map((r) => [r.e, r.n, r.me]),
+      ]),
+      dayKey(Date.now()),
+    ]);
+  }
+
+  function paintIvBody(t, fresh, keepPlace) {
+    const body = ivView && ivView.body;
+    if (!body || !t) return;
+    const sig = ivBodySig(t);
+    if (!fresh && !keepPlace && ivView.bodySig === sig) return;
+    ivView.bodySig = sig;
+    const atBottom = fresh || body.scrollHeight - body.scrollTop - body.clientHeight < 80;
+    const prevTop = body.scrollTop;
+    body.textContent = "";
+    body.appendChild(ivAppCard(t));
+    if (!t.interview)
+      body.appendChild(
+        el(
+          "div",
+          "dk-iv-hint",
+          t.can.start
+            ? "No interview yet. Start one to message " + t.name + "."
+            : "Decided without an interview.",
+        ),
+      );
+    ivThread(body, t);
+    if (atBottom && !keepPlace)
+      requestAnimationFrame(() => {
+        body.scrollTop = body.scrollHeight;
+      });
+    else body.scrollTop = prevTop;
+  }
+
+  function paintIvTyping() {
+    const host = ivView && ivView.typing;
+    if (!host) return;
+    const ty = iv.typing && iv.typing.until > Date.now() ? iv.typing : null;
+    host.textContent = ty ? ty.name + " is typing" : "";
+  }
+
+  function ivFoot(t) {
+    if (t.can.write) {
+      const comp = el("div", "dk-comp");
+      const ta = el("textarea", "dk-input");
+      ta.rows = 1;
+      ta.maxLength = 1000;
+      ta.placeholder = "Message " + t.name;
+      ta.setAttribute("aria-label", ta.placeholder);
+      ta.value = iv.drafts.get(t.appId) || "";
+      const size = () => {
+        ta.style.height = "auto";
+        ta.style.height = Math.max(38, Math.min(ta.scrollHeight, 120)) + "px";
+      };
+      ta.addEventListener("input", () => {
+        if (ta.value) iv.drafts.set(t.appId, ta.value);
+        else iv.drafts.delete(t.appId);
+        size();
+        const now = Date.now();
+        if (ta.value.trim() && now - iv.lastTypeSent > 1500) {
+          iv.lastTypeSent = now;
+          socket.emit("staff interview typing", { appId: t.appId });
+        }
+      });
+      const send = () => {
+        const text = ta.value.trim();
+        if (!text) return;
+        iv.lastSent = { appId: t.appId, text };
+        socket.emit("staff interview send", { appId: t.appId, text });
+        iv.drafts.delete(t.appId);
+        iv.lastTypeSent = 0;
+        ta.value = "";
+        size();
+        ta.focus();
+      };
+      ta.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          send();
+        }
+      });
+      const sb = btn("dk-send", null, "fa-paper-plane", "Send");
+      sb.addEventListener("click", send);
+      comp.appendChild(ta);
+      comp.appendChild(sb);
+      ivView.composer = ta;
+      requestAnimationFrame(size);
+      return comp;
+    }
+    let text;
+    const ivs = t.interview;
+    if (t.status === "approved")
+      text = t.claimed ? t.name + " accepted the junior mod role." : "Offer sent. " + t.name + " has not answered yet.";
+    else if (t.status === "rejected") text = "Application declined" + (t.reviewedBy ? " by " + t.reviewedBy : "") + ".";
+    else if (t.status === "withdrawn") text = t.name + " turned the role down.";
+    else if (ivs && ivs.status === "ended")
+      text =
+        "Interview ended" +
+        (ivs.endedBy ? " by " + ivs.endedBy : "") +
+        ", " +
+        ivAgo(ivs.endedAt) +
+        "." +
+        (t.can.reopen ? "" : " A mod leader can reopen it.");
+    else text = "Start an interview to message " + t.name + ".";
+    return el("div", "dk-readonly", text);
+  }
+
+  function wireInterviews() {
+    socket.on("desk ready", () => {
+      iv.watching = null;
+      if (!isFullMod()) {
+        iv.rows = [];
+        return;
+      }
+      socket.emit("staff interview list");
+      syncIvWatch();
+    });
+
+    socket.on("staff interview list", (d) => {
+      iv.rows = (d && d.rows) || [];
+      if (d && Array.isArray(d.reactions) && d.reactions.length) iv.reactions = d.reactions;
+      if (!iv.loaded && iv.sel) {
+        const r = iv.rows.find((x) => x.appId === iv.sel);
+        if (r) iv.tab = ivGroup(r);
+      }
+      iv.loaded = true;
+      if (panelOpen && onInterviews()) paintIvList();
+      renderBadges();
+    });
+
+    socket.on("staff interview row", (r) => {
+      if (!r || !r.appId) return;
+      const i = iv.rows.findIndex((x) => x.appId === r.appId);
+      const before = i >= 0 && iv.rows[i].interview ? iv.rows[i].interview.unread || 0 : 0;
+      const was = i >= 0 ? ivGroup(iv.rows[i]) : null;
+      if (i >= 0) iv.rows[i] = r;
+      else iv.rows.push(r);
+      if (r.appId === iv.sel && was !== ivGroup(r)) iv.tab = ivGroup(r);
+      const after = (r.interview && r.interview.unread) || 0;
+      const looking = iv.watching === r.appId && panelOpen && document.hasFocus();
+      if (after > before && !looking) {
+        beep();
+        if (els.pill) {
+          els.pill.classList.remove("nudge");
+          void els.pill.offsetWidth;
+          els.pill.classList.add("nudge");
+        }
+      }
+      if (looking && after) ivMarkRead();
+      if (panelOpen && onInterviews()) paintIvList();
+      renderBadges();
+    });
+
+    socket.on("staff interview", (d) => {
+      if (!d || d.appId !== iv.sel) return;
+      const prev = iv.thread && iv.thread.appId === d.appId ? iv.thread : null;
+      iv.thread = d;
+      if (iv.typing && d.interview && prev && prev.interview) {
+        const fresh = d.interview.messages.slice(prev.interview.messages.length);
+        if (fresh.some((m) => (iv.typing.applicant ? m.from === "applicant" : m.from === "staff" && m.by === iv.typing.name)))
+          iv.typing = null;
+      }
+      if (panelOpen && onInterviews()) paintIvConv();
+      ivMarkRead();
+    });
+
+    socket.on("staff interview typing", (d) => {
+      if (!d || d.appId !== iv.sel) return;
+      iv.typing = { name: d.name, applicant: !!d.applicant, until: Date.now() + 4000 };
+      paintIvTyping();
+      clearTimeout(iv.typingTimer);
+      iv.typingTimer = setTimeout(paintIvTyping, 4100);
+    });
+
+    socket.on("staff interview seen", (d) => {
+      if (!d || !iv.thread || d.appId !== iv.thread.appId || !iv.thread.interview) return;
+      iv.thread.interview.applicantSeen = d.ts;
+      if (panelOpen && onInterviews()) paintIvBody(iv.thread);
+    });
+
+    socket.on("staff interview result", (d) => {
+      if (!d) return;
+      if (!d.ok) {
+        toast(d.error || "That did not go through.");
+        if (d.action === "send" && iv.lastSent && ivView && ivView.composer && !ivView.composer.value && iv.lastSent.appId === iv.sel) {
+          ivView.composer.value = iv.lastSent.text;
+          iv.drafts.set(iv.sel, iv.lastSent.text);
+        }
+        return;
+      }
+      if (d.action === "start") {
+        const r = iv.rows.find((x) => x.appId === d.appId);
+        const who = r ? r.name : "They";
+        toast(d.reopened ? "Interview reopened. " + who + " can reply again." : "Interview started. " + who + " got a notice.");
+      }
+      if (d.action === "end") toast("Interview ended.");
+    });
+
+    window.addEventListener("focus", () => {
+      if (iv.watching) ivMarkRead();
+    });
+  }
+
   function openHelp() {
     mode = "help";
     if (els.panel) els.panel.classList.remove("rail-open", "side-open");
@@ -5867,8 +6743,9 @@
         ],
         [
           "#queues",
-          "Reports, appeals, applications and suggestions as they arrive, each a card you can act on without leaving. Every card shows at the level that can handle it: reports for all staff, appeals for full mods, applications for mod leaders.",
+          "Reports, appeals, applications and suggestions as they arrive, each a card you can act on without leaving. Every card shows at the level that can handle it: reports for all staff, appeals and applications for full mods. Approving an application is for mod leaders.",
         ],
+        ["#interviews", "Everyone who applied to mod, and a chat with each of them. Full mods and up."],
         ["#l2", "Bans, blocks and escalations. Full mods and up."],
         ["#leads", "Applications, promotions, the team. Mod leaders and devs."],
         ["#admins", "Keys, promotions, abuse flags. Admins only."],
@@ -5915,6 +6792,17 @@
         "A ban appeal is a chat, not a note. Open it from its card in #queues and ask what actually happened - they answer from their ban screen, and you both see the same thread.",
         "End chat stops them writing without deciding anything, for the one who answers every question with twenty messages. The appeal stays open and you still judge it.",
         "Declining takes a message. Whatever you write is the last thing they read on their ban screen, so a refusal is never just a closed door. Lifting a ban is an admin call.",
+      ],
+    },
+    {
+      icon: "fa-user-pen",
+      tone: "purple",
+      h: "Interviewing applicants",
+      p: [
+        "#interviews lists everyone who applied: Applied for the ones waiting, Interviewing for open chats, Decided for the last 30 days. Pick a name to read their application.",
+        "Start interview opens a chat with them. They get a notice wherever they are on the site and reply from the lobby or a room. Any full mod can start one and ask questions.",
+        "They see staff as Talkomatic staff, never your name. Admins show by name, the same as on a decision.",
+        "Mod leaders and admins end interviews, reopen them, and approve or decline from the same screen. A decision closes the interview and they read it in the chat.",
       ],
     },
     {
@@ -7800,6 +8688,99 @@
 .dk-toast.show{opacity:1;transform:translate(-50%,0);}
 .dk-panel.dk-fullpage{position:fixed;inset:0;right:0;bottom:0;width:100%;height:100%;max-height:none;
   border:none;border-radius:0;box-shadow:none;}
+.dk-panel.dk-iv-wide .dk-side{display:none;}
+@media (min-width:761px){
+  .dk-panel.dk-iv-wide .dk-body{grid-template-columns:206px minmax(0,1fr);}
+}
+.dk-iv{flex:1;min-height:0;display:flex;container-type:inline-size;}
+.dk-iv-in{flex:1;min-width:0;min-height:0;display:grid;grid-template-columns:250px minmax(0,1fr);}
+.dk-iv-list{display:flex;flex-direction:column;min-height:0;min-width:0;background: #1b1b1b;}
+.dk-iv-tabs{flex:none;display:flex;gap:10px;padding:10px 14px 0;}
+.dk-iv-tab{background:none;border:0;border-bottom:2px solid transparent;color: #8d8d8d;font:inherit;font-size:12.5px;
+  padding:6px 2px 7px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;}
+.dk-iv-tab:hover{color: #fff;}
+.dk-iv-tab.on{color: #fff;border-bottom-color: #ff9800;}
+.dk-iv-tabn{font-size:10.5px;color: #8d8d8d;font-variant-numeric:tabular-nums;}
+.dk-iv-tab.on .dk-iv-tabn{color: #c3c3c3;}
+.dk-iv-tab.hot .dk-iv-tabn{color: #ff9800;font-weight:bold;}
+.dk-iv-rows{flex:1;overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:2px;}
+.dk-iv-none{color: #8d8d8d;font-size:12.5px;text-align:center;padding:26px 8px;}
+.dk-iv-row{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:none;border:0;
+  border-radius:6px;padding:8px 9px;color: #c3c3c3;font-family:inherit;cursor:pointer;}
+.dk-iv-row:hover{background: #242424;}
+.dk-iv-row.on{background: #2e2e2e;}
+.dk-iv-rmain{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;}
+.dk-iv-rtop,.dk-iv-rbot{display:flex;align-items:center;gap:6px;min-width:0;}
+.dk-iv-rname{flex:1;min-width:0;font-weight:bold;font-size:13.5px;color: #fff;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap;}
+.dk-iv-rtime{flex:none;font-size:10.5px;color: #8d8d8d;font-variant-numeric:tabular-nums;}
+.dk-iv-rsub{flex:1;min-width:0;font-size:12px;color: #8d8d8d;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.dk-iv-row.unread .dk-iv-rsub{color: #ededed;}
+.dk-iv-foot{flex:none;padding:10px 14px 12px;font-size:11px;line-height:1.5;color: #6f6f6f;}
+.dk-iv-face{position:relative;flex:none;display:inline-flex;}
+.dk-iv-pic{position:relative;width:34px;height:34px;border-radius:50%;overflow:hidden;background: #3d3d3d;
+  color: #fff;font-weight:bold;font-size:14px;}
+.dk-iv-pic img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;}
+.dk-iv-pic.has-pic .dk-av-i{display:none;}
+.dk-iv-face.sm .dk-iv-pic{width:26px;height:26px;font-size:12px;}
+.dk-iv-face.lg .dk-iv-pic{width:40px;height:40px;font-size:16px;}
+.dk-iv-dot{position:absolute;right:-1px;bottom:-1px;width:10px;height:10px;border-radius:50%;
+  background: #57d9a3;box-shadow:0 0 0 2px #1b1b1b;}
+.dk-iv-face.lg .dk-iv-dot{box-shadow:0 0 0 2px #1d1d1d;}
+.dk-iv-conv{display:flex;flex-direction:column;min-width:0;min-height:0;}
+.dk-iv-head{flex:none;display:flex;align-items:center;gap:10px 14px;flex-wrap:wrap;padding:10px 14px;background: #1d1d1d;}
+.dk-iv-htop{display:flex;align-items:center;gap:10px;flex:1 1 200px;min-width:0;}
+.dk-iv-back{display:none;}
+.dk-iv-hid{min-width:0;display:flex;flex-direction:column;gap:4px;}
+.dk-iv-hname{font-size:15.5px;font-weight:bold;color: #fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.dk-iv-hmeta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.dk-iv-hsub{font-size:11.5px;color: #8d8d8d;}
+.dk-iv-acts{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.dk-iv-acts .dk-minib{font-size:11.5px;padding:6px 10px;}
+.dk-iv-note{font-size:11.5px;color: #8d8d8d;padding:0 4px;}
+.dk-chip.dk-iv-st.live,.dk-chip.dk-iv-st.ok{color: #57d9a3;border-color: #57d9a3;}
+.dk-chip.dk-iv-st.wait{color: #ffb454;border-color: #ffb454;}
+.dk-chip.dk-iv-st.no{color: #ff5468;border-color: #ff5468;}
+.dk-iv-body{flex:1;overflow-y:auto;overflow-x:hidden;padding:12px 14px 6px;display:flex;flex-direction:column;}
+.dk-iv-app{flex:none;background: #1b1b1b;border-radius:8px;margin-bottom:4px;}
+.dk-iv-apph{display:flex;align-items:center;gap:8px;width:100%;background:none;border:0;color: #c3c3c3;
+  font-family:inherit;font-size:12.5px;padding:10px 12px;cursor:pointer;text-align:left;}
+.dk-iv-apph:hover .dk-iv-appt{color: #ff9800;}
+.dk-iv-apph .fa-file-signature{color: #c08bff;font-size:11px;}
+.dk-iv-appt{font-weight:bold;color: #fff;}
+.dk-iv-apps{flex:1;color: #8d8d8d;font-size:11.5px;}
+.dk-iv-apph .fa-chevron-up,.dk-iv-apph .fa-chevron-down{font-size:10px;color: #8d8d8d;}
+.dk-iv-appb{display:flex;flex-direction:column;gap:10px;padding:0 12px 13px;}
+.dk-iv-hint{align-self:center;font-size:12px;color: #8d8d8d;padding:20px 8px;text-align:center;}
+.dk-iv-txt{white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;}
+.dk-iv-m .dk-rx{margin-top:1px;}
+.dk-ap-m.staff .dk-iv-rx{justify-content:flex-end;}
+.dk-iv-bw{display:flex;align-items:center;gap:6px;max-width:100%;min-width:0;}
+.dk-ap-m.staff .dk-iv-bw{flex-direction:row-reverse;}
+.dk-iv-bw .dk-ap-bub{min-width:0;}
+.dk-iv-add{flex:none;visibility:hidden;width:26px;height:26px;border-radius:50%;background: #262626;border:0;
+  color: #8d8d8d;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:12px;padding:0;}
+.dk-iv-m:hover .dk-iv-add,.dk-iv-add:focus-visible{visibility:visible;}
+.dk-iv-add:hover{color: #ff9800;background: #333;}
+.dk-iv-seen{font-size:10.5px;color: #8d8d8d;}
+.dk-iv-rxp{width:auto;}
+.dk-iv-typing{flex:none;min-height:20px;padding:1px 16px 4px;font-size:11.5px;color: #8d8d8d;font-style:italic;}
+.dk-iv-empty{margin:auto;max-width:330px;text-align:center;display:flex;flex-direction:column;align-items:center;
+  gap:8px;padding:24px;color: #8d8d8d;}
+.dk-iv-empty > .fas{font-size:22px;color: #4a4a4a;}
+.dk-iv-empty-t{font-size:14px;font-weight:bold;color: #dedede;}
+.dk-iv-empty-p{font-size:12.5px;line-height:1.55;}
+@media (hover:none){
+  .dk-iv-add{visibility:visible;}
+}
+@container (max-width:600px){
+  .dk-iv-in{grid-template-columns:minmax(0,1fr);}
+  .dk-iv-conv{display:none;}
+  .dk-iv-in.conv .dk-iv-list{display:none;}
+  .dk-iv-in.conv .dk-iv-conv{display:flex;}
+  .dk-iv-back{display:inline-flex;}
+  .dk-iv-head{padding:8px 10px;}
+}
 button.dk-chan:focus-visible,button.dk-thread:focus-visible,.dk-minib:focus-visible,
 .dk-hbtn:focus-visible,.dk-pill:focus-visible,.dk-send:focus-visible{outline:2px solid #ff9800;outline-offset:1px;}
 @media (min-width:1001px){
@@ -7861,6 +8842,12 @@ button.dk-chan:focus-visible,button.dk-thread:focus-visible,.dk-minib:focus-visi
 
   window.TalkoDesk = {
     init,
+    openInterview: (id) => {
+      if (!me || !isFullMod()) return false;
+      setOpen(true);
+      openInterview(id);
+      return true;
+    },
     open: () => setOpen(true),
     close: () => setOpen(false),
     toggle,

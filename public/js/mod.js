@@ -5678,6 +5678,19 @@
       abadge.title = "Confirmed they are 14 or older and agreed to the moderator terms.";
       meta.appendChild(abadge);
     }
+    if (a.interview) {
+      const live = a.interview.status === "open";
+      const ibadge = span("rbadge " + (live ? "on" : "count"));
+      ibadge.appendChild(icon("fa-comments"));
+      ibadge.appendChild(
+        document.createTextNode(live ? " Interviewing" : " Interviewed"),
+      );
+      ibadge.title =
+        a.interview.count +
+        (a.interview.count === 1 ? " message" : " messages") +
+        " in the interview";
+      meta.appendChild(ibadge);
+    }
     if (a.submittedAt) {
       const t = span(null, "applied " + relTime(a.submittedAt));
       t.title = fmtTime(a.submittedAt);
@@ -5767,8 +5780,18 @@
     }
     foot.appendChild(info);
 
+    const canInterview =
+      viewerIsFullMod() &&
+      window.TalkoDesk &&
+      (a.status === "pending" || a.interview);
+    if (canInterview && !(a.status === "pending" && viewerIsLeader())) {
+      const actions = divc("ac-actions");
+      actions.appendChild(interviewButton(a));
+      foot.appendChild(actions);
+    }
     if (a.status === "pending" && viewerIsLeader()) {
       const actions = divc("ac-actions");
+      if (canInterview) actions.appendChild(interviewButton(a));
       const approve = document.createElement("button");
       approve.className = "btn sm primary";
       approve.appendChild(icon("fa-check"));
@@ -5842,6 +5865,28 @@
     }
     card.appendChild(foot);
     return card;
+  }
+
+  function interviewButton(a) {
+    const b = document.createElement("button");
+    b.className = "btn sm";
+    b.appendChild(icon("fa-comments"));
+    b.appendChild(
+      document.createTextNode(
+        a.interview
+          ? a.interview.status === "open"
+            ? " Open interview"
+            : " Read interview"
+          : " Interview",
+      ),
+    );
+    b.title = "Open this applicant in #interviews on the Desk";
+    b.addEventListener("click", () => {
+      if (!window.TalkoDesk || !TalkoDesk.openInterview(a.id))
+        if (window.StaffUI)
+          StaffUI.toast("The Desk is still loading. Try again in a moment.", { type: "info" });
+    });
+    return b;
   }
 
   function renderApplicationsToggle() {
@@ -6487,6 +6532,24 @@
       "tab-reports",
       "You can warn and kick from here. Discarding a report and IP blocking are full-mod actions.",
     );
+    const appsNote = $("tab-applications")
+      ? $("tab-applications").querySelector(".ro-note")
+      : null;
+    if (viewerIsFullMod() && !viewerIsLeader()) {
+      if (!appsNote) {
+        const note = divc("ro-note");
+        note.appendChild(icon("fa-eye"));
+        note.appendChild(
+          document.createTextNode(
+            " You can read applications and interview applicants. Approving, declining and opening or closing intake belong to mod leaders.",
+          ),
+        );
+        const panel = $("tab-applications");
+        const strip = panel.querySelector(".strip");
+        panel.insertBefore(note, strip ? strip.nextSibling : panel.firstChild);
+      }
+    } else if (appsNote) appsNote.remove();
+
     readOnlyNote(
       "tab-mods",
       "Anyone on staff can read the roster. Applications, promotions, and key removals belong to mod leaders; leader keys themselves are an admin decision.",

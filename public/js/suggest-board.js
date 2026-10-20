@@ -95,6 +95,8 @@
   var isOpen = false;
   var sessionSince = 0;
   var listScroll = 0;
+  var listAnchor = null;
+  var restorePending = false;
   var knownIds = null;
   var readAt = lsJSON(READ_KEY) || {};
   var replyDrafts = {};
@@ -233,9 +235,11 @@
 
   function autogrow(ta, max) {
     var cap = max || 320;
+    var keep = main ? main.scrollTop : 0;
     ta.style.height = "auto";
     ta.style.height = Math.min(cap, ta.scrollHeight) + "px";
     ta.style.overflowY = ta.scrollHeight > cap ? "auto" : "hidden";
+    if (main) main.scrollTop = keep;
   }
 
   function statusLabel(st, kind) {
@@ -518,6 +522,10 @@
         return;
       }
       render();
+      if (restorePending && view.name === "list") {
+        restorePending = false;
+        restoreList();
+      }
     });
     socket.on("board result", onResult);
   }
@@ -549,15 +557,34 @@
 
   // ── Navigation ────────────────────────────────────────────────────────────
 
+  function rowTop(id) {
+    if (!listEl || id == null) return null;
+    var row = listEl.querySelector('.sb-row[data-id="' + id + '"]');
+    return row ? row.getBoundingClientRect().top - main.getBoundingClientRect().top : null;
+  }
+
+  function rememberList(id) {
+    listScroll = main.scrollTop;
+    var top = rowTop(id);
+    listAnchor = top == null ? null : { id: id, offset: top };
+  }
+
+  function restoreList() {
+    main.scrollTop = listScroll;
+    if (!listAnchor) return;
+    var top = rowTop(listAnchor.id);
+    if (top != null) main.scrollTop += top - listAnchor.offset;
+  }
+
   function goList() {
     view = { name: "list", id: null };
     editing = null;
     render();
-    main.scrollTop = listScroll;
+    restoreList();
   }
 
   function openThread(id) {
-    if (view.name === "list") listScroll = main.scrollTop;
+    if (view.name === "list") rememberList(id);
     view = { name: "thread", id: id };
     editing = null;
     markRead(id);
@@ -611,6 +638,7 @@
         function () {
           tab = t[0];
           listScroll = 0;
+          listAnchor = null;
           goList();
         },
       );
@@ -921,6 +949,7 @@
       "article",
       "sb-row" + (p.status === "declined" ? " is-declined" : "") + (unread.any ? " is-unread" : ""),
     );
+    row.setAttribute("data-id", String(p.id));
     row.appendChild(voteBlock(p, "col"));
 
     var body = el("div", "sb-row-body");
@@ -1584,6 +1613,10 @@
 
   function open(startTab) {
     build();
+    if (startTab && startTab !== tab) {
+      listScroll = 0;
+      listAnchor = null;
+    }
     if (startTab) tab = startTab;
     sessionSince = lastSeen();
     view = { name: "list", id: null };
@@ -1594,11 +1627,15 @@
     socket.emit("suggest board open");
     markSeen();
     renderBadges(null);
-    if (board) render();
+    if (board) {
+      render();
+      restoreList();
+    } else restorePending = true;
   }
 
   function close() {
     if (!isOpen) return;
+    if (view.name === "list") rememberList(null);
     isOpen = false;
     editing = null;
     overlay.classList.remove("show");
