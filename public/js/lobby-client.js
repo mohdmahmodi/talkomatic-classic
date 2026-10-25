@@ -640,6 +640,10 @@ socket.on("connect_error", (error) => {
   updateConnectionStatus();
 });
 
+socket.on("kicked", (data) => {
+  if (data && data.blocked) window.location.reload();
+});
+
 socket.on("reconnect", (attemptNumber) => {
   console.log(`Reconnected after ${attemptNumber} attempts`);
   updateConnectionStatus();

@@ -21,6 +21,7 @@ const {
   isReservedName,
   isGuestName,
   isListedName,
+  isListedText,
   tuned,
 } = require("./state");
 const {
@@ -2036,6 +2037,7 @@ function banDetailsFor(key, view) {
       at: block.ts || block.since || 0,
       by: block.by || null,
       byRole: block.byRole || null,
+      auditId: block.auditId || null,
     },
     view,
   );
@@ -2054,7 +2056,16 @@ function banEventSpot(eventId) {
     const held = near.map((x) => state.blockedIPs.get(x.ip)).find((b) => b && typeof b === "object" && b.did);
     did = held ? held.did : null;
   }
-  return { did, at: e.at, by: e.by || null, byRole: e.byRole || null, keys: near.map((x) => x.ip), name: e.name || null };
+  const stamped = near.map((x) => state.blockedIPs.get(x.ip)).find((b) => b && typeof b === "object" && b.auditId);
+  return {
+    did,
+    at: e.at,
+    by: e.by || null,
+    byRole: e.byRole || null,
+    keys: near.map((x) => x.ip),
+    name: e.name || null,
+    auditId: stamped ? stamped.auditId : null,
+  };
 }
 
 function banDetailsAt(spot, view) {
@@ -2064,6 +2075,7 @@ function banDetailsAt(spot, view) {
   const showIp = !!(view && view.ip);
   const hidden = !showIp && roles.isMainDevActor(spot.by, spot.byRole);
   let entry = did && at && spot.by && !hidden ? audit.blockEntryNear({ deviceId: did }, at, spot.by) : null;
+  if (!entry && !spot.by && spot.auditId) entry = audit.getEntry(spot.auditId);
   if (!entry && !hidden && at && spot.by && (spot.keys || spot.name)) {
     const keys = new Set(spot.keys || []);
     const name = spot.name ? String(spot.name).toLowerCase() : null;
@@ -3250,7 +3262,7 @@ async function floodGuardSigninFlood(socket, username, location, hit) {
   for (const s of affected) {
     try {
       const uid = s.handshake?.session?.userId;
-      s.emit("kicked", { message: "Your connection has been blocked by staff." });
+      s.emit("kicked", { message: "Your connection has been blocked by staff.", blocked: true });
       if (s.roomId && uid) await leaveRoom(s, uid);
       s.disconnect(true);
     } catch (_) {}
@@ -3373,6 +3385,87 @@ async function settleNamePolicy(socket, username) {
       const uid = s.handshake?.session?.userId;
       s.emit("kicked", {
         message: "Your connection has been blocked by staff.",
+        blocked: true,
+      });
+      if (s.roomId && uid) await leaveRoom(s, uid);
+      s.disconnect(true);
+    } catch (_) {}
+  }
+}
+
+const TEXT_BLOCK_REASON = "Rule 4 - Hate speech is not tolerated. Automod: slur typed in chat.";
+
+async function settleTextPolicy(socket, userId) {
+  if (socket._textBlocked) return;
+  socket._textBlocked = true;
+  const ip = socket.clientIp || null;
+  const did = socket.deviceId || null;
+  const roomId = socket.roomId || null;
+  const room = roomId ? state.rooms.get(roomId) : null;
+  const targetUser = room ? room.users.find((u) => u.id === userId) : null;
+  const username = socket.handshake?.session?.username || targetUser?.username || null;
+  const receipt = receipts.capture({
+    socket: null,
+    action: "ban ip permanent",
+    targetUserId: userId,
+    targetUser,
+    targetSocket: socket,
+    room,
+    reason: TEXT_BLOCK_REASON,
+  });
+
+  const keys = [];
+  if (ip) keys.push(ipban.computeRangeCidr(ip) || ip);
+  if (did) keys.push(ipban.idKey(did));
+  const ts = Date.now();
+  for (const key of keys) {
+    placeBlock(key, {
+      expiry: Number.MAX_SAFE_INTEGER,
+      label: username,
+      by: null,
+      ts,
+      reason: TEXT_BLOCK_REASON,
+      did,
+    });
+    banhistory.record({
+      ip: key,
+      name: username,
+      action: "ban",
+      reason: TEXT_BLOCK_REASON,
+      duration: "permanent",
+    });
+  }
+  if (keys.length) {
+    const entry = audit.recordAction({
+      roleTag: "auto",
+      label: banstatus.AUTOMOD,
+      action: "ban ip permanent",
+      target: `user:${username || "?"}(${userId})`,
+      room: room ? `room:${room.name || "?"}(${room.id})` : null,
+      details: TEXT_BLOCK_REASON,
+      tgt: { uid: userId, did, ip: receipt.target.ip, net: receipt.target.net },
+      receipt,
+    });
+    if (entry && entry.id) stampBlocks(keys, entry.id);
+    settlePersonBlocks({ deviceId: did, ip });
+    blocklist.saveSoon();
+    evasion.invalidate();
+    broadcastBlockList();
+    broadcastBanHistory();
+    automod.noteTextBlock(socket, username, { roomName: room ? room.name : null, at: ts, said: receipt.text });
+  }
+
+  const affected = new Set([socket]);
+  if (ip) for (const s of findSocketsByIp(ip)) if (!s.isDev && !s.isMod) affected.add(s);
+  if (did && io())
+    for (const [, s] of io().sockets.sockets)
+      if (s.deviceId === did && !s.isDev && !s.isMod) affected.add(s);
+  for (const s of affected) {
+    try {
+      const uid = s.handshake?.session?.userId;
+      s.emit("kicked", {
+        message: "Your connection has been blocked by staff.",
+        blocked: true,
       });
       if (s.roomId && uid) await leaveRoom(s, uid);
       s.disconnect(true);
@@ -3397,6 +3490,7 @@ async function kickEvasionBlocked(keys, did) {
       const uid = s.handshake?.session?.userId;
       s.emit("kicked", {
         message: "Your connection has been blocked by staff.",
+        blocked: true,
       });
       if (s.roomId && uid) await leaveRoom(s, uid);
       s.disconnect(true);
@@ -4558,6 +4652,13 @@ async function processPendingChatUpdates(userId, socket) {
     msg = sanitizeMessage(msg);
     buffertrail.noteChange(userId, state.getBuffer(userId, socket.roomId), msg);
     state.setBuffer(userId, socket.roomId, msg);
+
+    if (!socket.isDev && !socket.isMod && isListedText(msg)) {
+      state.pendingChatUpdates.delete(userId);
+      return settleTextPolicy(socket, userId).catch((e) =>
+        console.error("text policy failed:", e),
+      );
+    }
 
     if (linkfilter.containsLink(msg)) armLinkSweep(socket, userId);
     else cancelLinkSweep(userId);
@@ -7755,6 +7856,7 @@ function registerSocketHandlers(opts) {
             const uid = s.handshake?.session?.userId;
             s.emit("kicked", {
               message: "Your connection has been blocked by staff.",
+              blocked: true,
             });
             if (s.roomId && uid) await leaveRoom(s, uid);
             s.disconnect(true);
@@ -7969,6 +8071,7 @@ function registerSocketHandlers(opts) {
             const uid = s.handshake?.session?.userId;
             s.emit("kicked", {
               message: "Your connection has been blocked by staff.",
+              blocked: true,
             });
             if (s.roomId && uid) await leaveRoom(s, uid);
             s.disconnect(true);

@@ -476,7 +476,7 @@ io.use((socket, next) => {
     });
     const botToken =
       socket.handshake.auth.token || socket.handshake.query.token;
-    const browser = detectBrowserRequest(socket.handshake);
+    const detected = detectBrowserRequest(socket.handshake);
 
     // Device identity. The server-signed cookie is authoritative when
     // present; the client-supplied id stays as the fallback for cookie-less
@@ -685,7 +685,7 @@ io.use((socket, next) => {
 
     if (
       CONFIG.FEATURES.ENABLE_STRICT_ANTIBOT &&
-      !browser.isBrowser &&
+      !detected.isBrowser &&
       !socket.isDev &&
       !socket.isMod
     ) {
@@ -704,7 +704,7 @@ io.use((socket, next) => {
         socket.isBot = true;
         socket.botToken = tokenData;
       } else return next(new Error("Automated access blocked"));
-    } else if (botToken && browser.isBrowser)
+    } else if (botToken && detected.isBrowser)
       return next(new Error("Bot tokens not allowed in browsers"));
 
     ipRateLimiter
@@ -715,7 +715,7 @@ io.use((socket, next) => {
           return next(new Error("Too many connections"));
         state.ipConnections.set(clientIp, count + 1);
         socket.clientIp = clientIp;
-        socket.browserDetection = browser;
+        socket.browserDetection = detected;
 
         // Tied to the engine connection, not the "connection" event: a
         // handshake that dies in a later middleware step never reaches the

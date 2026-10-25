@@ -3707,6 +3707,10 @@ socket.on("links not allowed", () => {
 socket.on("update votes", updateVotesUI);
 
 socket.on("kicked", (data) => {
+  if (data && data.blocked) {
+    window.location.href = "/";
+    return;
+  }
   showInfoModal(
     (data && data.message) ||
     "You have been removed from the room by a majority vote.",

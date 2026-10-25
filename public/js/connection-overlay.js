@@ -223,11 +223,11 @@
         armOverlay(GRACE_DROP);
       });
       socket.on("connect_error", function (err) {
-        if (
-          restarting ||
-          (err && err.data && (err.data.banned || err.data.ackRequired))
-        )
+        if (err && err.data && (err.data.banned || err.data.ackRequired)) {
+          disarmOverlay();
           return;
+        }
+        if (restarting) return;
         armOverlay(everConnected ? GRACE_DROP : GRACE_FIRST);
         // A middleware denial ("Too many connections") is final to socket.io:
         // it stops trying on its own. Keep knocking until a slot frees up,

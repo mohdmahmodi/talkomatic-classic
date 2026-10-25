@@ -1671,6 +1671,34 @@ function noteAutoBlock(socket, username, info) {
   }
 }
 
+function noteTextBlock(socket, username, info) {
+  if (!ctx || !socket || socket.isDev || socket.isMod) return;
+  try {
+    const who = whoFrom(socket);
+    if (username) who.name = username;
+    const i = info || {};
+    const said = String(i.said || "").replace(/\s+/g, " ").replace(/\|/g, "/").trim();
+    event(
+      "textblock",
+      who,
+      noName(who) + " blocked for a slur in " + (i.roomName || "a room"),
+      {
+        chips: ["Blocked", "Permanent"],
+        facts: [
+          "Rule|4, hate speech",
+          ...(said ? ["Their box|" + (said.length > 200 ? said.slice(0, 200) + "..." : said)] : []),
+          "Action taken|network and browser blocked, removed from the room|appeal open",
+        ],
+        roomName: i.roomName || null,
+        ...(i.at ? { itemId: i.at } : {}),
+      },
+      { force: true },
+    );
+  } catch (e) {
+    console.error("automod text block note failed:", e.message);
+  }
+}
+
 function noteFlood(socket) {
   if (!plain(socket)) return;
   try {
@@ -2025,6 +2053,7 @@ module.exports = {
   noteKnock,
   noteEvasion,
   noteAutoBlock,
+  noteTextBlock,
   noteFlood,
   notePoll,
   noteName,

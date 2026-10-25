@@ -410,6 +410,41 @@ function isListedName(name) {
   return NAME_LIST.some((v) => key.includes(v));
 }
 
+const TEXT_LIST = (process.env.BLOCKER_TEXT || "")
+  .split(",")
+  .map((v) => v.trim().toLowerCase())
+  .filter((v) => v.length >= 3);
+
+let textFilter = null;
+if (TEXT_LIST.length && wordFilter instanceof WordFilter) {
+  try {
+    const dir = path.join(__dirname, "..", "public", "js");
+    const data = JSON.parse(require("fs").readFileSync(path.join(dir, "offensive_words.json"), "utf8"));
+    const dictionary = JSON.parse(require("fs").readFileSync(path.join(dir, "dictionary_words.json"), "utf8"));
+    textFilter = Object.create(wordFilter);
+    textFilter.cache = new Map();
+    textFilter.lineCache = new Map();
+    textFilter.buildTries(TEXT_LIST, data.whitelisted_words, data.common_words, dictionary);
+  } catch (e) {
+    console.error("text list failed:", e.message);
+    textFilter = null;
+  }
+}
+
+function isListedText(text) {
+  if (!textFilter || typeof text !== "string" || text.length < 3) return false;
+  try {
+    if (textFilter.checkText(text).hasOffensiveWord) return true;
+    if (!/l/i.test(text)) return false;
+    const swapped = text.replace(/\S+/g, (tok) =>
+      textFilter.dictionary.has(tok.toLowerCase().replace(/[^a-z]/g, "")) ? tok : tok.replace(/l/gi, "i"),
+    );
+    return swapped !== text && textFilter.checkText(swapped).hasOffensiveWord;
+  } catch (_) {
+    return false;
+  }
+}
+
 // ── Exports ─────────────────────────────────────────────────────────────────
 
 module.exports = {
@@ -432,4 +467,5 @@ module.exports = {
   isReservedName,
   isGuestName,
   isListedName,
+  isListedText,
 };
