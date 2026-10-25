@@ -85,6 +85,27 @@
   .tk-item .tk-idesc{font-size:12px;color:#9a9a9a;margin-top:2px;line-height:1.4;word-break:break-word;}
   button.tk-item::after{content:"›";color:#616161;font-size:19px;line-height:1;flex:none;font-weight:bold;margin-left:2px;transition:color .15s;}
   button.tk-item:hover::after{color:#ff9800;}
+  button.tk-item.tk-sw-item::after,button.tk-item.tk-has-val::after{display:none;}
+  .tk-ival{flex:none;max-width:45%;font-size:12px;color:#ededed;background:#2a2a2a;padding:3px 8px;
+    border-radius:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .tk-ival.tk-ival-go::after{content:" ›";color:#9a9a9a;font-weight:bold;}
+  .tk-sw{flex:none;display:flex;align-items:center;gap:7px;font-size:11.5px;font-weight:bold;color:#8d8d8d;}
+  .tk-sw-track{position:relative;width:36px;height:20px;border-radius:10px;background:#3a3a3a;transition:background .15s;}
+  .tk-sw-track::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;
+    background:#bdbdbd;transition:transform .15s,background .15s;}
+  .tk-sw.on{color:#ff9800;}
+  .tk-sw.on .tk-sw-track{background:rgba(255,152,0,.45);}
+  .tk-sw.on .tk-sw-track::after{transform:translateX(16px);background:#ff9800;}
+  .tk-sw.unknown .tk-sw-track{opacity:.4;}
+  .tk-sum{background:#1b1b1b;border-radius:5px;padding:4px 0;margin:0 0 6px;font-size:12.5px;}
+  .tk-sum-row{display:flex;gap:10px;padding:5px 12px;align-items:baseline;}
+  .tk-sum-l{flex:0 0 84px;color:#9a9a9a;font-size:11.5px;}
+  .tk-sum-v{flex:1;min-width:0;color:#fff;word-break:break-word;}
+  .tk-psearch{position:sticky;top:-14px;z-index:2;background:#202020;margin:-14px 0 4px;padding:14px 0 10px;}
+  .tk-psearch .tk-input{padding-left:32px;}
+  .tk-psearch i{position:absolute;left:11px;top:calc(50% + 2px);transform:translateY(-50%);color:#8d8d8d;font-size:13px;}
+  @media (max-width:640px){.tk-psearch .tk-input{font-size:16px;}}
+  .tk-pempty{display:none;color:#9a9a9a;font-size:12.5px;text-align:center;padding:18px 8px;}
   .tk-item.tk-d .tk-ilabel{color:#ff8a8e;}
   .tk-item.tk-d:hover{border-color:#ff5468;background:#241416;}
   button.tk-item.tk-d:hover::after{color:#ff5468;}
@@ -682,38 +703,135 @@
     });
   }
 
+  // An item with `state` (true/false) draws a switch; `null` means not known
+  // yet. `value` draws a chip with the current setting on the right.
+  function fillItem(btn, it) {
+    btn.textContent = "";
+    const isSwitch = "state" in it;
+    btn.className =
+      "tk-item" +
+      (it.danger ? " tk-d" : "") +
+      (isSwitch ? " tk-sw-item" : "") +
+      (!isSwitch && it.value != null ? " tk-has-val" : "");
+    btn.disabled = !!it.disabled;
+    const tone = it.tone || (it.danger ? "danger" : iconTone(it.icon));
+    btn.appendChild(iconNode(it.icon || "•", "tk-iico t-" + tone));
+    const tx = el("div", { class: "tk-itxt" });
+    tx.appendChild(el("div", { class: "tk-ilabel", text: it.label }));
+    if (it.desc) tx.appendChild(el("div", { class: "tk-idesc", text: it.desc }));
+    btn.appendChild(tx);
+    if (isSwitch) {
+      const known = typeof it.state === "boolean";
+      btn.setAttribute("role", "switch");
+      btn.setAttribute("aria-checked", it.state ? "true" : "false");
+      const sw = el("div", {
+        class: "tk-sw" + (it.state ? " on" : "") + (known ? "" : " unknown"),
+      });
+      sw.appendChild(el("span", { text: known ? (it.state ? "On" : "Off") : "" }));
+      sw.appendChild(el("span", { class: "tk-sw-track" }));
+      btn.appendChild(sw);
+    } else {
+      btn.removeAttribute("role");
+      btn.removeAttribute("aria-checked");
+      if (it.value != null)
+        btn.appendChild(
+          el("div", { class: "tk-ival tk-ival-go", text: String(it.value) }),
+        );
+    }
+  }
+
+  function fillRows(box, rows) {
+    box.textContent = "";
+    (rows || []).forEach(([label, value]) => {
+      const r = el("div", { class: "tk-sum-row" });
+      r.appendChild(el("div", { class: "tk-sum-l", text: label }));
+      r.appendChild(el("div", { class: "tk-sum-v", text: value }));
+      box.appendChild(r);
+    });
+  }
+
   function renderGroups(groups, getClose, closeOnClick) {
     const wrap = el("div");
     (groups || []).forEach((g) => {
       const gEl = el("div", { class: "tk-group" });
       if (g.title)
         gEl.appendChild(el("div", { class: "tk-gtitle", text: g.title }));
+      if (g.rows) {
+        const box = el("div", { class: "tk-sum" });
+        if (g.id) box.id = g.id;
+        fillRows(box, g.rows);
+        gEl.appendChild(box);
+      }
       (g.items || []).forEach((it) => {
-        const btn = el("button", {
-          class: "tk-item" + (it.danger ? " tk-d" : ""),
-          type: "button",
-        });
+        const btn = el("button", { type: "button" });
         if (it.id) btn.id = it.id;
-        if (it.disabled) btn.disabled = true;
-        const tone = it.tone || (it.danger ? "danger" : iconTone(it.icon));
-        btn.appendChild(iconNode(it.icon || "•", "tk-iico t-" + tone));
-        const tx = el("div", { class: "tk-itxt" });
-        tx.appendChild(el("div", { class: "tk-ilabel", text: it.label }));
-        if (it.desc)
-          tx.appendChild(el("div", { class: "tk-idesc", text: it.desc }));
-        btn.appendChild(tx);
+        btn._tkItem = it;
+        fillItem(btn, it);
         btn.addEventListener("click", () => {
-          if (closeOnClick && !it.keepOpen) {
+          const cur = btn._tkItem;
+          if (closeOnClick && !cur.keepOpen) {
             const c = getClose && getClose();
             if (c) c();
           }
-          if (it.onClick) it.onClick();
+          if (cur.onClick) cur.onClick();
         });
         gEl.appendChild(btn);
       });
       wrap.appendChild(gEl);
     });
     return wrap;
+  }
+
+  // Live refresh for an open panel or menu: merge `patch` into the item.
+  function updateItem(id, patch) {
+    const btn = document.getElementById(id);
+    if (!btn || !btn._tkItem) return;
+    btn._tkItem = Object.assign({}, btn._tkItem, patch);
+    fillItem(btn, btn._tkItem);
+  }
+
+  function updateRows(id, rows) {
+    const box = document.getElementById(id);
+    if (box) fillRows(box, rows);
+  }
+
+  function addSearch(body, list) {
+    const box = el("div", { class: "tk-psearch" });
+    box.appendChild(el("i", { class: "fas fa-magnifying-glass" }));
+    const input = el("input", {
+      class: "tk-input",
+      type: "search",
+      placeholder: "Search tools",
+      "aria-label": "Search tools",
+    });
+    box.appendChild(input);
+    const empty = el("div", { class: "tk-pempty", text: "No tools match." });
+    body.appendChild(box);
+    body.appendChild(list);
+    body.appendChild(empty);
+    input.addEventListener("input", () => {
+      const q = input.value.trim().toLowerCase();
+      let shown = 0;
+      list.querySelectorAll(".tk-group").forEach((g) => {
+        let inGroup = 0;
+        g.querySelectorAll(".tk-item").forEach((btn) => {
+          const it = btn._tkItem || {};
+          const hay = [it.label, it.desc, it.keywords, it.value]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase();
+          const hit = !q || hay.includes(q);
+          btn.style.display = hit ? "" : "none";
+          if (hit) inGroup++;
+        });
+        const sum = g.querySelector(".tk-sum");
+        if (sum) sum.style.display = q ? "none" : "";
+        g.style.display = inGroup || (!q && sum) ? "" : "none";
+        shown += inGroup;
+      });
+      empty.style.display = shown ? "none" : "block";
+    });
+    return input;
   }
 
   function menu(opts) {
@@ -871,7 +989,11 @@
     panelEl.appendChild(head);
 
     const body = el("div", { class: "tk-pbody" });
-    body.appendChild(renderGroups(o.groups, () => close, false));
+    // groups can be a function so a re-dock rebuilds with current state
+    const groups = typeof o.groups === "function" ? o.groups() : o.groups;
+    const list = renderGroups(groups, () => close, false);
+    if (o.search) addSearch(body, list);
+    else body.appendChild(list);
     panelEl.appendChild(body);
 
     if (mode === "drawer") {
@@ -1251,22 +1373,22 @@
         [
           "Clear Talkoboard",
           "jr",
-          "Wipes the shared drawing board for the room.",
+          "Erases every drawing on the room's shared board, after a confirm.",
         ],
         [
-          "Rename room",
+          "Room name",
           "jr",
           "Fixes a bad or misleading room name. Everyone in the room is told, and it is logged.",
         ],
         [
-          "Lock room",
+          "Locked",
           "jr",
-          "Blocks new joins; people already inside stay. Good for calming a raid.",
+          "Switch. Nobody new can join; people already inside stay. Good for calming a raid.",
         ],
         [
           "Slow mode",
           "jr",
-          "Throttles how fast the room updates for everyone.",
+          "Switch. Typing reaches everyone in slower batches, which calms spam.",
         ],
         [
           "Close room",
@@ -1274,20 +1396,30 @@
           "Kicks everyone and deletes the room (for slur names / spam farms).",
         ],
         [
-          "Megaphone (this room)",
+          "Announcement",
           "mod",
           "Shows an announcement banner to everyone in the room you are in.",
         ],
-        ["Party mode", "dev", "Confetti + party horn for the whole room."],
+        [
+          "Room size",
+          "dev",
+          "Most people allowed in this room (2 to 50). Going below the current count removes the newest non-staff users.",
+        ],
+        ["Party mode", "dev", "Confetti and a party horn for the whole room."],
         [
           "Spotlight",
           "dev",
           "Pins the room to the top of the lobby with an Official badge.",
         ],
         [
-          "Server HUD",
+          "Server stats overlay",
           "dev",
-          "Live overlay of sockets / rooms / heap / solo-TTL.",
+          "Live overlay of sockets, rooms, users and memory.",
+        ],
+        [
+          "Whole server",
+          "dev",
+          "Word filter, room creation, room limit, maintenance, announcement everywhere, lobby ticker and close every room, all in the room's Staff tools.",
         ],
       ],
     },
@@ -2384,6 +2516,8 @@
     prompt,
     menu,
     panel,
+    updateItem,
+    updateRows,
     toast,
     actionToast,
     copy,

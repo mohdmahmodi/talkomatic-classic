@@ -2722,21 +2722,11 @@ socket.on("dev context", (ctx) => {
   renderDevContext();
 });
 
-function setStaffItemLabel(id, label) {
-  const item = document.getElementById(id);
-  if (!item) return;
-  const lbl = item.querySelector(".tk-ilabel");
-  if (lbl) lbl.textContent = label;
-}
-
 socket.on("dev vanish status", (data) => {
   currentUserIsVanished = !!data?.isVanished;
   const button = document.getElementById("devVanishToggle");
   updateDevVanishButton(button);
-  setStaffItemLabel(
-    "staffVanishItem",
-    currentUserIsVanished ? "Vanish: ON" : "Vanish: OFF",
-  );
+  refreshStaffPanel();
 });
 
 socket.on("dev hide status", (data) => {
@@ -2749,10 +2739,7 @@ socket.on("dev hide status", (data) => {
   } catch (_) { }
   const button = document.getElementById("devHideToggle");
   updateDevHideButton(button);
-  setStaffItemLabel(
-    "staffHideItem",
-    currentUserIsHidden ? "Show my flair" : "Hide my flair",
-  );
+  refreshStaffPanel();
   refreshCurrentUserAppearance();
   renderDevContext();
 });
@@ -3246,6 +3233,7 @@ function updateRoomInfo(data) {
   if (idEl) idEl.textContent = `Room ID: ${data.roomId || currentRoomId}`;
 
   const roomType = data.roomType || data.type;
+  if (roomType) currentRoomType = roomType;
   if (typeEl && roomType) {
     typeEl.textContent = `${getRoomTypeDisplay(roomType) || "Public"} room`;
   }
@@ -3690,10 +3678,7 @@ function toggleFakeAfk() {
       }, 0);
     if (window.toastr) toastr.info("Fake AFK is off. You can type again.");
   }
-  setStaffItemLabel(
-    "staffFakeAfkItem",
-    fakeAfkActive ? "Fake AFK: ON" : "Fake AFK: OFF",
-  );
+  refreshStaffPanel();
 }
 
 socket.on("links not allowed", () => {
@@ -4330,6 +4315,9 @@ let currentRoomLocked = false;
 let currentRoomSlow = false;
 let currentRoomSpotlight = false;
 let currentRoomMaxSize = 0;
+let currentRoomCapacity = 0;
+let currentRoomUserCount = 0;
+let currentRoomType = "";
 let hudInterval = null;
 let partyHornAudio = null;
 
@@ -4884,31 +4872,130 @@ function createStaffPanelButton() {
   else navRight.appendChild(button);
 }
 
-function openStaffPanel() {
-  if (!window.StaffUI) return;
+// The panel stays open while you work, so every item has an id and
+// refreshStaffPanel() redraws its state when the server confirms a change.
+let serverFlags = null;
+
+function roomSizeText() {
+  const cap = currentRoomCapacity || currentRoomMaxSize;
+  return cap ? `${cap} people` : "Default";
+}
+
+function staffRoomRows() {
+  const rows = [["Name", currentRoomName || "Untitled"]];
+  const cap = currentRoomCapacity || currentRoomMaxSize;
+  if (cap) rows.push(["People", `${currentRoomUserCount} of ${cap}`]);
+  if (currentRoomType)
+    rows.push(["Type", getRoomTypeDisplay(currentRoomType) || "Public"]);
+  const status = [];
+  if (currentRoomLocked) status.push("Locked");
+  if (currentRoomSlow) status.push("Slow mode");
+  if (currentRoomSpotlight) status.push("Spotlight");
+  rows.push(["Status", status.length ? status.join(", ") : "Open"]);
+  return rows;
+}
+
+function staffNameColor() {
+  try {
+    return localStorage.getItem("talkomatic_devColor") || "";
+  } catch (_) {
+    return "";
+  }
+}
+
+function refreshStaffPanel() {
+  if (!window.StaffUI || !StaffUI.updateItem) return;
+  const u = StaffUI.updateItem;
+  StaffUI.updateRows("staffRoomSummary", staffRoomRows());
+  u("staffSizeItem", { value: roomSizeText() });
+  u("staffNameItem", { value: currentRoomName || "Untitled" });
+  u("staffLockItem", { state: currentRoomLocked });
+  u("staffSlowItem", { state: currentRoomSlow });
+  u("staffSpotlightItem", { state: currentRoomSpotlight });
+  u("staffHideItem", { state: !currentUserIsHidden });
+  u("staffVanishItem", { state: currentUserIsVanished });
+  u("staffFakeAfkItem", { state: fakeAfkActive });
+  u("staffIpItem", { state: devShowIP });
+  u("staffColorItem", { value: staffNameColor() || "Default" });
+  u("staffHudItem", { state: !!document.getElementById("devHud") });
+  const f = serverFlags;
+  u("staffFilterItem", { state: f ? !!f.wordFilter : null });
+  u("staffCreationItem", { state: f ? !!f.roomCreation : null });
+  u("staffMaintItem", { state: f ? !!f.maintenance : null });
+  u("staffRoomLimitItem", { value: f ? String(f.baseMaxRooms) : "..." });
+}
+
+async function promptRoomSize() {
+  const cap = currentRoomCapacity || currentRoomMaxSize || 10;
+  const v = await StaffUI.prompt({
+    title: "Room size",
+    icon: '<i class="fas fa-users"></i>',
+    subtitle: currentRoomName || "this room",
+    fields: [
+      {
+        name: "value",
+        label: "Most people allowed in this room",
+        type: "number",
+        value: String(cap),
+        required: true,
+        help: `2 to 50. ${currentRoomUserCount} in the room now. Going below that removes the newest non-staff users. Other rooms are not changed.`,
+      },
+    ],
+    confirmText: "Set size",
+  });
+  const n = parseInt(v, 10);
+  if (!Number.isFinite(n)) return;
+  if (n < 2 || n > 50) {
+    notify("Room size must be between 2 and 50.", "error");
+    return;
+  }
+  if (
+    n < currentRoomUserCount &&
+    !(await StaffUI.confirm({
+      title: "Room size",
+      message: `${currentRoomUserCount - n} people will be removed from the room to fit ${n}.`,
+      danger: true,
+      confirmText: "Set size",
+    }))
+  )
+    return;
+  socket.emit("dev set room size", { roomId: currentRoomId, size: n });
+}
+
+function staffPanelGroups() {
   const rid = currentRoomId;
   const isFullMod =
     currentUserIsDev || (currentUserIsMod && currentUserModLevel >= 2);
-  const roomItems = [
+  const groups = [];
+
+  groups.push({
+    title: "This room",
+    id: "staffRoomSummary",
+    rows: staffRoomRows(),
+  });
+
+  const settings = [];
+  if (currentUserIsDev)
+    settings.push({
+      id: "staffSizeItem",
+      icon: '<i class="fas fa-users"></i>',
+      label: "Room size",
+      desc: "Most people allowed in at once",
+      keywords: "capacity max limit full seats people",
+      value: roomSizeText(),
+      onClick: promptRoomSize,
+    });
+  settings.push(
     {
-      icon: '<i class="fas fa-comments"></i>',
-      label: "Open the Desk",
-      desc: "Staff chat: pings, presence, and the room map",
-      onClick: () => window.TalkoDesk && window.TalkoDesk.open(),
-    },
-    {
-      icon: '<i class="fas fa-eraser"></i>',
-      label: "Clear Talkoboard",
-      desc: "Wipe the shared drawing board",
-      onClick: () => socket.emit("board clear"),
-    },
-    {
+      id: "staffNameItem",
       icon: '<i class="fas fa-pen"></i>',
-      label: "Rename room...",
-      desc: "Fix a bad or misleading room name",
+      label: "Room name",
+      desc: "Rename the room. Everyone inside is told.",
+      keywords: "rename title",
+      value: currentRoomName || "Untitled",
       onClick: async () => {
         const name = await StaffUI.prompt({
-          title: "Rename room",
+          title: "Room name",
           icon: '<i class="fas fa-pen"></i>',
           subtitle: currentRoomName || "this room",
           message:
@@ -4930,11 +5017,12 @@ function openStaffPanel() {
       },
     },
     {
-      icon: currentRoomLocked
-        ? '<i class="fas fa-lock-open"></i>'
-        : '<i class="fas fa-lock"></i>',
-      label: currentRoomLocked ? "Unlock room" : "Lock room",
-      desc: "Block new joins; current users stay",
+      id: "staffLockItem",
+      icon: '<i class="fas fa-lock"></i>',
+      label: "Locked",
+      desc: "Nobody new can join. People inside stay.",
+      keywords: "lock unlock raid joins close",
+      state: currentRoomLocked,
       onClick: () =>
         socket.emit("staff lock room", {
           roomId: rid,
@@ -4942,27 +5030,116 @@ function openStaffPanel() {
         }),
     },
     {
+      id: "staffSlowItem",
       icon: '<i class="fas fa-gauge"></i>',
-      label: currentRoomSlow ? "Slow mode: turn OFF" : "Slow mode: turn ON",
-      desc: "Throttle the room's update speed",
+      label: "Slow mode",
+      desc: "Typing reaches everyone in slower batches. Calms spam.",
+      keywords: "throttle spam flood speed",
+      state: currentRoomSlow,
       onClick: () =>
         socket.emit("staff slow mode", {
           roomId: rid,
           enabled: !currentRoomSlow,
         }),
     },
-  ];
-  if (isFullMod) {
-    roomItems.push({
+  );
+  if (currentUserIsDev)
+    settings.push({
+      id: "staffSpotlightItem",
+      icon: '<i class="fas fa-star"></i>',
+      label: "Spotlight",
+      desc: "Pinned to the top of the lobby with an Official badge",
+      keywords: "official pin feature lobby",
+      state: currentRoomSpotlight,
+      onClick: () =>
+        socket.emit("staff spotlight", {
+          roomId: rid,
+          on: !currentRoomSpotlight,
+        }),
+    });
+  groups.push({ title: "Room settings", items: settings });
+
+  const actions = [];
+  if (isFullMod)
+    actions.push({
+      icon: '<i class="fas fa-tower-broadcast"></i>',
+      label: "Announcement",
+      desc: "Banner shown to everyone in this room",
+      keywords: "megaphone broadcast message notice",
+      onClick: async () => {
+        const m = await StaffUI.prompt({
+          title: "Announcement",
+          icon: '<i class="fas fa-tower-broadcast"></i>',
+          subtitle: currentRoomName || "this room",
+          fields: [
+            {
+              name: "value",
+              label: "Message",
+              type: "textarea",
+              maxLength: 300,
+              required: true,
+            },
+          ],
+          confirmText: "Send to room",
+        });
+        if (m)
+          socket.emit("staff megaphone", {
+            scope: "room",
+            roomId: rid,
+            message: m,
+          });
+      },
+    });
+  actions.push({
+    icon: '<i class="fas fa-eraser"></i>',
+    label: "Clear Talkoboard",
+    desc: "Erase every drawing on the shared board",
+    keywords: "board drawing wipe whiteboard",
+    onClick: async () => {
+      if (
+        await StaffUI.confirm({
+          title: "Clear Talkoboard",
+          message: "Erase every drawing on this room's board for everyone?",
+          danger: true,
+          confirmText: "Clear board",
+        })
+      )
+        socket.emit("board clear");
+    },
+  });
+  if (currentUserIsDev)
+    actions.push({
+      icon: '<i class="fas fa-champagne-glasses"></i>',
+      label: "Party mode",
+      desc: "Confetti and a party horn for everyone here",
+      keywords: "confetti celebrate",
+      onClick: () => socket.emit("staff party", { roomId: rid }),
+    });
+  actions.push({
+    icon: '<i class="fas fa-link"></i>',
+    label: "Copy room link",
+    desc: "Link straight to this room",
+    keywords: "url share invite",
+    onClick: () => {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("accessCode");
+      StaffUI.copy(url.toString()).then(() =>
+        notify("Room link copied.", "success"),
+      );
+    },
+  });
+  if (isFullMod)
+    actions.push({
       icon: '<i class="fas fa-trash"></i>',
       label: "Close room",
       danger: true,
-      desc: "Kick everyone and delete the room",
+      desc: "Removes everyone and deletes the room",
+      keywords: "delete kick everyone remove",
       onClick: async () => {
         if (
           await StaffUI.confirm({
             title: "Close room",
-            message: "Kick everyone and delete this room?",
+            message: "Remove everyone and delete this room?",
             danger: true,
             confirmText: "Close room",
           })
@@ -4970,166 +5147,229 @@ function openStaffPanel() {
           socket.emit("staff close room", { roomId: rid });
       },
     });
-  }
-  const groups = [];
-  if (roomItems.length) groups.push({ title: "This room", items: roomItems });
+  groups.push({ title: "Room actions", items: actions });
 
-  const appearanceItems = [
+  const you = [
     {
       id: "staffHideItem",
-      icon: currentUserIsHidden
-        ? '<i class="fas fa-eye-slash"></i>'
-        : '<i class="fas fa-eye"></i>',
-      label: currentUserIsHidden ? "Show my flair" : "Hide my flair",
+      icon: '<i class="fas fa-eye"></i>',
+      label: currentUserIsDev ? "Show my flair" : "Show my MOD badge",
       desc: currentUserIsDev
-        ? "Hide/show your crown, color and glow"
-        : "Hide/show your MOD badge",
+        ? "Crown, name color and glow"
+        : "Badge next to your name",
+      keywords: "hide flair badge crown incognito",
+      state: !currentUserIsHidden,
       onClick: () =>
         socket.emit("dev set hide", { isHidden: !currentUserIsHidden }),
     },
+  ];
+  if (currentUserIsDev)
+    you.push({
+      id: "staffVanishItem",
+      icon: '<i class="fas fa-ghost"></i>',
+      label: "Vanish",
+      desc: "Only devs can see you. You take no seat.",
+      keywords: "invisible hidden ghost",
+      state: currentUserIsVanished,
+      onClick: () =>
+        socket.emit("dev set vanish", { isVanished: !currentUserIsVanished }),
+    });
+  you.push(
     {
       id: "staffFakeAfkItem",
       icon: '<i class="fas fa-user-clock"></i>',
-      label: fakeAfkActive ? "Fake AFK: ON" : "Fake AFK: OFF",
-      desc: "Locks your typing; a few minutes later the room sees you as away",
+      label: "Fake AFK",
+      desc: "Locks your typing. A few minutes later the room sees you as away.",
+      keywords: "away idle afk",
+      state: fakeAfkActive,
       onClick: () => toggleFakeAfk(),
     },
     {
+      id: "staffColorItem",
       icon: '<i class="fas fa-palette"></i>',
-      label: "Custom name color...",
-      desc: "Set your chat text color",
+      label: "Text color",
+      desc: "Color of your chat text",
+      keywords: "name color colour",
+      value: staffNameColor() || "Default",
       onClick: async () => {
         const color = await StaffUI.prompt({
-          title: "Custom name color",
+          title: "Text color",
           icon: '<i class="fas fa-palette"></i>',
           fields: [
             {
               name: "value",
               label: "Pick a color",
               type: "color",
-              value: localStorage.getItem("talkomatic_devColor") || "#ff9800",
+              value: staffNameColor() || "#ff9800",
             },
           ],
           confirmText: "Apply",
         });
-        if (color) pushStaffColor(color, true);
+        if (color) {
+          pushStaffColor(color, true);
+          refreshStaffPanel();
+        }
       },
     },
-  ];
-  if (currentUserIsDev) {
-    appearanceItems.push({
-      id: "staffVanishItem",
-      icon: '<i class="fas fa-ghost"></i>',
-      label: currentUserIsVanished ? "Vanish: ON" : "Vanish: OFF",
-      desc: "Invisible to non-devs; takes no room slot",
-      onClick: () =>
-        socket.emit("dev set vanish", { isVanished: !currentUserIsVanished }),
-    });
-    appearanceItems.push({
+  );
+  if (currentUserIsDev)
+    you.push({
       id: "staffIpItem",
-      icon: devShowIP
-        ? '<i class="fas fa-globe"></i>'
-        : '<i class="fas fa-eye-slash"></i>',
-      label: devShowIP ? "User tags: showing" : "User tags: hidden",
-      desc: "Show or hide the tag beside each user",
+      icon: '<i class="fas fa-tag"></i>',
+      label: "User tags",
+      desc: "Tag beside each user's name",
+      keywords: "ip label",
+      state: devShowIP,
       onClick: () => {
         devShowIP = !devShowIP;
         localStorage.setItem(
           "talkomatic_devShowIP",
           devShowIP ? "true" : "false",
         );
-        setStaffItemLabel(
-          "staffIpItem",
-          devShowIP ? "User tags: showing" : "User tags: hidden",
-        );
         renderDevContext();
+        refreshStaffPanel();
       },
     });
-  }
-  groups.push({ title: "How you appear", items: appearanceItems });
-
-  const megaphoneItem = {
-    icon: '<i class="fas fa-tower-broadcast"></i>',
-    label: "Megaphone this room...",
-    desc: "Announcement banner to this room",
-    onClick: async () => {
-      const m = await StaffUI.prompt({
-        title: "Megaphone (this room)",
-        icon: '<i class="fas fa-tower-broadcast"></i>',
-        fields: [
-          {
-            name: "value",
-            label: "Announcement",
-            type: "textarea",
-            maxLength: 300,
-            required: true,
-          },
-        ],
-        confirmText: "Broadcast",
-      });
-      if (m)
-        socket.emit("staff megaphone", {
-          scope: "room",
-          roomId: rid,
-          message: m,
-        });
-    },
-  };
-  if (isFullMod && !currentUserIsDev)
-    groups.push({ title: "Announce to this room", items: [megaphoneItem] });
+  groups.push({ title: "You", items: you });
 
   if (currentUserIsDev) {
-    groups.push({
-      title: "Announce to this room",
-      items: [
-        megaphoneItem,
-        {
-          icon: '<i class="fas fa-champagne-glasses"></i>',
-          label: "Party mode",
-          desc: "Confetti + party horn for everyone",
-          onClick: () => socket.emit("staff party", { roomId: rid }),
-        },
-        {
-          icon: '<i class="fas fa-star"></i>',
-          label: currentRoomSpotlight ? "Remove spotlight" : "Spotlight room",
-          desc: "Pin to top of lobby with an Official badge",
-          onClick: () =>
-            socket.emit("staff spotlight", {
-              roomId: rid,
-              on: !currentRoomSpotlight,
-            }),
-        },
-        {
-          icon: '<i class="fas fa-chart-simple"></i>',
-          label: "Server HUD (toggle)",
-          desc: "Live server stats overlay",
-          onClick: toggleDevHud,
-        },
-      ],
-    });
     groups.push({
       title: "Whole server",
       items: [
         {
-          icon: '<i class="fas fa-flag"></i>',
-          label: "Feature flags...",
-          desc: "Word filter / room creation / limit",
-          onClick: () => socket.emit("dev get flags"),
+          id: "staffFilterItem",
+          icon: '<i class="fas fa-filter"></i>',
+          label: "Word filter",
+          desc: "Server-wide filter on names and chat",
+          keywords: "flags swear profanity",
+          state: serverFlags ? !!serverFlags.wordFilter : null,
+          onClick: () =>
+            serverFlags &&
+            socket.emit("dev set flags", {
+              wordFilter: !serverFlags.wordFilter,
+            }),
         },
         {
+          id: "staffCreationItem",
+          icon: '<i class="fas fa-square-plus"></i>',
+          label: "Room creation",
+          desc: "Users can make new rooms",
+          keywords: "flags create new",
+          state: serverFlags ? !!serverFlags.roomCreation : null,
+          onClick: () =>
+            serverFlags &&
+            socket.emit("dev set flags", {
+              roomCreation: !serverFlags.roomCreation,
+            }),
+        },
+        {
+          id: "staffRoomLimitItem",
+          icon: '<i class="fas fa-hashtag"></i>',
+          label: "Room limit",
+          desc: "Most rooms that can exist at once",
+          keywords: "flags max rooms",
+          value: serverFlags ? String(serverFlags.baseMaxRooms) : "...",
+          onClick: async () => {
+            if (!serverFlags) return;
+            const v = await StaffUI.prompt({
+              title: "Room limit",
+              icon: '<i class="fas fa-hashtag"></i>',
+              fields: [
+                {
+                  name: "value",
+                  label: "Most rooms at once",
+                  type: "number",
+                  value: String(serverFlags.baseMaxRooms),
+                  required: true,
+                },
+              ],
+              confirmText: "Set limit",
+            });
+            const n = parseInt(v, 10);
+            if (Number.isFinite(n))
+              socket.emit("dev set flags", { baseMaxRooms: n });
+          },
+        },
+        {
+          id: "staffMaintItem",
           icon: '<i class="fas fa-screwdriver-wrench"></i>',
-          label: "Maintenance mode (toggle)",
-          desc: "Pause new rooms + joins",
-          onClick: () => socket.emit("dev set maintenance", {}),
+          label: "Maintenance mode",
+          desc: "Pauses new rooms and joins everywhere",
+          keywords: "deploy pause",
+          state: serverFlags ? !!serverFlags.maintenance : null,
+          onClick: () =>
+            socket.emit(
+              "dev set maintenance",
+              serverFlags ? { enabled: !serverFlags.maintenance } : {},
+            ),
+        },
+        {
+          icon: '<i class="fas fa-tower-broadcast"></i>',
+          label: "Announcement everywhere",
+          desc: "Banner in every room and the lobby",
+          keywords: "megaphone broadcast all global",
+          onClick: async () => {
+            const m = await StaffUI.prompt({
+              title: "Announcement everywhere",
+              icon: '<i class="fas fa-tower-broadcast"></i>',
+              fields: [
+                {
+                  name: "value",
+                  label: "Message",
+                  type: "textarea",
+                  maxLength: 300,
+                  required: true,
+                },
+              ],
+              confirmText: "Send everywhere",
+            });
+            if (m)
+              socket.emit("staff megaphone", { scope: "all", message: m });
+          },
+        },
+        {
+          icon: '<i class="fas fa-newspaper"></i>',
+          label: "Lobby ticker",
+          desc: "Banner across the top of the lobby",
+          keywords: "news marquee",
+          onClick: async () => {
+            const msg = await StaffUI.prompt({
+              title: "Lobby ticker",
+              icon: '<i class="fas fa-newspaper"></i>',
+              fields: [
+                {
+                  name: "value",
+                  label: "Ticker message (blank to clear)",
+                  type: "textarea",
+                  maxLength: 200,
+                },
+              ],
+              confirmText: "Set ticker",
+            });
+            if (msg !== null) socket.emit("dev set ticker", { message: msg });
+          },
+        },
+        {
+          id: "staffHudItem",
+          icon: '<i class="fas fa-chart-simple"></i>',
+          label: "Server stats overlay",
+          desc: "Sockets, rooms, users and memory, live",
+          keywords: "hud heap",
+          state: !!document.getElementById("devHud"),
+          onClick: () => {
+            toggleDevHud();
+            refreshStaffPanel();
+          },
         },
         {
           icon: '<i class="fas fa-bomb"></i>',
-          label: "NUKE all rooms",
+          label: "Close every room",
           danger: true,
-          desc: "Emergency clear of every room",
+          desc: "Removes all users from all rooms. Emergency only.",
+          keywords: "nuke clear all",
           onClick: async () => {
             const r = await StaffUI.prompt({
-              title: "Nuke all rooms",
+              title: "Close every room",
               icon: '<i class="fas fa-bomb"></i>',
               danger: true,
               message:
@@ -5142,13 +5382,13 @@ function openStaffPanel() {
                   required: true,
                 },
               ],
-              confirmText: "NUKE",
+              confirmText: "Close every room",
             });
             if (r && r.trim().toUpperCase() === "NUKE")
               socket.emit("staff nuke", { confirm: true });
             else if (r != null)
               notify(
-                "Nuke cancelled. The confirmation text did not match.",
+                "Nothing was closed. The confirmation text did not match.",
                 "info",
               );
           },
@@ -5158,125 +5398,47 @@ function openStaffPanel() {
   }
 
   groups.push({
-    title: "Records",
+    title: "Staff",
     items: [
       {
+        icon: '<i class="fas fa-comments"></i>',
+        label: "The Desk",
+        desc: "Staff chat, pings and the room map",
+        keywords: "chat staff",
+        onClick: () => window.TalkoDesk && window.TalkoDesk.open(),
+      },
+      {
         icon: '<i class="fas fa-clipboard"></i>',
-        label: "Open Mod Dashboard",
-        desc: "Every staff action + identity change",
+        label: "Mod Dashboard",
+        desc: "Every staff action and name change. Opens a new tab.",
+        keywords: "records audit log reports appeals bans",
         onClick: () => window.open("/mod.html", "_blank"),
       },
     ],
   });
+  return groups;
+}
 
-  const rankLabel = currentUserIsDev
-    ? "Admin"
-    : currentUserModLevel >= 3
-      ? "Mod Leader (L3)"
-      : currentUserModLevel >= 2
-        ? "Full mod (L2)"
-        : "Junior mod (L1)";
-
+function openStaffPanel() {
+  if (!window.StaffUI) return;
+  if (currentUserIsDev) socket.emit("dev get flags");
   StaffUI.panel({
-    title: "Staff panel",
+    title: "Staff tools",
     icon: currentUserIsDev
       ? '<i class="fas fa-screwdriver-wrench"></i>'
       : '<i class="fas fa-shield-halved"></i>',
-    subtitle: rankLabel,
-    groups,
+    subtitle: StaffUI.rank(currentUserIsDev ? "dev" : staffRole()).title,
+    search: true,
+    groups: staffPanelGroups,
     onHelp: () => StaffUI.help(staffRole()),
     onLayoutChange: adjustLayout,
   });
 }
 
 socket.on("dev flags", (flags) => {
-  if (!flags || !window.StaffUI) return;
-  StaffUI.menu({
-    title: "Feature flags",
-    icon: '<i class="fas fa-flag"></i>',
-    subtitle: "Live server configuration",
-    groups: [
-      {
-        items: [
-          {
-            icon: flags.wordFilter
-              ? '<i class="fas fa-circle-check"></i>'
-              : '<i class="fas fa-ban"></i>',
-            label: `Word filter (global): ${flags.wordFilter ? "ON" : "OFF"}`,
-            desc: "Toggle the global word filter",
-            onClick: () =>
-              socket.emit("dev set flags", { wordFilter: !flags.wordFilter }),
-          },
-          {
-            icon: flags.roomCreation
-              ? '<i class="fas fa-circle-check"></i>'
-              : '<i class="fas fa-ban"></i>',
-            label: `Room creation: ${flags.roomCreation ? "ON" : "OFF"}`,
-            desc: "Allow users to create rooms",
-            onClick: () =>
-              socket.emit("dev set flags", {
-                roomCreation: !flags.roomCreation,
-              }),
-          },
-          {
-            icon: '<i class="fas fa-hashtag"></i>',
-            label: `Room limit: ${flags.baseMaxRooms}`,
-            desc: "How many rooms can exist at once",
-            onClick: async () => {
-              const v = await StaffUI.prompt({
-                title: "Room limit",
-                fields: [
-                  {
-                    name: "value",
-                    label: "Base room limit",
-                    type: "number",
-                    value: String(flags.baseMaxRooms),
-                    required: true,
-                  },
-                ],
-              });
-              const n = parseInt(v, 10);
-              if (Number.isFinite(n))
-                socket.emit("dev set flags", { baseMaxRooms: n });
-            },
-          },
-          {
-            icon: '<i class="fas fa-users"></i>',
-            label: `Max size (this room): ${currentRoomMaxSize || flags.maxRoomCapacity} people`,
-            desc: "Capacity for THIS room only (2 to 50)",
-            onClick: async () => {
-              const v = await StaffUI.prompt({
-                title: "Max size for this room",
-                icon: '<i class="fas fa-users"></i>',
-                message:
-                  "How many people can be in THIS room (2 to 50)? Other rooms keep the default limit.",
-                fields: [
-                  {
-                    name: "value",
-                    label: "Max users in this room",
-                    type: "number",
-                    value: String(currentRoomMaxSize || flags.maxRoomCapacity),
-                    required: true,
-                  },
-                ],
-              });
-              const n = parseInt(v, 10);
-              if (Number.isFinite(n))
-                socket.emit("dev set room size", { size: n });
-            },
-          },
-          {
-            icon: flags.maintenance
-              ? '<i class="fas fa-screwdriver-wrench"></i>'
-              : '<i class="fas fa-circle-check"></i>',
-            label: `Maintenance: ${flags.maintenance ? "ON" : "OFF"}`,
-            desc: "Toggle maintenance mode",
-            onClick: () => socket.emit("dev set maintenance", {}),
-          },
-        ],
-      },
-    ],
-  });
+  if (!flags) return;
+  serverFlags = flags;
+  refreshStaffPanel();
 });
 
 // ── Dev HUD overlay ──────────────────────────────────────────────────────────
@@ -5319,6 +5481,10 @@ function applyRoomFlags(data) {
   if (typeof data.slowMode === "boolean") currentRoomSlow = data.slowMode;
   if (typeof data.spotlight === "boolean")
     currentRoomSpotlight = data.spotlight;
+  if (typeof data.capacity === "number") currentRoomCapacity = data.capacity;
+  if (typeof data.userCount === "number") currentRoomUserCount = data.userCount;
+  if (data.type) currentRoomType = data.type;
+  refreshStaffPanel();
   const navbar = document.querySelector(".second-navbar");
   if (!navbar) return;
   let flags = document.getElementById("roomStaffFlags");
@@ -5357,6 +5523,7 @@ function renderSpectate(data, noteText) {
   const rn = document.querySelector(".second-navbar .room-name");
   const ru = document.querySelector(".second-navbar .room-uptime");
   const rid = document.querySelector(".second-navbar .room-id");
+  if (data.roomType) currentRoomType = data.roomType;
   if (rt) rt.textContent = `${getRoomTypeDisplay(data.roomType) || "Public"} room`;
   if (rn) rn.textContent = data.roomName || "*";
   if (ru) ru.textContent = roomUptimeText();
@@ -5569,6 +5736,7 @@ socket.on("room renamed", (data) => {
   const nameEl = document.querySelector(".room-name");
   if (nameEl && nameEl !== rn) nameEl.textContent = `Room: ${data.name}`;
   notify(`This room was renamed to "${data.name}" by staff.`, "info");
+  refreshStaffPanel();
 });
 socket.on("room slow mode", (data) => {
   currentRoomSlow = !!(data && data.enabled);
@@ -5597,6 +5765,10 @@ socket.on("party mode", () => {
   } catch (_) { }
 });
 socket.on("maintenance status", (data) => {
+  if (serverFlags) {
+    serverFlags.maintenance = !!(data && data.enabled);
+    refreshStaffPanel();
+  }
   if (data && data.enabled)
     notify(
       "Talkomatic is in maintenance mode. New rooms and joins are paused.",
@@ -5616,7 +5788,13 @@ socket.on("connect_error", (error) => {
 
 socket.on("staff action result", (data) => {
   if (!data) return;
-  if (data.action === "room size" && data.size) currentRoomMaxSize = data.size;
+  if (data.action === "room size" && data.size) {
+    currentRoomMaxSize = data.size;
+    currentRoomCapacity = data.size;
+  }
+  if (data.action === "maintenance" && serverFlags)
+    serverFlags.maintenance = !!data.enabled;
+  refreshStaffPanel();
   if (window.StaffUI) StaffUI.actionToast(data);
   else notify((data.ok ? "Done: " : "Failed: ") + data.action, data.ok ? "success" : "error");
 });

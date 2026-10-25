@@ -2438,75 +2438,156 @@ function makeStaffButtonDraggable(btn) {
   });
 }
 
+// Server switches load after the panel opens; refreshLobbyPanel() fills
+// them in and redraws them whenever the server confirms a change.
+let lobbyFlags = null;
+
+function refreshLobbyPanel() {
+  if (!window.StaffUI || !StaffUI.updateItem) return;
+  const f = lobbyFlags;
+  StaffUI.updateItem("lobbyFilterItem", { state: f ? !!f.wordFilter : null });
+  StaffUI.updateItem("lobbyCreationItem", {
+    state: f ? !!f.roomCreation : null,
+  });
+  StaffUI.updateItem("lobbyMaintItem", { state: f ? !!f.maintenance : null });
+  StaffUI.updateItem("lobbyRoomLimitItem", {
+    value: f ? String(f.baseMaxRooms) : "...",
+  });
+}
+
+function staffToolsItems() {
+  return [
+    {
+      icon: '<i class="fas fa-comments"></i>',
+      label: "The Desk",
+      desc: "Staff chat, pings and the room map",
+      keywords: "chat staff",
+      onClick: () => window.TalkoDesk && window.TalkoDesk.open(),
+    },
+    {
+      icon: '<i class="fas fa-clipboard"></i>',
+      label: "Mod Dashboard",
+      desc: "Reports, appeals, bans and every staff action. Opens a new tab.",
+      keywords: "records audit log reports appeals bans",
+      onClick: () => window.open("/mod.html", "_blank"),
+    },
+  ];
+}
+
 function openDevPanel() {
   if (!window.StaffUI) return;
+  socket.emit("dev get flags");
   StaffUI.panel({
     title: "Admin panel",
     icon: '<i class="fas fa-screwdriver-wrench"></i>',
-    subtitle: "Global staff tools",
-    wide: true,
+    subtitle: StaffUI.rank("dev").title,
+    search: true,
     onHelp: () => StaffUI.help("dev"),
-    groups: [
+    groups: () => [
       {
-        title: "Moderators",
+        title: "Whole server",
         items: [
           {
-            icon: '<i class="fas fa-user-plus"></i>',
-            label: "Grant mod key…",
-            desc: "Create a key for a new mod (shown once)",
+            id: "lobbyFilterItem",
+            icon: '<i class="fas fa-filter"></i>',
+            label: "Word filter",
+            desc: "Server-wide filter on names and chat",
+            keywords: "flags swear profanity",
+            state: lobbyFlags ? !!lobbyFlags.wordFilter : null,
+            onClick: () =>
+              lobbyFlags &&
+              socket.emit("dev set flags", {
+                wordFilter: !lobbyFlags.wordFilter,
+              }),
+          },
+          {
+            id: "lobbyCreationItem",
+            icon: '<i class="fas fa-square-plus"></i>',
+            label: "Room creation",
+            desc: "Users can make new rooms",
+            keywords: "flags create new",
+            state: lobbyFlags ? !!lobbyFlags.roomCreation : null,
+            onClick: () =>
+              lobbyFlags &&
+              socket.emit("dev set flags", {
+                roomCreation: !lobbyFlags.roomCreation,
+              }),
+          },
+          {
+            id: "lobbyRoomLimitItem",
+            icon: '<i class="fas fa-hashtag"></i>',
+            label: "Room limit",
+            desc: "Most rooms that can exist at once",
+            keywords: "flags max rooms",
+            value: lobbyFlags ? String(lobbyFlags.baseMaxRooms) : "...",
             onClick: async () => {
-              const r = await StaffUI.prompt({
-                title: "Grant mod key",
-                icon: '<i class="fas fa-user-plus"></i>',
-                message:
-                  "Junior (L1) mods can kick and warn but cannot ban or IP-block. Promote them to full (L2) later from the Manage list.",
+              if (!lobbyFlags) return;
+              const v = await StaffUI.prompt({
+                title: "Room limit",
+                icon: '<i class="fas fa-hashtag"></i>',
                 fields: [
                   {
                     name: "value",
-                    label: "Mod's name / label",
-                    placeholder: "e.g. Alice",
+                    label: "Most rooms at once",
+                    type: "number",
+                    value: String(lobbyFlags.baseMaxRooms),
                     required: true,
-                    maxLength: 40,
-                  },
-                  {
-                    name: "level",
-                    label: "Level",
-                    type: "select",
-                    value: "1",
-                    options: [
-                      { value: "1", label: "Junior mod (L1) - limited" },
-                      { value: "2", label: "Full mod (L2) - all powers" },
-                      { value: "3", label: "Mod leader (L3) - runs the team" },
-                    ],
                   },
                 ],
-                confirmText: "Generate key",
+                confirmText: "Set limit",
               });
-              if (r && r.value)
-                socket.emit("dev grant mod", {
-                  label: r.value,
-                  level: Number(r.level),
-                });
+              const n = parseInt(v, 10);
+              if (Number.isFinite(n))
+                socket.emit("dev set flags", { baseMaxRooms: n });
             },
           },
           {
-            icon: '<i class="fas fa-list"></i>',
-            label: "Manage / revoke mod keys…",
-            desc: "List current mods and revoke instantly",
-            onClick: () => {
-              manageKeysOpen = true;
-              socket.emit("dev list mod keys");
-            },
+            id: "lobbyMaintItem",
+            icon: '<i class="fas fa-screwdriver-wrench"></i>',
+            label: "Maintenance mode",
+            desc: "Pauses new rooms and joins everywhere",
+            keywords: "deploy pause",
+            state: lobbyFlags ? !!lobbyFlags.maintenance : null,
+            onClick: () =>
+              socket.emit(
+                "dev set maintenance",
+                lobbyFlags ? { enabled: !lobbyFlags.maintenance } : {},
+              ),
           },
         ],
       },
       {
-        title: "Broadcast",
+        title: "Announcements",
         items: [
           {
+            icon: '<i class="fas fa-tower-broadcast"></i>',
+            label: "Announcement everywhere",
+            desc: "Banner in every room and the lobby",
+            keywords: "megaphone broadcast all global",
+            onClick: async () => {
+              const msg = await StaffUI.prompt({
+                title: "Announcement everywhere",
+                icon: '<i class="fas fa-tower-broadcast"></i>',
+                fields: [
+                  {
+                    name: "value",
+                    label: "Message",
+                    type: "textarea",
+                    maxLength: 300,
+                    required: true,
+                  },
+                ],
+                confirmText: "Send everywhere",
+              });
+              if (msg)
+                socket.emit("staff megaphone", { scope: "all", message: msg });
+            },
+          },
+          {
             icon: '<i class="fas fa-newspaper"></i>',
-            label: "Lobby ticker…",
-            desc: "Editable banner at the top of the lobby",
+            label: "Lobby ticker",
+            desc: "Banner across the top of the lobby",
+            keywords: "news marquee",
             onClick: async () => {
               const msg = await StaffUI.prompt({
                 title: "Lobby ticker",
@@ -2524,81 +2605,112 @@ function openDevPanel() {
               if (msg !== null) socket.emit("dev set ticker", { message: msg });
             },
           },
+        ],
+      },
+      {
+        title: "Moderators",
+        items: [
           {
-            icon: '<i class="fas fa-tower-broadcast"></i>',
-            label: "Megaphone everywhere…",
-            desc: "Announcement to all rooms + lobby",
+            icon: '<i class="fas fa-user-plus"></i>',
+            label: "New mod key",
+            desc: "Make a key for a new mod. It is shown once.",
+            keywords: "grant add mint promote",
             onClick: async () => {
-              const msg = await StaffUI.prompt({
-                title: "Megaphone (everywhere)",
-                icon: '<i class="fas fa-tower-broadcast"></i>',
+              const r = await StaffUI.prompt({
+                title: "New mod key",
+                icon: '<i class="fas fa-user-plus"></i>',
+                message:
+                  "Junior (L1) mods can kick and warn but cannot ban or IP-block. Promote them to full (L2) later from Mod keys.",
                 fields: [
                   {
                     name: "value",
-                    label: "Announcement",
-                    type: "textarea",
-                    maxLength: 300,
+                    label: "Mod's name",
+                    placeholder: "e.g. Alice",
                     required: true,
+                    maxLength: 40,
+                  },
+                  {
+                    name: "level",
+                    label: "Level",
+                    type: "select",
+                    value: "1",
+                    options: [
+                      { value: "1", label: "Junior mod (L1) - limited" },
+                      { value: "2", label: "Full mod (L2) - all powers" },
+                      { value: "3", label: "Mod leader (L3) - runs the team" },
+                    ],
                   },
                 ],
-                confirmText: "Broadcast",
+                confirmText: "Make key",
               });
-              if (msg)
-                socket.emit("staff megaphone", { scope: "all", message: msg });
+              if (r && r.value)
+                socket.emit("dev grant mod", {
+                  label: r.value,
+                  level: Number(r.level),
+                });
+            },
+          },
+          {
+            icon: '<i class="fas fa-list"></i>',
+            label: "Mod keys",
+            desc: "Everyone with a key. Change levels or revoke.",
+            keywords: "manage revoke demote list",
+            onClick: () => {
+              manageKeysOpen = true;
+              socket.emit("dev list mod keys");
             },
           },
         ],
       },
       {
-        title: "Server",
+        title: "Blocks",
         items: [
           {
-            icon: '<i class="fas fa-flag"></i>',
-            label: "Feature flags…",
-            desc: "Word filter / room creation / limit",
-            onClick: () => socket.emit("dev get flags"),
-          },
-          {
-            icon: '<i class="fas fa-screwdriver-wrench"></i>',
-            label: "Maintenance mode (toggle)",
-            desc: "Pause new rooms + joins",
-            onClick: () => socket.emit("dev set maintenance", {}),
-          },
-          {
-            icon: '<i class="fas fa-fire-extinguisher"></i>',
-            label: "Clear bot blacklist",
-            desc: "Lift all bot-blacklist entries",
-            onClick: async () => {
-              if (
-                await StaffUI.confirm({
-                  title: "Clear blacklist",
-                  message: "Clear the entire bot blacklist?",
-                })
-              )
-                socket.emit("dev clear blacklist");
-            },
-          },
-          {
             icon: '<i class="fas fa-unlock"></i>',
-            label: "Blocked IPs…",
-            desc: "See who is blocked and unblock them",
+            label: "Blocked addresses",
+            desc: "Who is blocked, and unblock them",
+            keywords: "ip ban unban",
             onClick: () => {
               blocksOpen = true;
               socket.emit("dev list blocks");
             },
           },
           {
+            icon: '<i class="fas fa-fire-extinguisher"></i>',
+            label: "Clear bot blacklist",
+            desc: "Lift every bot-blacklist entry",
+            keywords: "bots",
+            onClick: async () => {
+              if (
+                await StaffUI.confirm({
+                  title: "Clear bot blacklist",
+                  message: "Lift every entry on the bot blacklist?",
+                  confirmText: "Clear blacklist",
+                })
+              )
+                socket.emit("dev clear blacklist");
+            },
+          },
+        ],
+      },
+      { title: "Staff", items: staffToolsItems() },
+      { title: "Your key", items: [myKeyItem(), removeKeyItem()] },
+      {
+        title: "Emergency",
+        items: [
+          {
             icon: '<i class="fas fa-bomb"></i>',
-            label: "NUKE all rooms",
+            label: "Close every room",
             danger: true,
-            desc: "Emergency clear of every room",
+            desc: "Removes all users from all rooms",
+            keywords: "nuke clear all",
             onClick: async () => {
               const r = await StaffUI.prompt({
-                title: "Nuke all rooms",
+                title: "Close every room",
                 icon: '<i class="fas fa-bomb"></i>',
                 danger: true,
                 message:
-                  "Clears EVERY room and removes ALL users. Type NUKE to confirm.",
+                  "This clears EVERY room and removes ALL users. Type NUKE to confirm.",
                 fields: [
                   {
                     name: "value",
@@ -2607,27 +2719,17 @@ function openDevPanel() {
                     required: true,
                   },
                 ],
-                confirmText: "NUKE",
+                confirmText: "Close every room",
               });
               if (r && r.trim().toUpperCase() === "NUKE")
                 socket.emit("staff nuke", { confirm: true });
               else if (r != null)
-                lobbyNotify("Nuke cancelled. The text did not match.", "info");
+                lobbyNotify(
+                  "Nothing was closed. The confirmation text did not match.",
+                  "info",
+                );
             },
           },
-        ],
-      },
-      {
-        title: "Records",
-        items: [
-          {
-            icon: '<i class="fas fa-clipboard"></i>',
-            label: "Open Mod Dashboard",
-            desc: "Every staff action + identity change",
-            onClick: () => window.open("/mod.html", "_blank"),
-          },
-          myKeyItem(),
-          removeKeyItem(),
         ],
       },
     ],
@@ -2636,37 +2738,20 @@ function openDevPanel() {
 
 function openModLobbyPanel() {
   if (!window.StaffUI) return;
+  const role =
+    currentUserModLevel >= 3
+      ? "leader"
+      : currentUserModLevel >= 2
+        ? "mod"
+        : "jr";
   StaffUI.panel({
     title: "Mod panel",
     icon: '<i class="fas fa-shield-halved"></i>',
-    subtitle:
-      currentUserModLevel >= 3
-        ? "Mod Leader (L3)"
-        : currentUserModLevel >= 2
-          ? "Full mod (L2)"
-          : "Junior mod (L1)",
-    onHelp: () =>
-      StaffUI.help(
-        currentUserModLevel >= 3
-          ? "leader"
-          : currentUserModLevel >= 2
-            ? "mod"
-            : "jr",
-      ),
+    subtitle: StaffUI.rank(role).title,
+    onHelp: () => StaffUI.help(role),
     groups: [
-      {
-        title: "Records",
-        items: [
-          {
-            icon: '<i class="fas fa-clipboard"></i>',
-            label: "Open Mod Dashboard",
-            desc: "Every staff action, and your own record",
-            onClick: () => window.open("/mod.html", "_blank"),
-          },
-          myKeyItem(),
-          removeKeyItem(),
-        ],
-      },
+      { title: "Staff", items: staffToolsItems() },
+      { title: "Your key", items: [myKeyItem(), removeKeyItem()] },
     ],
   });
 }
@@ -3076,96 +3161,17 @@ socket.on("dev blocks", (list) => {
 });
 
 socket.on("dev flags", (flags) => {
-  if (!flags || !window.StaffUI) return;
-  StaffUI.menu({
-    title: "Feature flags",
-    icon: '<i class="fas fa-flag"></i>',
-    subtitle: "Live server configuration",
-    groups: [
-      {
-        items: [
-          {
-            icon: flags.wordFilter
-              ? '<i class="fas fa-circle-check"></i>'
-              : '<i class="fas fa-ban"></i>',
-            label: `Word filter (global): ${flags.wordFilter ? "ON" : "OFF"}`,
-            desc: "Toggle the global word filter",
-            onClick: () =>
-              socket.emit("dev set flags", { wordFilter: !flags.wordFilter }),
-          },
-          {
-            icon: flags.roomCreation
-              ? '<i class="fas fa-circle-check"></i>'
-              : '<i class="fas fa-ban"></i>',
-            label: `Room creation: ${flags.roomCreation ? "ON" : "OFF"}`,
-            desc: "Allow users to create rooms",
-            onClick: () =>
-              socket.emit("dev set flags", {
-                roomCreation: !flags.roomCreation,
-              }),
-          },
-          {
-            icon: '<i class="fas fa-hashtag"></i>',
-            label: `Room limit: ${flags.baseMaxRooms}`,
-            desc: "How many rooms can exist at once",
-            onClick: async () => {
-              const v = await StaffUI.prompt({
-                title: "Room limit",
-                fields: [
-                  {
-                    name: "value",
-                    label: "Base room limit",
-                    type: "number",
-                    value: String(flags.baseMaxRooms),
-                    required: true,
-                  },
-                ],
-              });
-              const n = parseInt(v, 10);
-              if (Number.isFinite(n))
-                socket.emit("dev set flags", { baseMaxRooms: n });
-            },
-          },
-          {
-            icon: '<i class="fas fa-users"></i>',
-            label: `Max room size: ${flags.maxRoomCapacity} people`,
-            desc: "How many users fit in one room (2 to 50)",
-            onClick: async () => {
-              const v = await StaffUI.prompt({
-                title: "Max room size",
-                icon: '<i class="fas fa-users"></i>',
-                message: "How many people can be in a single room (2 to 50)?",
-                fields: [
-                  {
-                    name: "value",
-                    label: "Max users per room",
-                    type: "number",
-                    value: String(flags.maxRoomCapacity),
-                    required: true,
-                  },
-                ],
-              });
-              const n = parseInt(v, 10);
-              if (Number.isFinite(n))
-                socket.emit("dev set flags", { maxRoomCapacity: n });
-            },
-          },
-          {
-            icon: flags.maintenance
-              ? '<i class="fas fa-screwdriver-wrench"></i>'
-              : '<i class="fas fa-circle-check"></i>',
-            label: `Maintenance: ${flags.maintenance ? "ON" : "OFF"}`,
-            desc: "Toggle maintenance mode",
-            onClick: () => socket.emit("dev set maintenance", {}),
-          },
-        ],
-      },
-    ],
-  });
+  if (!flags) return;
+  lobbyFlags = flags;
+  refreshLobbyPanel();
 });
 
 socket.on("staff action result", (data) => {
   if (!data) return;
+  if (data.action === "maintenance" && lobbyFlags) {
+    lobbyFlags.maintenance = !!data.enabled;
+    refreshLobbyPanel();
+  }
   if (window.StaffUI) StaffUI.actionToast(data);
   else
     lobbyNotify(
@@ -3580,6 +3586,10 @@ socket.on("megaphone", (data) => {
 });
 
 socket.on("maintenance status", (data) => {
+  if (lobbyFlags) {
+    lobbyFlags.maintenance = !!(data && data.enabled);
+    refreshLobbyPanel();
+  }
   let bar = document.getElementById("lobbyMaintenanceBar");
   if (data && data.enabled) {
     if (!bar) {
