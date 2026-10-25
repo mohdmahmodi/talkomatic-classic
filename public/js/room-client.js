@@ -4903,6 +4903,11 @@ function staffNameColor() {
   }
 }
 
+function staffColorLabel() {
+  const c = staffNameColor();
+  return c ? c.toUpperCase() : "Default";
+}
+
 function refreshStaffPanel() {
   if (!window.StaffUI || !StaffUI.updateItem) return;
   const u = StaffUI.updateItem;
@@ -4916,7 +4921,10 @@ function refreshStaffPanel() {
   u("staffVanishItem", { state: currentUserIsVanished });
   u("staffFakeAfkItem", { state: fakeAfkActive });
   u("staffIpItem", { state: devShowIP });
-  u("staffColorItem", { value: staffNameColor() || "Default" });
+  u("staffColorItem", {
+    value: staffColorLabel(),
+    swatch: staffNameColor() || null,
+  });
   u("staffHudItem", { state: !!document.getElementById("devHud") });
   const f = serverFlags;
   u("staffFilterItem", { state: f ? !!f.wordFilter : null });
@@ -5190,25 +5198,18 @@ function staffPanelGroups() {
       label: "Text color",
       desc: "Color of your chat text",
       keywords: "name color colour",
-      value: staffNameColor() || "Default",
-      onClick: async () => {
-        const color = await StaffUI.prompt({
-          title: "Text color",
-          icon: '<i class="fas fa-palette"></i>',
-          fields: [
-            {
-              name: "value",
-              label: "Pick a color",
-              type: "color",
-              value: staffNameColor() || "#ff9800",
-            },
-          ],
-          confirmText: "Apply",
-        });
-        if (color) {
-          pushStaffColor(color, true);
+      value: staffColorLabel(),
+      swatch: staffNameColor() || null,
+      picker: {
+        value: staffNameColor() || "#ff9800",
+        onInput: (c) => {
+          pushStaffColor(c, false);
           refreshStaffPanel();
-        }
+        },
+        onChange: (c) => {
+          pushStaffColor(c, true);
+          refreshStaffPanel();
+        },
       },
     },
   );

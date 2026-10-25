@@ -105,6 +105,29 @@
   .tk-psearch .tk-input{padding-left:32px;}
   .tk-psearch i{position:absolute;left:11px;top:calc(50% + 2px);transform:translateY(-50%);color:#8d8d8d;font-size:13px;}
   @media (max-width:640px){.tk-psearch .tk-input{font-size:16px;}}
+  .tk-ival .tk-ival-sw{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:6px;
+    vertical-align:-1px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.25);}
+  .tk-item.tk-open{border-radius:5px 5px 0 0;margin-bottom:0;background:#242424;}
+  .tk-item.tk-open .tk-ival-go::after{content:" ▾";}
+  .tk-cp{background:#242424;border-radius:0 0 5px 5px;padding:4px 12px 12px;margin:0 0 6px;}
+  .tk-form .tk-cp{border-radius:5px;padding:12px;}
+  .tk-cp-sv{position:relative;height:150px;border-radius:5px;cursor:crosshair;touch-action:none;outline:none;}
+  .tk-cp-svdot{position:absolute;width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;
+    border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.6),0 1px 4px rgba(0,0,0,.5);pointer-events:none;}
+  .tk-cp-hue{position:relative;height:14px;margin:12px 0 0;border-radius:7px;cursor:pointer;touch-action:none;outline:none;
+    background:linear-gradient(to right,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00);}
+  .tk-cp-huedot{position:absolute;top:50%;width:18px;height:18px;margin:-9px 0 0 -9px;border-radius:50%;
+    border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.6),0 1px 4px rgba(0,0,0,.5);pointer-events:none;}
+  .tk-cp-sv:focus-visible .tk-cp-svdot,.tk-cp-hue:focus-visible .tk-cp-huedot{border-color:#ff9800;}
+  .tk-cp-row{display:flex;align-items:center;gap:8px;margin-top:12px;}
+  .tk-cp-prev{flex:none;width:34px;height:34px;border-radius:5px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.2);}
+  .tk-cp-row .tk-cp-hex{flex:1;min-width:0;width:auto;padding:7px 10px;font-family:"Courier New",monospace;
+    text-transform:uppercase;}
+  .tk-cp-pre{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;}
+  .tk-cp-chip{width:24px;height:24px;border-radius:5px;border:none;cursor:pointer;padding:0;
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.2);transition:transform .1s;}
+  .tk-cp-chip:hover{transform:scale(1.12);}
+  .tk-cp-chip.on{box-shadow:0 0 0 2px #242424,0 0 0 4px #fff;}
   .tk-pempty{display:none;color:#9a9a9a;font-size:12.5px;text-align:center;padding:18px 8px;}
   .tk-item.tk-d .tk-ilabel{color:#ff8a8e;}
   .tk-item.tk-d:hover{border-color:#ff5468;background:#241416;}
@@ -180,7 +203,7 @@
   .tk-panel{background:#202020;color:#fff;display:flex;
     flex-direction:column;box-sizing:border-box;font-family:inherit;}
   .tk-panel *{box-sizing:border-box;}
-  .tk-pl-drawer{position:fixed;top:0;right:0;height:100vh;height:100dvh;width:380px;max-width:96vw;
+  .tk-pl-drawer{position:fixed;top:0;right:0;height:100vh;height:100dvh;width:420px;max-width:96vw;
     border-left:2px solid #ff9800;z-index:99999;transform:translateX(100%);transition:transform .22s ease;
     box-shadow:-16px 0 42px rgba(0,0,0,.5);}
   .tk-pl-drawer.tk-pl-in{transform:translateX(0);}
@@ -188,7 +211,7 @@
     border-radius:8px 8px 0 0;transform:translateY(100%);transition:transform .24s ease;
     box-shadow:0 -14px 42px rgba(0,0,0,.5);}
   .tk-pl-sheet.tk-pl-in{transform:translateY(0);}
-  .tk-pl-center{position:relative;width:100%;max-width:440px;max-height:86vh;border:1px solid #616161;
+  .tk-pl-center{position:relative;width:100%;max-width:480px;max-height:86vh;border:1px solid #616161;
     border-radius:8px;overflow:hidden;transform:translateY(10px);opacity:0;
     transition:transform .18s ease,opacity .18s ease;box-shadow:0 18px 55px rgba(0,0,0,.6);}
   .tk-pl-center.tk-pl-in{transform:translateY(0);opacity:1;}
@@ -611,6 +634,9 @@
             rows: f.rows,
           });
           if (f.value) input.value = f.value;
+        } else if (f.type === "color") {
+          input = colorPicker({ value: f.value });
+          Object.defineProperty(input, "value", { get: () => input.getValue() });
         } else if (f.type === "select") {
           input = el("select", { class: "tk-select" });
           (f.options || []).forEach((opt) => {
@@ -733,11 +759,201 @@
     } else {
       btn.removeAttribute("role");
       btn.removeAttribute("aria-checked");
-      if (it.value != null)
-        btn.appendChild(
-          el("div", { class: "tk-ival tk-ival-go", text: String(it.value) }),
-        );
+      if (it.value != null) {
+        const chip = el("div", { class: "tk-ival tk-ival-go" });
+        if (it.swatch) {
+          const dot = el("span", { class: "tk-ival-sw" });
+          dot.style.background = it.swatch;
+          chip.appendChild(dot);
+        }
+        chip.appendChild(document.createTextNode(String(it.value)));
+        btn.appendChild(chip);
+      }
     }
+    if (it.picker) {
+      btn.classList.toggle("tk-open", !!btn._tkPick);
+      btn.setAttribute("aria-expanded", btn._tkPick ? "true" : "false");
+    }
+  }
+
+  const PICKER_PRESETS = [
+    "#ff9800", "#ff5468", "#ffd23f", "#57d9a3",
+    "#5aa9ff", "#c08bff", "#ff7ad9", "#ffffff",
+  ];
+
+  function hexToHsv(hex) {
+    const n = parseInt(String(hex).slice(1), 16);
+    const r = ((n >> 16) & 255) / 255,
+      g = ((n >> 8) & 255) / 255,
+      b = (n & 255) / 255;
+    const max = Math.max(r, g, b),
+      d = max - Math.min(r, g, b);
+    let h = 0;
+    if (d) {
+      if (max === r) h = ((g - b) / d) % 6;
+      else if (max === g) h = (b - r) / d + 2;
+      else h = (r - g) / d + 4;
+      h = (h * 60 + 360) % 360;
+    }
+    return { h, s: max ? d / max : 0, v: max };
+  }
+
+  function hsvToHex(h, s, v) {
+    const f = (n) => {
+      const k = (n + h / 60) % 6;
+      const c = v - v * s * Math.max(0, Math.min(k, 4 - k, 1));
+      return Math.round(c * 255).toString(16).padStart(2, "0");
+    };
+    return "#" + f(5) + f(3) + f(1);
+  }
+
+  // Drag picker: shade square, hue bar, hex box and presets. onInput fires
+  // while dragging, onChange once a pick settles.
+  function colorPicker(o) {
+    const isHex = (v) => /^#[0-9a-f]{6}$/i.test(v);
+    let hsv = hexToHsv(isHex(o.value) ? o.value : "#ff9800");
+    const wrap = el("div", { class: "tk-cp" });
+    const sv = el("div", {
+      class: "tk-cp-sv",
+      tabindex: "0",
+      role: "slider",
+      "aria-label": "Shade",
+    });
+    const svDot = el("div", { class: "tk-cp-svdot" });
+    sv.appendChild(svDot);
+    const hue = el("div", {
+      class: "tk-cp-hue",
+      tabindex: "0",
+      role: "slider",
+      "aria-label": "Hue",
+      "aria-valuemin": "0",
+      "aria-valuemax": "360",
+    });
+    const hueDot = el("div", { class: "tk-cp-huedot" });
+    hue.appendChild(hueDot);
+    const row = el("div", { class: "tk-cp-row" });
+    const prev = el("div", { class: "tk-cp-prev" });
+    const hex = el("input", {
+      class: "tk-input tk-cp-hex",
+      maxlength: "7",
+      spellcheck: "false",
+      autocomplete: "off",
+      "aria-label": "Hex color",
+    });
+    row.appendChild(prev);
+    row.appendChild(hex);
+    const pre = el("div", { class: "tk-cp-pre" });
+    const chips = PICKER_PRESETS.map((c) => {
+      const b = el("button", { type: "button", class: "tk-cp-chip", title: c });
+      b.style.background = c;
+      b.addEventListener("click", () => {
+        hsv = hexToHsv(c);
+        emit(true);
+      });
+      pre.appendChild(b);
+      return b;
+    });
+    wrap.appendChild(sv);
+    wrap.appendChild(hue);
+    wrap.appendChild(row);
+    wrap.appendChild(pre);
+
+    function paint() {
+      const c = hsvToHex(hsv.h, hsv.s, hsv.v);
+      sv.style.background =
+        "linear-gradient(to top,#000,transparent),linear-gradient(to right,#fff," +
+        hsvToHex(hsv.h, 1, 1) +
+        ")";
+      svDot.style.left = hsv.s * 100 + "%";
+      svDot.style.top = (1 - hsv.v) * 100 + "%";
+      svDot.style.background = c;
+      hueDot.style.left = (hsv.h / 360) * 100 + "%";
+      hueDot.style.background = hsvToHex(hsv.h, 1, 1);
+      hue.setAttribute("aria-valuenow", String(Math.round(hsv.h)));
+      prev.style.background = c;
+      if (document.activeElement !== hex) hex.value = c.toUpperCase();
+      chips.forEach((b) => b.classList.toggle("on", b.title === c));
+      return c;
+    }
+    function emit(final) {
+      const c = paint();
+      const fn = final ? o.onChange : o.onInput;
+      if (fn) fn(c);
+    }
+    const clamp = (n) => Math.max(0, Math.min(1, n));
+    function drag(node, apply) {
+      node.addEventListener("pointerdown", (e) => {
+        if (e.button != null && e.button !== 0) return;
+        e.preventDefault();
+        node.focus();
+        try {
+          node.setPointerCapture(e.pointerId);
+        } catch (_) {}
+        const move = (ev) => {
+          const r = node.getBoundingClientRect();
+          apply(
+            clamp((ev.clientX - r.left) / r.width),
+            clamp((ev.clientY - r.top) / r.height),
+          );
+          emit(false);
+        };
+        const up = () => {
+          node.removeEventListener("pointermove", move);
+          node.removeEventListener("pointerup", up);
+          node.removeEventListener("pointercancel", up);
+          emit(true);
+        };
+        move(e);
+        node.addEventListener("pointermove", move);
+        node.addEventListener("pointerup", up);
+        node.addEventListener("pointercancel", up);
+      });
+    }
+    drag(sv, (x, y) => {
+      hsv.s = x;
+      hsv.v = 1 - y;
+    });
+    drag(hue, (x) => {
+      hsv.h = Math.min(359.9, x * 360);
+    });
+    const ARROWS = {
+      ArrowLeft: [-1, 0],
+      ArrowRight: [1, 0],
+      ArrowUp: [0, -1],
+      ArrowDown: [0, 1],
+    };
+    const keys = (node, step) =>
+      node.addEventListener("keydown", (e) => {
+        const d = ARROWS[e.key];
+        if (!d) return;
+        e.preventDefault();
+        const m = e.shiftKey ? 10 : 1;
+        step(d[0] * m, d[1] * m);
+        emit(true);
+      });
+    keys(sv, (dx, dy) => {
+      hsv.s = clamp(hsv.s + dx / 100);
+      hsv.v = clamp(hsv.v - dy / 100);
+    });
+    keys(hue, (dx) => {
+      hsv.h = Math.max(0, Math.min(359.9, hsv.h + dx * 2));
+    });
+    hex.addEventListener("input", () => {
+      let v = hex.value.trim();
+      if (v && v[0] !== "#") v = "#" + v;
+      if (!isHex(v)) return;
+      hsv = hexToHsv(v);
+      emit(false);
+    });
+    hex.addEventListener("change", () => emit(true));
+    hex.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      hex.blur();
+    });
+    paint();
+    wrap.getValue = () => hsvToHex(hsv.h, hsv.s, hsv.v);
+    return wrap;
   }
 
   function fillRows(box, rows) {
@@ -769,6 +985,17 @@
         fillItem(btn, it);
         btn.addEventListener("click", () => {
           const cur = btn._tkItem;
+          if (cur.picker) {
+            if (btn._tkPick) {
+              btn._tkPick.remove();
+              btn._tkPick = null;
+            } else {
+              btn._tkPick = colorPicker(cur.picker);
+              btn.after(btn._tkPick);
+            }
+            fillItem(btn, cur);
+            return;
+          }
           if (closeOnClick && !cur.keepOpen) {
             const c = getClose && getClose();
             if (c) c();
@@ -879,9 +1106,9 @@
     } catch (_) {}
   }
   function drawerWidth() {
-    let w = 380;
+    let w = 420;
     try {
-      w = parseInt(localStorage.getItem(PANEL_WIDTH_KEY), 10) || 380;
+      w = parseInt(localStorage.getItem(PANEL_WIDTH_KEY), 10) || 420;
     } catch (_) {}
     return Math.max(300, Math.min(560, w));
   }
