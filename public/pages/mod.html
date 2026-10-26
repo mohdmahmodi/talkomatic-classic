@@ -1154,7 +1154,13 @@
         color: var(--orange);
         background: rgba(255, 152, 0, 0.12);
       }
-      .cat-other .ico {
+      .cat-room .ico {
+        color: var(--blue);
+        background: rgba(90, 169, 255, 0.12);
+      }
+      .cat-other .ico,
+      .cat-move .ico,
+      .cat-signoff .ico {
         color: var(--dim);
       }
       .cat-security .act,
@@ -1165,7 +1171,8 @@
       .cat-namechange .act {
         color: var(--amber);
       }
-      .cat-broadcast .act {
+      .cat-broadcast .act,
+      .cat-room .act {
         color: var(--blue);
       }
       .cat-config .act {
@@ -4947,6 +4954,8 @@
               <button class="active" data-f="all">All</button>
               <button data-f="action">Actions</button>
               <button data-f="identity">Identity</button>
+              <button data-f="room">Rooms</button>
+              <button data-f="move">Joins</button>
               <button data-f="notification">
                 Inbox<span
                   id="notifCount"

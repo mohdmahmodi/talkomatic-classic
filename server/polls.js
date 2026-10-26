@@ -4,6 +4,7 @@ const chatguard = require("./chatguard");
 const linkfilter = require("./linkfilter");
 const identity = require("./identity");
 const automod = require("./automod");
+const audit = require("./audit");
 
 const QUESTION_MAX = 120;
 const OPTION_MAX = 40;
@@ -185,6 +186,20 @@ function create(socket, data) {
   lastCreate.set(me.userId, now);
   push(roomId);
   automod.notePoll(socket, poll);
+  const room = roomOf(roomId);
+  if (room && room.type === "public" && !poll.ghost)
+    audit.recordRoomEvent({
+      event: "poll",
+      room,
+      userId: me.userId,
+      username: me.username,
+      location: (socket.handshake.session && socket.handshake.session.location) || null,
+      ip: socket.clientIp || null,
+      opsOnly: !!socket.isMainDev,
+      question,
+      answers: options.map((o) => o.text),
+      minutes,
+    });
   return { ok: true };
 }
 

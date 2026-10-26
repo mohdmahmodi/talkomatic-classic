@@ -2722,7 +2722,9 @@
               ? "fa-shield-halved"
               : e.type === "comment"
                 ? "fa-comment"
-                : "fa-gavel",
+                : e.type === "room"
+                  ? "fa-door-open"
+                  : "fa-gavel",
       ),
     );
     r.appendChild(ico);
@@ -2751,10 +2753,31 @@
               ? "was renamed by staff"
               : e.event === "accepted-rules"
                 ? "read the rules and came back after a block"
-                : "signed in",
+                : e.event === "signoff"
+                  ? "left the site"
+                  : "signed in",
         ),
       );
       if (e.location) line.appendChild(el("span", "dk-act-room", "from " + e.location));
+    } else if (e.type === "room") {
+      const who = e.event === "close" ? tagName(e.room) : e.event === "bot" && e.botKind === "token" ? e.bot || "A bot" : e.username || "Someone";
+      line.appendChild(el("span", "dk-act-who", who));
+      line.appendChild(
+        el(
+          "span",
+          "dk-act-verb",
+          e.event === "open"
+            ? "opened a room"
+            : e.event === "close"
+              ? "room closed"
+              : e.event === "poll"
+                ? "started a poll"
+                : e.botKind === "token"
+                  ? "bot joined with a bot token"
+                  : "brought a bot in",
+        ),
+      );
+      if (e.event !== "close" && e.room) line.appendChild(el("span", "dk-act-room", "in " + tagName(e.room)));
     } else if (e.type === "comment") {
       line.appendChild(el("span", "dk-act-who", e.label || "?"));
       line.appendChild(el("span", "dk-act-verb", "commented"));
@@ -2769,7 +2792,7 @@
     }
     mid.appendChild(line);
 
-    const detail = e.details || e.text || e.detail || null;
+    const detail = e.details || e.text || e.detail || e.question || null;
     if (detail) mid.appendChild(el("div", "dk-act-detail", detail));
     if (e.type === "writeup" && window.StaffUI)
       mid.appendChild(

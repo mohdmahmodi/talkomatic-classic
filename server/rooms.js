@@ -67,6 +67,7 @@ const diag = require("./diag");
 const gamesFloor = require("./games");
 const gamesSocket = require("./games/socket");
 const polls = require("./polls");
+const movement = require("./movement");
 const staffchat = require("./staffchat");
 const bots = require("./bots");
 const buffertrail = require("./buffertrail");
@@ -943,7 +944,7 @@ async function proxyTurnAway(s, net, at) {
   const place = sess?.location || null;
   reportProxyHit(s, { username: name, location: place, type: net.type, provider: net.provider, network: net.network, school: net.school, at });
   try {
-    if (inRoom && uid) await leaveRoom(s, uid);
+    if (inRoom && uid) await leaveRoom(s, uid, { why: "proxy" });
   } catch (_) {}
   if (sess && sess.username) {
     sess.username = null;
@@ -1099,10 +1100,11 @@ async function pressureCleanup() {
             "You can create a new room anytime.",
           redirectTo: "/",
         });
-        await leaveRoom(soloSocket, soloUser.id);
+        await leaveRoom(soloSocket, soloUser.id, { why: "solo" });
       }
     }
 
+    noteRoomClosed(room, room.users && room.users.length ? "solo" : "empty");
     state.rooms.delete(roomId);
     gamesFloor.roomClosed(roomId);
     polls.roomClosed(roomId);
@@ -1274,7 +1276,7 @@ function roomBansSocket(room, socket) {
 // A bot is banned with its maker. A creator bot has no socket of its own, so
 // its owner's network and device go on the list and the owner leaves with
 // it; a token bot already carries its owner's address on its own socket.
-async function banBotOwner(room, botUserId, roomId) {
+async function banBotOwner(room, botUserId, roomId, why) {
   const owner = bots.ownerOf(botUserId);
   if (!owner) return;
   roomBan(room, owner);
@@ -1283,7 +1285,7 @@ async function banBotOwner(room, botUserId, roomId) {
   s.emit("kicked", {
     message: "Your bot was removed from this room, and you with it.",
   });
-  await leaveRoom(s, owner);
+  await leaveRoom(s, owner, { why: why || "staff" });
 }
 
 function canActOn(actorSocket, targetUserId) {
@@ -2299,6 +2301,8 @@ function buildQuickFile(targetUserId, socket) {
       else action = "signed in as " + e.username;
     } else if (e.event === "accepted-rules") {
       action = "read the rules and came back after a block";
+    } else if (e.event === "signoff") {
+      action = "signed off";
     } else {
       action = "signed in as " + e.username + (e.location ? " / " + e.location : "");
     }
@@ -3263,7 +3267,7 @@ async function floodGuardSigninFlood(socket, username, location, hit) {
     try {
       const uid = s.handshake?.session?.userId;
       s.emit("kicked", { message: "Your connection has been blocked by staff.", blocked: true });
-      if (s.roomId && uid) await leaveRoom(s, uid);
+      if (s.roomId && uid) await leaveRoom(s, uid, { why: "automod" });
       s.disconnect(true);
     } catch (_) {}
   }
@@ -3387,7 +3391,7 @@ async function settleNamePolicy(socket, username) {
         message: "Your connection has been blocked by staff.",
         blocked: true,
       });
-      if (s.roomId && uid) await leaveRoom(s, uid);
+      if (s.roomId && uid) await leaveRoom(s, uid, { why: "automod" });
       s.disconnect(true);
     } catch (_) {}
   }
@@ -3467,7 +3471,7 @@ async function settleTextPolicy(socket, userId) {
         message: "Your connection has been blocked by staff.",
         blocked: true,
       });
-      if (s.roomId && uid) await leaveRoom(s, uid);
+      if (s.roomId && uid) await leaveRoom(s, uid, { why: "automod" });
       s.disconnect(true);
     } catch (_) {}
   }
@@ -3492,7 +3496,7 @@ async function kickEvasionBlocked(keys, did) {
         message: "Your connection has been blocked by staff.",
         blocked: true,
       });
-      if (s.roomId && uid) await leaveRoom(s, uid);
+      if (s.roomId && uid) await leaveRoom(s, uid, { why: "automod" });
       s.disconnect(true);
     } catch (_) {}
   }
@@ -4297,6 +4301,63 @@ async function loadRooms() {
   }
 }
 
+function staffWhy(actor, why) {
+  if (!actor || !actor.isMainDev) return why;
+  return why === "blocked" ? "automod" : why === "staff" ? "automod-removed" : "automod-closed";
+}
+
+function noteRoomOpened(socket, room) {
+  if (!room || diag.isSimRoom(room.id)) return;
+  const sess = socket.handshake.session || {};
+  room.openedBy = {
+    id: sess.userId || null,
+    name: sess.username || null,
+    location: sess.location || null,
+    ops: !!socket.isMainDev || undefined,
+  };
+  audit.recordRoomEvent({
+    event: "open",
+    room,
+    userId: room.openedBy.id,
+    username: room.openedBy.name,
+    location: room.openedBy.location,
+    ip: socket.clientIp || null,
+    opsOnly: !!socket.isMainDev,
+  });
+}
+
+function noteRoomClosed(room, why) {
+  if (!room || diag.isSimRoom(room.id)) return;
+  const by = room.openedBy || {};
+  audit.recordRoomEvent({
+    event: "close",
+    room,
+    userId: by.id,
+    username: by.name,
+    location: by.location,
+    opsOnly: !!by.ops,
+    why,
+    lasted: Date.now() - (room.createdAt || Date.now()),
+  });
+}
+
+function noteBotJoined(room, socket, entry) {
+  if (!room || diag.isSimRoom(room.id)) return;
+  const sess = socket?.handshake?.session || {};
+  audit.recordRoomEvent({
+    event: "bot",
+    room,
+    userId: entry ? entry.botOwnerId : null,
+    username: entry ? entry.botOwnerName : null,
+    location: entry ? sess.location || null : null,
+    ip: socket?.clientIp || null,
+    opsOnly: !!(entry && socket?.isMainDev),
+    bot: entry ? entry.username : sess.username || null,
+    botId: entry ? entry.id : sess.userId || null,
+    botKind: entry ? "creator" : "token",
+  });
+}
+
 // ── Room Timers ─────────────────────────────────────────────────────────────
 
 const SEAT_HOLD_MS = 30 * 1000;
@@ -4382,6 +4443,7 @@ function startRoomDeletionTimer(roomId) {
   const timer = setTimeout(async () => {
     const room = state.rooms.get(roomId);
     if (room && room.users.length === 0) {
+      noteRoomClosed(room, "empty");
       state.rooms.delete(roomId);
       seatHolds.delete(roomId);
       for (const key of [...parkedText.keys()])
@@ -4498,7 +4560,7 @@ async function handleAFKTimeout(socket, userId) {
     message: "Removed from room due to inactivity.",
     redirectTo: "/",
   });
-  await leaveRoom(socket, userId);
+  await leaveRoom(socket, userId, { why: "idle" });
   clearAFKTimers(userId);
 }
 
@@ -4513,7 +4575,7 @@ async function handleAfkSpectate(socket, userId) {
   const room = state.rooms.get(roomId);
   if (!room || !room.users.find((u) => u.id === userId)) return;
 
-  await leaveRoom(socket, userId);
+  await leaveRoom(socket, userId, { why: "afk" });
   socket.tabHidden = undefined;
 
   const after = state.rooms.get(roomId);
@@ -4739,6 +4801,13 @@ async function leaveRoom(socket, userId, opts) {
       const leftUser = room.users.find((u) => u.id === userId);
       room.users = room.users.filter((u) => u.id !== userId);
       room.lastActiveTime = Date.now();
+      if (!socket.isBot && !diag.isSimRoom(roomId)) {
+        const why = (opts && opts.why) || "left";
+        const wait = opts && opts.park ? SEAT_HOLD_MS : 0;
+        if (leftUser && !leftUser.isBotUser) movement.left(socket, room, leftUser, why, { wait });
+        else if (!leftUser && socket.spectating === roomId && !isStaffSocket(socket))
+          movement.left(socket, room, null, why === "dropped" ? "disconnected" : why, { spectating: true });
+      }
       if (opts && opts.park && leftUser && !socket.isBot && !socket.isDev && !socket.isMod)
         holdSeat(roomId, userId);
 
@@ -4957,6 +5026,7 @@ function joinRoom(socket, roomId, userId) {
 
     clearAFKTimers(userId);
     releaseSeat(userId);
+    const wasIn = room.users.some((u) => u.id === userId);
     room.users = room.users.filter((u) => u.id !== userId);
     socket.join(roomId);
 
@@ -4977,6 +5047,11 @@ function joinRoom(socket, roomId, userId) {
       deviceId: socket.deviceId || null,
       avatar: socket.handshake.session?.avatar || null,
     });
+
+    if (!wasIn && !diag.isSimRoom(roomId)) {
+      if (socket.isBot) noteBotJoined(room, socket, null);
+      else movement.joined(socket, room, room.users[room.users.length - 1], false);
+    }
 
     const restoredText = takeParkedText(roomId, userId);
     if (restoredText) state.setBuffer(userId, roomId, restoredText);
@@ -5251,6 +5326,7 @@ function registerSocketHandlers(opts) {
     emitChat: emitRoomChatUpdate,
     emitTyping: emitRoomTyping,
     userJoined: emitRoomUserJoined,
+    botJoined: noteBotJoined,
     userLeft: emitRoomUserLeft,
     updateRoom,
     updateLobby,
@@ -5477,6 +5553,12 @@ function registerSocketHandlers(opts) {
 
       // ── One active ROOM tab per browser session ─────────────────────────
       socket.isModLog = socket.handshake?.auth?.app === "modlog";
+      if (
+        !socket.isBot &&
+        !socket.handshake?.auth?.app &&
+        !isGuestName(socket.handshake?.session?.username)
+      )
+        movement.cameOnline(socket);
 
       // ── Staff key leak watch ────────────────────────────────────────────
       if ((socket.isDev || socket.isMod) && clientIp) {
@@ -5959,6 +6041,7 @@ function registerSocketHandlers(opts) {
           ip: socket.clientIp || null,
           opsOnly: !!socket.isMainDev,
         });
+        if (!socket.isBot && !socket.handshake?.auth?.app) movement.cameOnline(socket);
 
         if (socket.deviceId)
           identity.setName(socket.deviceId, username, location);
@@ -6952,6 +7035,7 @@ function registerSocketHandlers(opts) {
           await promisifySessionSave(socket.handshake.session).catch(() => {});
         }
 
+        noteRoomOpened(socket, state.rooms.get(roomId));
         state.apiCache.delete("public_rooms");
         socket.emit("room created", roomId);
         updateLobby();
@@ -7110,13 +7194,13 @@ function registerSocketHandlers(opts) {
             // Their bot goes with them; the room ban on their user id also
             // stops them deploying another one here (checked at deploy).
             bots.evictOwner(data.targetUserId, roomId);
-            await leaveRoom(target, data.targetUserId);
+            await leaveRoom(target, data.targetUserId, { why: "voted" });
           } else if (
             bots.isActiveBot(data.targetUserId) ||
             diag.isHeld(data.targetUserId)
           ) {
             roomBan(room, data.targetUserId);
-            await banBotOwner(room, data.targetUserId, roomId);
+            await banBotOwner(room, data.targetUserId, roomId, "voted");
             const gone = room.users.find((u) => u.id === data.targetUserId);
             room.users = room.users.filter((u) => u.id !== data.targetUserId);
             emitRoomUserLeft(roomId, data.targetUserId, gone);
@@ -7435,7 +7519,7 @@ function registerSocketHandlers(opts) {
         const roomName = targetRoom.name || targetRoomId;
 
         targetSocket.emit("kicked");
-        await leaveRoom(targetSocket, targetUserId);
+        await leaveRoom(targetSocket, targetUserId, { why: staffWhy(socket, "staff") });
 
         console.log(
           `[DEV] Force-kicked "${targetName}" from "${roomName}" by dev user`,
@@ -7595,14 +7679,14 @@ function registerSocketHandlers(opts) {
         });
         if (ban) {
           roomBan(room, targetUserId);
-          await banBotOwner(room, targetUserId, roomId);
+          await banBotOwner(room, targetUserId, roomId, staffWhy(socket, "staff"));
         }
         const targetSocket = findSocketByUserId(targetUserId, roomId);
         if (targetSocket) {
           targetSocket.emit("kicked", {
             message: "You were removed from this room by staff.",
           });
-          await leaveRoom(targetSocket, targetUserId);
+          await leaveRoom(targetSocket, targetUserId, { why: staffWhy(socket, "staff") });
         } else {
           room.users = room.users.filter((u) => u.id !== targetUserId);
           emitRoomUserLeft(roomId, targetUserId, targetUser);
@@ -7858,7 +7942,7 @@ function registerSocketHandlers(opts) {
               message: "Your connection has been blocked by staff.",
               blocked: true,
             });
-            if (s.roomId && uid) await leaveRoom(s, uid);
+            if (s.roomId && uid) await leaveRoom(s, uid, { why: staffWhy(socket, "blocked") });
             s.disconnect(true);
           } catch (_) {}
         }
@@ -8073,7 +8157,7 @@ function registerSocketHandlers(opts) {
               message: "Your connection has been blocked by staff.",
               blocked: true,
             });
-            if (s.roomId && uid) await leaveRoom(s, uid);
+            if (s.roomId && uid) await leaveRoom(s, uid, { why: staffWhy(socket, "blocked") });
             s.disconnect(true);
           } catch (_) {}
         }
@@ -8149,9 +8233,10 @@ function registerSocketHandlers(opts) {
             s.emit("kicked", {
               message: "This room was closed by staff.",
             });
-            await leaveRoom(s, uid);
+            await leaveRoom(s, uid, { why: staffWhy(socket, "closed") });
           }
         }
+        noteRoomClosed(room, socket.isMainDev ? "automod" : "staff");
         state.rooms.delete(roomId);
         state.roomSoloSince.delete(roomId);
         state.roomLastChatActivity.delete(roomId);
@@ -8976,7 +9061,7 @@ function registerSocketHandlers(opts) {
         if (staff) {
           sendDevRoomContext(roomId);
           if (!socket.isDev) logStaff(socket, "spectate", null, room);
-        }
+        } else if (specUserId && !diag.isSimRoom(roomId)) movement.joined(socket, room, null, true);
       }),
     );
 
@@ -9021,6 +9106,9 @@ function registerSocketHandlers(opts) {
       safe(async () => {
         if (!socket.spectating) return;
         const roomId = socket.spectating;
+        const watched = state.rooms.get(roomId);
+        if (watched && !isStaffSocket(socket) && socket.handshake.session?.userId)
+          movement.left(socket, watched, null, "left", { spectating: true });
         socket.leave(roomId);
         socket.spectating = null;
         socket.roomId = null;
@@ -9261,7 +9349,7 @@ function registerSocketHandlers(opts) {
               s.emit("kicked", {
                 message: "The room size was reduced by staff.",
               });
-              await leaveRoom(s, u.id);
+              await leaveRoom(s, u.id, { why: staffWhy(socket, "staff") });
             } else {
               room.users = room.users.filter((x) => x.id !== u.id);
             }
@@ -9395,9 +9483,10 @@ function registerSocketHandlers(opts) {
               s.emit("kicked", {
                 message: "All rooms were cleared by staff.",
               });
-              await leaveRoom(s, uid);
+              await leaveRoom(s, uid, { why: staffWhy(socket, "closed") });
             }
           }
+          noteRoomClosed(room, socket.isMainDev ? "automod" : "staff");
           state.rooms.delete(roomId);
           state.roomSoloSince.delete(roomId);
           state.roomLastChatActivity.delete(roomId);
@@ -10289,6 +10378,7 @@ function registerSocketHandlers(opts) {
             modLevel: socket.modLevel || 1,
             since: weekStart,
           }),
+          moves: movement.recent(socket, weekStart),
           dayStart: days[days.length - 1],
           days,
           me: {
@@ -12400,7 +12490,8 @@ function registerSocketHandlers(opts) {
           setTimeout(() => broadcastReportsList(), 150);
         if (userId) {
           clearAFKTimers(userId);
-          await leaveRoom(socket, userId, { park: reason !== "server namespace disconnect" });
+          const park = reason !== "server namespace disconnect";
+          await leaveRoom(socket, userId, { park, why: park ? "dropped" : "disconnected" });
           state.devUsers.delete(userId);
           cancelLinkSweep(userId);
           if (state.typingTimeouts.has(userId)) {
@@ -12414,6 +12505,7 @@ function registerSocketHandlers(opts) {
           }
           state.users.delete(userId);
         }
+        movement.wentOffline(socket, audit.recordSignoff);
         if (socket.releaseIpSlot) socket.releaseIpSlot();
         if (socket.isDev || socket.isMod) staffchat.presenceDirty();
         console.log(
@@ -12569,6 +12661,7 @@ function startCleanupIntervals() {
         toDelete.push(id);
     }
     for (const id of toDelete) {
+      noteRoomClosed(state.rooms.get(id), "empty");
       state.rooms.delete(id);
       state.roomSoloSince.delete(id);
       state.roomLastChatActivity.delete(id);

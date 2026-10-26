@@ -164,6 +164,21 @@
       icon: "fa-user-pen",
       label: "Identity: a name changed or was reset",
     },
+    signoff: {
+      color: "#6b7080",
+      icon: "fa-right-from-bracket",
+      label: "Identity: a user left the site",
+    },
+    room: {
+      color: "#5aa9ff",
+      icon: "fa-door-open",
+      label: "Rooms: opened, closed, polls started, bots brought in",
+    },
+    move: {
+      color: "#6b7080",
+      icon: "fa-person-walking-arrow-right",
+      label: "Joins: someone joined, watched or left a room. Kept for 7 days",
+    },
     notification: {
       color: "#ff9800",
       icon: "fa-bell",
@@ -180,8 +195,13 @@
   function categorize(e) {
     if (e.type === "security") return "security";
     if (e.type === "notification") return "notification";
+    if (e.type === "room" || e.type === "move") return e.type;
     if (e.type === "identity")
-      return e.event === "signin" ? "signin" : "namechange";
+      return e.event === "signin"
+        ? "signin"
+        : e.event === "signoff"
+          ? "signoff"
+          : "namechange";
     const a = (e.action || "").toLowerCase();
     if (/kick|ban|ip block|close room|nuke|freeze|wipe/.test(a))
       return "destructive";
@@ -394,6 +414,9 @@
       e.prevUsername,
       e.userId,
       e.by,
+      e.question,
+      e.bot,
+      e.why && WHY_TEXT[e.why],
     ]
       .filter(Boolean)
       .join(" ")
@@ -405,18 +428,57 @@
     return base + " " + cmts;
   }
   function matchesFocus(e, uid) {
-    if (e.type === "identity") return e.userId === uid;
+    if (e.type === "identity" || e.type === "move") return e.userId === uid;
+    if (e.type === "room") return e.userId === uid || e.botId === uid;
     if (e.type === "action") {
       const t = parseTarget(e.target);
       return t && t.uid === uid;
     }
     return false;
   }
+  function typeShown(e) {
+    if (feedFilter === "all") return e.type !== "move" || !!focusUid;
+    return e.type === feedFilter;
+  }
+  const WHY_TEXT = {
+    left: "left on their own",
+    dropped: "connection dropped and they did not come back within 30 seconds",
+    disconnected: "connection closed",
+    voted: "voted out by dislikes",
+    afk: "away from the tab for 15 minutes, moved to spectate",
+    idle: "no typing for 3 minutes",
+    staff: "removed by staff",
+    blocked: "blocked by staff",
+    closed: "room closed by staff",
+    proxy: "VPN or proxy refused",
+    solo: "alone in the room too long, room closed",
+    automod: "blocked by Automod",
+    "automod-removed": "removed by Automod",
+    "automod-closed": "room closed by Automod",
+  };
+  const CLOSE_TEXT = {
+    empty: "everyone left",
+    solo: "one person alone too long",
+    staff: "closed by staff",
+    automod: "closed by Automod",
+  };
+  function lengthLabel(ms) {
+    const m = Math.round((ms || 0) / 60000);
+    if (m < 1) return "under a minute";
+    if (m < 60) return m + " min";
+    const h = Math.floor(m / 60);
+    if (h < 24) return h + "h " + (m % 60) + "m";
+    return Math.floor(h / 24) + "d " + (h % 24) + "h";
+  }
+  function roomName(tag) {
+    const m = /^room:(.*)\(([^)]*)\)$/.exec(tag || "");
+    return m ? m[1] : tag || "a room";
+  }
   function passes(e) {
     const ts = e.ts || 0;
     if (dayStart && ts < dayStart) return false;
     if (ts >= dayEnd()) return false;
-    if (feedFilter !== "all" && e.type !== feedFilter) return false;
+    if (!typeShown(e)) return false;
     if (focusUid && !matchesFocus(e, focusUid)) return false;
     if (query && !searchable(e).includes(query)) return false;
     return true;
@@ -488,6 +550,36 @@
                         : "user report",
         ),
       );
+    } else if (e.type === "room" && e.event === "close") {
+      title.appendChild(span("who", roomName(e.room)));
+      title.appendChild(document.createTextNode(" "));
+      title.appendChild(span("act", "room closed"));
+    } else if (e.type === "room" && e.event === "bot" && e.botKind === "token") {
+      title.appendChild(span("who", e.bot || "A bot"));
+      title.appendChild(document.createTextNode(" "));
+      title.appendChild(span("act", "bot joined with a bot token"));
+    } else if (e.type === "room" || e.type === "move") {
+      if (e.staff) {
+        title.appendChild(span("chip " + e.staff, e.staff.toUpperCase()));
+        title.appendChild(document.createTextNode(" "));
+      }
+      title.appendChild(uref(e.username || "Someone", e.userId));
+      title.appendChild(document.createTextNode(" "));
+      const act =
+        e.type === "room"
+          ? e.event === "open"
+            ? "opened a room"
+            : e.event === "poll"
+              ? "started a poll"
+              : "brought a bot in"
+          : e.event === "join"
+            ? e.spectating
+              ? "started watching a room"
+              : "joined a room"
+            : e.spectating
+              ? "stopped watching a room"
+              : "left a room";
+      title.appendChild(span("act", act));
     } else {
       title.appendChild(uref(e.username || "?", e.userId));
       const evt =
@@ -497,7 +589,9 @@
             ? "force-renamed by staff"
             : e.event === "accepted-rules"
               ? "read the rules and came back after a block"
-              : "signed in";
+              : e.event === "signoff"
+                ? "left the site"
+                : "signed in";
       title.appendChild(document.createTextNode(" "));
       title.appendChild(span("act", evt));
     }
@@ -507,7 +601,7 @@
     when.title = fmtTime(e.ts);
     head.appendChild(when);
     top.appendChild(head);
-    if (me && me.role === "dev" && e.id) {
+    if (me && me.role === "dev" && e.id && e.type !== "move") {
       const del = document.createElement("button");
       del.className = "e-del";
       del.type = "button";
@@ -592,6 +686,46 @@
         "dimv",
       );
       addKv(body, "When", fmtTime(e.ts), "dimv");
+    } else if (e.type === "room") {
+      addKv(body, "Room", e.room, "dimv");
+      addKv(body, "Type", e.roomType, "dimv");
+      if (e.event === "close") {
+        addKv(body, "Why", CLOSE_TEXT[e.why] || e.why, "dimv");
+        addKv(body, "Lasted", lengthLabel(e.lasted), "dimv");
+        if (e.username) addKv(body, "Opened by", uref(e.username, e.userId));
+      } else if (e.event === "poll") {
+        addKv(body, "Question", e.question, "quote");
+        addKv(body, "Answers", (e.answers || []).join(" / "), "dimv");
+        addKv(body, "Length", e.minutes ? e.minutes + " min" : null, "dimv");
+      } else if (e.event === "bot") {
+        if (e.botKind === "token") {
+          addKv(body, "Bot id", e.botId, "dimv", e.botId);
+          addKv(body, "Made by", "a bot token, no account", "dimv");
+        } else addKv(body, "Bot", e.bot, "dimv");
+      }
+      if (e.event !== "close") {
+        addKv(body, "Location", e.location, "dimv");
+        addKv(body, "Their IP", e.ip, "ip");
+        if (e.botKind !== "token") addKv(body, "User id", e.userId, "dimv", e.userId);
+      }
+      addKv(body, "When", fmtTime(e.ts), "dimv");
+    } else if (e.type === "move") {
+      addKv(body, "Room", e.room, "dimv");
+      addKv(body, "Type", e.roomType, "dimv");
+      if (e.event === "join")
+        addKv(body, "Seat", e.spectating ? "spectating" : "in a seat", "dimv");
+      else addKv(body, "Why", WHY_TEXT[e.why] || e.why, "dimv");
+      addKv(body, "Location", e.location, "dimv");
+      addKv(body, "Their IP", e.ip, "ip");
+      addKv(body, "User id", e.userId, "dimv", e.userId);
+      addKv(body, "When", fmtTime(e.ts), "dimv");
+    } else if (e.event === "signoff") {
+      addKv(body, "Location", e.location, "dimv");
+      addKv(body, "On for", e.since ? lengthLabel(e.ts - e.since) : null, "dimv");
+      addKv(body, "Rooms visited", String(e.rooms || 0), "dimv");
+      addKv(body, "Their IP", e.ip, "ip");
+      addKv(body, "User id", e.userId, "dimv", e.userId);
+      addKv(body, "When", fmtTime(e.ts), "dimv");
     } else {
       addKv(body, "Was", e.prevUsername, "dimv");
       addKv(body, "Location", e.location, "dimv");
@@ -612,6 +746,7 @@
     const detailText =
       e.details || e.detail || (e.type === "notification" ? e.text : null);
     if (detailText) card.appendChild(detailBlock(detailText));
+    if (e.type === "move") return card;
 
     const thread = document.createElement("div");
     thread.className = "comments";
@@ -753,7 +888,7 @@
       if (e.type === "comment") continue;
       const ts = e.ts || 0;
       if (ts < from || ts >= to) continue;
-      if (feedFilter !== "all" && e.type !== feedFilter) continue;
+      if (!typeShown(e)) continue;
       if (focusUid && !matchesFocus(e, focusUid)) continue;
       if (query && !searchable(e).includes(query)) continue;
       n++;
@@ -943,7 +1078,7 @@
       locations = new Set();
     let actionsAgainst = 0;
     for (const e of entries) {
-      if (e.type === "identity" && e.userId === uid) {
+      if ((e.type === "identity" || e.type === "move" || e.type === "room") && e.userId === uid) {
         if (e.username) names.add(e.username);
         if (e.prevUsername) names.add(e.prevUsername);
         if (e.ip) ips.add(e.ip);
@@ -6594,9 +6729,10 @@
     }
     dayStart = weekDays[dayIndex];
     updateDayLabel();
-    entries = (Array.isArray(data && data.entries) ? data.entries : []).filter(
-      (e) => e.type !== "writeup",
-    );
+    entries = (Array.isArray(data && data.entries) ? data.entries : [])
+      .filter((e) => e.type !== "writeup")
+      .concat(Array.isArray(data && data.moves) ? data.moves : [])
+      .sort((a, b) => (a.ts || 0) - (b.ts || 0));
     commentsByRef.clear();
     for (const e of entries)
       if (e.type === "comment" && e.refId) {
@@ -6659,6 +6795,13 @@
     const card = listEl.querySelector('.entry[data-id="' + block.id + '"]');
     if (card) card.replaceWith(buildCard(block));
   }
+
+  socket.on("audit move", (e) => {
+    if (!e) return;
+    entries.push(e);
+    pendingNew.push(e);
+    scheduleFlush();
+  });
 
   socket.on("audit removed", (d) => {
     if (d && Array.isArray(d.ids)) dropEntries(d.ids);

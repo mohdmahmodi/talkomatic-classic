@@ -247,15 +247,15 @@ function recordIdentity({ userId, username, location, ip, opsOnly }) {
   let event = "signin";
   let prevUsername = null;
   let prevLocation = null;
-  if (prev) {
-    if (prev.username === username && prev.location === location) return;
+  const now = Date.now();
+  if (prev && (prev.username !== username || prev.location !== location)) {
     event = "rename";
     prevUsername = prev.username;
     prevLocation = prev.location;
-  }
-  lastIdentity.set(userId, { username, location });
+  } else if (prev && (prev.ts || 0) >= startOfPacificDay(now)) return;
+  lastIdentity.set(userId, { username, location, ts: now });
   push({
-    ts: Date.now(),
+    ts: now,
     type: "identity",
     event,
     ...(opsOnly ? { opsOnly: true } : {}),
@@ -270,7 +270,7 @@ function recordIdentity({ userId, username, location, ip, opsOnly }) {
 
 function recordForcedRename({ userId, from, ip, by, byRole, room }) {
   const prevLoc = lastIdentity.get(userId)?.location || null;
-  lastIdentity.set(userId, { username: "Anonymous", location: prevLoc });
+  lastIdentity.set(userId, { username: "Anonymous", location: prevLoc, ts: Date.now() });
   push({
     ts: Date.now(),
     type: "identity",
@@ -283,6 +283,43 @@ function recordForcedRename({ userId, from, ip, by, byRole, room }) {
     by: by || null,
     byRole: byRole || null,
     room: room || null,
+  });
+}
+
+function recordSignoff({ userId, username, location, ip, since, until, rooms, opsOnly }) {
+  if (!userId || !username) return;
+  push({
+    ts: until || Date.now(),
+    type: "identity",
+    event: "signoff",
+    ...(opsOnly ? { opsOnly: true } : {}),
+    userId,
+    username,
+    location: location || null,
+    ip: ip || null,
+    since: since || null,
+    rooms: rooms || 0,
+  });
+}
+
+function roomTag(room) {
+  return room ? "room:" + (room.name || room.id) + "(" + room.id + ")" : null;
+}
+
+function recordRoomEvent({ event, room, userId, username, location, ip, opsOnly, ...rest }) {
+  if (!room) return;
+  push({
+    ts: Date.now(),
+    type: "room",
+    event,
+    ...(opsOnly ? { opsOnly: true } : {}),
+    room: roomTag(room),
+    roomType: room.type || null,
+    userId: userId || null,
+    username: username || null,
+    location: location || null,
+    ip: ip || null,
+    ...rest,
   });
 }
 
@@ -1772,6 +1809,8 @@ function setAuditSub(socket, on) {
   if (socket) socket.auditSub = !!on;
 }
 
+const IDENTITY_EVENTS = new Set(["signin", "rename", "forced-rename"]);
+
 function load() {
   try {
     const raw = fs.readFileSync(AUDIT_PATH, "utf8");
@@ -1790,10 +1829,11 @@ function load() {
     revision++;
     for (const e of entries) if (e.type === "writeup") attachWriteup(e);
     for (const e of entries) {
-      if (e.type === "identity" && e.userId)
+      if (e.type === "identity" && e.userId && IDENTITY_EVENTS.has(e.event || "signin"))
         lastIdentity.set(e.userId, {
           username: e.username,
           location: e.location,
+          ts: e.ts || 0,
         });
     }
   } catch (err) {
@@ -1844,6 +1884,9 @@ module.exports = {
   HISTORY_WINDOW_MS,
   recordIdentity,
   recordForcedRename,
+  recordSignoff,
+  recordRoomEvent,
+  roomTag,
   recordRulesAccepted,
   recordKeyAlert,
   recordNotification,

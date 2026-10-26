@@ -1062,6 +1062,7 @@ function deploy(socket, bot, room, ownerKey) {
 
   state.setBuffer(botUserId, room.id, "");
   deps.userJoined(room, entry);
+  if (deps.botJoined) deps.botJoined(room, socket, entry);
   deps.updateRoom(room.id);
   deps.updateLobby();
   greetOnArrival(rt);
