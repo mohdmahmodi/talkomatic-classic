@@ -21,6 +21,8 @@ mod-keys.json
 modlog.txt
 audit-log.jsonl
 key-activity.json
+room-moves.jsonl
+room-moves.jsonl.tmp
 
 # The Desk (staff chat) and its review state - staff conversation, never commit
 staff-chat.json
