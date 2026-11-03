@@ -4361,12 +4361,26 @@ function noteBotJoined(room, socket, entry) {
 // ── Room Timers ─────────────────────────────────────────────────────────────
 
 const SEAT_HOLD_MS = 30 * 1000;
+const SEAT_HOLD_CLOSE_MS = 5 * 1000;
 const seatHolds = new Map();
 
-function holdSeat(roomId, userId) {
+function holdSeat(roomId, userId, ms) {
   let m = seatHolds.get(roomId);
   if (!m) seatHolds.set(roomId, (m = new Map()));
-  m.set(userId, Date.now() + SEAT_HOLD_MS);
+  const wait = ms || SEAT_HOLD_MS;
+  m.set(userId, Date.now() + wait);
+  // Nothing else fires when a hold lapses, so the lobby and the room would
+  // keep showing the held seat until the next join or leave.
+  const t = setTimeout(() => {
+    const held = seatHolds.get(roomId);
+    if (!held || held.get(userId) > Date.now()) return;
+    held.delete(userId);
+    if (!held.size) seatHolds.delete(roomId);
+    if (!state.rooms.has(roomId)) return;
+    updateRoom(roomId);
+    updateLobby();
+  }, wait + 50);
+  if (t.unref) t.unref();
 }
 
 function heldSeats(room, exceptUserId) {
@@ -4790,6 +4804,7 @@ async function leaveRoom(socket, userId, opts) {
           s !== socket &&
           s.connected &&
           s.roomId === roomId &&
+          !s.spectating &&
           s.handshake?.session?.userId === userId,
       );
       if (successor) {
@@ -4803,13 +4818,14 @@ async function leaveRoom(socket, userId, opts) {
       room.lastActiveTime = Date.now();
       if (!socket.isBot && !diag.isSimRoom(roomId)) {
         const why = (opts && opts.why) || "left";
-        const wait = opts && opts.park ? SEAT_HOLD_MS : 0;
+        const hold = socket.pageClosing ? SEAT_HOLD_CLOSE_MS : SEAT_HOLD_MS;
+        const wait = opts && opts.park ? hold : 0;
         if (leftUser && !leftUser.isBotUser) movement.left(socket, room, leftUser, why, { wait });
         else if (!leftUser && socket.spectating === roomId && !isStaffSocket(socket))
           movement.left(socket, room, null, why === "dropped" ? "disconnected" : why, { spectating: true });
       }
       if (opts && opts.park && leftUser && !socket.isBot && !socket.isDev && !socket.isMod)
-        holdSeat(roomId, userId);
+        holdSeat(roomId, userId, socket.pageClosing ? SEAT_HOLD_CLOSE_MS : SEAT_HOLD_MS);
 
       if (room.votes) {
         delete room.votes[userId];
@@ -7224,6 +7240,16 @@ function registerSocketHandlers(opts) {
         }
       }),
     );
+
+    // The page is closing or navigating away. The disconnect that follows
+    // still parks the text (a refresh gets it back) but holds the seat only
+    // briefly, so a closed tab does not keep a room full for 30 seconds.
+    socket.on("page closing", () => {
+      socket.pageClosing = true;
+    });
+    socket.on("page open", () => {
+      socket.pageClosing = false;
+    });
 
     // ── Tab-away AFK flag (client reports via Page Visibility API) ──────
     socket.on(
@@ -12509,7 +12535,7 @@ function registerSocketHandlers(opts) {
         if (socket.releaseIpSlot) socket.releaseIpSlot();
         if (socket.isDev || socket.isMod) staffchat.presenceDirty();
         console.log(
-          `Disconnected: "${username}" from "${location}" (${reason}) IP:${socket.clientIp}${socket.isBot ? " [BOT]" : ""}${socket.isDev ? " [DEV]" : ""}`,
+          `Disconnected: "${username}" from "${location}" (${reason}${socket.pageClosing ? ", page closing" : ""}) IP:${socket.clientIp}${socket.isBot ? " [BOT]" : ""}${socket.isDev ? " [DEV]" : ""}`,
         );
       }),
     );
@@ -12706,10 +12732,14 @@ function startCleanupIntervals() {
   }, 30000);
 
   setInterval(() => {
-    const activeIds = new Set();
+    // A seat is live only while a connected, non-spectating socket of that
+    // user sits in that room. A lobby or spectator tab on the same userId
+    // used to keep a left-over seat alive for as long as it stayed open.
+    const seated = new Set();
     for (const [, s] of io().sockets.sockets) {
       const uid = s.handshake?.session?.userId;
-      if (uid) activeIds.add(uid);
+      if (uid && s.connected && s.roomId && !s.spectating)
+        seated.add(s.roomId + ":" + uid);
     }
     let ghostCount = 0;
     const affectedRooms = [];
@@ -12719,8 +12749,13 @@ function startCleanupIntervals() {
       room.users = room.users.filter((u) => {
         if (u.isBotUser && bots.isActiveBot(u.id)) return true;
         if (diag.isHeld(u.id)) return true;
-        if (!activeIds.has(u.id)) {
+        if (!seated.has(roomId + ":" + u.id)) {
           console.log(`Ghost removed: "${u.username}" from "${room.name}"`);
+          if (room.votes) {
+            delete room.votes[u.id];
+            for (const vid in room.votes)
+              if (room.votes[vid] === u.id) delete room.votes[vid];
+          }
           state.deleteBuffer(u.id, roomId);
           clearAFKTimers(u.id);
           state.devUsers.delete(u.id);

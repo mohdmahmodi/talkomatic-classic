@@ -3852,7 +3852,8 @@ socket.on("user joined", (data) => {
 
 socket.on("user left", (userId) => {
   afkUsers.delete(userId);
-  if (userId !== currentUserId) {
+  // A spectator can watch their own seat (opened in another tab) leave.
+  if (userId !== currentUserId || isSpectating) {
     const row = document.querySelector(`.chat-row[data-user-id="${userId}"]`);
     if (row) {
       row.remove();
@@ -4256,6 +4257,26 @@ document.querySelector(".leave-room").addEventListener("click", () => {
   window.location.href = "/index.html";
 });
 
+// Closing or refreshing the tab: the server keeps the seat only briefly
+// instead of the 30 second hold meant for dropped connections.
+window.addEventListener("pagehide", () => {
+  try {
+    if (!socket.connected) return;
+    socket.emit("page closing");
+    if (navigator.sendBeacon)
+      navigator.sendBeacon(
+        "/api/v1/closing",
+        new Blob([JSON.stringify({ socketId: socket.id })], { type: "application/json" }),
+      );
+  } catch (_) {}
+});
+window.addEventListener("pageshow", (e) => {
+  if (!e.persisted) return;
+  try {
+    if (socket.connected) socket.emit("page open");
+  } catch (_) {}
+});
+
 let tabSuperseded = false;
 function showTabSupersededOverlay() {
   if (tabSuperseded) return;
@@ -4356,7 +4377,15 @@ function createBotBadge(owner) {
   const badge = document.createElement("span");
   badge.className = "bot-badge";
   badge.textContent = "BOT";
-  badge.title = owner ? `Bot, run by ${owner}` : "Automated user";
+  const label = owner ? `Bot, run by ${owner}` : "Automated user";
+  badge.title = label;
+  badge.setAttribute("role", "button");
+  badge.tabIndex = 0;
+  // A hover title never shows on a phone, so a tap says it too.
+  badge.addEventListener("click", (e) => {
+    e.stopPropagation();
+    notify(label, "info", { timeout: 3500 });
+  });
   return badge;
 }
 
@@ -5929,7 +5958,8 @@ window.addEventListener("hashchange", () => {
     .mod-badge{display:inline-block;background:#5aa9ff;color:#001229;font-size:9px;font-weight:bold;padding:1px 5px;border-radius:8px;margin:0 5px 0 0;letter-spacing:.5px;vertical-align:middle;flex:0 0 auto;}
     .mod-badge.mod-badge-jr{background:#c08bff;color:#16002b;}
     .mod-badge.mod-badge-lead{background:#77dd77;color:#00220f;}
-    .bot-badge{display:inline-block;background:var(--bot-flair,#9aa3ae);color:#16191d;font-size:9px;font-weight:bold;padding:1px 5px;border-radius:8px;margin:0 5px 0 0;letter-spacing:.5px;vertical-align:middle;flex:0 0 auto;}
+    .bot-badge{display:inline-block;background:var(--bot-flair,#9aa3ae);color:#16191d;font-size:9px;font-weight:bold;padding:1px 5px;border-radius:8px;margin:0 5px 0 0;letter-spacing:.5px;vertical-align:middle;flex:0 0 auto;cursor:pointer;}
+    .bot-badge:active{opacity:.6;}
     .bot-user .chat-input{border-left:2px solid rgba(154,163,174,.4);}
     body.tk-hide-bots .bot-user{display:none !important;}
     .hide-bots-toggle{position:relative;color:#26c6da;}

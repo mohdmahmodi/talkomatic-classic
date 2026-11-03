@@ -431,15 +431,27 @@ if (TEXT_LIST.length && wordFilter instanceof WordFilter) {
   }
 }
 
+const GLUED_MIN = 6;
+
+function listedHit(text) {
+  const letter = /\p{L}/u;
+  for (const [a, b] of textFilter.checkText(text).offensiveRanges) {
+    const glued = letter.test(text[a - 1] || "") || letter.test(text[b] || "");
+    if (!glued) return true;
+    if (textFilter.stringToAlphanumeric(text.slice(a, b)).length >= GLUED_MIN) return true;
+  }
+  return false;
+}
+
 function isListedText(text) {
   if (!textFilter || typeof text !== "string" || text.length < 3) return false;
   try {
-    if (textFilter.checkText(text).hasOffensiveWord) return true;
+    if (listedHit(text)) return true;
     if (!/l/i.test(text)) return false;
     const swapped = text.replace(/\S+/g, (tok) =>
       textFilter.dictionary.has(tok.toLowerCase().replace(/[^a-z]/g, "")) ? tok : tok.replace(/l/gi, "i"),
     );
-    return swapped !== text && textFilter.checkText(swapped).hasOffensiveWord;
+    return swapped !== text && listedHit(swapped);
   } catch (_) {
     return false;
   }

@@ -1491,6 +1491,17 @@ app.get(`${API}/ban-status`, (req, res) => {
 
 // The person read the rules and is coming back. Clears the flag the socket
 // gate checks and leaves a line in the log beside the block.
+// Sent by the room page as it closes (a beacon survives the tab closing
+// where a socket packet may not). The socket then holds its seat briefly
+// instead of the dropped-connection grace.
+app.post(`${API}/closing`, (req, res) => {
+  const id = typeof req.body?.socketId === "string" ? req.body.socketId : "";
+  const s = id ? io.sockets.sockets.get(id) : null;
+  if (s && req.session?.userId && s.handshake?.session?.userId === req.session.userId)
+    s.pageClosing = true;
+  res.status(204).end();
+});
+
 app.post(`${API}/ban-acknowledge`, (req, res) => {
   const who = requester(req);
   const { ip, deviceId, legacyId } = who;
